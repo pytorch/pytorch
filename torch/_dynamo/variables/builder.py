@@ -31,7 +31,12 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    get_flattened_tensors,
+    is_traceable_wrapper_subclass,
+    SubclassConstraintDims,
+    SubclassDynamicDims,
+)
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
@@ -1628,7 +1633,27 @@ class TrackedFake:
 
 # Performs automatic dynamic dim determination.
 # Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
-def _automatic_dynamic(e, tx, name, static_shapes):
+def _automatic_dynamic(e, tx, name, static_shapes, dont_recurse: bool = False):
+    if is_traceable_wrapper_subclass(e) and not dont_recurse:
+        # Get dynamic dims for each tensor in the flattened list
+        # traceable_dynamic_dims = SubclassDynamicDims()
+        # traceable_constraint_dims = SubclassConstraintDims()
+        inner_dynamic_dims = []
+        inner_constraint_dims = []
+        outer_dynamic_dims, outer_constraint_dims = _automatic_dynamic(
+            e, tx, name, static_shapes, dont_recurse=True
+        )
+        for tensor in get_flattened_tensors(e):
+            tensor_dynamic_dims, tensor_constraint_dims = _automatic_dynamic(
+                tensor, tx, name, static_shapes
+            )
+            inner_dynamic_dims.append(tensor_dynamic_dims)
+            inner_constraint_dims.append(tensor_constraint_dims)
+        return (
+            SubclassDynamicDims(outer_dynamic_dims, inner_dynamic_dims),
+            SubclassConstraintDims(outer_constraint_dims, inner_constraint_dims),
+        )
+
     if static_shapes:
         return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
 

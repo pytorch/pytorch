@@ -48,6 +48,8 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 
+from torch.utils._python_dispatch import SubclassConstraintDims
+
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
@@ -603,7 +605,18 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
-        constraint_inputs = [a.constraint_dims for a in fs]
+
+        constraint_inputs = []
+        for a in fs:
+            if isinstance(a.constraint_dims, SubclassConstraintDims):
+                # This is a subclass constraint, so we need to use the outer
+                # and inner constraints
+                constraint_inputs.append(a.constraint_dims.outer)
+                # TODO: This is failing with  `assert len(constraint_inputs) == len(placeholders)``
+                # for inner in a.constraint_dims.inner:
+                #     constraint_inputs.append(inner)
+            else:
+                constraint_inputs.append(a.constraint_dims)
 
         def get_sources(t_id, dim):
             # Looks up base sources mapped to a tensor id and uses them to create

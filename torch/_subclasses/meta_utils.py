@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional, TYPE_CHECKING
+from typing import ContextManager, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._C._functorch import (
@@ -16,6 +16,8 @@ from torch._guards import Source
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
+    SubclassConstraintDims,
+    SubclassDynamicDims,
     transform_subclass,
 )
 from torch.utils.weak import WeakIdRef
@@ -184,8 +186,8 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
-        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        dynamic_dims: "Union[Optional[DimList[DimDynamic]], SubclassDynamicDims]" = None,
+        constraint_dims: "Union[Optional[DimList[DimConstraint]], SubclassConstraintDims]" = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -233,7 +235,7 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(t, src, dynamic_dims, constraint_dims):
             if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
@@ -286,7 +288,7 @@ class MetaConverter:
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
+                        t, source, dynamic_dims, constraint_dims
                     )
                     r = callback(
                         lambda: torch.empty_strided(
@@ -388,7 +390,7 @@ class MetaConverter:
                                     sizes,
                                     strides,
                                     storage_offset,
-                                ) = sym_sizes_strides_storage_offset(t, source)
+                                ) = sym_sizes_strides_storage_offset(t, source, dynamic_dims, constraint_dims)
                                 return base.as_strided(sizes, strides, storage_offset)
 
                         if safe_is_leaf(t):
@@ -434,18 +436,52 @@ class MetaConverter:
                     if not t.is_nested:
                         # Nested tensor subclasses have special logic for
                         # creating symbolic size/strides/storage_offset
+                        # TODO: This sucks.. so outer and inner can have different shapes
+                        # the test only has 1 inner tensor with num_inner_dims == num_outer_dims
+                        # we can arbitrarily pick the first dynamic_dim in the list returned by
+                        # get_flattened_tensors() but this feels all wrong
+                        # I think we need to make some contract between at least the # of dims between 1 of the
+                        if is_traceable_wrapper_subclass(t) and isinstance(
+                            dynamic_dims, SubclassDynamicDims
+                        ):
+                            assert isinstance(
+                                constraint_dims, SubclassConstraintDims
+                            ), "constraint_dims must be a SubclassConstraintDims"
+                            # We will add the outer dynamic_dims here, later on the inner will be checked
+                            temp_dynamic_dims = dynamic_dims.outer
+                            temp_constraint_dims = constraint_dims.outer
+                        else:
+                            # Appease MYPY
+                            if isinstance(dynamic_dims, list):
+                                temp_dynamic_dims = dynamic_dims
+                            else:
+                                temp_dynamic_dims = None
+
+                            if isinstance(constraint_dims, list):
+                                temp_constraint_dims = constraint_dims
+                            else:
+                                temp_constraint_dims = None
                         (
                             sizes,
                             strides,
                             storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                        ) = sym_sizes_strides_storage_offset(
+                            t, source, temp_dynamic_dims, temp_constraint_dims
+                        )
 
-                    def empty_create(inner_t, inner_src):
+                    def empty_create(
+                        inner_t, inner_src, tensor_dynamic_dim, tensor_constraint_dim
+                    ):
                         (
                             inner_sizes,
                             inner_strides,
                             inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
+                        ) = sym_sizes_strides_storage_offset(
+                            inner_t,
+                            inner_src,
+                            tensor_dynamic_dim,
+                            tensor_constraint_dim,
+                        )
                         return torch.empty_strided(
                             inner_sizes,
                             inner_strides,
@@ -478,7 +514,10 @@ class MetaConverter:
                                 inner_t = getattr(t, attr)
                                 transformed_tensors_dict[attr] = callback(
                                     lambda: empty_create(
-                                        inner_t, AttrSource(source, attr)
+                                        inner_t,
+                                        AttrSource(source, attr),
+                                        dynamic_dims,
+                                        constraint_dims,
                                     )
                                 )
                             # We expect JaggedTensor to have a 'ragged_size' in
@@ -503,14 +542,28 @@ class MetaConverter:
                                 transformed_tensors_dict, ctx
                             )
                         else:
+                            inner_dims = (
+                                dynamic_dims.inner
+                                if isinstance(dynamic_dims, SubclassDynamicDims)
+                                else None
+                            )
+                            inner_constraint_dims = (
+                                constraint_dims.inner
+                                if isinstance(constraint_dims, SubclassConstraintDims)
+                                else None
+                            )
                             r = transform_subclass(
                                 t,
-                                lambda attr, inner_t: callback(
+                                lambda attr, inner_t, tensor_dyn_dim, tensor_constraint_dim: callback(
                                     lambda: empty_create(
                                         inner_t,
                                         AttrSource(source, attr),
+                                        tensor_dyn_dim,
+                                        tensor_constraint_dim,
                                     )
                                 ),
+                                inner_dims,
+                                inner_constraint_dims,
                             )
                     else:
                         r = callback(

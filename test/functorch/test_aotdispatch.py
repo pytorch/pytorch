@@ -2898,6 +2898,46 @@ class TestPartitioning(AOTTestCase):
         res.sum().backward()
 
 
+class DiffTwoTensor(torch.Tensor):
+    def __new__(
+        cls,
+        data: torch.Tensor,
+        scale: torch.Tensor,
+    ):
+        self = torch.Tensor._make_wrapper_subclass(
+            cls,
+            data.size(),
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+            dtype=data.dtype,
+            layout=data.layout,
+            requires_grad=data.requires_grad,
+            device=data.device,
+        )
+        self._data = data
+        self._scale = scale
+        return self
+
+    def __tensor_flatten__(self):
+        ctx = {}
+        return ["_data", "_scale"], ctx
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: Dict, metadata):
+        assert len(inner_tensors) == 2
+        return DiffTwoTensor(
+            inner_tensors["_data"], inner_tensors["_scale"]
+        )
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs=None):
+        diff_two_tensor = args[0]
+        out = func(diff_two_tensor._data, *args[1:], **kwargs)
+        return DiffTwoTensor(out, diff_two_tensor._scale)
+
+    def __repr__(self):
+        return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
+
 class TestAOTDispatch(AOTTestCase):
 
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -3269,6 +3309,20 @@ def forward(self, tangents_1, tangents_2):
         # Both grad_inputs are TwoTensors
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
+
+    def test_traceable_subclass_diff_sub_tensors(self):
+        data = torch.rand(2, 4)
+        scale = torch.rand(1)
+        subclass = DiffTwoTensor(data, scale)
+
+        def func(tensor_a, tensor_b):
+            return torch.add(tensor_a, tensor_b)
+
+        add_tens = torch.rand(2, 4)
+        real_out = func(data, add_tens)
+        func = torch.compile(func, backend="eager")
+        out_subclass = func(subclass, add_tens)
+        torch.testing.assert_close(out_subclass._data, real_out)
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):

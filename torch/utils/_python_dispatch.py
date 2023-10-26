@@ -1,5 +1,5 @@
 import contextlib
-from typing import Optional, Union, List, Set, Dict, Any
+from typing import Optional, Union, List, Set, Dict, Any, Tuple
 
 import warnings
 from dataclasses import dataclass
@@ -135,6 +135,17 @@ class BaseTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         return func(*args, **kwargs)
 
+# Cant properly type because of circular reference
+@dataclass
+class SubclassDynamicDims:
+    outer: List[Any]
+    inner: List[List[Tuple[Any]]]
+
+@dataclass
+class SubclassConstraintDims:
+    outer: List[Any]
+    inner: List[List[Tuple[Any]]]
+
 def is_traceable_wrapper_subclass(t):
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
@@ -147,7 +158,12 @@ def is_traceable_wrapper_subclass(t):
     is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
     return is_subclass and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
 
-def transform_subclass(t, callback):
+def get_flattened_tensors(t):
+    assert is_traceable_wrapper_subclass(t), f"Expected a traceable wrapper subclass, but got {type(t)}"
+    attrs, _ = type(t).__tensor_flatten__(t)
+    return [getattr(t, attr) for attr in attrs]
+
+def transform_subclass(t, callback, *args):
     """
     Given a traceable, wrapper tensor subclass ``t`` that implements
     ``__torch_dispatch__`` and holds some inner tensors,
@@ -156,6 +172,8 @@ def transform_subclass(t, callback):
     It will do so by grabbing each inner tensor attribute from the wrapper,
     passing them into ``callback`` to get a transformed tensor,
     and putting each transformed tensor into the fresh tensor subclass instance.
+    An optional list of additional arguments can be passed to ``transform_subclass``,
+    which will be passed to ``callback`` after the tensor attribute.
 
     Note: this function will not handle ensuring that the fresh subclass
     gets the same (autograd, and aliasing) metadata as the original tensor.
@@ -163,8 +181,20 @@ def transform_subclass(t, callback):
     """
     attrs, ctx = t.__tensor_flatten__()
     transformed_tensors_dict = {}
-    for attr in attrs:
-        transformed_tensors_dict[attr] = callback(attr, getattr(t, attr))
+
+    # TODO I don't know if we should be doing this differently
+    # In the case of views on traceable subclasses, we recursively construct meta_tensors from bases
+    # During this process we pass in a None for the dynamic dimensions and constraint dims
+
+    if any(arg is not None and len(arg) != len(attrs) for arg in args):
+        raise ValueError("All additional arguments must be lists of the same length as attrs or None")
+
+    for i, attr in enumerate(attrs):
+        callback_args = [getattr(t, attr)]
+        # See note above
+        callback_args.extend([arg[i] if arg is not None else None for arg in args])
+        transformed_tensors_dict[attr] = callback(attr, *callback_args)
+
     return type(t).__tensor_unflatten__(transformed_tensors_dict, ctx)
 
 def _correct_storage_aliasing(func, schema_info, args, outs):
