@@ -234,7 +234,7 @@ COMMON_NVCC_FLAGS = [
 
 COMMON_HIP_FLAGS = [
     '-fPIC',
-    '-D__HIP_PLATFORM_HCC__=1',
+    '-D__HIP_PLATFORM_AMD__=1',
     '-DUSE_ROCM=1',
 ]
 
