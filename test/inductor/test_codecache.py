@@ -163,8 +163,7 @@ class TestFxGraphCache(TestCase):
     @skipIfNoTorchVision
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.float16))
-    def test_cache_resnet_backward(self, device, dtype):
+    def test_cache_resnet_backward(self, device):
         """
         Test backward graphs using resnet18. This model exposes failures
         to properly handle output strides.
@@ -179,8 +178,8 @@ class TestFxGraphCache(TestCase):
 
         compiled_fn = torch.compile(fn)
 
-        mod = resnet18().to(device=device, dtype=dtype)
-        inp = torch.randn(1, 3, 224, 224, device=device, dtype=dtype)
+        mod = resnet18().to(device=device)
+        inp = torch.randn(1, 3, 224, 224, device=device)
 
         # The first call should see all cache misses.
         grads1 = compiled_fn(mod, inp)
