@@ -798,6 +798,68 @@ _scaled_dot_product_flash_attention_cpu(
       std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
 }
 
+std::tuple<
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    c10::SymInt,
+    c10::SymInt,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor>
+_scaled_dot_product_flash_attention_varlen_cpu(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& cum_seq_q,
+    const Tensor& cum_seq_k,
+    int64_t max_q,
+    int64_t max_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    c10::optional<double> scale) {
+  const auto dtype = query.scalar_type();
+  int64_t batch_size = query.size(0);
+  int64_t q_size = query.size(2);
+  int64_t num_head = query.size(1);
+  int64_t head_dim = query.size(3);
+
+  TORCH_CHECK(c10::isFloatingType(dtype) && dtype != ScalarType::Half,
+    "scaled_dot_product_attention_flash_attention: Expected data type in FP32, FP64, BF16, but got ", dtype, " instead.");
+  TORCH_CHECK(query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
+    "scaled_dot_product_attention_flash_attention: Accept only 4 dims inputs shape of {B, H, T, K}");
+  TORCH_CHECK(dropout_p == 0.0,
+    "scaled_dot_product_attention_flash_attention: Currently do not support dropout > 0");
+  TORCH_CHECK((query.size(3) == value.size(3)) && (key.size(3) == value.size(3)),
+    "scaled_dot_product_attention_flash_attention: Q/K/V should have the same head size");
+  TORCH_CHECK(return_debug_mask == false,
+    "scaled_dot_product_attention_flash_attention: Currently do not support 'return_debug_mask'");
+  TORCH_CHECK(cum_seq_q.size(0) == cum_seq_k.size(0) && cum_seq_q.size(0) == batch_size + 1,
+    "scaled_dot_product_attention_flash_attention: cum_seq_q and cum_seq_k are 1-D tensor, they have the same length, which equals to `batch_size` + 1");
+
+  at::Tensor output = at::empty({batch_size, q_size, num_head, head_dim}, query.options());
+  const auto accumulate_dtype = toOpMathType(dtype);
+  at::Tensor logsumexp = at::empty({batch_size, q_size, num_head},
+      query.options().dtype(accumulate_dtype));
+  at::Tensor philox_seed = at::empty({}, at::kLong);
+  at::Tensor philox_offset = at::empty({}, at::kLong);
+  at::Tensor debug_attn_mask = at::empty({}, query.options());
+
+  flash_attention_kernel(kCPU, output, logsumexp, cum_seq_q, cum_seq_k,
+      max_q, max_k, philox_seed, philox_offset, debug_attn_mask,
+      query, key, value, dropout_p, is_causal, return_debug_mask, scale);
+
+  output = output.transpose(1, 2);
+  logsumexp = logsumexp.transpose(1, 2);
+
+  return std::make_tuple(std::move(output), std::move(logsumexp),
+      std::move(cum_seq_q), std::move(cum_seq_k), max_q, max_k,
+      std::move(philox_seed), std::move(philox_offset), std::move(debug_attn_mask));
+
+}
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
 _scaled_dot_product_flash_attention_backward_cpu(
     const Tensor& grad_out,

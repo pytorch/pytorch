@@ -135,6 +135,16 @@ void cpu_flash_attention(
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
+  int32_t* cum_seq_k_data = nullptr;
+
+  // attention mask
+  bool is_attn_mask = false;
+  if (!is_causal && cum_seq_k.numel() == batchSize + 1) {
+    // if user set cum_seq_k and not set is_causal, masking attention score before softmax
+    // do not check cum_seq_q because it no impact to result (inference)
+    is_attn_mask = true;
+    cum_seq_k_data = cum_seq_k.data_ptr<int32_t>();
+  }
 
   at::parallel_for(0, batchSize * num_head * qSlice, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0, k = 0;
@@ -156,9 +166,17 @@ void cpu_flash_attention(
           -std::numeric_limits<accum_t>::infinity(), qBlockSize);
       fill_stub(qk_sum_data,
           static_cast<accum_t>(0), qBlockSize);
-      int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
+      
+      int64_t num_keys = kvSize;
+      int64_t kv_actual_size = kvSize;
+      if (is_causal) {
+        num_keys = std::min(m + qBlockSize, kvSize);
+      } else if (is_attn_mask) {
+        kv_actual_size = cum_seq_k_data[i + 1] - cum_seq_k_data[i];
+        num_keys = kv_actual_size;
+      }
       for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
-        int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+        int64_t kvBlockSize = std::min(kvSplitSize, kv_actual_size - n);
         // Calculate scale * q @ k.T
         cpublas::gemm(
             TransposeType::Transpose,
@@ -367,6 +385,15 @@ void cpu_flash_attention_backward(
   accum_t* lse_data = logsumexp.data_ptr<accum_t>();
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
+  int32_t* cum_seq_k_data = nullptr;
+
+  bool is_attn_mask = false;
+  if (!is_causal && cumulative_sequence_length_k.numel() == batchSize + 1) {
+    // Masking attention score before softmax on forward
+    // Not check cum_seq_q yet
+    is_attn_mask = true;
+    cum_seq_k_data = cumulative_sequence_length_k.data_ptr<int32_t>();
+  }
 
   at::parallel_for(0, batchSize * num_head, 1, [&](int64_t begin, int64_t end) {
     int64_t i = 0, j = 0;
@@ -395,9 +422,16 @@ void cpu_flash_attention_backward(
             out_data + i * oStrideB + j * oStrideH + (m + row) * oStrideM,
             headSize);
         }
-        int64_t num_keys = is_causal ? std::min(m + qBlockSize, kvSize) : kvSize;
+        int64_t num_keys = kvSize;
+        int64_t kv_actual_size = kvSize;
+        if (is_causal) {
+          num_keys = std::min(m + qBlockSize, kvSize);
+        } else if (is_attn_mask) {
+          kv_actual_size = cum_seq_k_data[i + 1] - cum_seq_k_data[i];
+          num_keys = kv_actual_size;
+        }
         for (int64_t n = 0; n < num_keys; n += kvSplitSize) {
-          int64_t kvBlockSize = std::min(kvSplitSize, kvSize - n);
+          int64_t kvBlockSize = std::min(kvSplitSize, kv_actual_size - n);
           // attn <- scale * q @ k.T
           cpublas::gemm(
             TransposeType::Transpose,
