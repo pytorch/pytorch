@@ -1,6 +1,5 @@
 from functools import lru_cache
-from itertools import chain
-from typing import Callable, Dict, List, Optional
+from typing import Callable, cast, Dict, Optional, List
 
 import torch
 from torch._ops import OpOverload
@@ -31,7 +30,7 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,
@@ -88,7 +87,7 @@ class ShardingPropagator:
 
         elif isinstance(fake_out, (tuple, list)):
             tensor_meta_list = []
-            for fake_out_item in fake_out:
+            for i, fake_out_item in enumerate(fake_out):
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
                         TensorMeta(
@@ -107,35 +106,32 @@ class ShardingPropagator:
             return None
 
     def _wrap_output_spec_tensor_meta(
-        self, output_spec: OutputSpecType, output_tensor_meta: object
+        self, op: OpOverload, output_spec: OutputSpecType, output_tensor_meta: object
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
         """
+
         if output_spec is not None:
-            if isinstance(output_spec, DTensorSpec):
-                assert isinstance(output_tensor_meta, TensorMeta)
-                output_spec.tensor_meta = output_tensor_meta
-            elif isinstance(output_spec, (tuple, list)):
-                for i, spec in enumerate(output_spec):
-                    if isinstance(spec, DTensorSpec):
-                        assert isinstance(output_tensor_meta, (tuple, list))
-                        output_tensor_meta_i = output_tensor_meta[i]
-                        assert isinstance(output_tensor_meta_i, TensorMeta)
-                        spec.tensor_meta = output_tensor_meta_i
+            # Normalise
+            output_spec: List[DTensorSpec] = [output_spec] if isinstance(output_spec, DTensorSpec) else list(output_spec)
+            output_tensor_meta: List[TensorMeta] = [output_tensor_meta] if isinstance(output_tensor_meta, TensorMeta) else list(output_tensor_meta) 
+            
+            # Validate lengths
+            if len(output_spec) != len(output_tensor_meta):
+                raise ValueError(f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the number of op outputs {len(output_tensor_meta)}.")
+            
+            # Validate elements and wrap
+            for i, (output_spec_i, output_tensor_meta_i) in enumerate(zip(output_spec, output_tensor_meta)):
+                if isinstance(output_spec_i, DTensorSpec):
+                    assert isinstance(output_tensor_meta_i, TensorMeta)
+                    output_spec_i.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
-        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
-        # because SymInts are not hashable.
-        # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        if op_info.schema.has_symints:
-            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-        else:
-            output_sharding = self.propagate_op_sharding(op_info.schema)
+        output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding
 
-    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
+    def propagate_op_sharding(self, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
@@ -151,28 +147,28 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # generate op strategy for the op.
-            mesh = op_schema.args_spec[0].mesh
+            input_spec = cast(DTensorSpec, op_schema.args_schema[0])
+            mesh = input_spec.mesh
 
             # swap the args spec with args strategies
-            args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
-
-            kwargs_op_strategy = {
-                k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
-            }
+            args_sharding_strategy = [
+                spec_to_strategy(i) for i in op_schema.args_schema
+            ]
 
             # construct a new OpSchema on args for strategy based propagation
             # TODO: op schema should contain flat sharding by default later
             strategy_schema: OpSchema = OpSchema(
                 op=op_schema.op,
-                args_schema=tuple(args_op_strategy),
-                kwargs_schema=kwargs_op_strategy,
+                args_schema=tuple(args_sharding_strategy),
+                kwargs_schema=op_schema.kwargs_schema,
             )
 
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
 
             assert isinstance(op_strategy, OpStrategy)
-            output_strategy = self._select_strategy(op_strategy)
-
+            # we take the first strategy for now
+            # TODO: add a min cost selection logic
+            output_strategy = op_strategy.strategies[0]
             needs_redistribute = False
             expected_input_specs = []
             for idx, input_spec in enumerate(op_schema.args_spec):
@@ -210,7 +206,7 @@ class ShardingPropagator:
             )
             # associate the output sharding with the output tensor metadata
             self._wrap_output_spec_tensor_meta(
-                output_sharding.output_spec, out_tensor_meta
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
             return output_sharding
 
@@ -257,7 +253,7 @@ class ShardingPropagator:
 
             # associate the output sharding with the output tensor metadata
             self._wrap_output_spec_tensor_meta(
-                output_sharding.output_spec, out_tensor_meta
+                op_schema.op, output_sharding.output_spec, out_tensor_meta
             )
 
             return output_sharding
@@ -265,19 +261,3 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
-
-    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
-        if len(strategy.strategies) == 1:
-            # short cut with only one possible strategy
-            return strategy.strategies[0]
-
-        strategy_costs: List[float] = []
-        for strtg in strategy.strategies:
-            assert (
-                strtg.redistribute_cost is not None
-            ), "must set redistribute cost each strategy!"
-            redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
-            strategy_costs.append(redistribute_cost)
-
-        # for eager execution, we just select the one with the minimal redistribute cost
-        return strategy.strategies[strategy_costs.index(min(strategy_costs))]

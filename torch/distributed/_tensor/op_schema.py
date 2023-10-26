@@ -2,16 +2,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._ops import OpOverload
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-
-try:
-    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
-except ImportError:
-    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
-        tree_map_only,
-        TreeSpec,
-    )
+from torch.utils._pytree import tree_map_only, TreeSpec
 
 
 # Common type aliases
@@ -34,14 +28,14 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     )
 
 
-def _is_inplace_op(op: torch._ops.OpOverload):
+def _is_inplace_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an inplace variant, it might not
     # be entirely correct, but it's good enough for now.
     return op._schema.name[-1] == "_"
 
 
-def _is_out_variant_op(op: torch._ops.OpOverload):
+def _is_out_variant_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an out variant, it might not
     # be entirely correct, but it's good enough for now.
@@ -57,12 +51,6 @@ class PlacementStrategy:
 
     output_spec: DTensorSpec
     input_specs: Optional[Sequence[DTensorSpec]] = None
-
-    # redistribute costs for this op placement strategy
-    # we need a nested list to record the cost for each
-    # operand of this operator, and for each operand of
-    # this operator it might have multiple placement strategies
-    redistribute_cost: Optional[List[List[float]]] = None
 
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
@@ -158,10 +146,8 @@ class RuntimeSchemaInfo:
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
-    # each op can decide if it wants to use pytree flatten/unflatten during operator
-    # eager execution, by default we don't need to do flatten/unflatten, only if the
-    # op indicate it needs to, this is to accelate eager performance.
-    needs_pytree: bool = False
+    # TODO: make use of this field
+    needs_pytree: bool = True
 
 
 @dataclass
@@ -183,7 +169,7 @@ class OpSchema:
             with its DTensorSpec
     """
 
-    op: torch._ops.OpOverload
+    op: OpOverload
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
@@ -206,33 +192,6 @@ class OpSchema:
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
         )
-
-    def __str__(self) -> str:
-        args_sharding: List[str] = []
-        mesh = None
-        for arg in self.args_schema:
-            if isinstance(arg, DTensorSpec):
-                args_sharding.append(str(arg))
-                mesh = arg.mesh
-            elif isinstance(arg, OpStrategy):
-                assert len(arg.strategies) == 1
-                arg_spec = arg.strategies[0].output_spec
-                args_sharding.append(str(arg_spec))
-                mesh = arg_spec.mesh
-            else:
-                args_sharding.append(str(arg))
-        return (
-            f"Op(op={self.op}, args_sharding={','.join(args_sharding)}, @ mesh:{mesh})"
-        )
-
-    def __post_init__(self) -> None:
-        has_symints = False
-        for a in self.args_schema:
-            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
-                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
-                    has_symints = True
-                    break
-        self.has_symints = has_symints
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
@@ -372,9 +331,11 @@ class OpInfo:
     mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
-    local_args: Sequence[object]
-    local_kwargs: Dict[str, object]
-    args_tree_spec: Optional[TreeSpec] = None
+    flat_kwargs_schema: List[object]
+    flat_local_args: List[object]
+    flat_local_kwargs: List[object]
+    args_tree_spec: TreeSpec
+    kwargs_tree_spec: TreeSpec
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None

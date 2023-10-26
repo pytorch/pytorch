@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 import torch
-
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
@@ -15,19 +14,17 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
-    generate_redistribute_costs,
     normalize_dims,
     register_op_strategy,
     register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
     Shard,
+    _Partial,
 )
-
 
 aten = torch.ops.aten
 
@@ -99,7 +96,7 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(_Partial(reduction_op))
             else:
-                new_placements.append(Shard(new_shard_dim))
+                new_placements.append(Shard(reduction_dims_map[shard_dim]))
     return tuple(new_placements)
 
 
@@ -140,7 +137,6 @@ def common_reduction_strategy(
         out_placements = map_placements_after_reduction(
             input_spec.placements, reduce_dims, reduce_dims_map, reduction_op
         )
-        redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
         reduction_strategy.strategies.append(
             PlacementStrategy(
                 output_spec=DTensorSpec(
@@ -148,18 +144,33 @@ def common_reduction_strategy(
                     placements=out_placements,
                 ),
                 input_specs=(input_spec,),
-                redistribute_cost=redistribute_cost,
             )
         )
 
     return reduction_strategy
 
+REDUCTION_LINEAR_OP_MAP = {
+    aten.all.default: c10d.ReduceOp.SUM,
+    aten.sum.default: c10d.ReduceOp.SUM,
+    aten.sum.dim_IntList: c10d.ReduceOp.SUM,
+    aten.prod.default: c10d.ReduceOp.PRODUCT,
+    aten.prod.dim_int: c10d.ReduceOp.PRODUCT,
+    aten.prod.int_out: c10d.ReduceOp.PRODUCT,
+    aten.mean.default: c10d.ReduceOp.AVG,
+    aten.mean.dim: c10d.ReduceOp.AVG,
+    aten.mean.out: c10d.ReduceOp.AVG,
+    aten.max.default: c10d.ReduceOp.MAX,
+    aten.max.dim: c10d.ReduceOp.MAX,
+    aten.max.out: c10d.ReduceOp.MAX,
+    aten.min.default: c10d.ReduceOp.MIN,
+    aten.min.dim: c10d.ReduceOp.MIN,
+    aten.min.out: c10d.ReduceOp.MIN,
+}
 
 @register_op_strategy(
-    [aten.all.default, aten.sum.default, aten.sum.dim_IntList],
-    schema_info=RuntimeSchemaInfo(1),
+    list(REDUCTION_LINEAR_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
 )
-def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def reduction_linear_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
@@ -170,32 +181,14 @@ def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
 
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    return common_reduction_strategy(
-        mesh, input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=True
-    )
-
-
-@register_op_strategy(
-    [aten.mean.default, aten.mean.dim, aten.mean.out], schema_info=RuntimeSchemaInfo(1)
-)
-def mean_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
-    dims = None
-    if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.output_ndim)
-
-    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
-
-    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+    reduction_op = REDUCTION_LINEAR_OP_MAP[op_schema.op]
     return common_reduction_strategy(
         mesh,
         input_strategy,
         reduce_dims,
         keep_dim=keep_dim,
         reduction_linear=True,
-        reduction_op=c10d.ReduceOp.AVG,
+        reduction_op=reduction_op,
     )
 
 

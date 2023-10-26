@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-
+import pytest
 import torch
 
 from torch.distributed._tensor import distribute_tensor
@@ -17,28 +17,31 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class DistMathOpsTest(DTensorTestBase):
     @with_comms
-    def test_sum(self):
+    @pytest.mark.parametrize('op_str', ('all', 'sum', 'prod', 'mean', 'max', 'min'))
+    def test_linear_op_reductions(self, op_str: str):
         device_mesh = self.build_device_mesh()
 
         shard_spec = [Shard(0)]
 
-        tensor_to_sum = torch.randn(12, 8, 8)
+        x = torch.randn(12, 8, 8)
+        x_dt = distribute_tensor(x, device_mesh, shard_spec)
 
-        mat1 = distribute_tensor(tensor_to_sum, device_mesh, shard_spec)
+        op = getattr(x, op_str)
+        op_dt = getattr(x_dt, op_str)
 
         keep_dim_or_not = [True, False, None]
-        for dim in range(tensor_to_sum.ndim):
+        for dim in range(x.ndim):
             for keep_dim in keep_dim_or_not:
-                sum_args = (dim, keep_dim) if keep_dim is not None else (dim,)
-                dim_sumed_tensor = tensor_to_sum.sum(*sum_args)
-                dt_dim_sumed_tensor = mat1.sum(*sum_args).redistribute(
+                args = (dim, keep_dim) if keep_dim is not None else (dim,)
+                dim_reduced_tensor = op(*args)
+                dt_dim_reduced_tensor = op_dt(*args).redistribute(
                     device_mesh, [Replicate()] * device_mesh.ndim
                 )
-                self.assertEqual(dt_dim_sumed_tensor.to_local(), dim_sumed_tensor)
+                self.assertEqual(dt_dim_reduced_tensor.to_local(), dim_reduced_tensor)
 
-        full_sumed_tensor = tensor_to_sum.sum()
-        dt_sum = mat1.sum().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
-        self.assertEqual(dt_sum.to_local(), full_sumed_tensor)
+        full_reduced_tensor = op()
+        dt_full_reduced = op_dt().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
+        self.assertEqual(dt_full_reduced.to_local(), full_reduced_tensor)
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
