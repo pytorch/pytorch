@@ -705,16 +705,13 @@ class WrapperCodeGen(CodeGen):
     def codegen_alloc_from_pool(self, name, offset, dtype, shape, stride) -> str:
         return "alloc_from_pool({})".format(
             ", ".join(
-                map(
-                    str,
-                    [
-                        name,
-                        pexpr(offset),  # bytes not numel
-                        dtype,
-                        self.codegen_shape_tuple(shape),
-                        self.codegen_shape_tuple(stride),
-                    ],
-                )
+                [
+                    name,
+                    pexpr(offset),  # bytes not numel
+                    str(dtype),
+                    self.codegen_shape_tuple(shape),
+                    self.codegen_shape_tuple(stride),
+                ]
             )
         )
 
@@ -1280,7 +1277,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
-        """
+            """
         )
 
     def mark_output_type(self):
@@ -1876,22 +1873,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         return "alloc_from_pool({})".format(
             ", ".join(
-                map(
-                    str,
-                    [
-                        name,
-                        pexpr(offset),  # bytes not numel
-                        self.codegen_dtype(dtype),
-                        self.codegen_shape_tuple(shape),
-                        self.codegen_shape_tuple(stride),
-                    ],
-                )
+                [
+                    name,
+                    pexpr(offset),  # bytes not numel
+                    self.codegen_dtype(dtype),
+                    self.codegen_shape_tuple(shape),
+                    self.codegen_shape_tuple(stride),
+                ]
             )
         )
 
     def codegen_reinterpret_view(
         self, data, size_list, stride_list, offset, writer
     ) -> str:
+        dim = str(len(size_list))
         size = self.codegen_shape_tuple(size_list)
         stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
@@ -1905,7 +1900,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             args = [
                 f"{data.get_name()}",
-                str(len(size_list)),
+                dim,
                 self.codegen_int_array_var(size, writer),
                 self.codegen_int_array_var(stride, writer),
                 offset,
@@ -1972,8 +1967,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             # );
             # ```
             return f"RAIIAtenTensorHandle({tmp_name})"
-
-        return f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
+        else:
+            args = [data.get_name(), size, stride, offset]
+            return f"reinterpret_tensor({', '.join(args)})"
 
     def codegen_device_copy(self, src, dst):
         if config.aot_inductor.abi_compatible:
