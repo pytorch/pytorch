@@ -107,23 +107,21 @@ class TestPrioritizations:
             yield (relevance, self._test_priorities[relevance.value])
 
     def get_pointer_to_test(self, test_run: TestRun) -> Iterator[Tuple[Relevance, int]]:
+        """
+        Returns all test runs that contain any subset of the given test_run and their current relevance.
+
+        self._test_priorities should NOT have items added or removed form it while iterating over the
+        results of this function.
+        """
         # Find a test run that contains the given TestRun and it's relevance.
         found_match = False
         for relevance, tests in self._traverse_priorities():
             for idx, existing_test_run in enumerate(tests):
-                # Do we have an exact match or a direct subset?
-                if existing_test_run.contains(test_run):
-                    test_relevance = Relevance(relevance)
+                # Does the existing test run contain any of the test we're looking for?
+                shared_test = existing_test_run & test_run
+                if not shared_test.is_empty():
                     found_match = True
-                    yield (test_relevance, idx)
-
-                # Does test_run contain everything in existing_test_run?
-                # Relevant when you already have a test class prioritized and are trying
-                # to merge it with a request to prioritize it's whole file
-                elif test_run.contains(existing_test_run):
-                    test_relevance = Relevance(relevance)
-                    found_match = True
-                    yield (test_relevance, idx)
+                    yield (Relevance(relevance), idx)
 
         if not found_match:
             raise ValueError(f"Test {test_run} not found in any relevance group")
@@ -134,6 +132,15 @@ class TestPrioritizations:
         new_relevance: Relevance,
         acceptable_relevance_fn: Callable[[Relevance, Relevance], bool],
     ) -> None:
+        """
+        Updates the test run's relevance to the new relevance.
+
+        If the tests in the test run were previously split up into multiple test runs, all the chunks at a lower
+        relevance will be merged into one new test run at the new relevance, appended to the end of the relevance group.
+
+        However, any tests in a test run that are already at the desired relevance will be left alone, keeping it's
+        original place in the relevance group.
+        """
         if test_run.test_file not in self._original_tests:
             return  # We don't need this test
 
@@ -153,17 +160,20 @@ class TestPrioritizations:
             # Remove the requested tests from their current relevance group, to be added to the new one
             remaining_tests = test_run_to_rerank - test_run
             upgraded_tests |= test_run_to_rerank & test_run
+
+            # Remove the tests that are being upgraded
             if remaining_tests:
                 self._test_priorities[curr_relevance.value][
                     test_run_idx
                 ] = remaining_tests
             else:
+                # List traversal prevents us from deleting these immediately, so note them for later
                 tests_to_remove.append((curr_relevance, test_run_idx))
 
         for relevance, test_idx in tests_to_remove:
             del self._test_priorities[relevance.value][test_idx]
 
-        # And add it to the correct relevance group
+        # And add them to the desired relevance group
         if upgraded_tests:
             self._test_priorities[new_relevance.value].append(upgraded_tests)
 
