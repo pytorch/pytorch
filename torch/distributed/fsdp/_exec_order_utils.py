@@ -8,7 +8,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
-from torch.distributed.fsdp.flat_param import FlatParamHandle
+from torch.distributed.fsdp._flat_param import FlatParamHandle
 
 
 class _ExecOrderWarnStatus(Enum):
@@ -163,7 +163,7 @@ class _ExecOrderData:
         self._check_order(handle, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
-        if not self.is_first_iter or handle._pre_forward_order_index:
+        if not self.is_first_iter or handle._pre_forward_order_index is not None:
             return
         index = len(self.handles_pre_forward_order)
         handle._pre_forward_order_index = index

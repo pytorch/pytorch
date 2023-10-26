@@ -1,12 +1,10 @@
 #include <ATen/autocast_mode.h>
 
-#include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
 #include <c10/util/flat_hash_map.h>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 bool is_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
@@ -405,6 +403,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(conv_transpose2d, input, lower_precision_fp)
   KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
   KERNEL_CPU(prelu, lower_precision_fp)
+  KERNEL_CPU(scaled_dot_product_attention, lower_precision_fp)
+  KERNEL_CPU(_native_multi_head_attention, lower_precision_fp)
 
   // fp32 cast policy
   KERNEL_CPU(avg_pool3d, fp32)
@@ -518,5 +518,4 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 }
 
 } // namespace
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast

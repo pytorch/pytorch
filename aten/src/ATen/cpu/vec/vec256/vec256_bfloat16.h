@@ -14,8 +14,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -413,6 +412,22 @@ public:
     for (auto i = decltype(sz){0}; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
+    }
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
+    return cvt_from_fp32<T>(o1, o2);
+  }
+  Vectorized<T> digamma() const {
+    __m256 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    constexpr auto sz = size();
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
+      tmp1[i] = calc_digamma(tmp1[i]);
+      tmp2[i] = calc_digamma(tmp2[i]);
     }
     const auto o1 = _mm256_loadu_ps(tmp1);
     const auto o2 = _mm256_loadu_ps(tmp2);
@@ -1070,6 +1085,6 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-}}}
+}} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

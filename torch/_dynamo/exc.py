@@ -16,7 +16,11 @@ if is_fbcode():
 else:
 
     def exportdb_error_message(case_name):
-        return ""
+        return (
+            "For more information about this error, see: "
+            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+            + case_name.replace("_", "-")
+        )
 
 
 import logging
@@ -117,7 +121,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
+    CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
 
@@ -134,6 +138,10 @@ class UserError(Unsupported):
         """
         if case_name is not None:
             assert isinstance(case_name, str)
+            if msg.endswith("."):
+                msg += " "
+            else:
+                msg += "\n"
             msg += exportdb_error_message(case_name)
         super().__init__(msg)
         self.error_type = error_type

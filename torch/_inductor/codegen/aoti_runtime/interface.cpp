@@ -77,7 +77,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
   AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
   AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
 
-  auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+  auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->run(
         input_handles,
@@ -108,17 +108,6 @@ AOTIRuntimeError AOTInductorModelContainerGetInputName(
       { *ret_input_names = container->input_name(input_idx); })
 }
 
-AOTIRuntimeError AOTInductorModelContainerGetInputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const char** ret_input_dtypes) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *ret_input_dtypes = container->get_input_dtype(input_idx); })
-}
-
 AOTIRuntimeError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* ret_num_outputs) {
@@ -140,47 +129,77 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
       { *ret_output_names = container->output_name(output_idx); })
 }
 
-AOTIRuntimeError AOTInductorModelContainerGetOutputDtype(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const char** ret_output_dtypes) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { *ret_output_dtypes = container->get_output_dtype(output_idx); })
-}
-
-AOTIRuntimeError AOTInductorModelContainerGetMaxInputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t input_idx,
-    const int64_t** ret_input_sizes,
-    int64_t* ret_input_ndim) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
+AOTIRuntimeError AOTInductorModelCreate(
+    AOTInductorModelHandle* model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-    const std::vector<int64_t>& max_input_shape =
-        container->max_input_shape(input_idx);
-    *ret_input_sizes = max_input_shape.data();
-    *ret_input_ndim = max_input_shape.size();
+      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+
+      auto model = new torch::aot_inductor::AOTInductorModel(
+          constant_map,
+          ""
+      );
+      *model_handle = reinterpret_cast<AOTInductorModelHandle>(model);
   })
 }
 
-AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
-    AOTInductorModelContainerHandle container_handle,
-    size_t output_idx,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndim) {
-  auto* container =
-      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
-          container_handle);
+AOTIRuntimeError AOTInductorModelRun(
+    AOTInductorModelHandle model_handle,
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-    const std::vector<int64_t>& max_output_shape =
-        container->max_output_shape(output_idx);
-    *ret_output_sizes = max_output_shape.data();
-    *ret_output_ndim = max_output_shape.size();
+      model->run_impl(
+          input_handles,
+          output_handles,
+          (torch::aot_inductor::DeviceStreamType)nullptr,
+          nullptr);
   })
 }
 
+
+AOTIRuntimeError AOTInductorModelDelete(
+    AOTInductorModelHandle model_handle
+) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      delete model;
+  })
+}
+
+AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
+    AOTInductorModelHandle model_handle,
+    AOTInductorConstantMapHandle constant_map_handle) {
+  auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto constant_map = std::make_shared<torch::aot_inductor::ConstantMap>();
+      auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
+
+      for (auto const& kv : *input_map) {
+        constant_map->emplace(kv.first, kv.second);
+      }
+      model->update_constants_map(std::move(constant_map));
+  })
+}
+
+#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
+
+  CACHE_TORCH_DTYPE(bfloat16);
+  CACHE_TORCH_DTYPE(float16);
+  CACHE_TORCH_DTYPE(float32);
+  CACHE_TORCH_DTYPE(float64);
+  CACHE_TORCH_DTYPE(uint8);
+  CACHE_TORCH_DTYPE(int8);
+  CACHE_TORCH_DTYPE(int16);
+  CACHE_TORCH_DTYPE(int32);
+  CACHE_TORCH_DTYPE(int64);
+  CACHE_TORCH_DTYPE(bool);
+
+  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
+  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

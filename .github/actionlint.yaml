@@ -23,3 +23,5 @@ self-hosted-runner:
     - macos-12-xl
     - macos-12
     - macos12.3-m1
+    - macos-latest-xlarge
+    - macos-13-xlarge
