@@ -181,6 +181,7 @@ include_patterns = [
     'torch/_dynamo/allowed_functions.py',
     'torch/_dynamo/codegen.py',
     'torch/_dynamo/eval_frame.py',
+    'torch/_dynamo/funcname_cache.py',
     'torch/_dynamo/convert_frame.py',
     'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/types.py',
