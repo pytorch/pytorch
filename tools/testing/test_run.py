@@ -188,10 +188,9 @@ class TestRun:
         if other.is_empty():
             return self
 
-        assert (
-            self.test_file == other.test_file
-        ), f"Can't exclude {other} from {self} because they're not the same test file"
-
+        # Are you trying to subtract files that don't even exist in this one?
+        if self.test_file != other.test_file:
+            return self
         if other.is_full_file():
             return TestRun.empty()
 
@@ -214,6 +213,9 @@ class TestRun:
                 return return_inclusions_or_empty(other._excluded - self._excluded)
 
     def __and__(self, other: "TestRun") -> "TestRun":
+        if self.test_file != other.test_file:
+            return TestRun.empty()
+
         return (self | other) - (self - other) - (other - self)
 
 
