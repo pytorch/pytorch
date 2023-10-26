@@ -145,9 +145,9 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-        'masked.softmin': [torch.float32],
-        'masked.softmax': [torch.float32],
-        'masked.log_softmax': [torch.float32],
+        'masked.softmin': [torch.float32, torch.float16],
+        'masked.softmax': [torch.float32, torch.float16],
+        'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
         'grid_sampler_2d': [torch.float32],
@@ -762,7 +762,8 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float16, torch.float32],
         'nn.functional.dropout2d': [torch.float16, torch.float32],
         'nn.functional.dropout3d': [torch.float16, torch.float32],
-        'nn.functional.multi_head_attention_forward': [torch.float32],
+        # See https://github.com/pytorch/pytorch/issues/111479
+        'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -788,7 +789,7 @@ def mps_ops_modifier(ops):
         # Mismatched elements: 56 / 96 (58.3%)
         # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
-        'nn.functional.scaled_dot_product_attention': [torch.float32],
+        'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
@@ -10931,6 +10932,14 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.glu',
         '_native_batch_norm_legit',
         'native_batch_norm',
+        'softmax',
+        '_softmax_backward_data',
+        'log_softmax',
+        'masked.softmax',
+        'masked.log_softmax',
+        'masked.softmin',
+        'nn.functional.kl_div',
+        'nn.functional.softmin',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
