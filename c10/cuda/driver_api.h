@@ -67,5 +67,7 @@ struct DriverAPI {
   static DriverAPI* get();
 };
 
+static bool nvml_is_available = true;
+
 } // namespace cuda
 } // namespace c10

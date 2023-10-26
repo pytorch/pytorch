@@ -5,17 +5,16 @@
 #include <iostream>
 namespace c10 {
 namespace cuda {
-  static bool nvml_is_available = True;
 
 namespace {
 DriverAPI create_driver_api() {
-  void* libcuda_handle = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
-  TORCH_INTERNAL_ASSERT(libcuda_handle);
+  void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
+  TORCH_INTERNAL_ASSERT(handle_0);
   try{
-    void* nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_LAZY)
-    TORCH_INTERNAL_ASSERT(nvml_handle);
+    void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY)
+    TORCH_INTERNAL_ASSERT(handle_1);
   } catch (...) {
-    nvml_is_available = False;
+    nvml_is_available = false;
   }
 
 /*
