@@ -24,7 +24,7 @@ from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
     fqn,
@@ -60,7 +60,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = [
+    _nonvar_fields = {
         "proxy",
         "dtype",
         "device",
@@ -71,7 +71,11 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-    ]
+        "is_sparse",
+        "class_type",
+        "specialized_value",
+        *VariableTracker._nonvar_fields,
+    }
 
     def get_real_value(self):
         """
@@ -191,12 +195,8 @@ class TensorVariable(VariableTracker):
         from .builder import VariableBuilder
 
         attr_source = AttrSource(self.source, name)
-        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
-        return (
-            VariableBuilder(tx, attr_source)(real_value)
-            .add_options(self)
-            .add_guard(has_attr_guard)
-        )
+        install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
+        return VariableBuilder(tx, attr_source)(real_value)
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
@@ -206,26 +206,25 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         result = None
-        options = VariableTracker.propagate(self)
         if name == "ndim" and self.ndim is not None:
-            result = ConstantVariable.create(self.ndim, **options)
+            result = ConstantVariable.create(self.ndim)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = TorchVariable(self.dtype)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = TorchVariable(self.device)
         elif name == "layout" and self.layout is not None:
-            result = TorchVariable(self.layout, **options)
+            result = TorchVariable(self.layout)
         elif name == "is_cuda" and self.device is not None:
-            result = ConstantVariable.create(self.device.type == "cuda", **options)
+            result = ConstantVariable.create(self.device.type == "cuda")
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
-            result = SizeVariable(sizes, **options)
+            result = SizeVariable(sizes)
         elif name == "requires_grad" and self.requires_grad is not None:
-            result = ConstantVariable.create(self.requires_grad, **options)
+            result = ConstantVariable.create(self.requires_grad)
         elif name == "is_quantized" and self.is_quantized is not None:
-            result = ConstantVariable.create(self.is_quantized, **options)
+            result = ConstantVariable.create(self.is_quantized)
         elif name == "is_sparse" and self.is_sparse is not None:
-            result = ConstantVariable.create(self.is_sparse, **options)
+            result = ConstantVariable.create(self.is_sparse)
         elif name == "shape" and self.size is None:
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
@@ -233,13 +232,13 @@ class TensorVariable(VariableTracker):
         elif name == "data":
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
-            return TorchVariable(self.python_type(), **options)
+            return TorchVariable(self.python_type())
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
-            result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+            install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
         # dynamo/aot/inductor, just fall back.
@@ -279,7 +278,6 @@ class TensorVariable(VariableTracker):
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                    **options,
                 )
 
             result = try_generic_attr_handling()
@@ -297,7 +295,6 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        options = VariableTracker.propagate(self)
         if idxes is None:
             if self.size:
                 length = self.size[0]
@@ -314,9 +311,7 @@ class TensorVariable(VariableTracker):
                     length = dyn_length.value
             idxes = range(length)
         return [
-            wrap_fx_proxy_cls(
-                target_cls=type(self), tx=tx, proxy=self.as_proxy()[i], **options
-            )
+            wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
 
@@ -338,7 +333,6 @@ class TensorVariable(VariableTracker):
         from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
-        options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name in ("stride", "size"):
             dim_var = None
@@ -365,9 +359,9 @@ class TensorVariable(VariableTracker):
             # (it really should always be set though!)
             if (r := getattr(self, name)) is not None:
                 if dim is None:
-                    return RetVariable(r, **options)
+                    return RetVariable(r)
                 else:
-                    return ConstantVariable.create(r[dim], **options)
+                    return ConstantVariable.create(r[dim])
 
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
@@ -376,11 +370,11 @@ class TensorVariable(VariableTracker):
                     if not free_symbols(fake_r):
                         # int conversion for safety, in case a SymInt refined
                         # to constant
-                        return RetVariable(tuple(int(r) for r in fake_r), **options)
+                        return RetVariable(tuple(int(r) for r in fake_r))
                 else:
                     fake_r = getattr(fake, name)(dim)
                     if not free_symbols(fake_r):
-                        return ConstantVariable.create(int(fake_r), **options)
+                        return ConstantVariable.create(int(fake_r))
 
             # Oops, it's not constant.  Do the dynamic shapes path.
             return wrap_fx_proxy(
@@ -390,18 +384,17 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
-                **options,
             )
 
         elif name in ("numel", "nelement"):
             if self.size is not None:
-                return ConstantVariable.create(product(self.size), **options)
+                return ConstantVariable.create(product(self.size))
 
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 fake_r = fake.numel()
                 if not free_symbols(fake_r):
-                    return ConstantVariable.create(int(fake_r), **options)
+                    return ConstantVariable.create(int(fake_r))
 
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
 
@@ -413,22 +406,19 @@ class TensorVariable(VariableTracker):
                     "numel",
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
-                **options,
             )
 
         elif name in ("ndimension", "dim") and self.ndim is not None:
-            constant_result = ConstantVariable.create(self.ndim, **options)
+            constant_result = ConstantVariable.create(self.ndim)
         elif name == "is_floating_point" and self.dtype is not None:
-            constant_result = ConstantVariable.create(
-                self.dtype.is_floating_point, **options
-            )
+            constant_result = ConstantVariable.create(self.dtype.is_floating_point)
         elif name == "is_contiguous" and self.is_contiguous is not None:
             if "memory_format" in kwargs:
                 memory_format = kwargs.pop("memory_format").as_python_constant()
             else:
                 memory_format = torch.contiguous_format
             constant_result = ConstantVariable.create(
-                memory_format in self.is_contiguous, **options
+                memory_format in self.is_contiguous
             )
         elif (
             name == "type"
@@ -441,11 +431,11 @@ class TensorVariable(VariableTracker):
             ]
             if self.device.type == "cuda":
                 constant_result = ConstantVariable.create(
-                    f"torch.cuda.{tensortype.__name__}", **options
+                    f"torch.cuda.{tensortype.__name__}"
                 )
             else:
                 constant_result = ConstantVariable.create(
-                    f"torch.{tensortype.__name__}", **options
+                    f"torch.{tensortype.__name__}"
                 )
         elif (
             name == "type"
@@ -456,7 +446,7 @@ class TensorVariable(VariableTracker):
             # torch.fx's tracer fails on these types, because it doesn't support arguments of torch.tensortype type.
             # So, we pass it in as a string (which is also supported, see above implementation for .type() with 0 args)
             tensor_type = args[0].as_python_constant()
-            tensor_type_const = ConstantVariable.create(fqn(tensor_type), **options)
+            tensor_type_const = ConstantVariable.create(fqn(tensor_type))
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -464,7 +454,6 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self, tensor_type_const], kwargs),
                 ),
-                **options,
             )
         elif (
             name == "as_subclass"
@@ -491,7 +480,7 @@ class TensorVariable(VariableTracker):
             )
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
-            constant_result = ConstantVariable.create(index, **options)
+            constant_result = ConstantVariable.create(index)
         else:
             constant_result = None
 
@@ -501,9 +490,7 @@ class TensorVariable(VariableTracker):
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
-                return TupleVariable(
-                    [constant_result.getitem_const(a) for a in args], **options
-                )
+                return TupleVariable([constant_result.getitem_const(a) for a in args])
             return constant_result
         elif name == "numpy":
             if not config.trace_numpy:
@@ -530,7 +517,7 @@ class TensorVariable(VariableTracker):
                 proxy = tx.output.create_proxy(
                     "call_method", "cpu", *proxy_args_kwargs([self], {})
                 )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
+            return NumpyNdarrayVariable.create(tx, proxy)
         elif name == "tolist":
             from .builder import SourcelessBuilder
 
@@ -563,15 +550,13 @@ class TensorVariable(VariableTracker):
 
             tensor = self.as_proxy().node.meta["example_value"]
             out = tolist(tensor, self.as_proxy())
-            return SourcelessBuilder()(tx, out).add_options(options)
+            return SourcelessBuilder()(tx, out)
         elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
-            return self.call_method(
-                tx, "size", [ConstantVariable.create(0, **options)], {}
-            )
+            return self.call_method(tx, "size", [ConstantVariable.create(0)], {})
         elif name == "__setitem__":
             key, value = args
 
@@ -592,20 +577,19 @@ class TensorVariable(VariableTracker):
                 unimplemented(
                     "boolean masking setitem backwards requires dynamic shapes"
                 )
-            tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
                 "call_function",
                 operator.setitem,
                 *proxy_args_kwargs([self] + list(args), kwargs),
             )
-            return ConstantVariable.create(None, **options)
+            return ConstantVariable.create(None)
         elif name in ("resize_", "resize_as_"):
             # Handling resizing in its full generality is difficult.
             unimplemented(f"Tensor.{name}")
         elif (
             name == "add_" and len(args) == 1 and len(kwargs) == 1 and "alpha" in kwargs
         ):
-            result = TorchVariable(torch.mul, **options).call_function(
+            result = TorchVariable(torch.mul).call_function(
                 tx, args + [kwargs["alpha"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -615,8 +599,8 @@ class TensorVariable(VariableTracker):
             and len(kwargs) == 1
             and "value" in kwargs
         ):
-            result = TorchVariable(torch.div, **options).call_function(tx, args, {})
-            result = TorchVariable(torch.mul, **options).call_function(
+            result = TorchVariable(torch.div).call_function(tx, args, {})
+            result = TorchVariable(torch.mul).call_function(
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
@@ -625,10 +609,8 @@ class TensorVariable(VariableTracker):
             # without dealing with unbacked symbool. Roughly the code we translate is:
             # def __contains__(self, x):
             #     return (x == self).any().item()
-            result = TorchVariable(torch.eq, **options).call_function(
-                tx, [self, args[0]], {}
-            )
-            result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
+            result = TorchVariable(torch.eq).call_function(tx, [self, args[0]], {})
+            result = TorchVariable(torch.any).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
         elif name == "redistribute":
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
@@ -649,7 +631,6 @@ class TensorVariable(VariableTracker):
                     redistribute_fn_with_prim_types,
                     *proxy_args_kwargs([self], {}),
                 ),
-                **options,
             )
         elif name == "register_hook":
             # see [On tensor.register_hook]
@@ -666,23 +647,17 @@ class TensorVariable(VariableTracker):
             ):
                 unimplemented("Unexpected callable type passed to register_hook")
 
-            # Guards from the fn_var
-            options.update(VariableTracker.propagate(fn_var))
-
             if isinstance(fn_var, variables.NestedUserFunctionVariable):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
-                **options,
             )
 
             if not self.source:
@@ -736,7 +711,6 @@ class TensorVariable(VariableTracker):
                         (self.as_proxy(),),
                         {},
                     ),
-                    **options,
                 )
 
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
@@ -758,7 +732,6 @@ class TensorVariable(VariableTracker):
                     name,
                     *proxy_args_kwargs([self] + list(args), kwargs),
                 ),
-                **options,
             )
 
     def rename(self, tx, name):
@@ -814,8 +787,6 @@ class SymNodeVariable(VariableTracker):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
@@ -823,8 +794,148 @@ class SymNodeVariable(VariableTracker):
                 name,
                 *proxy_args_kwargs([self] + list(args), kwargs),
             ),
-            **options,
         )
+
+
+class TensorWithTFOverrideVariable(VariableTracker):
+    """
+    Represents a tensor subclass instance with a __torch_function__ override.
+    """
+
+    @staticmethod
+    def create(
+        tx,
+        tensor_variable,
+        orig_tensor_variable_source,
+        torch_function_fn,
+        subclass_type,
+        **kwargs,
+    ):
+        var = TensorWithTFOverrideVariable(
+            tensor_variable,
+            orig_tensor_variable_source,
+            torch_function_fn,
+            subclass_type,
+            **kwargs,
+        )
+        # stash the subclass type to rewrap an output tensor if needed
+        tx.output.install_global(var.global_class_name(), subclass_type)
+        return var
+
+    def __init__(
+        self,
+        tensor_variable,
+        orig_tensor_variable_source,
+        subclass_torch_function__func,
+        subclass_type,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.tensor_variable = tensor_variable
+        self.orig_tensor_variable_source = orig_tensor_variable_source
+        self.subclass_torch_function__func = subclass_torch_function__func
+        self.subclass_type = subclass_type
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This code block implements inlining the __torch_function__ override
+        # of `call_method`.
+        from . import GetAttrVariable
+
+        # insert unwrapped version of self as the first argument
+        # TODO: This is wrong!  When you call the internal __torch_function__,
+        # you still get the wrapped version of self, and if you call functions
+        # inside __torch_function__, they should come back here.  If we unwrap
+        # the tensor immediately, that will not happen.
+        # See https://github.com/pytorch/torchdynamo/issues/1951
+        args = list(args)
+        args.insert(0, self.tensor_variable)
+        func_var = GetAttrVariable(self.tensor_variable, name)
+
+        unwrapped = TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
+            tx,
+            func_var,
+            self.orig_tensor_variable_source,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+            {},
+            args,
+            kwargs,
+        )
+
+        # TODO(future PR): implement rewrapping conditional on method presence
+        # in `torch.overrides.get_default_nowrap_function()`. It's unclear how
+        # to do this easily in the current codebase since the resolution of
+        # `GetAttrVariable` depends on the type of the underlying object.
+
+        return TensorWithTFOverrideVariable(
+            unwrapped,
+            self.orig_tensor_variable_source,
+            self.subclass_torch_function__func,
+            self.subclass_type,
+        )
+
+    def global_class_name(self):
+        return f"__subclass_{self.subclass_type.__name__}"
+
+    @staticmethod
+    def inline_torch_function_unwrapped(
+        tx,
+        original_func_var,
+        tensor_with_tf_override_source,
+        tf_func,
+        subclass_type,
+        options,
+        args,
+        kwargs,
+    ):
+        """
+        This function inlines the `__torch_function__` override for `original_func_var`.
+        For example, if the user code is
+
+           x1 = torch.sigmoid(x0)
+
+        And `x0` has an override, then:
+        * `original_func_var` will be a `VariableTracker` object wrapping `torch.sigmoid`
+        * `tensor_with_tf_override_source` will be the `Source` object from
+          the original tensor override instance in the beginning of the program
+        * `tf_func` will be the custom `__torch_function__` function
+        * `subclass_type` will be `type(x0)`
+
+        The caller is expected to properly massage args and kwargs before
+        passing them into this function.
+
+        The caller is responsible for wrapping the return value, if needed.
+        """
+        from . import UserDefinedClassVariable
+        from .builder import TupleVariable, VariableBuilder
+
+        source = AttrSource(
+            AttrSource(tensor_with_tf_override_source, "__torch_function__"),
+            "__func__",
+        )
+        tf_func_var = VariableBuilder(tx, source)(tf_func)
+        type_var = UserDefinedClassVariable(subclass_type, **options)
+
+        # signature:
+        # def __torch_function__(cls, func, types, args=(), kwargs=None):
+        tf_args = (
+            type_var,  # cls
+            original_func_var,  # func
+            (type_var,),  # types
+            TupleVariable(args),  # args
+            kwargs,  # kwargs
+        )
+
+        # Disable __torch_function__ here to prevent the clone of the
+        # example tensor from going into the override.
+        with torch._C.DisableTorchFunctionSubclass():
+            return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
 class NumpyNdarrayVariable(TensorVariable):
@@ -853,7 +964,6 @@ class NumpyNdarrayVariable(TensorVariable):
         from .builder import wrap_fx_proxy
 
         result = None
-        options = VariableTracker.propagate(self)
 
         example_value = self.as_proxy().node.meta["example_value"]
         example_ndarray = tnp.ndarray(example_value)
@@ -864,7 +974,6 @@ class NumpyNdarrayVariable(TensorVariable):
                 tx.output.create_proxy(
                     "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
                 ),
-                **options,
             )
 
         if name in ["T", "real", "imag"]:
@@ -874,7 +983,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 (self.as_proxy(), name),
                 {},
             )
-            result = NumpyNdarrayVariable.create(tx, proxy, **options)
+            result = NumpyNdarrayVariable.create(tx, proxy)
 
         # These are awkward to implement.  The standard playbook for torch._numpy
         # interop is to trace a call into the torch._numpy wrapper which works for
@@ -890,14 +999,14 @@ class NumpyNdarrayVariable(TensorVariable):
         # NB: only ALWAYS specialized attributes can go here; notably,
         # size/shape not allowed!
         elif name in ("ndim", "itemsize"):
-            return ConstantVariable.create(getattr(example_ndarray, name), **options)
+            return ConstantVariable.create(getattr(example_ndarray, name))
         elif name in ("shape", "stride"):
             if not free_symbols(r := getattr(example_ndarray, name)):
-                return ConstantVariable.create(tuple(int(r) for r in r), **options)
+                return ConstantVariable.create(tuple(int(r) for r in r))
             return insert_into_graph()
         elif name == "size":
             if not free_symbols(r := example_ndarray.size):
-                return ConstantVariable.create(int(r), **options)
+                return ConstantVariable.create(int(r))
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
@@ -912,7 +1021,6 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         from ..utils import numpy_method_wrapper
 
         if name in ["__len__", "size", "tolist"]:
@@ -923,7 +1031,7 @@ class NumpyNdarrayVariable(TensorVariable):
             numpy_method_wrapper(name),
             *proxy_args_kwargs([self] + list(args), kwargs),
         )
-        return NumpyNdarrayVariable.create(tx, proxy, **options)
+        return NumpyNdarrayVariable.create(tx, proxy)
 
     def python_type(self):
         return np.ndarray
@@ -954,12 +1062,7 @@ class UnspecializedPythonVariable(TensorVariable):
         for graph_arg in tx.output.graphargs:
             if graph_arg.source is self.source:
                 graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
+        return ConstantVariable.create(value=self.raw_value)
 
 
 class FakeItemVariable(TensorVariable):

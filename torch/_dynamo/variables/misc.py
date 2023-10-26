@@ -12,7 +12,7 @@ import torch._numpy as tnp
 from .. import config, polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
@@ -90,16 +90,13 @@ class SuperVariable(VariableTracker):
         # special when it comes to finding sources. Compared to other VTs, super
         # requires the attr name to walk the mro and find the actual source (and
         # not just AttrSource).
-        options = VariableTracker.propagate(self, self.objvar, self.typevar)
         value, source = self._resolved_getattr_and_source(self, name)
         if not variables.ConstantVariable.is_literal(value):
-            return GetAttrVariable(self, name, **options)
+            return GetAttrVariable(self, name)
         if source:
-            options["source"] = source
-            return variables.ConstantVariable.create(value, **options).add_guard(
-                source.make_guard(GuardBuilder.CONSTANT_MATCH)
-            )
-        return variables.ConstantVariable.create(value, **options)
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+            return variables.ConstantVariable.create(value, source=source)
+        return variables.ConstantVariable.create(value)
 
     def call_method(
         self,
@@ -108,9 +105,6 @@ class SuperVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(
-            self, args, kwargs.values(), self.objvar, self.typevar
-        )
         inner_fn, source = self._resolved_getattr_and_source(self, name)
 
         if inner_fn is object.__init__:
@@ -124,7 +118,6 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
                     objvar,
                     "__call_nn_module_init",
@@ -135,11 +128,11 @@ class SuperVariable(VariableTracker):
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
             return variables.UserFunctionVariable(
-                inner_fn, source=source, **options
+                inner_fn, source=source
             ).call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
-                inner_fn.__func__, self.objvar, source=source, **options
+                inner_fn.__func__, self.objvar, source=source
             ).call_function(tx, args, kwargs)
         elif (
             inner_fn is collections.OrderedDict.__getitem__
@@ -167,16 +160,9 @@ class SuperVariable(VariableTracker):
 
             newval = collections.OrderedDict(self.objvar.items)
             newval[k] = args[1]
-
-            new_rec_contains = self.objvar.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self.objvar,
-                self.objvar.modifed(newval, new_rec_contains, **options),
+                self.objvar.modifed(newval),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -432,16 +418,17 @@ class AutogradFunctionVariable(VariableTracker):
                 fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        options["source"] = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        source = AttrSource(AttrSource(self.source, "__class__"), "forward")
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
-            return variables.UserFunctionVariable(fn, **options).call_function(
+            return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
             )
         elif isinstance(fn, types.MethodType):
             return variables.UserMethodVariable(
-                fn.__func__, variables.UserDefinedClassVariable(self.fn_cls), **options
+                fn.__func__,
+                variables.UserDefinedClassVariable(self.fn_cls),
+                source=source,
             ).call_function(tx, args, kwargs)
         else:
             unimplemented(
@@ -449,8 +436,8 @@ class AutogradFunctionVariable(VariableTracker):
             )
 
     def call_function(self, tx, args, kwargs):
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        return AutogradFunctionVariable(self.fn_cls, source=self.source, **options)
+        # TODO(jansel): BUG! the source here seems wrong, I believe it should just be None
+        return AutogradFunctionVariable(self.fn_cls, source=self.source)
 
     def call_method(
         self,
@@ -460,8 +447,7 @@ class AutogradFunctionVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ):
         if name == "apply":
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            return self.call_apply(tx, args, kwargs).add_options(options)
+            return self.call_apply(tx, args, kwargs)
         elif name == "backward":
             with tx.strict_translation_mode():
                 if isinstance(self.fn_cls.backward, types.FunctionType):
@@ -543,7 +529,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         if not hasattr(self, "_saved_tensors"):
             self._saved_tensors = []
         for arg in args:
@@ -551,13 +536,13 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
-        return variables.ConstantVariable.create(None, **options)
+        return variables.ConstantVariable.create(None)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            ).add_options(self)
+            )
         if name == "saved_tensors":
             return variables.TupleVariable(list(self._saved_tensors))
         return super().var_getattr(tx, name)
@@ -571,7 +556,7 @@ class LambdaVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.fn(*args, **kwargs).add_options(self)
+        return self.fn(*args, **kwargs)
 
 
 class GetAttrVariable(VariableTracker):
@@ -610,7 +595,7 @@ class GetAttrVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return self.obj.call_method(tx, self.name, args, kwargs).add_options(self)
+        return self.obj.call_method(tx, self.name, args, kwargs)
 
     def call_method(
         self,
@@ -626,7 +611,6 @@ class GetAttrVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
-                **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
         return super().call_method(tx, name, args, kwargs)
 
@@ -710,8 +694,6 @@ class SkipFilesVariable(VariableTracker):
     ) -> "VariableTracker":
         from .builtin import BuiltinVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
@@ -729,7 +711,6 @@ class SkipFilesVariable(VariableTracker):
                 tx,
                 collections.OrderedDict,
                 args,
-                **options,
             )
         elif (
             self.value is collections.defaultdict
@@ -741,7 +722,6 @@ class SkipFilesVariable(VariableTracker):
                 collections.defaultdict,
                 args[0],
                 mutable_local=MutableLocal(),
-                **options,
             )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
@@ -754,7 +734,7 @@ class SkipFilesVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal(), **options
+                value, mutable_local=MutableLocal()
             )
         elif (
             self.value is itertools.product
@@ -764,10 +744,8 @@ class SkipFilesVariable(VariableTracker):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
             items = []
             for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is itertools.chain
             and not kwargs
@@ -777,9 +755,7 @@ class SkipFilesVariable(VariableTracker):
             items = []
             for item in itertools.chain(*seqs):
                 items.append(item)
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
 
@@ -823,9 +799,7 @@ class SkipFilesVariable(VariableTracker):
                         )
                 items.append(acc)
 
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is itertools.combinations
             and not kwargs
@@ -838,10 +812,8 @@ class SkipFilesVariable(VariableTracker):
 
             items = []
             for item in itertools.combinations(iterable, r):
-                items.append(variables.TupleVariable(list(item), **options))
-            return variables.ListIteratorVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+                items.append(variables.TupleVariable(list(item)))
+            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
         elif (
             self.value is functools.wraps
             and not kwargs
@@ -854,7 +826,7 @@ class SkipFilesVariable(VariableTracker):
                     return fn.clone(wraps_source=args[0].source)
                 unimplemented(f"functools.wraps({fn})")
 
-            return variables.LambdaVariable(wraps, **options)
+            return variables.LambdaVariable(wraps)
         elif self.value is collections.deque and not kwargs:
             if len(args) == 0:
                 items = []
@@ -862,9 +834,7 @@ class SkipFilesVariable(VariableTracker):
                 items = args[0].unpack_var_sequence(tx)
             else:
                 unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(
-                items, mutable_local=MutableLocal(), **options
-            )
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -874,7 +844,7 @@ class SkipFilesVariable(VariableTracker):
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs, **options
+                fn, args=rest_args, keywords=kwargs
             )
         elif self.value is itertools.repeat:
             from .builder import SourcelessBuilder
@@ -912,7 +882,6 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
-                **VariableTracker.propagate(self, args),
             )
         unimplemented("typing")
 
@@ -959,7 +928,6 @@ class NumpyVariable(VariableTracker):
 
         from .tensor import NumpyNdarrayVariable
 
-        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
         if self.value.__name__ == "dtype":
             unimplemented(
@@ -980,7 +948,7 @@ class NumpyVariable(VariableTracker):
                 numpy_to_tensor_wrapper(func),
                 *proxy_args_kwargs(args, kwargs),
             )
-            return NumpyNdarrayVariable.create(tx, proxy, **options)
+            return NumpyNdarrayVariable.create(tx, proxy)
 
     def call_method(
         self,

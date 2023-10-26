@@ -200,7 +200,7 @@ class SideEffects:
         )
 
     def is_attribute_mutation(self, item):
-        return isinstance(item.mutable_local, AttributeMutation)
+        return item.is_mutable_local(AttributeMutation)
 
     def has_pending_mutation(self, item):
         return self.is_attribute_mutation(item) and bool(
@@ -208,7 +208,7 @@ class SideEffects:
         )
 
     def is_modified(self, item):
-        if isinstance(item.mutable_local, AttributeMutationNew):
+        if item.is_mutable_local(AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
             return item.mutable_local in self.store_attr_mutations
@@ -299,7 +299,7 @@ class SideEffects:
 
         def visit(var: VariableTracker):
             if (
-                isinstance(var.mutable_local, AttributeMutationNew)
+                var.is_mutable_local(AttributeMutationNew)
                 and var.mutable_local is not skip_obj
             ):
                 live_new_objects.add(var.mutable_local)
@@ -309,12 +309,12 @@ class SideEffects:
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
-                return is_live(var.mutable_local)
+                return var.is_mutable_local(AttributeMutationNew)
             return True
 
         VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
         for var in self.id_to_variable.values():
-            if not isinstance(var.mutable_local, AttributeMutationNew):
+            if not var.is_mutable_local(AttributeMutationNew):
                 VariableTracker.apply(visit, var)
 
         for skip_obj, setattrs in self.store_attr_mutations.items():
@@ -338,15 +338,15 @@ class SideEffects:
 
     def codegen_save_tempvars(self, cg: PyCodegen):
         for var in self._get_modified_vars():
-            if isinstance(
-                var.mutable_local, (AttributeMutationExisting, AttributeMutationNew)
+            if var.is_mutable_local(
+                (AttributeMutationExisting, AttributeMutationNew)
             ) and isinstance(var, variables.NewCellVariable):
                 cg.load_import_from(utils.__name__, "make_cell")
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
                     var.mutable_local.source = LocalSource(cg.tempvars[var])
-            elif isinstance(var.mutable_local, AttributeMutationNew):
+            elif var.is_mutable_local(AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
                 if "__call_nn_module_init" in self.store_attr_mutations.get(
@@ -502,9 +502,9 @@ class SideEffects:
                     elif name == "__call_nn_module_init":
                         pass  # handled in codegen_save_tempvars
                     elif isinstance(value, variables.DeletedVariable):
-                        if isinstance(
-                            var.mutable_local, AttributeMutationExisting
-                        ) and hasattr(getattr(var, "value", None), name):
+                        if var.is_mutable_local(AttributeMutationExisting) and hasattr(
+                            getattr(var, "value", None), name
+                        ):
                             cg.tx.output.update_co_names(name)
                             cg(var.mutable_local.source)
                             suffixes.append(

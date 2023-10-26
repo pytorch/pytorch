@@ -1,12 +1,12 @@
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import dict_values, identity, istype, odict_values
+from ..utils import identity, istype
 
 
 class MutableLocalSource(Enum):
@@ -18,6 +18,31 @@ class MutableLocalSource(Enum):
 
     Existing = 0
     Local = 1
+
+
+class ParentsTracker:
+    """
+    This is a perf optimization to limit the number of objects we need to visit in tx.replace_all.
+    This must be a seperate object so that it is not cloned in apply.
+    """
+
+    def __init__(self):
+        # logically this is a set, but we use a dict to ensure deterministic ordering
+        self.parents: Dict[ParentsTracker, bool] = dict()
+
+    def add(self, parent):
+        self.parents[parent] = True
+
+    def recursive_parents(self):
+        rv = dict(self.parents)
+        worklist = list(self.parents)
+        while worklist:
+            for parent in worklist.pop().parents:
+                if parent not in rv:
+                    assert isinstance(parent, ParentsTracker)
+                    rv[parent] = True
+                    worklist.append(parent)
+        return rv.keys()
 
 
 class MutableLocalBase:
@@ -123,27 +148,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "guards",
         "source",
         "mutable_local",
-        "recursively_contains",
+        "parents_tracker",
         "user_code_variable_name",
     }
-
-    @staticmethod
-    def propagate(*vars: List[List["VariableTracker"]]):
-        """Combine the guards from many VariableTracker into **kwargs for a new instance"""
-        guards = set()
-
-        def visit(var):
-            if type(var) in (list, tuple, dict_values, odict_values):
-                for i in var:
-                    visit(i)
-            else:
-                assert isinstance(var, VariableTracker), typestr(var)
-                guards.update(var.guards)
-
-        visit(vars)
-        return {
-            "guards": guards,
-        }
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
@@ -163,7 +170,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value,
         cache=None,
         skip_fn=lambda _: False,  # Whether we should skip applying to this var
-        update_contains=False,
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -193,24 +199,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                     # running fn() resulted in value getting realized,
                     # which means we missed updating the contents of result
                     result = result.clone(**updated_dict(result.unwrap()))
-                if update_contains is False:
-                    result._update_contains()
             else:
-                result = fn(value).unwrap()
+                result = fn(value)
+                if result is not None:
+                    result = result.unwrap()
         elif istype(value, list):
-            result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
+            result = [cls.apply(fn, v, cache, skip_fn) for v in value]
         elif istype(value, tuple):
-            result = tuple(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
-            )
+            result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
+                cls.apply(fn, v, cache, skip_fn) for v in value.items()
             )
         elif istype(value, dict):
+            assert "__name__" not in value, "_nonvar_fields should have excluded this"
             result = {
-                k: cls.apply(fn, v, cache, skip_fn, update_contains)
-                for k, v in list(value.items())
+                k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
             }
         else:
             result = value
@@ -218,23 +222,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         # save `value` to keep it alive and ensure id() isn't reused
         cache[idx] = (result, value)
         return result
-
-    def add_guard(self, guard):
-        return self.clone(guards=set.union(self.guards, {guard}))
-
-    def add_guards(self, guards):
-        if guards is None:
-            return self
-        assert isinstance(guards, set)
-        return self.clone(guards=set.union(self.guards, guards))
-
-    def add_options(self, options, *more):
-        if more:
-            return self.add_options(options).add_options(*more)
-        if isinstance(options, VariableTracker):
-            return self.add_guards(options.guards)
-        assert isinstance(options, dict)
-        return self.add_guards(options.get("guards", set()))
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
@@ -244,13 +231,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def python_type(self):
         raise NotImplementedError(f"{self} has no type")
-
-    def var_type(self):
-        """
-        Similar to python_type but
-        returns a VariableTracker containing the type.
-        """
-        raise NotImplementedError(f"{self} has no variable tracker-ed type")
 
     def as_python_constant(self):
         """For constants"""
@@ -270,13 +250,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return self
 
-    def can_make_guard(self):
-        try:
-            self.make_guard(None)
-            return True
-        except NotImplementedError:
-            return False
-
     def make_guard(self, fn):
         if self.source:
             return self.source.make_guard(fn)
@@ -288,14 +261,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        options = VariableTracker.propagate(self)
-
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
+        source = None
         if self.source:
-            options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, **options)
+            source = AttrSource(self.source, name)
+        return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
         try:
@@ -340,18 +312,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable.create(
-                len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
-            )
+            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
         elif (
             name == "__getattr__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
         ):
-            return self.var_getattr(tx, args[0].as_python_constant()).add_options(
-                self, args[0]
-            )
+            return self.var_getattr(tx, args[0].as_python_constant())
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
@@ -367,6 +335,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
 
+    def recursive_realize(self):
+        """Realize all objects under this"""
+        return VariableTracker.apply(lambda x: x.realize(), self)
+
     def unwrap(self) -> "VariableTracker":
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
         return self
@@ -375,57 +347,32 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
+    def is_mutable_local(self, cls):
+        return isinstance(self.mutable_local, cls)
+
     def __init__(
         self,
-        guards: Optional[Set] = None,
+        *,
         source: Source = None,
         mutable_local: MutableLocal = None,
-        recursively_contains: Optional[Set] = None,
         user_code_variable_name: str = None,
+        parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
-        self.guards = guards or set()
         self.source = source
-        try:
-            self.mutable_local = mutable_local
-        except Exception:
-            # Annoyingly, LazyVT must implement mutable_local as a property
-            assert mutable_local is None
-
-        self.recursively_contains = (
-            recursively_contains  # provides hint to replace_all when replacing vars
-        )
+        self.mutable_local = mutable_local
         self.user_code_variable_name = user_code_variable_name
+        self.parents_tracker = parents_tracker
 
     def __post_init__(self, *args, **kwargs):
-        if self.recursively_contains is None:
-            self.recursively_contains = set()
-
-            VariableTracker.apply(
-                self._aggregate_mutables, self, skip_fn=lambda var: var is not self
-            )
-
-        assert None not in self.recursively_contains
-
-    def _aggregate_mutables(self, var):
-        self.recursively_contains.update(var.recursively_contains)
-        if var.mutable_local is not None:
-            self.recursively_contains.add(var.mutable_local)
-
-        return var
-
-    # This is used to forcely update self.recursively_contains
-    def _update_contains(self):
-        self.recursively_contains = set()
-
+        if self.parents_tracker is None:
+            self.parents_tracker = ParentsTracker()
+        # visit children 1 level deep and ensure parent is set properly
         VariableTracker.apply(
-            self._aggregate_mutables,
-            self,
-            skip_fn=lambda var: var is not self,
-            update_contains=True,
+            lambda node: node.parents_tracker.add(self.parents_tracker),
+            [v for k, v in self.__dict__.items() if k not in self._nonvar_fields],
+            skip_fn=lambda _: True,
         )
-
-        assert None not in self.recursively_contains
 
 
 def typestr(*objs):

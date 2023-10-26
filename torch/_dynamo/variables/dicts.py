@@ -13,7 +13,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
@@ -22,10 +22,8 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
-
-        self.guards.update(VariableTracker.propagate(items.values())["guards"])
+    def __init__(self, items, user_cls, **kwargs):
+        super().__init__(**kwargs)
         self.items = items
         self.user_cls = user_cls
 
@@ -68,7 +66,7 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
+        return self.items[ConstDictVariable.get_key(arg)]
 
     def call_method(
         self,
@@ -79,7 +77,6 @@ class ConstDictVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import ConstantVariable, SetVariable, TupleVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
 
         if name == "__getitem__":
@@ -94,15 +91,12 @@ class ConstDictVariable(VariableTracker):
                             ConstDictVariable._key_to_var(
                                 tx,
                                 k,
-                                **options,
                             ),
                             v,
                         ],
-                        **options,
                     )
                     for k, v in val.items()
                 ],
-                **options,
             )
         elif name == "keys":
             assert not (args or kwargs)
@@ -111,20 +105,18 @@ class ConstDictVariable(VariableTracker):
                     ConstDictVariable._key_to_var(
                         tx,
                         k,
-                        **options,
                     )
                     for k in val.keys()
                 ],
                 mutable_local=MutableLocal(),
-                **options,
             )
 
         elif name == "values":
             assert not (args or kwargs)
-            return TupleVariable(list(val.values()), **options)
+            return TupleVariable(list(val.values()))
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable.create(len(self.items), **options)
+            return ConstantVariable.create(len(self.items))
         elif (
             name == "__setitem__"
             and args
@@ -139,15 +131,9 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
-            new_rec_contains = self.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self,
-                self.modifed(newval, new_rec_contains, **options),
+                self.modifed(newval),
             )
         elif (
             name in ("pop", "get")
@@ -157,7 +143,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 2
         ):
             # missing item, return the default value
-            return args[1].add_options(options)
+            return args[1]
         elif (
             name == "pop"
             and args
@@ -166,8 +152,8 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, None, **options))
-            return result.add_options(options)
+            tx.replace_all(self, self.modifed(newval))
+            return result
         elif (
             name == "update"
             and args
@@ -176,12 +162,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            new_rec_contains = self.recursively_contains.union(
-                args[0].recursively_contains
-            )
-            result = self.modifed(
-                newval, recursively_contains=new_rec_contains, **options
-            )
+            result = self.modifed(newval)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -189,27 +170,23 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(args[0]) in self.items
         ):
-            result = self.items[ConstDictVariable.get_key(args[0])]
-            return result.add_options(options)
+            return self.items[ConstDictVariable.get_key(args[0])]
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
             return ConstantVariable.create(
-                ConstDictVariable.get_key(args[0]) in self.items, **options
+                ConstDictVariable.get_key(args[0]) in self.items
             )
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, recursively_contains, **options):
+    def modifed(self, items, **options):
         """a copy of self with different items"""
-        return self.clone(
-            items=items, recursively_contains=recursively_contains, **options
-        )
+        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
-        options = VariableTracker.propagate([self])
         val = self.items
-        result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]
+        result = [ConstDictVariable._key_to_var(tx, k) for k in val.keys()]
         return result
 
     @classmethod
@@ -267,8 +244,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name == "__getitem__":
             k = ConstDictVariable.get_key(args[0])
 
@@ -283,14 +258,7 @@ class DefaultDictVariable(ConstDictVariable):
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
-                    new_rec_contains = self.recursively_contains.union(
-                        default_var.recursively_contains
-                    )
-                    if default_var.mutable_local is not None:
-                        new_rec_contains.add(default_var.mutable_local)
-                    tx.replace_all(
-                        self, self.modifed(new_val, new_rec_contains, **options)
-                    )
+                    tx.replace_all(self, self.modifed(new_val))
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -375,9 +343,7 @@ class DataClassVariable(ConstDictVariable):
                     items[key] = var
                 else:
                     excluded.append(var)
-        return cls(
-            items, user_cls, **VariableTracker.propagate(excluded, items.values())
-        )
+        return cls(items, user_cls)
 
     def __init__(self, items, user_cls, **options):
         super().__init__(items, user_cls, **options)
@@ -400,21 +366,18 @@ class DataClassVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             index = args[0].as_python_constant()
             if isinstance(index, str):
-                return self.items[index].add_options(options)
+                return self.items[index]
             else:
-                return (
-                    self.call_method(tx, "to_tuple", [], {})
-                    .call_method(tx, "__getitem__", args, kwargs)
-                    .add_options(options)
+                return self.call_method(tx, "to_tuple", [], {}).call_method(
+                    tx, "__getitem__", args, kwargs
                 )
         elif name == "to_tuple":
             assert not (args or kwargs)
-            return variables.TupleVariable(list(self.items.values()), **options)
+            return variables.TupleVariable(list(self.items.values()))
         elif name == "__setattr__":
             name = "__setitem__"
         return super().call_method(tx, name, args, kwargs)
@@ -428,9 +391,7 @@ class DataClassVariable(ConstDictVariable):
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable.create(defaults[name]).add_options(
-                    self
-                )
+                return variables.ConstantVariable.create(defaults[name])
         super().var_getattr(tx, name)
 
 
@@ -528,7 +489,6 @@ class CustomizedDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         fn = getattr(self.user_cls, name)
         source = None if self.source is None else AttrSource(self.source, name)
 
@@ -541,7 +501,7 @@ class CustomizedDictVariable(ConstDictVariable):
         elif name in ("__getitem__", "to_tuple", "__setitem__", "__setattr__"):
             # for user overridden method
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=source, **options),
+                variables.UserFunctionVariable(fn, source=source),
                 [self] + list(args),
                 kwargs,
             )
@@ -585,9 +545,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return ConstantVariable.create(getattr(self.obj, name))
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
-            self
-        )
+        return variables.ConstantVariable.create(hasattr(self.obj, name))
 
 
 class PythonSysModulesVariable(VariableTracker):
@@ -622,53 +580,46 @@ class PythonSysModulesVariable(VariableTracker):
             return self.call_contains(tx, *args, **kwargs)
 
         # Fallback to dict implementation
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        real_dict = VariableBuilder(tx, self.source, **options)(sys.modules)
+        real_dict = VariableBuilder(tx, self.source)(sys.modules)
         return real_dict.call_method(tx, name, args, kwargs)
 
     def _contains_helper(self, tx, key: VariableTracker):
         k = ConstDictVariable.get_key(key)
         has_key = k in sys.modules
-        guard = self.make_guard(
-            functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+        install_guard(
+            self.make_guard(
+                functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+            )
         )
-        guards = {*self.guards, guard}
-        return k, has_key, guards
+        return k, has_key
 
     def call_contains(self, tx, key: VariableTracker):
-        k, has_key, guards = self._contains_helper(tx, key)
-        return ConstantVariable.create(
-            value=has_key,
-            guards=guards,
-        )
+        k, has_key = self._contains_helper(tx, key)
+        return ConstantVariable.create(value=has_key)
 
     def call_get(
         self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
     ):
         from .builder import VariableBuilder
 
-        k, has_key, guards = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
 
         if has_key:
             return VariableBuilder(
                 tx,
                 GetItemSource(self.source, k),
-            )(
-                sys.modules[k]
-            ).add_guards(guards)
+            )(sys.modules[k])
 
         if default is not None:
-            return default.add_guards(guards)
+            return default
 
-        return ConstantVariable.create(value=None, guards=guards)
+        return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx, key: VariableTracker):
         from .builder import VariableBuilder
 
-        k, has_key, guards = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
         return VariableBuilder(
             tx,
             GetItemSource(self.source, k),
-        )(
-            sys.modules[k]
-        ).add_guards(guards)
+        )(sys.modules[k])
