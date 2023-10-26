@@ -45,9 +45,11 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
                 inner_tuple_items = []
                 for j, inner_item in enumerate(outer_item):
                     options["mutable_local"] = MutableLocal()
+                    acc_grad_proxy = self.proxy.next_functions[i][j]
+                    acc_grad_proxy.node.meta["example_value"] = inner_item
                     inner_tuple_items.append(
                         AccumulateGradVariable(
-                            inner_item, self.proxy.next_functions[i][j], **options
+                            inner_item, acc_grad_proxy, **options
                         )
                     )
                 inner_tuple_obj = TupleVariable(inner_tuple_items, **options)

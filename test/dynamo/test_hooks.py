@@ -568,7 +568,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
                 def fn(t):
                     acc_grad = t.view_as(t).grad_fn.next_functions[0][0]
-                    t.register_hook(pre_hook)
+                    acc_grad.register_hook(pre_hook)
                     return t * t
 
                 fn(tensor_eag)
@@ -589,16 +589,19 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             tensor_cmp = torch.ones(3, requires_grad=True)
 
             def pre_hook(grad):
+                breakpoint()
                 return grad.sub(2.)
 
             def fn(x, y):
                 t = x * y
                 acc_grad = t.view_as(t).grad_fn.next_functions[0][0]
-                t.register_hook(pre_hook)
+                acc_grad.register_hook(pre_hook)
                 return t * t
 
             fn(tensor_eag, tensor_eag)
+            tensor_eag.backward(torch.randn(3))
             res_eag = tensor_eag.sum().backward()
+            breakpoint()
 
             cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
             with compiled_autograd.enable(compiler_fn):

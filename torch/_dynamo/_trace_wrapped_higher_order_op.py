@@ -8,6 +8,7 @@ from torch._subclasses import FakeTensorMode
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+import torch.utils._pytree as pytree
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def inner_trace(mode, *args, fn):
 
     log.warning("trace_wrapped %s", fn)
 
-    assert all(isinstance(grad, torch.Tensor) for grad in args)
+    assert all(isinstance(grad, torch.Tensor) for grad in pytree.tree_flatten(args)[0])
 
     def self_invoke(*args):
         return _trace_wrapped_op(*args, fn=fn)
@@ -105,14 +106,14 @@ def inner_trace(mode, *args, fn):
     else:
         # acc_grad
         grads = args
-        proxy_args = (mode.tracer.unwrap_proxy(grads),)
+        proxy_args = mode.tracer.unwrap_proxy(grads)
         out_proxy = mode.tracer.create_proxy(
             "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
         )
         out_acc_grad = track_tensor_tree(
             grads, out_proxy, constant=None, tracer=mode.tracer
         )
-        return None
+        return out_acc_grad[0]
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)

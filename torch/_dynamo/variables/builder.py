@@ -81,6 +81,7 @@ from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
+from .autograd import AutogradNodeVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -1584,6 +1585,8 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif hasattr(example_value, "_raw_saved_self") and isinstance(example_value._raw_saved_self, torch._C._autograd.SavedTensor):
+        return AutogradNodeVariable(example_value, proxy, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

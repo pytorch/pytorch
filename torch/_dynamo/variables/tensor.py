@@ -936,7 +936,7 @@ def _register_hook(
 ):
     assert isinstance(
         variable,
-        (TensorVariable, torch._dynamo.variables.autograd.AutogradNodeVariable),
+        (TensorVariable, torch._dynamo.variables.autograd.AccumulateGradVariable),
     )
 
     from .builder import wrap_fx_proxy
@@ -1018,6 +1018,7 @@ def _register_hook(
             tensor.register_hook(fn)
             return tensor
 
+        breakpoint()
         return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
