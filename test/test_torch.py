@@ -1292,7 +1292,7 @@ else:
             else:
                 a = torch.empty_strided(size, stride, dtype=dtype, device=device).fill_(0)
             old_storage = a.untyped_storage().clone()
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 a.resize_(resize_size)
 
             new_storage = a.untyped_storage()
@@ -1336,7 +1336,7 @@ else:
         ]
 
         for gen_fn in gen_fns:
-            with DeterministicGuard(True):
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
                 res = gen_fn()
 
             if dtype.is_floating_point or dtype.is_complex:
@@ -5000,7 +5000,7 @@ else:
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -5370,7 +5370,7 @@ else:
         self._test_multinomial_empty(device, False, 2)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypes(torch.float, torch.double)
     def test_multinomial_cpu(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
@@ -6350,6 +6350,11 @@ class TestTorch(TestCase):
             self.assertNotEqual(t_0.stride(), t_1.stride())
             self.assertNotEqual(t_0.size(), t_1.size())
             self.assertFalse(torch.equal(t_0, t_1))
+
+            # Fast path: tensor containing `nan` is not equal to self
+            for dtype in floating_and_complex_types():
+                t = torch.tensor([1., float('nan')], dtype=dtype)
+                self.assertFalse(torch.equal(t, t))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
@@ -8684,6 +8689,38 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 r"_set_deterministic_algorithms\(\): argument 'warn_only' must be bool, not int"):
             torch.use_deterministic_algorithms(False, warn_only=1)
 
+    # Tests that torch.utils.deterministic.fill_uninitialized_memory can be set as expected
+    def test_deterministic_fill_uninitialized_memory(self):
+        with DeterministicGuard(True, fill_uninitialized_memory=False):
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with DeterministicGuard(True, fill_uninitialized_memory=True):
+                self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+                self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = False
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch.utils.deterministic.fill_uninitialized_memory = True
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(False)
+            self.assertFalse(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertFalse(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            torch._C._set_deterministic_fill_uninitialized_memory(True)
+            self.assertTrue(torch.utils.deterministic.fill_uninitialized_memory)
+            self.assertTrue(torch._C._get_deterministic_fill_uninitialized_memory())
+
+            with self.assertRaisesRegex(RuntimeError, r"expected a bool, but got int"):
+                torch.utils.deterministic.fill_uninitialized_memory = 1
+
     def test_type_conversion_via_dtype_name(self):
         x = torch.tensor([1])
         self.assertEqual(x.byte().dtype, torch.uint8)
@@ -9564,6 +9601,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertNotEqual(t.data_ptr(), 0)
         t2 = t[0:0].view(0, 1)
         self.assertEqual(t2.data_ptr(), 0)
+
+    def test_size_stride(self) -> None:
+        t = torch.rand(2, 3, dtype=torch.float32)
+        self.assertEqual(t.size(0), 2)
+        self.assertEqual(t.size(dim=None), torch.Size([2, 3]))
+        self.assertEqual(t.stride(dim=None), torch.Size([3, 1]))
+        self.assertEqual(t.t().stride(), torch.Size([1, 3]))
+
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

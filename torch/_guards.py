@@ -22,6 +22,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
@@ -30,7 +31,14 @@ from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
+
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -76,29 +84,6 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
-
-    def select(self, locals_, globals_):
-        # SHAPE_ENV counts as locals, because the guard expressions
-        # created by shape env can reference f_locals
-        #
-        # RANDOM_VALUE counts as locals, because what we do is we run
-        # Python RNG and assign it to a temporary, and then perform
-        # guard tests on that temporary
-        if self in (
-            GuardSource.LOCAL,
-            GuardSource.LOCAL_NN_MODULE,
-            GuardSource.LOCAL_FSDP_MODULE,
-            GuardSource.SHAPE_ENV,
-            GuardSource.RANDOM_VALUE,
-        ):
-            return locals_
-        if self in (
-            GuardSource.GLOBAL,
-            GuardSource.GLOBAL_NN_MODULE,
-            GuardSource.GLOBAL_FSDP_MODULE,
-        ):
-            return globals_
-        raise NotImplementedError(str(self))
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -255,8 +240,8 @@ class Guard:
         output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
         return output
 
-    def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
-        return self.create_fn(self.source.select(local_builder, global_builder), self)
+    def create(self, builder: GuardBuilderBase):
+        return self.create_fn(builder, self)
 
     def is_nn_module(self):
         return self.source.is_nn_module()

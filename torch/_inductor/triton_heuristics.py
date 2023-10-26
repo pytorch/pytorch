@@ -268,7 +268,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = (
-            config.triton.assert_indirect_indexing and torch.version.hip is None
+            config.assert_indirect_indexing and torch.version.hip is None
         )
 
         # Setting device_type="hip" required on ROCm to pass down to triton
@@ -489,19 +489,21 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(best_config, found_by_coordesc=True)
         return config2launcher.get(best_config)
 
-    def run(self, *args, grid, stream):
+    def run(self, *args, grid, stream, **kwargs):
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
-                self.autotune_to_one_config(*args, grid=grid)
+                self.autotune_to_one_config(*args, grid=grid, **kwargs)
 
         if (
             not getattr(self.launchers[0].config, "found_by_coordesc", False)
             and config.coordinate_descent_tuning
         ):
             self.launchers = [
-                self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)
+                self.coordinate_descent_tuning(
+                    self.launchers[0], *args, grid=grid, **kwargs
+                )
             ]
 
         (launcher,) = self.launchers
@@ -510,7 +512,7 @@ class CachingAutotuner(KernelInterface):
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
-                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
+                {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
         # guard the record_function_ctx and only call it if profiling is currently
@@ -522,12 +524,14 @@ class CachingAutotuner(KernelInterface):
             with self.record_function_ctx:
                 return launcher(
                     *args,
+                    **kwargs,
                     grid=grid,
                     stream=stream,
                 )
         else:
             return launcher(
                 *args,
+                **kwargs,
                 grid=grid,
                 stream=stream,
             )
@@ -538,8 +542,9 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):  # type: ignore[union-attr]
+    while frame is not None:
         frame.f_locals
+        frame = frame.f_back
     obj_names = []
     for referrer in gc.get_referrers(obj):
         if isinstance(referrer, dict):
@@ -1143,6 +1148,9 @@ def foreach(meta, num_warps, filename=None):
 def grid(*numels):
     """Helper function to compute triton grids"""
 
+    if len(numels) == 1 and isinstance(numels[0], tuple):
+        numels = numels[0]
+
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
     elif len(numels) == 2:
@@ -1153,7 +1161,7 @@ def grid(*numels):
         raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
-        if numel is None:
+        if numel is None or block is None:
             return 1
         return ceildiv(numel, block)
 
