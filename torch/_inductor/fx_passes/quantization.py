@@ -86,7 +86,7 @@ qlinear_pt2e_pattern = CallFunction(
     KeywordArg("b"),
     KeywordArg("output_scale"),
     KeywordArg("output_zero_point"),
-    KeywordArg("fp32_output"),
+    KeywordArg("output_dtype"),
     KeywordArg("postop_name"),
     KeywordArg("postop_args"),
     KeywordArg("postop_algorithm"),
@@ -228,7 +228,7 @@ def _register_quantized_linear_lowering(
     pattern,
     pass_number,
     computation_op,
-    fp32_output,
+    output_dtype,
     unary_attr,
 ):
     @register_lowering_pattern(pattern, pass_number=pass_number)
@@ -255,7 +255,7 @@ def _register_quantized_linear_lowering(
             kwargs["o_zp"],
         )
         assert (
-            kwargs["fp32_output"] is True
+            kwargs["output_dtype"] is torch.float32
         )  # Expected int8-in fp32-out qlinear in weight prepack phase
         assert (
             kwargs["postop_name"] == "none"
@@ -271,7 +271,7 @@ def _register_quantized_linear_lowering(
             b,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr.op_name,
             unary_attr.scalars_attr,
             unary_attr.algorithm_attr,
@@ -384,7 +384,7 @@ def _register_quantization_unary_fusion():
             patterns,
             1 if unary_attr.op_name != "none" else 2,  # pass_number
             torch.ops.onednn.qlinear_pointwise,  # computation_op
-            False,  # fp32_output
+            None,  # output_dtype
             unary_attr,  # unary_attr
         )
 
@@ -967,7 +967,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
                 bias,
                 1.0,  # output_scale
                 0,  # output_zero_point
-                True,  # fp32_output
+                torch.float32,  # output_dtype
                 "none",  # post op name
                 [],  # post op args
                 "",  # post op algorithm

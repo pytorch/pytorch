@@ -5664,7 +5664,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5681,7 +5681,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             + f", {bias}"
             + f", {o_inv_scale}"
             + f", {o_zp}"
-            + f", {fp32_output}"
+            + f", {output_dtype}"
             + f", {unary_attr}"
             + f", {unary_scalars}"
             + f", {unary_algorithm}"
@@ -5702,7 +5702,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         bias: "TensorBox",
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5722,16 +5722,17 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwisePT2E(
             layout=kernel_layout,
