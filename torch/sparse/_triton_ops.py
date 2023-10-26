@@ -741,7 +741,10 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
         non_zero_row_indices = crow_indices_diff.nonzero()
         a = non_zero_row_indices * (Ms * N)
         r_offsets = (a + b).view(-1)
-        c_indices = crow_indices
+        # crow_indices consitutes a part of a key in lru_cache as well
+        # as of a value. To avoid infinite lifetime of such tensors,
+        # the value will contain a clone of the tensor:
+        c_indices = crow_indices.clone()
         # swizzle operation: mm elements with longer sums are computed first:
         nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
         nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
