@@ -160,6 +160,39 @@ def generate_pattern_with_output_quant(computation_call):
     return quantized_op_output_pattern_pt2e
 
 
+def _is_valid_quantized_conv2d_optimization_pattern(output_dtype):
+    def fn(match):
+        if output_dtype is not None:
+            # Expect current pattern output is Float32 or BFloat16
+            qconv_node_after_weight_prepack = filter_nodes(
+                match.nodes, torch.ops.onednn.qconv2d_pointwise
+            )[0]
+            if "output_dtype" in qconv_node_after_weight_prepack.kwargs:
+                qconv_node_after_weight_prepack_output_dtype = (
+                    qconv_node_after_weight_prepack.kwargs["output_dtype"]
+                )
+                assert qconv_node_after_weight_prepack_output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ]
+                if qconv_node_after_weight_prepack_output_dtype != output_dtype:
+                    return False
+            else:
+                assert len(qconv_node_after_weight_prepack.args) >= 14
+                qconv_node_after_weight_prepack_output_dtype = (
+                    qconv_node_after_weight_prepack.args[13]
+                )
+                assert qconv_node_after_weight_prepack_output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ]
+                if qconv_node_after_weight_prepack_output_dtype != output_dtype:
+                    return False
+        return True
+
+    return fn
+
+
 def _register_quantized_conv_lowering(
     pattern,
     pass_number,
@@ -167,7 +200,11 @@ def _register_quantized_conv_lowering(
     output_dtype,
     unary_attr,
 ):
-    @register_lowering_pattern(pattern, pass_number=pass_number)
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_conv2d_optimization_pattern(output_dtype),
+        pass_number=pass_number,
+    )
     def qconv(match: Match, *args, **kwargs):
         # Activation QParams
         x, x_scale, x_zp = (
@@ -190,10 +227,13 @@ def _register_quantized_conv_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale, o_zero_point = (
-            kwargs["o_inv_scale"],
-            kwargs["o_zp"],
-        )
+        o_inv_scale = 1.0
+        o_zero_point = 0
+        if output_dtype is None:
+            o_inv_scale, o_zero_point = (
+                kwargs["o_inv_scale"],
+                kwargs["o_zp"],
+            )
         assert (
             kwargs["output_dtype"] is torch.float32
         )  # Expected int8-in fp32-out qconv in weight prepack phase
@@ -224,6 +264,39 @@ def _register_quantized_conv_lowering(
     return qconv
 
 
+def _is_valid_quantized_linear_optimization_pattern(output_dtype):
+    def fn(match):
+        if output_dtype is not None:
+            # Expect current pattern output is Float32 or BFloat16
+            qlinear_node_after_weight_prepack = filter_nodes(
+                match.nodes, torch.ops.onednn.qlinear_pointwise
+            )[0]
+            if "output_dtype" in qlinear_node_after_weight_prepack.kwargs:
+                qlinear_node_after_weight_prepack_output_dtype = (
+                    qlinear_node_after_weight_prepack.kwargs["output_dtype"]
+                )
+                assert qlinear_node_after_weight_prepack_output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ]
+                if qlinear_node_after_weight_prepack_output_dtype != output_dtype:
+                    return False
+            else:
+                assert len(qlinear_node_after_weight_prepack.args) >= 10
+                qlinear_node_after_weight_prepack_output_dtype = (
+                    qlinear_node_after_weight_prepack.args[9]
+                )
+                assert qlinear_node_after_weight_prepack_output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ]
+                if qlinear_node_after_weight_prepack_output_dtype != output_dtype:
+                    return False
+        return True
+
+    return fn
+
+
 def _register_quantized_linear_lowering(
     pattern,
     pass_number,
@@ -231,7 +304,11 @@ def _register_quantized_linear_lowering(
     output_dtype,
     unary_attr,
 ):
-    @register_lowering_pattern(pattern, pass_number=pass_number)
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_linear_optimization_pattern(output_dtype),
+        pass_number=pass_number,
+    )
     def qlinear(match: Match, *args, **kwargs):
         # Activation QParams
         x, x_scale, x_zp = (
@@ -250,10 +327,13 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale, o_zero_point = (
-            kwargs["o_inv_scale"],
-            kwargs["o_zp"],
-        )
+        o_inv_scale = 1.0
+        o_zero_point = 0
+        if output_dtype is None:
+            o_inv_scale, o_zero_point = (
+                kwargs["o_inv_scale"],
+                kwargs["o_zp"],
+            )
         assert (
             kwargs["output_dtype"] is torch.float32
         )  # Expected int8-in fp32-out qlinear in weight prepack phase
@@ -288,14 +368,25 @@ def _register_quantized_conv_binary_lowering(
     output_dtype,
     binary_unary_attr,
 ):
-    @register_lowering_pattern(pattern, pass_number=pass_number)
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_quantized_conv2d_optimization_pattern(output_dtype),
+        pass_number=pass_number,
+    )
     def qconv_binary(match: Match, *args, **kwargs):
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
-        accum, accum_scale, accum_zp = (
-            kwargs["accum"],
-            kwargs["accum_scale"],
-            kwargs["accum_zp"],
+
+        accum = (
+            kwargs["accum"] if output_dtype is None else kwargs["accum_after_dequant"]
         )
+        accum_scale = 1.0
+        accum_zp = 0
+        if output_dtype is None:
+            accum_scale, accum_zp = (
+                kwargs["accum_scale"],
+                kwargs["accum_zp"],
+            )
+
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
@@ -308,10 +399,15 @@ def _register_quantized_conv_binary_lowering(
             kwargs["dilation"],
             kwargs["groups"],
         )
-        o_inv_scale, o_zero_point = (
-            kwargs["o_inv_scale"],
-            kwargs["o_zp"],
-        )
+
+        # Output QParams
+        o_inv_scale = 1.0
+        o_zero_point = 0
+        if output_dtype is None:
+            o_inv_scale, o_zero_point = (
+                kwargs["o_inv_scale"],
+                kwargs["o_zp"],
+            )
 
         computation_args = (
             x,
@@ -349,6 +445,8 @@ def _register_quantization_unary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
+    # Priority 1: QConv2d Unary pattern with int8 output
+    # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly
     conv_unary_replace_patterns = {
         UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
             dequantize_qconv_pt2e_pattern
@@ -364,12 +462,33 @@ def _register_quantization_unary_fusion():
         # Register qconv2d pattern for ExternKernel Lowering
         _register_quantized_conv_lowering(
             patterns,
-            1 if unary_attr.op_name != "none" else 2,  # pass_number
+            1,  # pass_number
             torch.ops.onednn.qconv2d_pointwise,  # computation_op
             None,  # output_dtype, None is the default value for int8 output
             unary_attr,  # unary_attr
         )
 
+    # Priority 2: QConv2d Unary pattern with fp32/bfloat16 output
+    conv_unary_replace_float_out_patterns = {
+        UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+            dequantize_qconv_pt2e_pattern, aten.relu.default
+        ),
+    }
+
+    for unary_attr, patterns in conv_unary_replace_float_out_patterns.items():
+        # Register qconv2d pattern for ExternKernel Lowering
+        _register_quantized_conv_lowering(
+            patterns,
+            2,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise,  # computation_op
+            torch.float32,  # output_dtype
+            unary_attr,  # unary_attr
+        )
+        # TODO <Leslie>: Add BFloat16 output pattern here
+
+    # QLinear
+    # Priority 1: QLinear Unary pattern with int8 output
+    # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly
     linear_unary_replace_patterns = {
         UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
             qlinear_pt2e_pattern
@@ -382,11 +501,28 @@ def _register_quantization_unary_fusion():
     for unary_attr, patterns in linear_unary_replace_patterns.items():
         _register_quantized_linear_lowering(
             patterns,
-            1 if unary_attr.op_name != "none" else 2,  # pass_number
+            1,  # pass_number
             torch.ops.onednn.qlinear_pointwise,  # computation_op
             None,  # output_dtype
             unary_attr,  # unary_attr
         )
+
+    # Priority 2: QLinear Unary FP32/BF16 pattern with int8 output
+    linear_unary_replace_float_out_patterns = {
+        UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+            qlinear_pt2e_pattern, aten.relu.default
+        ),
+    }
+
+    for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
+        _register_quantized_linear_lowering(
+            patterns,
+            2,  # pass_number
+            torch.ops.onednn.qlinear_pointwise,  # computation_op
+            torch.float32,  # output_dtype
+            unary_attr,  # unary_attr
+        )
+        # TODO <Leslie>: Add BFloat16 output pattern here
 
 
 def _register_quantization_binary_fusion():
@@ -405,6 +541,8 @@ def _register_quantization_binary_fusion():
             self.scalars_attr = scalars_attr if scalars_attr else []
             self.algorithm_attr = algorithm_attr if algorithm_attr else ""
 
+    # Priority 1: QConv2d Binary pattern with int8 output
+    # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly
     binary_replace_patterns = {
         BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_output_quant(
             generate_pattern_with_binary(
@@ -429,11 +567,54 @@ def _register_quantization_binary_fusion():
         # Register qconv2d_binary_unary pattern for ExternKernel Lowering
         _register_quantized_conv_binary_lowering(
             patterns,
-            0 if binary_unary_attr.unary_op_name != "none" else 1,  # pass_number
+            0,  # pass_number
             torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
             None,  # output_dtype
             binary_unary_attr,  # binary_unary_attr
         )
+
+    # Priority 2: QConv2d Binary Unary pattern with fp32/bfloat16 output
+    binary_replace_float_out_patterns = {
+        BinaryUnaryAttr("add", 1.0, "relu", [], ""): generate_pattern_with_unary(
+            generate_pattern_with_binary(
+                aten.add.Tensor,
+                dequantize_qconv_pt2e_pattern,
+                KeywordArg("accum_after_dequant"),
+            ),
+            aten.relu.default,
+        ),
+    }
+
+    for binary_unary_attr, patterns in binary_replace_float_out_patterns.items():
+        # Register qconv2d_binary_unary pattern for ExternKernel Lowering
+        _register_quantized_conv_binary_lowering(
+            patterns,
+            1,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+            torch.float32,  # output_dtype
+            binary_unary_attr,  # binary_unary_attr
+        )
+        # TODO <Leslie>: Add BFloat16 output pattern here
+
+    # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
+    binary_replace_float_out_patterns = {
+        BinaryUnaryAttr("add", 1.0, "none", [], ""): generate_pattern_with_binary(
+            aten.add.Tensor,
+            dequantize_qconv_pt2e_pattern,
+            KeywordArg("accum_after_dequant"),
+        ),
+    }
+
+    for binary_unary_attr, patterns in binary_replace_float_out_patterns.items():
+        # Register qconv2d_binary_unary pattern for ExternKernel Lowering
+        _register_quantized_conv_binary_lowering(
+            patterns,
+            2,  # pass_number
+            torch.ops.onednn.qconv2d_pointwise.binary,  # computation_op
+            torch.float32,  # output_dtype
+            binary_unary_attr,  # binary_unary_attr
+        )
+        # TODO <Leslie>: Add BFloat16 output pattern here
 
 
 def _is_valid_quantized_maxpool2d_optimization_pattern():
