@@ -4,8 +4,8 @@ on:
   pull_request:
 
 jobs:
-  do_merge:
-    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
+  do_merge_dry_run:
+    name: try_merge_pr_${{ github.event.pull_request.number }}
     runs-on: linux.20_04.4x
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -29,7 +29,7 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          PR_NUM: ${{ github.event.pull_request.number  }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           set -ex
@@ -37,5 +37,5 @@ jobs:
           python3 .github/scripts/trymerge.py --force --dry-run "${PR_NUM}"
 # We want newer merge commands to supercede old ones
 concurrency:
-  group: mergability-check-${{ github.event.client_payload.pr_num }}
+  group: mergability-check-${{ github.event.pull_request.number  }}
   cancel-in-progress: true
