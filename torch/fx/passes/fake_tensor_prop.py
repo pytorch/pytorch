@@ -23,22 +23,31 @@ class FakeTensorProp(torch.fx.Interpreter):
          module (GraphModule): The module to be executed
          mode (Optional[FakeTensorMode]): The dispatch mode used to execute computation indicated by each FX Node.
     """
-    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None):
+    def __init__(
+        self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None, only_detach_requires_grad: bool = False
+    ):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
+        self.only_detach_requires_grad = only_detach_requires_grad
+
+    def snapshot_fake(self, tensor: torch.Tensor) -> torch.Tensor:
+        if not self.only_detach_requires_grad or tensor.requires_grad:
+            return snapshot_fake(tensor)
+        else:
+            return tensor
 
     def run_node(self, n: Node):
         result = super().run_node(n)
 
         def extract_val(obj):
             if isinstance(obj, FakeTensor):
-                return snapshot_fake(obj)
+                return self.snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
-                return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
+                return self.snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
             elif isinstance(obj, py_sym_types):
                 return obj
             else:

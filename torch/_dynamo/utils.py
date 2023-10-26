@@ -101,14 +101,16 @@ def tabulate(rows, headers):
 def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
-        global timer_counter
-        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
+        iter_no = next(timer_counter)
+        profile_path = Path(func.__name__ + f"{iter_no}.profile")
         prof = cProfile.Profile()
         prof.enable()
         retval = prof.runcall(func, *args, **kwargs)
         prof.disable()
-        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
         ps = pstats.Stats(prof)
+        print(
+            f"### Cprofile for {func.__name__} iter {iter_no}, total time {ps.total_tt:6f} seconds ###"
+        )
         prof.dump_stats(profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:

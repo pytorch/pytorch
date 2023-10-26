@@ -264,7 +264,9 @@ def fake_tensor_prop(
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-        FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+        FakeTensorProp(gm, mode=fake_mode, only_detach_requires_grad=True).propagate(
+            *example_inputs
+        )
     else:
         ctx = (
             contextlib.nullcontext()
@@ -272,9 +274,9 @@ def fake_tensor_prop(
             else mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
         )
         with ctx:  # type: ignore[attr-defined]
-            FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
-                *example_inputs
-            )
+            FakeTensorProp(
+                gm, mode=fake_mode, only_detach_requires_grad=True
+            ).propagate_dont_convert_inputs(*example_inputs)
 
     return fake_mode
 
