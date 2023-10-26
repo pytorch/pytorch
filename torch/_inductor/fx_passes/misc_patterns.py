@@ -4,6 +4,8 @@ import torch
 
 from ..pattern_matcher import fwd_only, register_replacement
 
+aten = torch.ops.aten
+
 
 @functools.lru_cache(None)
 def _misc_patterns_init():
@@ -31,7 +33,7 @@ def _misc_patterns_init():
         index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
         return (
             torch.ops.aten._unsafe_index_put(
-                x, (index,), x[index] + y, accumulate=False
+                x, (index,), aten._unsafe_index(x, (index,)) + y, accumulate=False
             ),
             index,
         )
