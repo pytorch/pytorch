@@ -957,8 +957,8 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim, bool 
       std::vector<c10::SymInt> split_sizes(chunks, split_size);
       int64_t split_mod_int = split_mod.guard_int(__FILE__, __LINE__);
       for(auto i = split_mod_int; i < chunks; ++i) {
-				split_sizes[i] = split_size - 1;
-			}
+        split_sizes[i] = split_size - 1;
+      }
       return self.split_with_sizes_symint(split_sizes, dim, drop_remainder);
     }
   }
