@@ -19,16 +19,16 @@
   } while (0)
 
 #define C10_LIBCUDA_DRIVER_API(_) \
-  _(cuMemAddressReserve)         \
-  _(cuMemRelease)                \
-  _(cuMemMap)                    \
-  _(cuMemAddressFree)            \
-  _(cuMemSetAccess)              \
-  _(cuMemUnmap)                  \
-  _(cuMemCreate)                 \
+  _(cuMemAddressReserve)          \
+  _(cuMemRelease)                 \
+  _(cuMemMap)                     \
+  _(cuMemAddressFree)             \
+  _(cuMemSetAccess)               \
+  _(cuMemUnmap)                   \
+  _(cuMemCreate)                  \
   _(cuGetErrorString)
 
-#define C10_NVML_DRIVER_API(_) \
+#define C10_NVML_DRIVER_API(_)        \
   _(nvmlInit_v2)                      \
   _(nvmlDeviceGetHandleByPciBusId_v2) \
   _(nvmlDeviceGetComputeRunningProcesses)
