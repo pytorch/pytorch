@@ -475,7 +475,8 @@ def _compile(
     mutated_closure_cell_contents: Set[str] = set()
     fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
-    fail_user_frame_summary: Optional[str] = None
+    fail_user_frame_filename: Optional[str] = None
+    fail_user_frame_lineno: Optional[int] = None
 
     def transform(instructions, code_options):
         nonlocal output
@@ -625,13 +626,17 @@ def _compile(
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            fail_user_frame_summary = str(e.innermost_user_frame_summary)  # type: ignore[union-attr]
+            if e.innermost_user_frame_summary is not None:
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[union-attr]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[union-attr]
             raise
         except Exception as e:
             fail_type = str(type(e))
             fail_reason = str(e)
             exception_handler(e, code, frame, export=export)
-            fail_user_frame_summary = str(e.innermost_user_frame_summary)  # type: ignore[attr-defined]
+            if e.innermost_user_frame_summary is not None:
+                fail_user_frame_filename = e.innermost_user_frame_summary.filename  # type: ignore[attr-defined]
+                fail_user_frame_lineno = e.innermost_user_frame_summary.lineno  # type: ignore[attr-defined]
             raise InternalTorchDynamoError(str(e)).with_traceback(
                 e.__traceback__
             ) from None
@@ -677,7 +682,8 @@ def _compile(
                     backend_compile_time,
                     fail_type,
                     fail_reason,
-                    fail_user_frame_summary,
+                    fail_user_frame_filename,
+                    fail_user_frame_lineno,
                 )
                 log_compilation_event(metrics)
 

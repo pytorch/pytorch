@@ -549,7 +549,8 @@ class CompilationMetrics:
     backend_compile_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
-    fail_user_frame_summary: Optional[str]
+    fail_user_frame_filename: Optional[str]
+    fail_user_frame_lineno: Optional[int]
 
 
 @dataclasses.dataclass
