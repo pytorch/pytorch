@@ -313,7 +313,7 @@ class MetaConverter:
                         shape_env,
                         callback,
                         source=AttrSource(source, "_base"),
-                        dynamic_dims=base_dynamic_dims,
+                        dynamic_dims=None,
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
@@ -364,12 +364,13 @@ class MetaConverter:
                         #
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
-
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                        if not t.is_nested:
+                            # Skip this because we're not going to call as_strided
+                            (
+                                sizes,
+                                strides,
+                                storage_offset,
+                            ) = sym_sizes_strides_storage_offset(t, source)
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
@@ -382,7 +383,11 @@ class MetaConverter:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress():
-                                    r = base.as_strided(sizes, strides, storage_offset)
+                                    if not t.is_nested:
+                                        r = base.as_strided(sizes, strides, storage_offset)
+                                    else:
+                                        # nested tensor does not support as_strided
+                                        r = t._view_func_unsafe(base)
                             else:
                                 # Obscure case.  Create a leaf view and give it the
                                 # correct requires_grad, then do the final view.

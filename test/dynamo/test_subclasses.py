@@ -700,6 +700,21 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
 
+    def test_inputs_to_compiled_fn_are_views(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt_view = nt.unsqueeze(-1)
+
+        def fn(x):
+            return x.sin()
+
+        out_ref = fn(nt_view)
+        compile_fn = torch.compile(fn, fullgraph=True, backend="aot_eager", dynamic=True)
+        out = compile_fn(nt_view)
+
+        # Check metadata and values are correct
+        self.assertTrue(out.size() == out_ref.size())
+        self.assertTrue(out.stride() == out_ref.stride())
+        self.assertTrue(torch.allclose(out.values(), out_ref.values()))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
