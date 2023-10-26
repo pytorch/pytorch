@@ -16,6 +16,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+TEST_WITH_CXX_PYTREE = cxx_pytree.optree is not None
+
+
 GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
 
 
@@ -653,6 +656,7 @@ class TestCxxPytree(TestCase):
         self.assertTrue(cxx_pytree.LeafSpec() == cxx_pytree.LeafSpec())
 
     @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "Dynamo test in test_treespec_repr_dynamo.")
+    @unittest.skipIf(not TEST_WITH_CXX_PYTREE, "CXX pytree test in test_treespec_repr.")
     def test_treespec_repr(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -663,6 +667,7 @@ class TestCxxPytree(TestCase):
         )
 
     @unittest.skipIf(not TEST_WITH_TORCHDYNAMO, "Eager test in test_treespec_repr.")
+    @unittest.skipIf(not TEST_WITH_CXX_PYTREE, "CXX pytree test in test_treespec_repr.")
     def test_treespec_repr_dynamo(self):
         # Check that it looks sane
         pytree = (0, [0, 0, [0]])
@@ -693,6 +698,10 @@ class TestCxxPytree(TestCase):
         self.assertTrue(isinstance(serialized_spec, str))
         self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
 
+    @unittest.skipIf(
+        not TEST_WITH_CXX_PYTREE,
+        "CXX pytree test in test_pytree_serialize_namedtuple.",
+    )
     def test_pytree_serialize_namedtuple(self):
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
 

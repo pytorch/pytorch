@@ -26,9 +26,12 @@ from typing import (
     Union,
 )
 
+import torch
 from ._pytree import TreeSpec as PyTreeSpec
 
 try:
+    if torch._running_with_deploy() and torch.compiled_with_cxx11_abi():
+        raise ModuleNotFoundError
     import optree
 except ModuleNotFoundError:
     optree = None  # type: ignore[assignment]
