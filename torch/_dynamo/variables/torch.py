@@ -178,7 +178,7 @@ def check_allowed_op(value):
                 return
             unimplemented(
                 f"Encountered the torch.ops.OpOverloadPacket {value} "
-                f"whose only overload ({overload}) is not PT2 compliant. "
+                f"whose only overload ({op}) is not PT2 compliant. "
                 + err_epilogue
             )
 
