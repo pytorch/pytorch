@@ -1,3 +1,4 @@
+from .autograd import AutogradNodeVariable
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -21,9 +22,6 @@ from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
-)
-from .autograd import (
-    AutogradNodeVariable
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (

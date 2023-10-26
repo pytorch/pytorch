@@ -1,12 +1,10 @@
-import torch
+from typing import Dict, List
 
-from typing import List, Dict
-
-from .base import VariableTracker, MutableLocal
-from .functions import NestedUserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
+from .base import MutableLocal, VariableTracker
 from .lists import TupleVariable
 from .tensor import _register_hook
+from .user_defined import UserDefinedObjectVariable
+
 
 class AccumulateGradVariable(VariableTracker):
     def __init__(self, value, proxy, value_type=None, **kwargs):
@@ -52,13 +50,9 @@ class AutogradNodeVariable(UserDefinedObjectVariable):
                             inner_item, self.proxy.next_functions[i][j], **options
                         )
                     )
-                inner_tuple_obj = TupleVariable(
-                    inner_tuple_items, **options
-                )
+                inner_tuple_obj = TupleVariable(inner_tuple_items, **options)
                 outer_tuple_items.append(inner_tuple_obj)
-            outer_tuple_obj = TupleVariable(
-                outer_tuple_items, **options
-            )
+            outer_tuple_obj = TupleVariable(outer_tuple_items, **options)
             result = outer_tuple_obj
             return result
         return super().var_getattr(tx, name)

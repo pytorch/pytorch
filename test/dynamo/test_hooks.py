@@ -9,7 +9,7 @@ import torch._dynamo.testing
 from functorch.compile import nop
 from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
-
+import contextlib
 
 def compiler_fn(gm):
     return torch._dynamo.optimize("inductor", nopython=True, dynamic=True)(gm)
@@ -556,26 +556,58 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(orig_grad * 2, x.grad)
 
 
-    def test_acc_grad_hooking(self):
-        tensor_eag = torch.ones(3, requires_grad=True)
-        tensor_cmp = torch.ones(3, requires_grad=True)
+    def test_acc_grad_hooking_on_input(self):
+        for compiled_bwd in [True, False]:
+            for backend in ["eager", "aot_eager", "inductor"]:
+                torch._dynamo.reset()
+                tensor_eag = torch.ones(3, requires_grad=True)
+                tensor_cmp = torch.ones(3, requires_grad=True)
 
-        def pre_hook(grad):
-            return grad.sub(2.)
+                def pre_hook(grad):
+                    return grad.sub(2.)
 
-        def fn(t):
-            acc_grad = t.view_as(t).grad_fn.next_functions[0][0]
-            t.register_hook(pre_hook)
-            return t * t
+                def fn(t):
+                    acc_grad = t.view_as(t).grad_fn.next_functions[0][0]
+                    t.register_hook(pre_hook)
+                    return t * t
 
-        fn(tensor_eag)
-        res_eag = tensor_eag.sum().backward()
+                fn(tensor_eag)
+                res_eag = tensor_eag.sum().backward()
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
-        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)(tensor_cmp)
-        res_cmp = tensor_cmp.sum().backward()
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(res_eag, res_cmp)
+                cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                bwd_compiler = compiled_autograd.enable(compiler_fn) if compiled_bwd else contextlib.nullcontext()
+                with bwd_compiler:
+                    fn = torch._dynamo.optimize(cnts, nopython=True)(fn)(tensor_cmp)
+                    res_cmp = tensor_cmp.sum().backward()
+                self.assertEqual(cnts.frame_count, 1)
+                self.assertEqual(res_eag, res_cmp)
+
+    def test_acc_grad_hooking_on_intermed(self):
+        for backend in ["eager", "aot_eager"]:
+            torch._dynamo.reset()
+            tensor_eag = torch.ones(3, requires_grad=True)
+            tensor_cmp = torch.ones(3, requires_grad=True)
+
+            def pre_hook(grad):
+                return grad.sub(2.)
+
+            def fn(x, y):
+                t = x * y
+                acc_grad = t.view_as(t).grad_fn.next_functions[0][0]
+                t.register_hook(pre_hook)
+                return t * t
+
+            fn(tensor_eag, tensor_eag)
+            res_eag = tensor_eag.sum().backward()
+
+            cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            with compiled_autograd.enable(compiler_fn):
+                fn = torch._dynamo.optimize(cnts, nopython=True)(fn)(tensor_cmp, tensor_cmp)
+                res_cmp = tensor_cmp.sum().backward()
+            self.assertEqual(cnts.frame_count, 1)
+            breakpoint()
+            self.assertEqual(res_eag, res_cmp)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

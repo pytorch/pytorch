@@ -1,3 +1,5 @@
+import logging
+
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 
@@ -6,8 +8,6 @@ from torch._subclasses import FakeTensorMode
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-import torch.utils._pytree as pytree
-import logging
 
 log = logging.getLogger(__name__)
 
@@ -61,12 +61,13 @@ def _assert_meta(grad, size, stride, dtype):
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(mode, *args, fn):
     import torch
+
     # TODO(voz) - This isn't great... args==1 is backward, hook, rest is assume to be acc_grad
     # DO NOT LAND - fix to use an enum or smth, maybe separate op.
 
     log.warning("trace_wrapped %s", fn)
 
-    assert all([isinstance(grad, torch.Tensor) for grad in args])
+    assert all(isinstance(grad, torch.Tensor) for grad in args)
 
     def self_invoke(*args):
         return _trace_wrapped_op(*args, fn=fn)
@@ -108,7 +109,9 @@ def inner_trace(mode, *args, fn):
         out_proxy = mode.tracer.create_proxy(
             "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
         )
-        out_acc_grad = track_tensor_tree(grads, out_proxy, constant=None, tracer=mode.tracer)
+        out_acc_grad = track_tensor_tree(
+            grads, out_proxy, constant=None, tracer=mode.tracer
+        )
         return None
 
 
