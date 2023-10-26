@@ -856,7 +856,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertEqual(
             torch._dynamo.utils.counters["frames"]["total"],
-            torch._dynamo.utils.counters["frames"]["ok"] + 1,
+            torch._dynamo.utils.counters["frames"]["ok"],
         )
 
     def test_convert_boxes_to_pooler_format(self):
