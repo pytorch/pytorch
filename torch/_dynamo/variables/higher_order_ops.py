@@ -81,8 +81,12 @@ def only_consist_of(var, types):
         return all(only_consist_of(item, types) for item in var.items.values())
     return False
 
-
+hello
+I should
 def validate_args_and_maybe_create_graph_inputs(
+        not 
+        be 
+        mergable
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
     from . import (
@@ -694,11 +698,10 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
-        example_res = lowered_module.original_module(*real_sub_args)
+        example_res = lowered_module.original_module(*real_sub_args) more chaosmonkeying
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
-
+        hopefully this causes a merge conflict
         p_args = (lowered_node,) + p_args
-
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
         # Store the invocation as a call
