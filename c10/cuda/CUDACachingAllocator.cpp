@@ -17,6 +17,7 @@
 #include <c10/cuda/driver_api.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <dlfcn.h>
 #endif
 
 #include <c10/util/Exception.h>
@@ -790,6 +791,12 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 static std::string reportProcessMemoryInfo(int device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
+  void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  try {
+    TORCH_INTERNAL_ASSERT(handle_1);
+  } catch (...) {
+    nvml_is_available = false;
+  }
   if (!c10::cuda::nvml_is_available) {
     return "";
   }
