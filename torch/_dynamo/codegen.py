@@ -134,40 +134,6 @@ class PyCodegen:
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
 
-            for tensor, hook in self.tx.output.side_effects.tensor_hooks:
-                if tensor == value:
-                    # if True:
-                    if isinstance(value, TensorVariable):
-                        # print("Matching tensor to reg hook", graph_outputs_key)
-                        self.extend_output(
-                            [
-                                self.create_load_python_module(torch.Tensor, True),
-                                self.create_load_attr("register_hook"),
-                            ]
-                        )
-                        self.load_graph_output(graph_outputs[graph_outputs_key].index)
-                        print("Hook source", hook.source.name())
-                        self(hook.source)
-                        # self(ConstantVariable(True))
-                        self.extend_output(create_call_function(2, True))
-                        output.extend([create_instruction("POP_TOP")])
-                        # output.extend([create_instruction("POP_TOP")])
-                    elif isinstance(value, torch._dynamo.variables.user_defined.AccumulateGradVariable):
-                        # print("Matching tensor to AG hook", graph_outputs_key)
-                        self.load_graph_output(graph_outputs[graph_outputs_key].index)
-                        self.extend_output(
-                            [
-
-                                self.create_load_attr("register_hook"),
-                            ]
-                        )
-                        self(hook.source)
-                        self.extend_output(create_call_function(1, True))
-                        # self.load_graph_output(graph_outputs[graph_outputs_key].index)
-                        print("Hook source", hook.source.name())
-                        # self(hook.source)
-                        # self(ConstantVariable(True))
-                        output.extend([create_instruction("POP_TOP")])
             # import os
             # gpu_id = int(os.environ["LOCAL_RANK"])
             # if gpu_id == 0:

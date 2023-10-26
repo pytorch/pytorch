@@ -7,7 +7,7 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..bytecode_transformation import create_call_function, create_rot_n
+from ..bytecode_transformation import create_call_function, create_rot_n, create_instruction
 from ..exc import unimplemented, Unsupported
 from ..source import (
     AttrSource,
@@ -634,6 +634,21 @@ class FunctoolsPartialVariable(VariableTracker):
         return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
             options
         )
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("functools", "partial")
+        codegen(self.func.source)
+        # codegen.extend_output([create_instruction("LOAD_NAME", argval="_post_backward_hook")])
+        print("CODEGEN SOME SHIT", self.func.source)
+        # keys = tuple(self.keywords.keys())
+        # for key in keys:
+        #     codegen(self.keywords[key])
+        for arg in self.args:
+            codegen(arg)
+        codegen.extend_output(create_call_function(3, True))
+        print(codegen._output)
+        return []
+
 
     def as_python_constant(self):
         if self.original:

@@ -1713,6 +1713,7 @@ class Module:
             self.register_parameter(name, value)
         elif params is not None and name in params:
             if value is not None:
+                print("FAILING?", self, value, name, params)
                 raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
                                 "(torch.nn.Parameter or None expected)"
                                 )

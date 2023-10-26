@@ -733,6 +733,7 @@ class {module_name}(torch.nn.Module):
             cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
         def call_wrapped(self, *args, **kwargs):
+            print("CALL AND RUN?", self)
             return self._wrapped_call(self, *args, **kwargs)
 
         cls.__call__ = call_wrapped  # type: ignore[method-assign]

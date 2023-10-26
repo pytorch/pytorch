@@ -709,15 +709,15 @@ def _post_backward_hook(
     handle: FlatParamHandle,
     *unused: Any,
 ):
-    gpu_id = int(os.environ["LOCAL_RANK"])
-    log.warning("STATE IS? %s", state)
-    log.warning("handle IS? %s", handle)
-    log.warning("UNUSED IS? %s %s", unused, "what")
-    log.warning("POST BACKWARD ARGS? %s", len(unused))
+    # gpu_id = int(os.environ["LOCAL_RANK"])
+    # log.warning("STATE IS? %s", state)
+    # log.warning("handle IS? %s", handle)
+    # log.warning("UNUSED IS? %s %s", unused, "what")
+    # log.warning("POST BACKWARD ARGS? %s", len(unused))
     # import os
     # gpu_id = int(os.environ["LOCAL_RANK"])
     # if gpu_id == 0:
-    log.warning("RUNNING POST BWD HOOK")
+    # log.warning("RUNNING POST BWD HOOK")
     # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
     # if state.training_state == TrainingState.IDLE:
     # return
@@ -739,16 +739,16 @@ def _post_backward_hook(
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
     ):
-        _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
+        # _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
         # For multiple applications of reentrant AC across submodules sharing
         # the same `FlatParameter`, the post-backward hook may run multiple
         # times in one backward, in which case we permit the state to already
         # be in `BACKWARD_POST`.
-        _p_assert(
-            handle._training_state
-            in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
-            f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
-        )
+        # _p_assert(
+        #     handle._training_state
+        #     in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
+        #     f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
+        # )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
         if flat_param.grad is None:
@@ -1441,14 +1441,8 @@ def _register_post_backward_hook(
     if already_registered or not flat_param.requires_grad:
         return
     # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
     hook = functools.partial(_post_backward_hook, state, handle)
-    hook_handle = temp_flat_param.register_post_accumulate_grad_hook(hook)
+    hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
     flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
 
 

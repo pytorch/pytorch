@@ -696,7 +696,7 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "register_hook":
+        elif name == "register_hook" or name == "register_post_accumulate_grad_hook":
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -730,6 +730,7 @@ class TensorVariable(VariableTracker):
 
             if not self.source:
                 # Intermediary
+                print("HOOK NO SOURCE?", name)
                 src = fn_var.source
                 if (
                     not src
@@ -763,24 +764,37 @@ class TensorVariable(VariableTracker):
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                fn = functools.partial(trace_wrapped, fn=fn)
+                return_none = name == "register_post_accumulate_grad_hook"
+                fn = functools.partial(trace_wrapped, fn=fn, return_none=return_none)
 
                 def _register_hook_trampoline(tensor):
+                    print("REGISTER register_hook")
                     tensor.register_hook(fn)
                     return tensor
+
+                def _register_post_acc_grad_hook_trampoline(tensor):
+                    print("REGISTER register_post_accumulate_grad_hook")
+                    tensor.register_post_accumulate_grad_hook(fn)
+                    return tensor
+
+                if name == "register_hook":
+                    _hook_fn = _register_hook_trampoline
+                else:
+                    _hook_fn = _register_post_acc_grad_hook_trampoline
 
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
                         "call_function",
-                        _register_hook_trampoline,
+                        _hook_fn,
                         (self.as_proxy(),),
                         {},
                     ),
                     **options,
                 )
 
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            print("HOOK SOURCE", name, self.source)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
