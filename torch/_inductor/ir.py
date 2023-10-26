@@ -132,7 +132,6 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
                     Expr,
-                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -736,13 +735,20 @@ class Reduction(Loops):
             if split == 1:
                 # No need to split.
                 return ReductionHint.INNER, split
-            if input_node is not None and isinstance(input_node, TensorBox):
-                ranges, reduction_ranges = extract_input_node_reduction_ranges(
+            if (
+                len(ranges) == 0
+                and input_node is not None
+                and isinstance(input_node, TensorBox)
+            ):
+                # Only handles the case where keep_dim = False.
+                # Otherwise, we need to propagate reduction dim info to the stage where
+                # the intermediate loader of the first Reduction is generated.
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
                     input_node
                 )
-                if reduction_ranges is not None:
+                if new_ranges is not None and new_reduction_ranges is not None:
                     extracted_numel_hint = V.graph.sizevars.symbolic_hint(
-                        sympy_product(ranges + reduction_ranges)
+                        sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
                         # If the input_node or its dependent nodes are also Reduction nodes,
@@ -2230,10 +2236,28 @@ class Layout(IRNode):
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
+
+        # ignore dimensions of size 1, they dont affect layout
+        non_1_indices = [
+            i
+            for i, dim in enumerate(self.size)
+            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+        ]
+
+        stride = [self.stride[i] for i in non_1_indices]
+        order = [order[i] for i in non_1_indices]
+
+        def sorted_indices(arr):
+            sorted_arr = sorted(arr)
+            return [sorted_arr.index(element) for element in arr]
+
+        # since we may have removed dimensions, need to re-sort & re-index order
+        order = sorted_indices(order)
+
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
@@ -3484,6 +3508,8 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
+            while isinstance(x.get_layout(), AliasedLayout):
+                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
@@ -3745,14 +3771,15 @@ class UserDefinedTritonKernel(ExternKernel):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
+        new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
-            kernel.__name__,
+            new_name,
             self.grid,
             self.codegen_kwargs(),
         )
-        wrapper.define_user_defined_triton_kernel(kernel, self.kwargs)
+        wrapper.define_user_defined_triton_kernel(new_name, kernel, self.kwargs)
 
     def should_allocate(self):
         return False
@@ -3765,6 +3792,9 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self):
         return {}
 
+    def get_mutation_names(self):
+        return [t.get_name() for t in self.inputs]
+
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
@@ -3776,6 +3806,7 @@ class UserDefinedTritonKernel(ExternKernel):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
+                V.graph.mark_buffer_mutated(t.get_name())
             else:
                 constant_args.append(v)
                 kwargs[k] = v
@@ -4391,6 +4422,69 @@ class FallbackKernel(ExternKernelAlloc):
 
 
 @dataclasses.dataclass
+class ComplexView(ExternKernelAlloc):
+    """View a complex number as two dtyped numbers or vice versa"""
+
+    def should_allocate(self):
+        return False
+
+    def has_aliasing(self):
+        return True
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
+
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+    ):
+        super().__init__(
+            layout,
+            tuple(tensor_args),
+            tuple(nontensor_args),
+        )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs: Sequence[Any] = []
+        self.kernel = kernel
+
+    @classmethod
+    def create(cls, kernel, *args, **kwargs):
+        context = V.graph.fake_mode
+        with context:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        device = FallbackKernel.find_device(tensor_args, example_output)
+        assert device, "Not sure where to find device info"
+
+        packed = ComplexView(
+            MultiOutputLayout(device), kernel, tensor_args, non_tensor_args
+        )
+
+        layout = FixedLayout(
+            example_output.device,
+            example_output.dtype,
+            convert_shape_to_inductor(example_output.size()),
+            convert_shape_to_inductor(example_output.stride()),
+        )
+        outputs = MultiOutput(layout, packed, [])
+
+        packed.outputs = [outputs]
+        return outputs
+
+
+@dataclasses.dataclass
 class MultiOutputLayout(IRNode):
     device: torch.device
 
@@ -4437,7 +4531,7 @@ class MultiOutput(ExternKernel):
 
     def has_aliasing(self):
         return any(
-            isinstance(inp, FallbackKernel) and inp.has_aliasing()
+            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
             for inp in self.inputs
         )
 
@@ -6124,6 +6218,8 @@ class Wait(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
+        from .codegen.wrapper import ReuseLine
+
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
@@ -6134,7 +6230,7 @@ class Wait(ExternKernelAlloc):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
