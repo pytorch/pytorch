@@ -18,9 +18,11 @@
     }                                                                      \
   } while (0)
 
+/*
 #define C10_FORALL_DRIVER_LIBRARIES(_) \
   _("libcuda.so", 0)                   \
   _("libnvidia-ml.so.1", 1)
+*/
 
 #define C10_FORALL_DRIVER_API(_)         \
   _(cuMemAddressReserve, 0)              \
@@ -35,12 +37,32 @@
   _(nvmlDeviceGetHandleByPciBusId_v2, 1) \
   _(nvmlDeviceGetComputeRunningProcesses, 1)
 
+/*
+#define C10_LIBCUDA_DRIVER_API(_) \
+  _(cuMemAddressReserve)         \
+  _(cuMemRelease)                \
+  _(cuMemMap)                    \
+  _(cuMemAddressFree)            \
+  _(cuMemSetAccess)              \
+  _(cuMemUnmap)                  \
+  _(cuMemCreate)                 \
+  _(cuGetErrorString)
+
+#define C10_NVML_DRIVER_API(_) \
+  _(nvmlInit_v2)                      \
+  _(nvmlDeviceGetHandleByPciBusId_v2) \
+  _(nvmlDeviceGetComputeRunningProcesses)
+*/
+
 namespace c10 {
 namespace cuda {
 
 struct DriverAPI {
 #define CREATE_MEMBER(name, n) decltype(&name) name##_;
+// #define CREATE_MEMBER(name) decltype(&name) name##_;
   C10_FORALL_DRIVER_API(CREATE_MEMBER)
+// C10_LIBCUDA_DRIVER_API(CREATE_MEMBER)
+// C10_NVML_DRIVER_API(CREATE_MEMBER)
 #undef CREATE_MEMBER
   static DriverAPI* get();
 };

@@ -5,15 +5,27 @@
 #include <iostream>
 namespace c10 {
 namespace cuda {
+  static bool nvml_is_available = True;
 
 namespace {
 DriverAPI create_driver_api() {
+  void* libcuda_handle = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
+  TORCH_INTERNAL_ASSERT(libcuda_handle);
+  try{
+    void* nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_LAZY)
+    TORCH_INTERNAL_ASSERT(nvml_handle);
+  } catch (...) {
+    nvml_is_available = False;
+  }
+
+/*
 #define OPEN_LIBRARIES(name, n)               \
   void* handle_##n = dlopen(name, RTLD_LAZY); \
   TORCH_INTERNAL_ASSERT(handle_##n);
 
   C10_FORALL_DRIVER_LIBRARIES(OPEN_LIBRARIES)
 #undef OPEN_LIBRARIES
+*/
   DriverAPI r{};
 
 #define LOOKUP_ENTRY(name, n)                              \
