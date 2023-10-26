@@ -2696,6 +2696,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
+    add_asserts,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -2746,7 +2747,7 @@ def index_output_size_and_inner_fn(
                     ops.indirect_indexing(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
-                        check=check,
+                        add_asserts=add_asserts,
                     )
                 )
         new_index = [
@@ -2758,7 +2759,7 @@ def index_output_size_and_inner_fn(
     return output_size, fn
 
 
-def index_impl(x, indices, check):
+def index_impl(x, indices, add_asserts):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -2785,6 +2786,7 @@ def index_impl(x, indices, check):
         indices_loaders,
         indexed_size,
         x_loader,
+        add_asserts=add_asserts,
     )
 
     return Pointwise.create(
@@ -2798,7 +2800,7 @@ def index_impl(x, indices, check):
 @register_lowering(aten.index, type_promotion_kind=None)
 def index(x, indices):
     try:
-        return index_impl(x, indices, check=True)
+        return index_impl(x, indices, add_asserts=True)
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
@@ -2807,7 +2809,7 @@ def index(x, indices):
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
 def _unsafe_index(x, indices):
-    return index_impl(x, indices, check=False)
+    return index_impl(x, indices, add_asserts=False)
 
 
 # All the indexing decompositions are written in terms of index, index_put, and index_put_
@@ -2825,7 +2827,7 @@ def index_put(x, indices, values, accumulate=False):
 
 @register_lowering(aten._unsafe_index_put)
 def _unsafe_index_put(x, indices, values, accumulate=False):
-    return index_put_impl_(clone(x), indices, values, accumulate, check=False)
+    return index_put_impl_(clone(x), indices, values, accumulate, add_asserts=False)
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -2847,10 +2849,10 @@ def index_put_fallback(self, indices, values, accumulate):
 
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=True)
+    return index_put_impl_(self, indices, values, accumulate, add_asserts=True)
 
 
-def index_put_impl_(self, indices, values, accumulate, check):
+def index_put_impl_(self, indices, values, accumulate, add_asserts):
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
@@ -2915,6 +2917,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         indices_loaders,
         indexed_size,
         None,
+        add_asserts=add_asserts,
     )
 
     values = expand(values, expected_vals_size)
@@ -3176,7 +3179,7 @@ def upsample_nearestnd(
         x = ops.index_expr(x, torch.float32)
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
-        return ops.indirect_indexing(x, size, check=False)
+        return ops.indirect_indexing(x, size, add_asserts=False)
 
     def fn(idx):
         x = idx[-n:]
@@ -3305,8 +3308,8 @@ def upsample_bicubic2d_default(
             _0 = ops.constant(0, torch.int32)
             iHm1 = ops.constant(iH - 1, torch.int32)
             iWm1 = ops.constant(iW - 1, torch.int32)
-            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, check=False)
-            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, check=False)
+            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, add_asserts=False)
+            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, add_asserts=False)
             return x_loader([n, c, iy, ix])
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
@@ -3343,7 +3346,7 @@ def reflection_pad2d(x, padding):
         x = ops.index_expr(x, torch.int32)
         x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num, check=False)
+        return ops.indirect_indexing(x, size_num, add_asserts=False)
 
     def fn(idx):
         *b, x, y = idx
@@ -3803,12 +3806,12 @@ def max_pool2d_with_indices_backward(
                     ops.indirect_indexing(
                         ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
-                        check=False,
+                        add_asserts=False,
                     ),
                     ops.indirect_indexing(
                         ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
-                        check=False,
+                        add_asserts=False,
                     ),
                 ]
 
@@ -4254,14 +4257,14 @@ def avg_pool2d_backward(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
-                                check=False,
+                                add_asserts=False,
                             ),
                             ops.indirect_indexing(
                                 ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
-                                check=False,
+                                add_asserts=False,
                             ),
                         ]
                     ),

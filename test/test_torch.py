@@ -9602,6 +9602,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         t2 = t[0:0].view(0, 1)
         self.assertEqual(t2.data_ptr(), 0)
 
+    def test_size_stride(self) -> None:
+        t = torch.rand(2, 3, dtype=torch.float32)
+        self.assertEqual(t.size(0), 2)
+        self.assertEqual(t.size(dim=None), torch.Size([2, 3]))
+        self.assertEqual(t.stride(dim=None), torch.Size([3, 1]))
+        self.assertEqual(t.t().stride(), torch.Size([1, 3]))
+
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
