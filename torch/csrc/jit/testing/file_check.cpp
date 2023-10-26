@@ -114,6 +114,23 @@ size_t assertFind(
   return pos;
 }
 
+size_t assertFind(
+    const SourceRange& search_range,
+    const std::string& sub,
+    const Check& check) {
+  return assertFind(search_range, sub, [&](std::ostream& out) {
+    out << "From " << check << "\n";
+  });
+}
+
+size_t assertFind(
+    const std::shared_ptr<Source>& source,
+    const std::string& sub,
+    size_t start,
+    const Check& check) {
+  return assertFind(SourceRange(source, start, source->size()), sub, check);
+}
+
 size_t assertFindRegex(
     const SourceRange& search_range,
     const std::string& sub,
@@ -137,29 +154,13 @@ size_t assertFindRegex(
   return pos;
 }
 
-size_t assertFind(
+size_t assertFindRegex(
     const SourceRange& search_range,
     const std::string& sub,
-    const Check& check,
-    const bool regex = false) {
-  return regex
-      ? (assertFindRegex(
-            search_range,
-            sub,
-            [&](std::ostream& out) { out << "From " << check << "\n"; }))
-      : (assertFind(search_range, sub, [&](std::ostream& out) {
-          out << "From " << check << "\n";
-        }));
-}
-
-size_t assertFind(
-    const std::shared_ptr<Source>& source,
-    const std::string& sub,
-    size_t start,
-    const Check& check,
-    const bool regex = false) {
-  return assertFind(
-      SourceRange(source, start, source->size()), sub, check, regex);
+    const Check& check) {
+  return assertFindRegex(search_range, sub, [&](std::ostream& out) {
+    out << "From " << check << "\n";
+  });
 }
 
 size_t assertFindRegex(
@@ -167,11 +168,8 @@ size_t assertFindRegex(
     const std::string& sub,
     size_t start,
     const Check& check) {
-  return assertFind(
-      SourceRange(source, start, source->size()),
-      sub,
-      check,
-      true /* regex match */);
+  return assertFindRegex(
+      SourceRange(source, start, source->size()), sub, check);
 }
 
 void assertNotFind(

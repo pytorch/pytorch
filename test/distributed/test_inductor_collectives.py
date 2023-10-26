@@ -334,7 +334,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             FileCheck() \
                 .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=\\[i\\d+, i\\d+\\]") \
-                .run(code)
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -372,7 +372,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
                 .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[i\\d+, i\\d+\\]") \
-                .run(code)
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -414,7 +414,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
                 .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=None") \
-                .run(code)
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -446,7 +446,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
                 .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=None") \
-                .run(code)
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
