@@ -236,7 +236,7 @@ class TestDeserialize(TestCase):
                     elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
-                        for v1, v2 in zip(val1, val2):
+                        for v1, v2 in zip(pytree.tree_flatten(val1)[0], pytree.tree_flatten(val2)[0]):
                             self.assertEqual(v1.shape, v2.shape)
                             self.assertEqual(v1.dtype, v2.dtype)
                     else:
@@ -397,6 +397,24 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
         self.check_graph(g, inputs, _check_meta=False)
+
+    def test_tensor_tensor_list(self):
+        from torch.library import Library
+        lib = Library("_export", "FRAGMENT")
+        lib.define("_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])")
+
+        def _test_tensor_tensor_list_output(x, y):
+            return y, [x]
+
+        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
+        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
+                return a + b[0]
+
+        self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
 
     @parametrize(
         "name,case",
