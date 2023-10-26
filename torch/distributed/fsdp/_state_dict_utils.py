@@ -19,7 +19,6 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.device_mesh import mesh_resources
 
-from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
