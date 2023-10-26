@@ -3956,6 +3956,9 @@ class ShapeEnv:
             return
         # NB: prioritize unbacked symints for solving by ordering them last
         free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
+        # Never substitute backed with unbacked
+        if self.is_unbacked_symint(free[0]):
+            return
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):
