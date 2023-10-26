@@ -3,20 +3,27 @@ import copy
 import dataclasses
 import inspect
 import io
+import math
 import pathlib
 import sys
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
-
-import sympy
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
-
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -27,6 +34,11 @@ from torch.utils._pytree import (
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = [
@@ -109,13 +121,15 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
+    constraint_range: "StrictMinMaxConstraint"
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=2, upper=sympy.oo):
+    def _clone_with_range(self, lower=2, upper=math.inf):
+        # Import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
 
         constraint_range = StrictMinMaxConstraint(
@@ -184,6 +198,10 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
                 "A dynamic dim can be specified equal only to another dynamic dim. "
                 f"Equality with {type(other)} is not supported."
             )
+
+        # import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
