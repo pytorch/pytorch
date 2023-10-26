@@ -136,7 +136,10 @@ def check_model(
     constraints=None,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -160,7 +163,10 @@ def check_model_with_multiple_inputs(
     constraints=None,
 ):
     with torch.no_grad(), config.patch(
-        "aot_inductor.abi_compatible", self.abi_compatible
+        {
+            "aot_inductor.abi_compatible": self.abi_compatible,
+            "allow_stack_allocation": self.allow_stack_allocation,
+        }
     ):
         torch.manual_seed(0)
         model = model.to(self.device)
@@ -915,28 +921,51 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
+
+
+def fail_with_and_without_stack_allocation():
+    return TestFailure(("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"))
+
+# test_failures, xfail by default, set is_skip=True to skip
+CPU_TEST_FAILURES = {
+    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
+    #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
+    "test_freezing": TestFailure(("abi_compatible_cpu", "abi_compatible_cpu_with_stack_allocation"), is_skip=True),
+    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_sdpa": fail_with_and_without_stack_allocation(),
+    "test_sdpa_2": fail_with_and_without_stack_allocation(),
+    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+}
 
 copy_tests(
     AOTInductorTestsTemplate,
     AOTInductorTestABICompatibleCpu,
     "abi_compatible_cpu",
-    # test_failures, xfail by default, set is_skip=True to skip
-    {
-        "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
-        "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
-        "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
-        #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-        "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
-        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
-        "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
-        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
-        "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-    },
+    CPU_TEST_FAILURES,
+)
+
+
+class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
+    device = "cpu"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = True
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpuWithStackAllocation,
+    "abi_compatible_cpu_with_stack_allocation",
+    CPU_TEST_FAILURES,
 )
 
 
@@ -945,6 +974,7 @@ class AOTInductorTestABICompatibleCuda(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(
@@ -964,6 +994,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(
@@ -990,6 +1021,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    allow_stack_allocation = False
 
 
 copy_tests(

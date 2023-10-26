@@ -204,3 +204,52 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
   static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"
+
+namespace torch {
+namespace aot_inductor {
+template <typename T>
+struct ThreadLocalCachedOutputTensor;
+
+template<>
+struct ThreadLocalCachedOutputTensor<RAIIAtenTensorHandle> {
+  explicit ThreadLocalCachedOutputTensor(const RAIIAtenTensorHandle&) {}
+  void copy_data_from(AtenTensorHandle) {}
+  std::array<char, 1> storage;
+  RAIIAtenTensorHandle tensor;
+};
+
+template<>
+struct ThreadLocalCachedOutputTensor<AtenTensorHandle> {
+  explicit ThreadLocalCachedOutputTensor(const AtenTensorHandle&) {}
+  void copy_data_from(AtenTensorHandle) {}
+  std::array<char, 1> storage;
+  RAIIAtenTensorHandle tensor;
+};
+
+template <typename T, size_t N>
+struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T, N>> {
+  explicit ThreadLocalCachedOutputTensor(ArrayRefTensor<T, N>& t) {
+    AtenTensorHandle handle;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+                                    storage.data(),
+                                    t.sizes().size(),
+                                    t.sizes().data(),
+                                    t.strides().data(),
+                                    0,
+                                    t.dtype(),
+                                    t.device_type(),
+                                    t.device_idx(),
+                                    &handle));
+    tensor = handle;
+  }
+
+  void copy_data_from(const ArrayRefTensor<T, N>& t) {
+    std::copy(t.data(), t.data() + t.numel(), storage.data());
+  }
+
+  std::array<T, N> storage;
+  RAIIAtenTensorHandle tensor;
+};
+
+} // namespace aot_inductor
+} // namespace torch
