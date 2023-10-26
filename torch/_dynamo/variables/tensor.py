@@ -933,6 +933,9 @@ class TensorSubclassVariable(VariableTracker):
 
 def _register_hook(variable, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]):
     assert isinstance(variable, (TensorVariable, torch._dynamo.variables.autograd.AutogradNodeVariable))
+
+    from .builder import wrap_fx_proxy
+
     options = VariableTracker.propagate(variable)
     # see [On tensor.register_hook]
     assert len(args) == 1
