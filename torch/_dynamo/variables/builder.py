@@ -42,7 +42,7 @@ from ..allowed_functions import (
 )
 
 from ..device_interface import device_interfaces
-from ..exc import unimplemented
+from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
@@ -956,6 +956,13 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
 
+    def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
+        if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
+            raise InternalTorchDynamoError(
+                "Cannot wrap a Tensor that has already been",
+                "wrapped by this instance of Dynamo",
+            )
+
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
@@ -963,11 +970,13 @@ class VariableBuilder:
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
         ) and not source.guard_source().is_fsdp_module():
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value, self.name, source=source
             )
 
         if is_constant_source(source):
+            self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
                 value,
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
@@ -1028,6 +1037,9 @@ class VariableBuilder:
                 self.install_guards(dup_guard)
             return stored_value
 
+        # By this point, we should have deduplicated all tensors
+        self.assert_not_wrapped_by_this_graph(value)
+
         # tx.output has multiple tracers if we're introspecting HigherOrderOperator.
         # When we've discovered an untracked tensor, then we actually need
         # to get Dynamo to track the tensor (which is what this function does)
@@ -1071,10 +1083,9 @@ class VariableBuilder:
         # TODO: I think the result is guaranteed to be fake with
         # ignore_subclass changes
         # Note: this information is conveyed via subclass_type now
-        fake_tensor_value = None
-        example_value = tensor_variable.proxy.node.meta["example_value"]
-        if is_fake(example_value):
-            fake_tensor_value = example_value
+        fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
+        if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
+            raise InternalTorchDynamoError("Wrapped Tensor must be this graph's fake")
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
@@ -1300,7 +1311,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 #      instead it is converted into a fake tensor using
 #      wrap_to_fake_tensor_and_record and registered as a graph input.)
 #
-#   2. "Wrapping" the result of some Tensor operation Dynamo traced over.  In
+#   2. "Wrapping" the result of some Tensor operation Dynamo traced over. In
 #      this case, example_value is None (and we are going to figure it out
 #      ourselves using FakeTensors, via get_fake_value, which will run
 #      the operation represented by the (singular!) FX node referenced by
@@ -1308,6 +1319,10 @@ def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
 #
 # The expectation is you end up with a Tensor output, and everything is
 # straightforwardly traced into the graph.
+#
+# In all cases, the returned `TensorVariable` subclass will have an `example_value`
+# and that `example_value` must be a `FakeTensor` produced by the currently running
+# instance of Dynamo.
 #
 # Upon closer inspection, you may notice that there are a slurry of non-Tensor
 # output cases.  What gives?  Well, we sometimes trace operations into the
@@ -1340,22 +1355,16 @@ def wrap_fx_proxy_cls(
 
     initial_example_value = example_value
 
-    def _is_functional_tensor_fakified_by_dynamo(x):
-        if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
-            reapply_views = torch._C._functionalization_reapply_views_tls()
-            unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
-            return (
-                isinstance(unwrapped, FakeTensor)
-                and unwrapped.fake_mode == tx.fake_mode
-            )
-        return False
-
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
             if not (
                 isinstance(value, FakeTensor)
-                or _is_functional_tensor_fakified_by_dynamo(value)
+                or (
+                    # Is functional tensor fakeified by this instance of Dynamo
+                    torch._is_functional_tensor(value)
+                    and maybe_get_fake_mode(value) is tx.fake_mode
+                )
                 or value.is_nested
             ):
                 # NB: ensure strides are preserved
@@ -1365,13 +1374,12 @@ def wrap_fx_proxy_cls(
 
     with preserve_rng_state():
         if example_value is None:
-            example_value = get_fake_value(proxy.node, tx)
+            # only allow_non_graph_fake in this instance because we handle the non-fake
+            # cases properly below.
+            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
         # Handle recursive calls here
-        elif (
-            is_fake(example_value)
-            and maybe_get_fake_mode(example_value) is tx.fake_mode
-        ) or _is_functional_tensor_fakified_by_dynamo(example_value):
+        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
             pass
 
         elif isinstance(example_value, torch.Tensor):
@@ -1396,6 +1404,13 @@ def wrap_fx_proxy_cls(
             kwargs["source"] = options["source"]
             example_value = wrap_to_fake_tensor_and_record(
                 example_value, tx=tx, **kwargs
+            )
+        if isinstance(example_value, torch.Tensor) and (
+            maybe_get_fake_mode(example_value) is not tx.fake_mode
+        ):
+            raise InternalTorchDynamoError(
+                "`example_value` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {example_value}"
             )
 
     if isinstance(example_value, torch.Tensor):
