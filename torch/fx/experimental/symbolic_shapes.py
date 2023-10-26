@@ -28,7 +28,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental._sym_dispatch_mode import set_sym_function_mode, sym_function_mode
+from torch.fx.experimental._sym_dispatch_mode import handle_sym_dispatch, sym_function_mode
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -108,17 +108,6 @@ def create_contiguous(shape):
     for dim in reversed(shape[:-1]):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
-
-def _handle_sym_dispatch(func, args, kwargs):
-    mode = sym_function_mode()
-    assert mode
-    set_sym_function_mode(mode.inner)
-    try:
-        # TODO: properly compute types
-        types: List[Type] = []
-        return mode.__sym_dispatch__(func, types, args, kwargs)
-    finally:
-        set_sym_function_mode(mode)
 
 def hint_int(a):
     if isinstance(a, torch.SymInt):
@@ -1370,7 +1359,7 @@ def _make_node_magic(method, func):
             return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
 
         if sym_function_mode():
-            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
+            return to_node(self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
         # TODO: consider constant prop here
         try:
@@ -1404,7 +1393,7 @@ def _make_node_magic(method, func):
     def unary_magic_impl(self):
         op = method_to_operator(method)
         if sym_function_mode():
-            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
+            return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
         if method == "floor" or method == "ceiling":
@@ -1440,7 +1429,7 @@ def _make_node_magic(method, func):
             if sym_function_mode():
                 return to_node(
                     pred_node,
-                    _handle_sym_dispatch(
+                    handle_sym_dispatch(
                         sym_ite,
                         (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}
                     )
@@ -1474,7 +1463,7 @@ def _make_node_sizes_strides(method, func):
         if sym_function_mode():
             return to_node(
                 self,
-                _handle_sym_dispatch(
+                handle_sym_dispatch(
                     op,
                     ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
                     {}
