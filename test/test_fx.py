@@ -3813,6 +3813,25 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         traced = torch.fx.symbolic_trace(foo)
         self.assertEqual(foo([]), traced([]))
 
+    def test_insert_arg(self):
+        m = symbolic_trace(SimpleTest())
+        m.register_buffer("buf", torch.tensor(0))
+        output_node = next(iter(reversed(m.graph.nodes)))
+        with m.graph.inserting_before(output_node):
+            a = m.graph.get_attr("buf")
+        r = len(output_node.args)
+        output_node.insert_arg(0, a)
+        self.assertEqual(len(output_node.args), r + 1)
+        self.assertEqual(len(a.users), 1)
+        self.assertIs(output_node.args[0], a)
+        self.assertIs(list(a.users.keys())[0], output_node)
+        output_node.insert_arg(2, a)
+        self.assertEqual(len(output_node.args), r + 2)
+        self.assertEqual(len(a.users), 1)
+        self.assertIs(output_node.args[2], a)
+        self.assertIs(list(a.users.keys())[0], output_node)
+        m.graph.lint()
+
 
 
 def run_getitem_target():
