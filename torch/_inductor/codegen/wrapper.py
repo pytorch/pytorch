@@ -839,6 +839,31 @@ class WrapperCodeGen(CodeGen):
             """
         )
         compile_wrapper.splice(kernel.src, strip=True)
+
+        # Also include any possible kernel being called indirectly
+        from triton import JITFunction
+
+        symbols_included = {original_name}
+
+        def traverse(cur_kernel):
+            for symbol_name in cur_kernel.fn.__code__.co_names:
+                if symbol_name in symbols_included:
+                    continue
+                if symbol_name in cur_kernel.fn.__globals__:
+                    symbol = cur_kernel.fn.__globals__[symbol_name]
+                    if isinstance(symbol, JITFunction):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline("@triton.jit")
+                        compile_wrapper.splice(symbol.src, strip=True)
+                        symbols_included.add(symbol_name)
+                        traverse(symbol)
+                    elif isinstance(symbol, (int, str, bool)):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
+
+        traverse(kernel)
+
         compile_wrapper.writeline("''')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1412,6 +1437,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(

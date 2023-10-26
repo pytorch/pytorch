@@ -620,6 +620,19 @@ class CommonTemplate:
 
         self.common(fn, (x, y, 2))
 
+    def test_add_complex2(self):
+        @torch.compile
+        def fn(a, b):
+            c = a + b
+            d = a + b
+            return c + d
+
+        x = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
+        y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
+
+        _, code = run_and_get_code(fn, x, y)
+        self.assertEqual(code[0].count("aten.view"), 3)
+
     def test_concat_add_inplace(self):
         def fn(x, y, z):
             return torch.cat([x, y], dim=1).add_(z)
@@ -814,6 +827,7 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     @skipIfRocm
+    @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
@@ -879,6 +893,11 @@ class CommonTemplate:
 
         # Constant is propagated as we can prove that the result is always negative.
         test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+        def unsafe_index(a, b):
+            return aten._unsafe_index(a, (b,))
+
+        test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
 
     def test_computed_buffer_inlining(self):
         def flip(x):
@@ -3533,6 +3552,14 @@ class CommonTemplate:
         )
         out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
         self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+    def test_remove_noop_copy(self):
+        def fn(x, y):
+            x = x.cos()
+            a = x.copy_(y)
+            return a.sin()
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8)))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -6710,6 +6737,40 @@ class CommonTemplate:
         inductor_out = compiled(args)
         eager_out = eager_mod(*eager_args)
         self.assertEqual(inductor_out, eager_out)
+
+    @skipIfRocm
+    def test_require_stride_expanded(self):
+        def forward(arg6, arg7, arg16):
+            convolution = torch.ops.aten.convolution(
+                arg16.unsqueeze(0), arg7, arg6, [4, 4], [2, 2], [1, 1], False, [0, 0], 1
+            )
+            return (convolution,)
+
+        self.common(
+            forward,
+            (
+                None,
+                rand_strided(
+                    (64, 3, 11, 11),
+                    (363, 121, 11, 1),
+                    torch.float32,
+                    device=self.device,
+                ).to(memory_format=torch.channels_last),
+                rand_strided(
+                    (1, 3, 224, 224),
+                    (150528, 50176, 224, 1),
+                    torch.float32,
+                    device=self.device,
+                )
+                .to(memory_format=torch.channels_last)
+                .squeeze(0),
+            ),
+            atol=1e-3,
+            rtol=0.001,
+        )
+
+        # expanded dim should not cause copy in require_stride_order
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_where_with_logical_op(self):
         def fn_and(x, y):
