@@ -1207,9 +1207,9 @@ def export(
             if not isinstance(arg, prim_types):
                 if dataclasses.is_dataclass(arg):
                     raise RuntimeError(
-                        f"Argument {str(arg)} has type {type(arg)} but only {prim_types} are allowed. "
-                        f"Perhaps you forgot to register it as dataclass. Please take a look at"
-                        f" torch._export.utils.register_dataclass_as_pytree_node. "
+                        "Dataclasses are supposed to be pytree nodes to be exportable."
+                        "Please take a look at torch._export.utils.register_dataclass_as_pytree_node "
+                        "for more information.",
                     )
                 else:
                     raise RuntimeError(
