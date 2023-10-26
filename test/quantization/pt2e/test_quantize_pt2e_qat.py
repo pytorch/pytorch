@@ -8,11 +8,9 @@ import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     default_observer,
-    default_weight_observer,
     FusedMovingAvgObsFakeQuantize,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
-    PlaceholderObserver,
     QConfigMapping,
 )
 from torch.ao.quantization.backend_config import get_qnnpack_backend_config
@@ -629,6 +627,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
 
 
 class ConvBnDerivedBiasQuantizer(Quantizer):
+    """
+    Dummy quantizer that annotates conv bn in such a way that the bias qparams are
+    derived from the conv input activation and weight qparams.
+    """
 
     def _derive_bias_qparams_from_act_and_weight_qparams(self, obs_or_fqs):
         act_scale, _ = obs_or_fqs[0].calculate_qparams()
