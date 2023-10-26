@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import dis
 import functools
 import inspect
@@ -1200,6 +1201,22 @@ def export(
         # Note: This is needed by rewrite_signature. We need to put it before
         # optimize_assert since user program may mutate the inputs.
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+
+        for arg in flat_args:
+            prim_types = (torch.Tensor, str, int, float, bool)
+            if not isinstance(arg, prim_types):
+                if dataclasses.is_dataclass(arg):
+                    raise RuntimeError(
+                        f"Argument {str(arg)} has type {type(arg)} but only {prim_types} are allowed. "
+                        f"Perhaps you forgot to register it as dataclass. Please take a look at"
+                        f" torch._export.utils.register_dataclass_as_pytree_node. "
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Argument {str(arg)} has type {type(arg)} but only {prim_types} are allowed. "
+                        f"If it is a container type, please register it as valid pytree type."
+                        f" Please take a look torch.utils._pytree._register_pytree_node"
+                    )
 
         remove_from_cache(f)
         constraint_violation_error = None

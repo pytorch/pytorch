@@ -4,6 +4,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
 import copy
+import dataclasses
 import functools
 import inspect
 import math
@@ -4237,6 +4238,25 @@ def forward(self, x):
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
+
+    def test_not_registered_dataclass(self):
+        @dataclasses.dataclass
+        class Input:
+            foo: torch.Tensor
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input: Input):
+                return input.foo + input.foo
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Perhaps you forgot to register it as dataclass. "
+            "Please take a look at torch._export.utils.register_dataclass_as_pytree_node.",
+        ):
+            gm, _ = torch._dynamo.export(Mod())(Input(foo=torch.ones(2, 3)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
