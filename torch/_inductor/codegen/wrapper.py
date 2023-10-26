@@ -1438,6 +1438,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
 
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
+
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
                     output, sympy.Expr

@@ -1258,6 +1258,10 @@ def aot_inductor_launcher(so_path: str, device: str):
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
             }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
         """
     elif device == "cpu":
         return f"""
@@ -1267,6 +1271,10 @@ def aot_inductor_launcher(so_path: str, device: str):
 
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
+            }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
             }}
         """
     else:

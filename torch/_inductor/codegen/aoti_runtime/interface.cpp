@@ -129,6 +129,19 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
       { *ret_output_names = container->output_name(output_idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+    AOTInductorModelContainerHandle container_handle,
+    const char** in_spec,
+    const char** out_spec) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *in_spec = container->get_in_spec();
+    *out_spec = container->get_out_spec();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {

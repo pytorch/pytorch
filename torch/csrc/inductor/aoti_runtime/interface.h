@@ -119,4 +119,9 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
 // Delete an AOTInductorModel created by AOTInductorModelCreate.
 AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
 
+AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+    AOTInductorModelContainerHandle container_handle,
+    const char** in_spec,
+    const char** out_spec);
+
 } // extern "C"
