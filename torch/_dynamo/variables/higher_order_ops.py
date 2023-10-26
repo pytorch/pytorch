@@ -25,7 +25,6 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
@@ -100,9 +99,6 @@ def validate_args_and_maybe_create_graph_inputs(
         assert isinstance(a, VariableTracker)
 
         if isinstance(a, ConstantVariable):
-            # Ensures that we recompile when the constant value changes
-            a.add_guard(GuardBuilder.CONSTANT_MATCH)
-
             if manually_set_subgraph_inputs:
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
@@ -247,7 +243,6 @@ def speculate_subgraph(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
 
-                tx.output.guards.update(output.guards)
                 # The output proxies might not belong to this SubgraphTracer
                 # (if they are free variables that were never lifted)
                 # so lift them here.
@@ -274,7 +269,7 @@ def speculate_subgraph(
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
         if isinstance(f, UserFunctionVariable):
-            f_name = f.get_name()
+            f_name = f.unwrap().get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
             f"to trace function `{f_name}` into a single graph. This means "
@@ -408,7 +403,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
-        tx.output.guards.update(args[0].guards)
 
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
@@ -625,7 +619,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         assert type(args[1].realize()) is TensorVariable
 
-        sample_shape = args[1].get_real_value().size()
+        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
                 "map() operator doesn't support scalar or zero-sized tensors during tracing."
@@ -675,9 +670,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r.new_empty(
-            [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
-        )
+        example_value = r.new_empty([sample_shape[0], *r.shape])
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
@@ -1111,6 +1104,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         else:
             fn = TorchVariable(self.value)
         checkpoint = tx.copy_graphstate()
+        # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
 

@@ -26,7 +26,7 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
-    _nonvar_fields = ["_value"]
+    _nonvar_fields = {"_value", *VariableTracker._nonvar_fields}
 
     def __init__(self, _value, source, **kwargs):
         super().__init__(source=source, **kwargs)
@@ -45,9 +45,10 @@ class LazyVariableTracker(VariableTracker):
 
             tx = InstructionTranslator.current_tx()
             self.mutable_local.vt = VariableBuilder(tx, self.source)(self._value)
+            self.mutable_local.vt.parents_tracker.add(self.parents_tracker)
             self._value = None
             tx.output.guards.update(self.mutable_local.vt.guards)
-        return self.mutable_local.vt.add_options(self)
+        return self.mutable_local.vt
 
     def unwrap(self):
         """Return the real VariableTracker if it already exists"""
@@ -73,16 +74,10 @@ class LazyVariableTracker(VariableTracker):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    add_guards = VariableTracker.add_guards
-    add_guard = VariableTracker.add_guard
-    add_options = VariableTracker.add_options
-    _aggregate_mutables = VariableTracker._aggregate_mutables
     apply = VariableTracker.apply
     copy = VariableTracker.copy
     __post_init__ = VariableTracker.__post_init__
-    propagate = VariableTracker.propagate
     __repr__ = VariableTracker.__repr__
-    _update_contains = VariableTracker._update_contains
 
 
 def _create_realize_and_forward(name):

@@ -8,7 +8,7 @@ from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..device_interface import get_interface_for_device
 from ..exc import unimplemented, Unsupported
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
@@ -25,22 +25,14 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.recursively_contains = (
-            set()
-        )  # This var doesn't contain any child vars and doesn't support clone() properly,
-        # so don't populate this automatically
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def reconstruct(self, codegen):
         attr_source = AttrSource(
@@ -79,15 +71,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         self.cm_obj = cm_obj
 
     def enter(self, tx):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__enter__")
-        )
+        source = None if self.source is None else AttrSource(self.source, "__enter__")
         try:
             return variables.UserMethodVariable(
                 self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
+                variables.UserDefinedObjectVariable(self.cm_obj),
+                source=source,
             ).call_function(tx, [], {})
         except Unsupported as e:
             raise unimplemented(
@@ -95,15 +84,12 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ) from e
 
     def exit(self, tx, *args):
-        options = VariableTracker.propagate(self)
-        options["source"] = (
-            None if self.source is None else AttrSource(self.source, "__exit__")
-        )
+        source = None if self.source is None else AttrSource(self.source, "__exit__")
         try:
             x = variables.UserMethodVariable(
                 self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
+                variables.UserDefinedObjectVariable(self.cm_obj),
+                source=source,
             ).call_function(
                 tx,
                 [
@@ -127,7 +113,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
 
     @staticmethod
     def create(tx, target_value, initialized=True, **kwargs):
@@ -145,15 +131,13 @@ class GradModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
         self.initialized = initialized
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
         if not self.initialized:
             self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -220,7 +204,7 @@ class InferenceModeVariable(ContextWrappingVariable):
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
 
     @staticmethod
     def create(tx, **kwargs):
@@ -237,12 +221,10 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -252,9 +234,9 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
-    _guards_singleton = {
-        Guard(GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
-    }
+    _guards_singleton = Guard(
+        GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS
+    )
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -270,12 +252,10 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.guards = self.guards | self._guards_singleton
+        install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -313,9 +293,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -420,14 +398,10 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def exit(self, tx, *args):
-        return variables.ConstantVariable.create(
-            None, **VariableTracker.propagate(self)
-        )
+        return variables.ConstantVariable.create(None)
 
     def module_name(self):
         return "contextlib"
@@ -542,24 +516,20 @@ class StreamVariable(VariableTracker):
             )
             return variables.ConstantVariable(None)
         elif name == "query":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         elif name == "record_event":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=EventVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         else:
             unimplemented(self.device + " stream method " + name + " unsupported")
@@ -592,14 +562,12 @@ class EventVariable(VariableTracker):
             )
             return variables.ConstantVariable(None)
         elif name == "query":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         else:
             unimplemented(f"event method {name} unsupported")

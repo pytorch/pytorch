@@ -53,7 +53,7 @@ from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
-from .guards import GuardBuilder
+from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
@@ -89,7 +89,6 @@ from .variables.functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .variables.lazy import LazyMutableLocal
 from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -258,13 +257,11 @@ def _detect_and_normalize_assert_statement(
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
-        self.output.guards.update(value.guards)
         if (
             config.rewrite_assert_with_torch_assert
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
-            self.output.guards.update(error_msg.guards)
             # Skip over things like `assert True`
             if value.is_python_constant() and bool(value.as_python_constant()):
                 self.jump(inst)
@@ -292,7 +289,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self,
                 scalar_to_tensor_proxy,
                 example_value=get_fake_value(scalar_to_tensor_proxy.node, self),
-                **VariableTracker.propagate([value]),
             )
 
             self.output.create_proxy(
@@ -355,7 +351,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
-                    self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
@@ -524,11 +519,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
+    inconsistent_side_effects: bool
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+
+    def mark_inconsistent_side_effects(self):
+        """
+        InstructionTranslator has encountered instructions which may cause
+        dynamo to see a different version of history from eager
+        See: https://github.com/pytorch/pytorch/issues/110765
+        """
+        self.inconsistent_side_effects = True
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -587,12 +591,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains and not any(
-                # recursively_contains will miss things for LazyVariableTracker
-                (isinstance(x, LazyMutableLocal) and x.vt is not None)
-                for x in v.recursively_contains
-            )
+            return v.parents_tracker not in recursive_parents
 
+        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -619,7 +620,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         state = self.copy_graphstate()
         try:
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-            self.output.guards.update(fn.guards)
             return result
         except Exception:
             self.restore_graphstate(state)
@@ -1064,7 +1064,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def FOR_ITER(self, inst):
         it = self.pop()
         if isinstance(it, ListIteratorVariable):
-            self.output.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables()
                 self.replace_all(it, next_iter)
@@ -1079,7 +1078,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         left, right = self.popn(2)
         left = left.as_specialized(self)
         right = right.as_specialized(self)
-        options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
             itertools.chain(
@@ -1107,7 +1105,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             # <non-None> is None
             self.push(
                 ConstantVariable.create(
-                    supported_const_comparison_ops[op](object(), right.value), **options
+                    supported_const_comparison_ops[op](object(), right.value)
                 )
             )
 
@@ -1122,7 +1120,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
-                    **options,
                 )
             )
         elif op in ("in", "not in"):
@@ -1131,7 +1128,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.UNARY_NOT(inst)
         else:
             self.push(
-                BuiltinVariable(supported_any[op], **options).call_function(
+                BuiltinVariable(supported_any[op]).call_function(
                     self, [left, right], {}
                 )
             )
@@ -1159,8 +1156,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if sys.version_info >= (3, 11):
             null = self.pop()
             assert isinstance(null, NullVariable)
-        self.output.guards.update(argsvars.guards)
-        self.output.guards.update(kwargsvars.guards)
 
         if (
             isinstance(fn, GetAttrVariable)
@@ -1251,12 +1246,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ), f"Mutating module attribute {inst.argval} during export."
 
         try:
-            self.output.guards.update(
-                BuiltinVariable(setattr)
-                .call_function(
-                    self, [obj, ConstantVariable.create(inst.argval), val], {}
-                )
-                .guards
+            BuiltinVariable(setattr).call_function(
+                self, [obj, ConstantVariable.create(inst.argval), val], {}
             )
             return
         except Unsupported as e:
@@ -1279,10 +1270,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def DELETE_ATTR(self, inst):
         obj = self.pop()
-        self.output.guards.update(
-            BuiltinVariable(delattr)
-            .call_function(self, [obj, ConstantVariable.create(inst.argval)], {})
-            .guards
+        BuiltinVariable(delattr).call_function(
+            self, [obj, ConstantVariable.create(inst.argval)], {}
         )
 
     def create_call_resume_at(self, offset):
@@ -1299,47 +1288,39 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
-        # no result is pushed, so need to lift the guards to global
-        self.output.guards.update(result.guards)
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
-        self.push(TupleVariable(items, **options))
+        self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
                 [x.as_specialized(self) for x in items],
-                **options,
             )
         )
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
-        self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
+        self.push(ListVariable(items, mutable_local=MutableLocal()))
 
     def BUILD_SET(self, inst):
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
-        options = VariableTracker.propagate(items)
-        new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
+        new_set = SetVariable(items, mutable_local=MutableLocal())
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
-        options = VariableTracker.propagate(seqs)
         items = list()
         for seq in seqs:
             try:
                 items.extend(seq.unpack_var_sequence(self))
             except NotImplementedError:
                 unimplemented(f"BUILD_LIST_UNPACK {seq}")
-        self.push(cls(items, mutable_local=MutableLocal(), **options))
+        self.push(cls(items, mutable_local=MutableLocal()))
 
     def BUILD_TUPLE_UNPACK(self, inst):
         self.BUILD_LIST_UNPACK(inst, cls=TupleVariable)
@@ -1348,7 +1329,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
-        options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
             assert (
@@ -1359,9 +1339,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
-        self.push(
-            ConstDictVariable(result, dict, mutable_local=MutableLocal(), **options)
-        )
+        self.push(ConstDictVariable(result, dict, mutable_local=MutableLocal()))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1376,7 +1354,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 result,
                 dict,
                 mutable_local=MutableLocal(),
-                **VariableTracker.propagate(items),
             )
         )
 
@@ -1385,7 +1362,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def BUILD_CONST_KEY_MAP(self, inst):
         keys = self.pop()
         values = self.popn(inst.argval)
-        options = VariableTracker.propagate([keys] + values)
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
         keys = keys.as_python_constant()
@@ -1396,7 +1372,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 dict(zip(keys, values)),
                 dict,
                 mutable_local=MutableLocal(),
-                **options,
             )
         )
 
@@ -1413,7 +1388,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ConstDictVariable(
                 items,
                 obj.user_cls,
-                **VariableTracker.propagate([obj, k, v]),
             ),
         )
 
@@ -1431,21 +1405,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        # only copy if the new obj contains other mutables
-        new_rec_contains = obj.recursively_contains
-        if v.recursively_contains or v.mutable_local:
-            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
-
-            if v.mutable_local:
-                new_rec_contains.add(v.mutable_local)
-
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
-                recursively_contains=new_rec_contains,
-                regen_guards=False,
-                **VariableTracker.propagate([obj, v]),
             ),
         )
 
@@ -1474,7 +1437,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if flags & 0x01:
             defaults = self.pop()
 
-        options = VariableTracker.propagate(old_stack[len(self.stack) :])
         self.push(
             NestedUserFunctionVariable(
                 fn_name,
@@ -1485,14 +1447,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 annotations,
                 closure,
                 closure_scope=self,
-                **options,
             )
         )
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         if isinstance(seq, (BaseListVariable, SetVariable)):
-            self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
             val = seq.unpack_var_sequence(self)
@@ -1501,8 +1461,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif isinstance(seq, GetAttrVariable) and isinstance(seq.obj, TensorVariable):
             # x, y = a.shape
             proxy = getattr(seq.obj.as_proxy(), seq.name)
-            options = VariableTracker.propagate(self)
-            val = [wrap_fx_proxy(self, proxy[i], **options) for i in range(inst.argval)]
+            val = [wrap_fx_proxy(self, proxy[i]) for i in range(inst.argval)]
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
         assert len(val) == inst.argval
@@ -1514,7 +1473,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         prefix = inst.argval & 0xFF  # low byte
         suffix = inst.argval >> 8  # high byte
         seq = self.pop()
-        options = VariableTracker.propagate(seq)
         if seq.has_unpack_var_sequence(self):
             vals = list(seq.unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
@@ -1522,10 +1480,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             vals_list = vals[prefix : len(vals) - suffix]
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
-                self.push(item.add_options(options))
-            self.push(TupleVariable(vals_list, **options))
+                self.push(item)
+            self.push(TupleVariable(vals_list))
             for item in reversed(vals_prefix):
-                self.push(item.add_options(options))
+                self.push(item)
         else:
             unimplemented(f"UNPACK_EX {seq}")
 
@@ -1589,9 +1547,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif (flags & 0x03) == 0x03:
             value = BuiltinVariable(ascii).call_function(self, [value], {})
 
-        fmt_var = ConstantVariable.create(
-            "{:" + fmt_spec.as_python_constant() + "}"
-        ).add_options(fmt_spec)
+        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
@@ -1810,12 +1766,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             # graph break under the GenericContextWrappingVariable.
             self.states_before_block.append(state)
 
-        self.output.guards.update(ctx.guards)
-
         exit = WithExitFunctionVariable(
             ctx,
             inst.target,
-            **VariableTracker.propagate(ctx),
         )
         if sys.version_info >= (3, 11):
             # see create_call_resume_at for block stack details
@@ -1902,9 +1855,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def store_global_weakref(self, name, value):
-        self.output.guards.add(
-            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
-        )
+        install_guard(GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE))
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
@@ -1999,6 +1950,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
+        self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
         self.log_starts_line()
 
@@ -2092,48 +2044,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                     lambda x: x.realize(), self.symbolic_locals
                 )
 
-            self.init_local_index_guards_hack()
-
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
-
-    def init_local_index_guards_hack(self):
-        # symbolic_locals contains the mapping from original f_locals to the
-        # Variable objects. During the Variable building phase, each object also
-        # has its associated guards. At the end, we will accumulate these
-        # guards.
-        #
-        # One way of handling these guards is to just accumulate all of them
-        # right now. However, many f_locals might not be used in the frame and
-        # thus can unnecessarily increase guard execution overhead.  Therefore,
-        # we selectively update output.guards as we run the Python Bytecode
-        # instruction by instruction.
-        #
-        # An exception here is list/dict variables. Guards related to these
-        # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-        # next invocation when args is not a list, and args[0] is a runtime
-        # error. Therefore, we recursively add guards for list/dict variable here.
-        for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-            ):
-                local_guards = VariableTracker.propagate(val)["guards"]
-                index_guards = [
-                    guard
-                    for guard in local_guards
-                    if guard.create_fn
-                    in (
-                        GuardBuilder.LIST_LENGTH,
-                        GuardBuilder.DICT_KEYS,
-                        GuardBuilder.ODICT_KEYS,
-                        GuardBuilder.TUPLE_ITERATOR_LEN,
-                    )
-                ]
-                self.output.guards.update(index_guards)
 
     def run(self):
         super().run()
@@ -2236,6 +2150,7 @@ class InstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
+            and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
@@ -2410,6 +2325,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
+        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
+
         log.debug("DONE INLINING %s", code)
 
         if is_generator(code):
@@ -2418,7 +2335,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return ListIteratorVariable(
                 tracer.generated_items,
                 mutable_local=MutableLocal(),
-                **VariableTracker.propagate(tracer.symbolic_result),
             )
         else:
             return tracer.symbolic_result
@@ -2577,7 +2493,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 self.pop()
                 return
             if isinstance(tos, ListIteratorVariable):
-                self.output.guards.update(tos.guards)
                 try:
                     val, next_iter = tos.next_variables()
                     self.replace_all(tos, next_iter)
