@@ -4253,8 +4253,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Perhaps you forgot to register it as dataclass. "
-            "Please take a look at torch._export.utils.register_dataclass_as_pytree_node.",
+            "Dataclasses are supposed to be pytree nodes to be exportable."
+            "Please take a look at torch._export.utils.register_dataclass_as_pytree_node for more information.",
         ):
             gm, _ = torch._dynamo.export(Mod())(Input(foo=torch.ones(2, 3)))
 
