@@ -473,6 +473,7 @@ class BatchReLUFusion(BatchFusion):
     Batch relu fusion in pre grad pass.
     We only fuse the relu if the input is after same split/unbind node.
     """
+
     def _getitem_args(self, getitem_node: torch.fx.Node):
         if getitem_node.target != operator.__getitem__ or (
             getitem_node.op != "call_function"
@@ -481,7 +482,6 @@ class BatchReLUFusion(BatchFusion):
         return getitem_node.args[0]
 
     def match(self, node: torch.fx.Node):
-
         input = get_arg_value(node, 0, "input")
         if (
             CallFunctionVarArgs(torch.nn.functional.relu).match(node)
@@ -526,7 +526,6 @@ class BatchReLUFusion(BatchFusion):
                 node.replace_all_uses_with(getitem)
                 getitem.meta.update(node.meta)
                 graph.erase_node(node)
-
 
 
 def find_independent_subset_greedy(
