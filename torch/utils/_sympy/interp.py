@@ -22,7 +22,11 @@ from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv, IsNonOverlappingAndDenseIndicator
+    from torch.fx.experimental.symbolic_shapes import (
+        IsNonOverlappingAndDenseIndicator,
+        Pow,
+        TrueDiv,
+    )
 
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
