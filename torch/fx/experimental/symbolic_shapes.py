@@ -28,6 +28,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
+from torch.fx.experimental._sym_dispatch_mode import handle_sym_dispatch, sym_function_mode
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -66,7 +67,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
+    "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
@@ -90,8 +91,6 @@ def uninteresting_files():
     ]
     return {inspect.getfile(m) for m in mods}
 
-SYM_FUNCTION_MODE = None
-
 # We don't bother with the metaclass as all of the dispatching logic happens
 # entirely from Python
 #
@@ -101,39 +100,6 @@ SYM_FUNCTION_MODE = None
 class ConstraintViolationError(RuntimeError):
     pass
 
-# SymDispatchMode gets invoked whenever an operation is processed on
-# a PySymInt.  When this occurs, you get called at __sym_dispatch__
-# with the operation in question.  This is symmetric to TorchDispatchMode
-# but with some caveats:
-#
-#   - In TorchDispatchMode, you get the same arguments as what a user
-#     invoked your API with; e.g., if you call torch.ops.aten.foo(a, b),
-#     you get (a, b) as args to your call.  In SymDispatchMode, if
-#     you call a + b (where a and b are SymInts), you will get
-#     (a.node, b.node) as your args (these are PySymInts)
-#
-#   - SymInt/PySymInt don't have FX proxy support (unlike, e.g., Tensor).
-#     So you have to manually call Tracer/create_node to write into
-#     the graph.  See ProxySymDispatchMode for an example
-#
-class SymDispatchMode:
-    def __sym_dispatch__(self, func, types, args, kwargs):
-        raise NotImplementedError()
-
-    def __enter__(self):
-        global SYM_FUNCTION_MODE
-        old = SYM_FUNCTION_MODE
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version")
-        else:
-            self.inner = old
-        SYM_FUNCTION_MODE = self
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        global SYM_FUNCTION_MODE
-        SYM_FUNCTION_MODE = self.inner
-
 def has_symbolic_sizes_strides(elem):
     return elem._has_symbolic_sizes_strides
 
@@ -142,18 +108,6 @@ def create_contiguous(shape):
     for dim in reversed(shape[:-1]):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
-
-def _handle_sym_dispatch(func, args, kwargs):
-    global SYM_FUNCTION_MODE
-    mode = SYM_FUNCTION_MODE
-    assert mode
-    SYM_FUNCTION_MODE = mode.inner
-    try:
-        # TODO: properly compute types
-        types: List[Type] = []
-        return mode.__sym_dispatch__(func, types, args, kwargs)
-    finally:
-        SYM_FUNCTION_MODE = mode
 
 def hint_int(a):
     if isinstance(a, torch.SymInt):
@@ -1404,8 +1358,8 @@ def _make_node_magic(method, func):
         if alternate_impl and out_hint is not None:
             return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
 
-        if SYM_FUNCTION_MODE:
-            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
+        if sym_function_mode():
+            return to_node(self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
         # TODO: consider constant prop here
         try:
@@ -1438,8 +1392,8 @@ def _make_node_magic(method, func):
 
     def unary_magic_impl(self):
         op = method_to_operator(method)
-        if SYM_FUNCTION_MODE:
-            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
+        if sym_function_mode():
+            return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
         if method == "floor" or method == "ceiling":
@@ -1472,10 +1426,10 @@ def _make_node_magic(method, func):
 
         def sym_ite_impl(pred_node, then_node, else_node):
             out_hint = then_node.hint if pred_node.hint else else_node.hint
-            if SYM_FUNCTION_MODE:
+            if sym_function_mode():
                 return to_node(
                     pred_node,
-                    _handle_sym_dispatch(
+                    handle_sym_dispatch(
                         sym_ite,
                         (wrap_node(pred_node), wrap_node(then_node), wrap_node(else_node)), {}
                     )
@@ -1506,10 +1460,10 @@ def _make_node_sizes_strides(method, func):
 
     def sizes_strides_impl(self, sizes, strides):
         op = getattr(sys.modules[__name__], method)
-        if SYM_FUNCTION_MODE:
+        if sym_function_mode():
             return to_node(
                 self,
-                _handle_sym_dispatch(
+                handle_sym_dispatch(
                     op,
                     ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
                     {}
