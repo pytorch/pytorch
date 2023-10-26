@@ -205,19 +205,16 @@ _register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
-    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
-    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
-    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     namedtuple,
@@ -225,13 +222,11 @@ _register_pytree_node(
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
-    _register_cxx_pytree_node=False,
 )
 
 
