@@ -352,10 +352,9 @@ def _reshard(
             free_event.record()
             state._free_event_queue.enqueue(free_event)
     handle.post_reshard()
-    # Since we prefetch entire handles keys at a time, conservatively mark
-    # the entire key as no longer prefetched once we free at least one
-    if free_unsharded_flat_param:
-        handle._prefetched = False
+    # Flat parameter freed or not, we always have to "unshard" the parameter
+    # upon next access to get its shape correct.
+    handle._prefetched = False
 
 
 def _unshard_grads(
