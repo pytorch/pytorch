@@ -80,10 +80,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
-  VMAP_SUPPORT2(to, device, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, device)));
-  VMAP_SUPPORT2(to, dtype, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype)));
-  VMAP_SUPPORT2(to, dtype_layout, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype_layout)));
-  VMAP_SUPPORT2(to, other, to_other_batch_rule);
 
   UNARY_POINTWISE(_to_copy);
   UNARY_POINTWISE(alias);

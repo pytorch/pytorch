@@ -1256,7 +1256,7 @@ _DATA_TYPE_FOR_DTYPE = [
     (np.float16, core.DataType.FLOAT16),
     (np.float32, core.DataType.FLOAT),
     (np.float64, core.DataType.DOUBLE),
-    (np.bool, core.DataType.BOOL),
+    (bool, core.DataType.BOOL),
     (np.int8, core.DataType.INT8),
     (np.int16, core.DataType.INT16),
     (np.int32, core.DataType.INT32),
