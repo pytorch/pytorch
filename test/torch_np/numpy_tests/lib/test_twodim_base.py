@@ -8,71 +8,39 @@ import functools
 from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
+
+import torch._numpy as np
 from pytest import raises as assert_raises
 
+from torch._numpy import (
+    arange,
+    array,
+    diag,
+    eye,
+    fliplr,
+    flipud,
+    histogram2d,
+    ones,
+    tri,  # mask_indices,
+    tril_indices,
+    tril_indices_from,
+    triu_indices,
+    triu_indices_from,
+    vander,
+    zeros,
+)
+from torch._numpy.testing import (
+    assert_allclose,
+    assert_array_almost_equal,
+    assert_array_equal,  # assert_array_max_ulp,
+    assert_equal,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
 )
-
-
-# If we are going to trace through these, we should use NumPy
-# If testing on eager mode, we use torch._numpy
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy import (
-        arange,
-        array,
-        diag,
-        eye,
-        fliplr,
-        flipud,
-        histogram2d,
-        ones,
-        tri,  # mask_indices,
-        tril_indices,
-        tril_indices_from,
-        triu_indices,
-        triu_indices_from,
-        vander,
-        zeros,
-    )
-    from numpy.testing import (
-        assert_allclose,
-        assert_array_almost_equal,
-        assert_array_equal,  # assert_array_max_ulp,
-        assert_equal,
-    )
-else:
-    import torch._numpy as np
-    from torch._numpy import (
-        arange,
-        array,
-        diag,
-        eye,
-        fliplr,
-        flipud,
-        histogram2d,
-        ones,
-        tri,  # mask_indices,
-        tril_indices,
-        tril_indices_from,
-        triu_indices,
-        triu_indices_from,
-        vander,
-        zeros,
-    )
-    from torch._numpy.testing import (
-        assert_allclose,
-        assert_array_almost_equal,
-        assert_array_equal,  # assert_array_max_ulp,
-        assert_equal,
-    )
-
 
 skip = functools.partial(skipif, True)
 
@@ -133,7 +101,7 @@ class TestEye(TestCase):
     def test_bool(self):
         assert_equal(eye(2, 2, dtype=bool), [[True, False], [False, True]])
 
-    @xpassIfTorchDynamo  # (reason="TODO: implement order=non-default")
+    @xfail  # (reason="TODO: implement order=non-default")
     def test_order(self):
         mat_c = eye(4, 3, k=-1)
         mat_f = eye(4, 3, k=-1, order="F")
@@ -159,10 +127,9 @@ class TestDiag(TestCase):
         assert_equal(diag(vals, k=2), b)
         assert_equal(diag(vals, k=-2), c)
 
-    def test_matrix(self):
-        self.check_matrix(vals=(100 * get_mat(5) + 1).astype("l"))
-
-    def check_matrix(self, vals):
+    def test_matrix(self, vals=None):
+        if vals is None:
+            vals = (100 * get_mat(5) + 1).astype("l")
         b = zeros((5,))
         for k in range(5):
             b[k] = vals[k, k]
@@ -175,10 +142,10 @@ class TestDiag(TestCase):
             b[k] = vals[k + 2, k]
         assert_equal(diag(vals, -2), b[:3])
 
-    @xpassIfTorchDynamo  # (reason="TODO implement orders")
+    @xfail  # (reason="TODO implement orders")
     def test_fortran_order(self):
         vals = array((100 * get_mat(5) + 1), order="F", dtype="l")
-        self.check_matrix(vals)
+        self.test_matrix(vals)
 
     def test_diag_bounds(self):
         A = [[1, 2], [3, 4], [5, 6]]
@@ -284,7 +251,7 @@ class TestHistogram2d(TestCase):
         # assert_array_max_ulp(a, np.zeros((4, 4)))
         assert_allclose(a, np.zeros((4, 4)), atol=1e-15)
 
-    @xpassIfTorchDynamo  # (reason="pytorch does not support bins = [int, array]")
+    @xfail  # (reason="pytorch does not support bins = [int, array]")
     def test_binparameter_combination(self):
         x = array([0, 0.09207008, 0.64575234, 0.12875982, 0.47390599, 0.59944483, 1])
         y = array([0, 0.14344267, 0.48988575, 0.30558665, 0.44700682, 0.15886423, 1])
@@ -318,7 +285,6 @@ class TestHistogram2d(TestCase):
         assert_array_equal(H, answer)
         assert_array_equal(xe, array([0.0, 0.25, 0.5, 0.75, 1]))
 
-    @skip(reason="NP_VER: fails on CI with older NumPy")
     @parametrize("x_len, y_len", [(10, 11), (20, 19)])
     def test_bad_length(self, x_len, y_len):
         x, y = np.ones(x_len), np.ones(y_len)
@@ -402,7 +368,7 @@ class TestTri(TestCase):
         iu1 = mask_indices(3, np.triu, 1)
         assert_array_equal(a[iu1], array([1, 2, 5]))
 
-    @xpassIfTorchDynamo  # (reason="np.tril_indices == our tuple(tril_indices)")
+    @xfail  # (reason="np.tril_indices == our tuple(tril_indices)")
     def test_tril_indices(self):
         # indices without and with offset
         il1 = tril_indices(4)
@@ -462,7 +428,7 @@ class TestTri(TestCase):
         )
 
 
-@xpassIfTorchDynamo  # (reason="np.triu_indices == our tuple(triu_indices)")
+@xfail  # (reason="np.triu_indices == our tuple(triu_indices)")
 class TestTriuIndices(TestCase):
     def test_triu_indices(self):
         iu1 = triu_indices(4)
