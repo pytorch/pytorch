@@ -1628,7 +1628,10 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto& unsortedOps = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+          if (unsortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
           // Depending on the order of registration, aten or jit ops may be
           // registered first. This sorting is helpful in cases where

@@ -823,6 +823,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)
