@@ -33,7 +33,7 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           set -ex
-          trap 'if [ $? -ne 0 ]; then echo "This PR is not mergable, please rebase and fix merge conflicts"; fi' EXIT
+          git fetch
           python3 .github/scripts/trymerge.py --force --dry-run "${PR_NUM}"
 # We want newer merge commands to supercede old ones
 concurrency:
