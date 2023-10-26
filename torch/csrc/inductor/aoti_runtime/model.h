@@ -15,6 +15,18 @@
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
+// At codegen time, we write out a binary file called constants.bin.
+// We then turn the raw binary to an object file that exposes this
+// symbol and link it into the final .so.
+// For information on the binary format, see `man objcopy`, under
+// the "binary-architecture" flag:
+// https://man7.org/linux/man-pages/man1/objcopy.1.html
+// todo: use #embed in C++ 23 once available
+extern const uint8_t _binary_constants_bin_start[];
+extern const uint8_t _binary_constants_bin_end[];
+
+#define AOTI_CONST_GPU_ALIGNMENT 64
+
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
     bool ok = EXPR;                   \
@@ -44,6 +56,45 @@ AOTI_NOINLINE static void throw_exception(
   if ((call) != AOTI_TORCH_SUCCESS) {           \
     throw_exception(#call, __FILE__, __LINE__); \
   }
+
+namespace {
+
+#ifdef USE_CUDA
+
+using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
+
+CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
+  void* data_ptr;
+  AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
+  return CUDAPtr(data_ptr, deleter);
+}
+
+#endif // USE_CUDA
+
+inline uint8_t* constant_ptr(
+    void* constant_blob,
+    size_t constant_offset,
+    size_t bytes_read,
+    size_t data_size) {
+#ifdef USE_CUDA
+  auto* constants_ptr = static_cast<uint8_t*>(constant_blob);
+  uint8_t* internal_ptr = constants_ptr + constant_offset;
+  // Copy data to GPU memory
+  // TODO: Handle shared storage case.
+  AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+      internal_ptr,
+      _binary_constants_bin_start + bytes_read,
+      data_size,
+      cudaMemcpyHostToDevice));
+  return internal_ptr;
+#else // !USE_CUDA
+  // get pointer to constant which is packed in model during compile time.
+  return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+#endif // USE_CUDA
+}
+
+} // anonymous namespace
 
 using DeleterFnPtr = void (*)(void*);
 
@@ -199,6 +250,83 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+#ifdef USE_CUDA
+  CUDAPtr make_cuda_constant_blob(
+      std::vector<size_t>& constants_internal_offset) {
+    size_t num_constants = this->num_constants();
+    // Compute required blob size with 64-alignment if on GPU.
+    size_t max_blob = 0;
+    for (size_t i = 0; i < num_constants; i++) {
+      size_t data_size = this->constant_data_size(i);
+      if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
+        data_size = AOTI_CONST_GPU_ALIGNMENT +
+            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+      }
+      constants_internal_offset[i] = max_blob;
+      max_blob += data_size;
+    }
+    return RAII_cudaMalloc(max_blob);
+  }
+#endif
+
+  void load_constants(bool is_cpu) {
+    size_t num_constants = this->num_constants();
+    constants_map_->reserve(num_constants);
+
+    std::vector<size_t> constants_internal_offset(num_constants);
+    void* constant_blob = nullptr;
+    if (!is_cpu) {
+#ifdef USE_CUDA
+      constant_blob_ = this->make_cuda_constant_blob(constants_internal_offset);
+      constant_blob = constant_blob_.get();
+#endif
+    }
+
+    size_t bytes_read = 0;
+    for (size_t i = 0; i < num_constants; i++) {
+      std::string name = constant_name(i);
+      size_t data_size = constant_data_size(i);
+      uint8_t* internal_ptr = constant_ptr(
+          constant_blob, constants_internal_offset[i], bytes_read, data_size);
+      bytes_read += data_size;
+
+      // Create at::Tensor from copied memory.
+      auto dtype = constant_type(i);
+      auto ndim = constant_ndim(i);
+      auto size = constant_shape(i);
+      auto stride = constant_stride(i);
+      auto offset = constant_offset(i);
+
+      auto device_type = aoti_torch_device_type_cuda();
+      if (is_cpu) {
+        device_type = aoti_torch_device_type_cpu();
+      }
+
+      AtenTensorHandle tensor_handle;
+      int device_idx = -1; // should be the same as was used for constant_blob_
+#ifdef USE_CUDA
+      AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx));
+#endif // USE_CUDA
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type,
+          device_idx,
+          &tensor_handle));
+      constants_map_->emplace(std::move(name), tensor_handle);
+    }
+  }
+
+#ifdef USE_CUDA
+  CUDAPtr&& release_constant_blob() {
+    return std::move(constant_blob_);
+  }
+#endif
+
   size_t num_inputs() const {
     return inputs_info_.size();
   }
@@ -316,6 +444,11 @@ class AOTInductorModelBase {
 
   std::shared_ptr<ConstantMap> constants_map_;
   std::vector<AtenTensorHandle> constants_;
+
+#ifdef USE_CUDA
+  // Holds the blob storage for constants' at::Tensor for CUDA.
+  CUDAPtr constant_blob_;
+#endif // USE_CUDA
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
