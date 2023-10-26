@@ -51,7 +51,7 @@ from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
-from torch.fx.experimental.symbolic_shapes import definitely_true, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -328,6 +328,7 @@ def get_lock_dir() -> str:
 
 
 def sha256_hash(data: bytes) -> str:
+    # [:51] to strip off the "Q====" suffix common to every hash value.
     return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
 
 
@@ -621,7 +622,9 @@ def compiled_fx_graph_hash(
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    return "f" + FxGraphCachePickler.get_hash(details)
+    key = "f" + FxGraphCachePickler.get_hash(details)
+    log.debug("FX graph cache hash details for key %s:\n%s", key, details.debug_str())
+    return key
 
 
 class FxGraphCache:
@@ -655,11 +658,18 @@ class FxGraphCache:
     # TODO(masnesral): Investigate whether it's beneficial to store compiled graphs
     # in an in-memory cache after loading from disk.
     @staticmethod
-    def _get_subdir(key: str) -> str:
+    def _get_tmp_dir() -> str:
+        """
+        Get the toplevel temporary directory for storing compiled graphs.
+        """
+        return os.path.join(cache_dir(), "fxgraph")
+
+    @staticmethod
+    def _get_tmp_dir_for_key(key: str) -> str:
         """
         Return the disk location for a given cache key.
         """
-        return os.path.join(cache_dir(), key[1:3], key)
+        return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
     def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
@@ -686,17 +696,18 @@ class FxGraphCache:
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
         """
-        subdir = FxGraphCache._get_subdir(key)
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
         if not os.path.exists(subdir):
             return None
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
-        for path in os.listdir(subdir):
+        for path in sorted(os.listdir(subdir)):
             with open(os.path.join(subdir, path), "rb") as f:
                 graph: CompiledFxGraph = pickle.load(f)
 
-            if not graph.guards_expr:
+            guards_expr = graph.guards_expr
+            if not guards_expr:
                 # No guards to evaluate
                 return graph
 
@@ -704,23 +715,28 @@ class FxGraphCache:
             shape_env = FxGraphCache._get_shape_env()
             symints = FxGraphCache._filter_symints(example_inputs)
 
-            # We don't want to create the guards in the current shape env
-            # unless we have a hit.
-            with shape_env.suppress_guards():
-                res = shape_env.evaluate_guards_expression(graph.guards_expr, symints)
-                hit = definitely_true(res)
-
+            # If there's not a cache hit, we don't want the evaluation to
+            # affect the current env, e.g., cause the creation of new guards,
+            # so we evaluate with the hints instead of the symbols.
+            assert all(has_hint(s) for s in symints)
+            hints = [hint_int(s) for s in symints]
+            hit = bool(shape_env.evaluate_guards_expression(guards_expr, hints))
             log.debug(
-                "fx graph evaluating guards for key %s: (%s) = %s",
+                "fx graph cache key %s evaluating guards for %s with values %s => %s",
                 key,
-                graph.guards_expr,
+                guards_expr,
+                hints,
                 hit,
             )
             if hit:
-                # Now re-evaluate to add the guards to the current shape env.
-                # We have to clear the `evaluate_expr` lru_cache to force evaluation.
-                shape_env.evaluate_expr.cache_clear()
-                shape_env.evaluate_guards_expression(graph.guards_expr, symints)
+                # Now re-evaluate with the symints to add any guards to the current env.
+                check = bool(shape_env.evaluate_guards_expression(guards_expr, symints))
+                assert check is True
+                log.debug(
+                    "fx graph cache key %s post-load guards: %s",
+                    key,
+                    shape_env.guards,
+                )
                 return graph
 
         return None
@@ -747,14 +763,14 @@ class FxGraphCache:
 
         content = pickle.dumps(disk_compiled_graph)
 
-        subdir = FxGraphCache._get_subdir(key)
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)
 
         # Use a hash of the serialized CompiledFxGraph to get a unique file
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
-        path = os.path.join(subdir, sha256_hash(content) + ".cg")
+        path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content)
 
     @staticmethod
@@ -787,6 +803,13 @@ class FxGraphCache:
 
             return compiled_graph
 
+    @staticmethod
+    def clear():
+        """
+        Clear out the on-disk cache.
+        """
+        shutil.rmtree(FxGraphCache._get_tmp_dir())
+
 
 @dataclasses.dataclass
 class CompiledFxGraph:
@@ -805,6 +828,11 @@ class CompiledFxGraph:
     mutated_inputs: Set[str] = field(default_factory=set)
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
+    # This is a string representation of an expression we serialize
+    # with the object so the guards can be evaluated in a different
+    # context in order to verify the validity of serving a cached
+    # fx graph. The expression must be generated by:
+    # ShapeEnv.produce_guards_expression()
     guards_expr: Optional[str] = None
 
     _boxed_call: Optional[bool] = None
@@ -925,6 +953,10 @@ def is_gcc() -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
 
 
+def is_clang() -> bool:
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
+
+
 @functools.lru_cache(None)
 def is_apple_clang() -> bool:
     cxx = cpp_compiler()
@@ -954,7 +986,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -1027,7 +1059,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "CPU_CAPABILITY_AVX512"
+    _macro = "-DCPU_CAPABILITY_AVX512"
     _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
@@ -1040,12 +1072,25 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "CPU_CAPABILITY_AVX2"
+    _macro = "-DCPU_CAPABILITY_AVX2"
     _arch_flags = "-mavx2 -mfma"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         return "avx2"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecZVECTOR(VecISA):
+    _bit_width = 256
+    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _arch_flags = "-mvx -mzvector"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "zvector"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -1077,6 +1122,9 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform != "linux":
         return []
 
+    if platform.machine() == "s390x":
+        return [VecZVECTOR()]
+
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
@@ -1087,6 +1135,9 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
+    if config.is_fbcode():
+        return VecAVX2()
+
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
@@ -1120,7 +1171,10 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
+    flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
+    if is_clang():
+        flags.append("-Werror=ignored-optimization-argument")
+    return " ".join(flags)
 
 
 def cpp_wrapper_flags() -> str:
@@ -1212,7 +1266,7 @@ def get_include_and_linking_paths(
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
-) -> Tuple[str, str, str, str]:
+) -> Tuple[List[str], str, str, str, str]:
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -1222,6 +1276,7 @@ def get_include_and_linking_paths(
     from torch.utils import cpp_extension
 
     macros = ""
+    build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
         or vec_isa != invalid_vec_isa
@@ -1235,10 +1290,12 @@ def get_include_and_linking_paths(
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
+
         libs = []
+
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu"]
+            libs += ["torch", "torch_cpu"]
             libs += ["gomp"]
             if not aot_mode:
                 libs += ["torch_python"]
@@ -1271,8 +1328,6 @@ def get_include_and_linking_paths(
                         f"-D HAVE_{cap}_CPU_DEFINITION",
                     ]
                 )
-            else:
-                macros = f"-D{macros}"
 
         if aot_mode and cuda:
             if macros is None:
@@ -1284,6 +1339,7 @@ def get_include_and_linking_paths(
                 libs += ["cuda"]
             else:
                 libs += ["c10_cuda", "cuda", "torch_cuda"]
+        build_arch_flags = vec_isa.build_arch_flags()
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -1335,17 +1391,20 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
+    # Unconditionally import c10 to use TORCH_CHECK - See PyTorch #108690
+    libs += ["c10"]
+    lpaths += [cpp_extension.TORCH_LIB_PATH]
+
     # third party libs
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
-        ipaths.append(build_paths.gcc_include())
+        ipaths.append(build_paths.cc_include())
         ipaths.append(build_paths.libgcc())
         ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.gcc_install_tools_include())
         ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
@@ -1356,10 +1415,9 @@ def get_include_and_linking_paths(
         # For Meta internal cuda-12, it is recommended to static link cudart
         static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
-    ipaths_str = " ".join(["-I" + p for p in ipaths])
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
-    return ipaths_str, lpaths_str, libs_str, macros
+    return ipaths, lpaths_str, libs_str, macros, build_arch_flags
 
 
 def cpp_compile_command(
@@ -1374,11 +1432,12 @@ def cpp_compile_command(
     compile_only: bool = False,
     use_absolute_path: bool = False,
 ) -> str:
-    ipaths, lpaths, libs, macros = get_include_and_linking_paths(
+    ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
     )
     if isinstance(input, str):
         input = [input]
+    ipaths_str = " ".join(["-I" + p for p in ipaths])
     if config.is_fbcode():
         if aot_mode and not use_absolute_path:
             inp_name = input
@@ -1401,7 +1460,8 @@ def cpp_compile_command(
             {cpp_compiler()} {inp_name_str} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {get_glibcxx_abi_build_flags()}
-            {ipaths} {lpaths} {libs} {macros} {linker_paths}
+            {ipaths_str} {lpaths} {libs} {build_arch_flags}
+            {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
@@ -1451,7 +1511,7 @@ class AotCodeCache:
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
-    ) -> Callable[..., Any]:
+    ) -> str:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
@@ -1475,28 +1535,6 @@ class AotCodeCache:
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor.output_path,
-        )
-
-        def _to_bytes(t: torch.Tensor) -> bytes:
-            # This serializes the tensor's untyped_storage to bytes by accessing
-            # the raw data of the underlying structure.
-            import ctypes
-
-            t_cpu = t.untyped_storage().cpu()
-            raw_array = ctypes.cast(
-                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
-            )
-
-            return bytes(raw_array.contents)
-
-        aot_constants = b""
-        for tensor in graph.constants.values():
-            aot_constants += _to_bytes(tensor)
-
-        consts_key, consts_path = write(
-            aot_constants,
-            "bin",
             specified_dir=config.aot_inductor.output_path,
         )
 
@@ -1532,6 +1570,29 @@ class AotCodeCache:
                         os.chmod(output_o, 0o644)
                     else:
                         run_command_and_check(cmd)
+
+                    def _to_bytes(t: torch.Tensor) -> bytes:
+                        # This serializes the tensor's untyped_storage to bytes by accessing
+                        # the raw data of the underlying structure.
+                        import ctypes
+
+                        t_cpu = t.untyped_storage().cpu()
+                        raw_array = ctypes.cast(
+                            t_cpu.data_ptr(),
+                            ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
+                        )
+
+                        return bytes(raw_array.contents)
+
+                    aot_constants = b"".join(
+                        _to_bytes(tensor) for tensor in graph.constants.values()
+                    )
+
+                    consts_key, consts_path = write(
+                        aot_constants,
+                        "bin",
+                        specified_dir=config.aot_inductor.output_path,
+                    )
 
                     consts_o = os.path.splitext(consts_path)[0] + ".o"
                     if fbcode_aot_cpu_re:
@@ -1597,11 +1658,7 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        def wrapper_call(*args) -> Any:
-            assert graph.graph_outputs is not None and len(graph.graph_outputs) > 0
-            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
-
-        return wrapper_call
+        return cls.cache[key]
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -1775,7 +1832,7 @@ class PyCodeCache:
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed to import {path}\n{type(e).__name__}: {e}"
-                    )
+                    ) from None
                 mod = ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key  # type: ignore[attr-defined]
@@ -1850,22 +1907,27 @@ class CppWrapperCodeCache:
                     _opt_flags = optimization_flags()
                     _shared = get_shared()
                     _warning_all_flag = get_warning_all_flag()
-                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
+                    (
+                        _ipaths,
+                        _lpaths,
+                        _libs,
+                        _macros,
+                        _build_arch_flags,
+                    ) = get_include_and_linking_paths(
                         vec_isa=pick_vec_isa(),
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
                     _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
-                    {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_build_arch_flags} {_macros} \
+                    {_cpp_wrapper_flags} {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
                     # For the default python wrapper, the compilation and linking are done in one command thus -ffast-math
                     # will take effect in both compilation and linking.
                     extra_ldflags = f"{_shared} {_lpaths} {_libs} -ffast-math"
-                    extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
@@ -1874,7 +1936,7 @@ class CppWrapperCodeCache:
                         functions=[func_name],
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
-                        extra_include_paths=[extra_include_paths],
+                        extra_include_paths=_ipaths,
                         use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)

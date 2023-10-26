@@ -172,65 +172,35 @@ class TestFxGraphCache(TestCase):
         def fn(x, y):
             return (x + x, y + y)
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, dynamic=True)
 
-        # Mark all tensor arg dimensions as dynamic to cause all shapes
-        # to be symbolic
-        def rand_dynamic(*args):
-            t = torch.rand(*args, device=device, dtype=dtype)
-            for i in range(len(args)):
-                torch._dynamo.mark_dynamic(t, i)
-            return t
+        # Iterate over different shapes, varying whether the total
+        # size is below or above int32. For each combination, we expect
+        # different guards around whether the symbolic sizes do or do
+        # not exceed int32.
+        shapes = (
+            ((5, 6), (7, 8)),
+            ((5, 6), (47000, 47001)),
+            ((47000, 47001), (5, 6)),
+        )
+        for a_shape, b_shape in shapes:
+            a = torch.rand(a_shape, device=device, dtype=dtype)
+            b = torch.rand(b_shape, device=device, dtype=dtype)
 
-        # 1) Both args' shapes are small. We expect guards testing that
-        # both do not exceed int32.
-        a = rand_dynamic(5, 5)
-        b = rand_dynamic(7, 7)
+            # AVOID a dynamo reset here. We expect guards to have been
+            # added that will be violated with the new shape. We should
+            # see a recompilation (along with a cache miss).
+            counters.clear()
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-
-        # A second call should hit.
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-        # 2) One arg's shape is small; the other is large. We expect a
-        # new guard expression that only tests that the first does not
-        # exceed int32.
-        a = rand_dynamic(7, 7)
-        b = rand_dynamic(47000, 47000)
-
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-        # A second call should hit.
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
-
-        # 3) The other arg's shape is large. We expect yet another
-        # guard expression that only tests that the second does not
-        # exceed int32.
-        a = rand_dynamic(47000, 47000)
-        b = rand_dynamic(7, 7)
-
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 3)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 2)
-
-        # A second call should hit.
-        torch._dynamo.reset()
-        self.assertEqual(fn(a, b), compiled_fn(a, b))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 3)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 3)
+            # A second call should hit. (Reset here to force compilation).
+            counters.clear()
+            torch._dynamo.reset()
+            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
 
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
@@ -248,27 +218,64 @@ class TestFxGraphCache(TestCase):
         # See lowering; for all of the pooling operators, we always guard and
         # make the height/width static.
         def fn(x):
-            return torch.nn.functional.adaptive_avg_pool2d(x, [64, 64])
+            return torch.nn.functional.adaptive_avg_pool2d(x, [5, 7])
 
         compiled_fn = torch.compile(fn, dynamic=True)
 
         # Iterate over different input shapes. Each new shape should cause
         # a cache miss.
-        for size in [64, 128, 256]:
-            x = torch.rand([1, 1, size, size], device=device, dtype=dtype)
-            torch._dynamo.reset()
+        shapes = ((1, 64, 8, 9), (1, 64, 9, 10), (1, 64, 10, 11))
+        for shape in shapes:
+            x = torch.rand(shape, device=device, dtype=dtype)
+
+            # AVOID a dynamo reset here. For each cache hit, we expect guards
+            # to have been added that will be violated with each new shape.
+            # We should see a recompilation (along with a cache miss).
+            counters.clear()
             self.assertEqual(fn(x), compiled_fn(x))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             # A second call should hit.
+            counters.clear()
             torch._dynamo.reset()
             self.assertEqual(fn(x), compiled_fn(x))
-            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-            # Reset counters for easier checking on each iterator.
-            counters.clear()
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_clear(self):
+        """
+        Test clearing the cache.
+        """
+
+        def fn(x, y):
+            return (x * y,)
+
+        a = torch.rand(5, 5)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn)
+
+        # A first call shold miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A second call should hit.
+        counters.clear()
+        torch._dynamo.reset()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # Clear the cache; now we should miss.
+        counters.clear()
+        torch._dynamo.reset()
+        torch._inductor.codecache.FxGraphCache.clear()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
 class TestFxGraphCacheHashing(TestCase):

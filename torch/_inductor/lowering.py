@@ -5,13 +5,17 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -44,7 +48,14 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import (
+    ceildiv,
+    decode_device,
+    is_dynamic,
+    is_pointwise_use,
+    pad_listlike,
+    sympy_product,
+)
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -252,7 +263,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...]] = list(args)
+        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -312,19 +323,19 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for a, b in itertools.zip_longest(
+    for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if b == 1:
-            output.append(a)
-        elif a == 1:
-            output.append(b)
+        if y == 1:
+            output.append(x)
+        elif x == 1:
+            output.append(y)
         else:
-            V.graph.sizevars.guard_equals(a, b)
-            if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
-                output.append(b)  # prefer shorter formula
+            V.graph.sizevars.guard_equals(x, y)
+            if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
+                output.append(y)  # prefer shorter formula
             else:
-                output.append(a)
+                output.append(x)
     return tuple(reversed(output))
 
 
@@ -423,13 +434,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -539,6 +543,10 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
 def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    if dtype.is_complex or x.get_dtype().is_complex:
+        return TensorBox.create(
+            ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
+        )
     return to_dtype_bitcast(x, dtype, copy=True)
 
 
@@ -950,6 +958,76 @@ def as_strided_copy(x, size, stride, storage_offset=None):
     return clone(result)
 
 
+def pointwise_cat(inputs, dim=0):
+    # (inclusive, exclusive)
+    inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
+    prev_end = 0
+    for inp in inputs:
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
+        prev_end = inputs_ranges[-1][-1]
+
+    inputs_loaders = [inp.make_loader() for inp in inputs]
+
+    def inner_fn(idx):
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
+
+        masks = []
+        masked_loads = []
+        for i in range(len(inputs)):
+            start = (
+                ops.constant(0, torch.int64)
+                if i == 0
+                else ops.index_expr(inputs_ranges[i][0], torch.int64)
+            )
+            end = ops.index_expr(inputs_ranges[i][1], torch.int64)
+
+            start_cond = ops.ge(idx_dim, start)
+            end_cond = ops.lt(idx_dim, end)
+            if i == 0:
+                mask = end_cond
+            elif i == len(inputs) - 1:
+                mask = start_cond
+            else:
+                mask = ops.and_(start_cond, end_cond)
+
+            masks.append(mask)
+            idx_load = list(idx)
+
+            # if we're concatting [4], [2]
+            # when we index the second tensor for 5 we want to index 5 - 4
+            idx_load[dim] -= inputs_ranges[i][0]
+
+            masked_loads.append(
+                ops.masked(
+                    mask,
+                    lambda: inputs_loaders[i](idx_load),
+                    0.0,  # this value should be unused
+                ),
+            )
+
+        def get_masked_val(i):
+            if i != len(inputs) - 1:
+                return ops.where(
+                    masks[i],
+                    masked_loads[i],
+                    get_masked_val(i + 1),
+                )
+            else:
+                return masked_loads[-1]
+
+        return get_masked_val(0)
+
+    new_size = list(inputs[0].get_size())
+    new_size[dim] = inputs_ranges[-1][-1]
+
+    return Pointwise.create(
+        device=inputs[0].get_device(),
+        dtype=inputs[0].get_dtype(),
+        inner_fn=inner_fn,
+        ranges=new_size,
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     if all(input.get_dtype() is torch.uint8 for input in inputs):
@@ -959,7 +1037,7 @@ def cat(inputs, dim=0):
             input.realize()
         if all(len(input.layout.size) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
-        return fallback_handler(aten.cat)(inputs, dim)
+        return fallback_handler(aten.cat.default)(inputs, dim)
 
     if len(inputs) == 1:
         return clone(inputs[0])
@@ -969,6 +1047,36 @@ def cat(inputs, dim=0):
         *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
+
+    def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+        if isinstance(x, TensorBox):
+            if isinstance(x.data, ir.BaseView):
+                return should_lower_cat_input(x.data.unwrap_view())
+            else:
+                return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.StorageBox):
+            return should_lower_cat_input(x.data)
+
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
+
+    if len(inputs) <= config.max_pointwise_cat_inputs:
+        pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
+        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
+        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+
+        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+            return pointwise_cat(inputs, dim)
+
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
@@ -1498,17 +1606,20 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
+        # Complex views are supported with IR ComplexView
+        if parent and parent.target == torch.ops.aten.view.dtype:
+            return False
         _warn_complex_not_supported()
         return True
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t):
+    if unsupported_input_tensor(t, parent):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1522,7 +1633,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, is_output):
+    def check_skip_condition(node, parent, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
 
@@ -1534,27 +1645,25 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta):
+                if unsupported_output_tensor(meta, parent):
                     return True
             else:
-                if unsupported_input_tensor(meta):
+                if unsupported_input_tensor(meta, parent):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=False):
+        if check_skip_condition(arg, node, is_output=False):
             return True
 
-    return check_skip_condition(node, is_output=True)
+    return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(kernel, layout_constraint=None, warn=True):
-    assert (
-        kernel not in decompositions
-    ), f"both a fallback and a decomp for same kernel: {kernel}"
-    if get_decompositions([kernel]) and warn and bool(os.getenv("CI")):
+def make_fallback(op, layout_constraint=None, warn=True):
+    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -1566,16 +1675,28 @@ def make_fallback(kernel, layout_constraint=None, warn=True):
                 " and suppress_errors is being disabled to surface it."
             )
         raise AssertionError(
-            f"make_fallback({kernel}): a decomposition exists, we should switch to it."
+            f"make_fallback({op}): a decomposition exists, we should switch to it."
             " To fix this error, either add a decomposition to core_aten_decompositions (preferred)"
             " or inductor_decompositions, and delete the corresponding `make_fallback` line."
             " Get help from the inductor team if unsure, don't pick arbitrarily to unblock yourself.",
         )
 
-    add_needs_realized_inputs(kernel)
-    if layout_constraint is not None:
-        add_layout_constraint(kernel, layout_constraint)
-    return register_lowering(kernel, type_promotion_kind=None)(fallback_handler(kernel))
+    def register_fallback(op_overload):
+        add_needs_realized_inputs(op_overload)
+        if layout_constraint is not None:
+            add_layout_constraint(op_overload, layout_constraint)
+        return register_lowering(op_overload, type_promotion_kind=None)(
+            fallback_handler(op_overload)
+        )
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        for ol in op.overloads():
+            op_overload = getattr(op, ol)
+            register_fallback(op_overload)
+    elif isinstance(op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+        register_fallback(op)
+    else:
+        raise RuntimeError(f"Unsupported fallback {op} with type {type(op)}")
 
 
 def philox_rand_offset(shape):
@@ -1633,7 +1754,8 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 def native_dropout(x, p, train):
     if config.fallback_random:
         return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
+            TensorBox.create,
+            ir.FallbackKernel.create(aten.native_dropout.default, x, p, train),
         )
     else:
         raise AssertionError("should be handled in replace_random.py")
@@ -1673,22 +1795,28 @@ def warn_triton_random():
     _warn_triton_random(V.graph.creation_time)
 
 
-fallback_rand = fallback_handler(aten.rand)
-fallback_randn = fallback_handler(aten.randn)
+fallback_rand_default = fallback_handler(aten.rand.default)
+fallback_rand_generator = fallback_handler(aten.rand.generator)
+fallback_randn_default = fallback_handler(aten.randn.default)
+fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_rand(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_rand_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if config.fallback_random or kwargs.get("generator", None) is not None:
-        return fallback_randn(*args, **kwargs)
+    if kwargs.get("generator", None) is not None:
+        return fallback_randn_generator(*args, **kwargs)
+    elif config.fallback_random:
+        return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
 
@@ -1790,7 +1918,7 @@ def bucketize(
     assert len(boundaries.get_size()) == 1
 
     if not (is_triton(input) and is_triton(boundaries)):
-        return fallback_handler(aten.bucketize, add_to_fallback_set=False)(
+        return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
 
@@ -2674,7 +2802,7 @@ def index(x, indices):
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
-        return fallback_handler(aten.index)(x, indices)
+        return fallback_handler(aten.index.Tensor)(x, indices)
 
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
@@ -3464,7 +3592,9 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(aten.max_pool2d_with_indices)
+fallback_max_pool2d_with_indices = fallback_handler(
+    aten.max_pool2d_with_indices.default
+)
 
 
 @register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
@@ -3549,7 +3679,7 @@ def max_pool2d_with_indices(
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
-    aten.max_pool2d_with_indices_backward
+    aten.max_pool2d_with_indices_backward.default
 )
 
 
@@ -3770,7 +3900,7 @@ def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
     return fn_sum
 
 
-fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d)
+fallback_adaptive_avg_pool2d = fallback_handler(aten._adaptive_avg_pool2d.default)
 
 
 @register_lowering(aten._adaptive_avg_pool2d)
@@ -3890,7 +4020,7 @@ def upsample_nearest2d_backward(
     return rv
 
 
-fallback_avg_pool2d = fallback_handler(aten.avg_pool2d)
+fallback_avg_pool2d = fallback_handler(aten.avg_pool2d.default)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -3987,7 +4117,7 @@ def avg_pool2d(
     return rv
 
 
-fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward)
+fallback_avg_pool2d_backward = fallback_handler(aten.avg_pool2d_backward.default)
 
 
 @register_lowering(aten.avg_pool2d_backward, type_promotion_kind=None)
@@ -4198,7 +4328,6 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
             assert len(index) == len(size)
-            assert all(index[i] == 0 for i in reduced_idx)
             index = [index[i] for i in kept_idx]
         assert len(index) == len(kept_idx)
         new_index = [None] * (len(index) + len(reduction_index))
@@ -4235,7 +4364,7 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
             dtype=dtype,
             override_return_dtype=override_return_dtype,
         )
-        result = Reduction.create(reduction_type=reduction_type, **kwargs)
+        result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
             result.data.data, Reduction
         ):  # Only realize if reduction isn't unrolled
@@ -4390,7 +4519,9 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-fallback_pow = fallback_handler(aten.pow)
+fallback_pow_tensor_tensor = fallback_handler(aten.pow.Tensor_Tensor)
+fallback_pow_scalar = fallback_handler(aten.pow.Scalar)
+fallback_pow_tensor_scalar = fallback_handler(aten.pow.Tensor_Scalar)
 
 
 @register_lowering(aten.pow, broadcast=True)
@@ -4431,7 +4562,12 @@ def pow(a, b):
 
     if is_integer_pow:
         # ops.pow doesn't work for integers
-        return fallback_pow(a, b)
+        if isinstance(a, Number):
+            return fallback_pow_scalar(a, b)
+        elif isinstance(b, Number):
+            return fallback_pow_tensor_scalar(a, b)
+        else:
+            return fallback_pow_tensor_tensor(a, b)
 
     return pow_native(a, b)
 
@@ -4736,6 +4872,7 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 register_foreach_pointwise(aten._foreach_mul.List, mul)
 register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
@@ -4847,6 +4984,20 @@ def accumulate_grad_(variable, new_grad):
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
     return variable
+
+
+@register_lowering(triton_kernel_wrapper_mutation)
+def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(triton_kernel_wrapper_functional)
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+    kwargs = {
+        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+    }
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
 
 try:

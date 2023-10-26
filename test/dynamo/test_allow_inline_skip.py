@@ -6,9 +6,9 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dynamo.skipfiles import (
-    FILE_INLINELIST,
     FUNC_INLINELIST,
-    SUBMODULE_INLINELIST,
+    LEGACY_MOD_INLINELIST,
+    MOD_INLINELIST,
 )
 from torch._dynamo.utils import istype
 
@@ -36,7 +36,7 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
     # this unit test is to make sure the functions/modules can be correctly imported
     # or loaded in case there is typo in the strings.
     def test_skipfiles_inlinelist_correctness(self):
-        for m in FILE_INLINELIST.union(SUBMODULE_INLINELIST):
+        for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
             self.assertTrue(isinstance(importlib.import_module(m), types.ModuleType))
         for f in FUNC_INLINELIST:
             module_name, fn_name = f.rsplit(".", 1)
@@ -54,11 +54,9 @@ class AllowInlineSkipTests(torch._dynamo.test_case.TestCase):
         func_inlinelist.add("torch._dynamo.utils.istype")
 
         self.assertTrue(
-            "torch._dynamo.utils" not in torch._dynamo.skipfiles.FILE_INLINELIST
+            "torch._dynamo" not in torch._dynamo.skipfiles.LEGACY_MOD_INLINELIST
         )
-        self.assertTrue(
-            "torch._dynamo" not in torch._dynamo.skipfiles.SUBMODULE_INLINELIST
-        )
+        self.assertTrue("torch._dynamo" not in torch._dynamo.skipfiles.MOD_INLINELIST)
 
         with unittest.mock.patch(
             "torch._dynamo.skipfiles.get_func_inlinelist",
