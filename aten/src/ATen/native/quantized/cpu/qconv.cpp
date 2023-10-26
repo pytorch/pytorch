@@ -1410,7 +1410,7 @@ static at::Tensor _quantized_convolution_onednn(
     // when inv_output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
     // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
     TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, inv_output_scale must be 1.0.");
-    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf 16 output, output_zero_point must be 0");
+    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, output_zero_point must be 0");
   }
 
   int kSpatialDim = act.dim() - 2;
@@ -1423,7 +1423,7 @@ static at::Tensor _quantized_convolution_onednn(
 
   if (has_accum_postop_sum && (fp32_output || bfloat16_output)) {
     TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
-    TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf 16 output, accum_zero_point must be 0");
+    TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, accum_zero_point must be 0");
   }
 
   std::string func_name = "quantized::packed_weights_conv";

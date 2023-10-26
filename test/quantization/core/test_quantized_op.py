@@ -6836,6 +6836,7 @@ class TestQuantizedConv(TestCase):
                 use_channelwise=use_channelwise,
                 X2_zero_point=X2_zero_point,
                 qconv_output_dtype=output_dtype,
+                qconv_x2_dtype=output_dtype,
             )
 
     # Test qconv with post op add relu
