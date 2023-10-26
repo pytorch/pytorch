@@ -938,6 +938,8 @@ coverage_ignore_functions = [
     "sympy_is_channels_last_strides_generic",
     "sympy_is_contiguous",
     "sympy_is_contiguous_generic",
+    "to_node",
+    "wrap_node",
     "sym_sqrt",
     "sym_ite",
     # torch.fx.experimental.symbolic_shapes
@@ -977,8 +979,6 @@ coverage_ignore_functions = [
     "parallel_and",
     "parallel_or",
     "tensor_has_hints",
-    "to_node",
-    "wrap_node",
     # torch.fx.experimental.unification.core
     "reify",
     # torch.fx.experimental.unification.match
