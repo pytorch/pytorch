@@ -3851,7 +3851,7 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: "sympy.Expr"):
+    def size_hint(self, expr: "sympy.Expr", *, allow_none=False):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
@@ -3862,6 +3862,8 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
+            if allow_none:
+                return None
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3947,7 +3949,8 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        # NB: prioritize unbacked symints for solving by ordering them last
+        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):
@@ -4234,9 +4237,9 @@ class ShapeEnv:
 
         self._check_frozen(expr, sympy.true)
 
-        # TODO: eliminate symbols on equality tests
-        # (_maybe_guard_eq assumes everything is hinted so it doesn't work
-        # here)
+        # eliminate symbols on equality tests
+        if isinstance(expr, sympy.Eq):
+            self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
             stack = CapturedTraceback.extract(skip=1)
