@@ -6967,30 +6967,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
 
-    def test_log_softmax_cpu(self, dtype=torch.bfloat16):
-        for dim in [0, 1]:
-            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).detach().requires_grad_(True)
-            outf = F.log_softmax(inputf, dim=dim)
-            out = F.log_softmax(input, dim=dim)
-            self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
-
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
-
-    def test_softmax_cpu(self, dtype=torch.bfloat16):
-        for dim in [0, 1]:
-            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).detach().requires_grad_(True)
-            outf = F.softmax(inputf, dim=dim)
-            out = F.softmax(input, dim=dim)
-            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
-
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
-
     def test_adaptive_log_softmax(self):
         # args validation
         with self.assertRaises(ValueError):
@@ -10222,6 +10198,34 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    def test_log_softmax_cpu(self, device, dtype):
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.log_softmax(inputf, dim=dim)
+            out = F.log_softmax(input, dim=dim)
+            self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    def test_softmax_cpu(self, device, dtype):
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.softmax(inputf, dim=dim)
+            out = F.softmax(input, dim=dim)
+            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
+
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -11473,7 +11477,7 @@ class TestNNDeviceType(NNTestCase):
 
     # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):
@@ -11760,7 +11764,7 @@ class TestNNDeviceType(NNTestCase):
         reductions = ['none', 'sum', 'mean']
         label_smoothings = [0.05, 0.15]
 
-        weight = torch.tensor([0.3, 0.6], device=device)
+        wgt = torch.tensor([0.3, 0.6], device=device)
         inp1 = torch.tensor([[0.3, 0.4], [1, 2]], device=device)
         inp2 = torch.tensor([[0.3, 0.6], [1, 2]], device=device)
 
@@ -11768,7 +11772,7 @@ class TestNNDeviceType(NNTestCase):
         targ_negative_ignore_index = torch.tensor([-2, 1], device=device)
         targ_positive_ignore_index = torch.tensor([2, 1], device=device)
 
-        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, weight)):
+        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, wgt)):
             def check_equal(loss, inp_targ_1, inp_targ_2):
                 inp1, targ1 = inp_targ_1
                 inp2, targ2 = inp_targ_2
