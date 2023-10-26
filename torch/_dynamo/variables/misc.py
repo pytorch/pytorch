@@ -167,16 +167,9 @@ class SuperVariable(VariableTracker):
 
             newval = collections.OrderedDict(self.objvar.items)
             newval[k] = args[1]
-
-            new_rec_contains = self.objvar.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self.objvar,
-                self.objvar.modifed(newval, new_rec_contains, **options),
+                self.objvar.modifed(newval, **options),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
