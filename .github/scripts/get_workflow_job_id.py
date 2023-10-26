@@ -130,6 +130,7 @@ def find_job_id(args: Any) -> str:
 
     for job in jobs:
         if job["runner_name"] == args.runner_name:
+            print(job)
             return job["id"]
 
     raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
