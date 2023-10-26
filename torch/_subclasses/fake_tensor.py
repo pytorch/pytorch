@@ -31,6 +31,7 @@ from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
     free_symbols,
+    is_symbolic,
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -209,6 +210,10 @@ def maybe_get_fake_mode(t):
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
     return None
 
 
@@ -582,7 +587,7 @@ def nonzero(fake_mode, func, arg):
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() >= 2:
+            if arg.numel() > 2:
                 maxval = int(arg.numel())
 
         _constrain_range_for_size(nnz, max=maxval)
@@ -1073,7 +1078,8 @@ class FakeTensor(torch.Tensor):
             init_cuda_context()
 
         if (
-            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            device.type
+            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
             device = torch.device(
@@ -1234,6 +1240,27 @@ class FakeTensor(torch.Tensor):
 
         return common_device, has_scalar_only_inputs
 
+    # We must handle tolist in a special way for FakeTensors here in the case
+    # where tolist is called from torch dispatch for tensor subclasses.
+    # Ordinarily, if a program calls .tolist compiling still works because there is
+    # special handling in dynamo, but for tensor subclasses if .tolist is called
+    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
+    # This would result in an error since wrapper subclasses don't have storage.
+    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
+    # of the tensor to create the output Python list, and (2) creating unbacked
+    # symints for each element of the list.
+    def tolist(self):
+        assert self.dim() == 1 and is_symbolic(self.shape[0])
+        shape_env = self.shape[0].node.shape_env
+        out = []
+        # Specialize on the length of the list
+        for _ in range(self.shape[0]):
+            s = shape_env.create_unbacked_symint()
+            # max value?
+            torch._constrain_as_size(s, min=2)
+            out.append(s)
+        return out
+
     __torch_function__ = torch._C._disabled_torch_function_impl
 
 
@@ -1361,6 +1388,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        elif func is torch.ops.aten.size.default:
+            return tuple(int(s) for s in args[0].size())
+        elif func is torch.ops.aten.stride.default:
+            return tuple(int(s) for s in args[0].stride())
+        elif func is torch.ops.aten.storage_offset.default:
+            return int(args[0].storage_offset())
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(

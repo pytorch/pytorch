@@ -37,7 +37,7 @@ SUPPORTED_QSCHEMES = [
 ]
 
 
-class QuantizationSpecBase(ABC):
+class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
@@ -138,7 +138,9 @@ class QuantizationAnnotation:
     """
 
     # a map from torch.fx.Node to a type of QuantizationSpecBase
-    input_qspec_map: Dict[Node, QuantizationSpecBase] = field(default_factory=dict)
+    input_qspec_map: Dict[Node, Optional[QuantizationSpecBase]] = field(
+        default_factory=dict
+    )
 
     # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR

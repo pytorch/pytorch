@@ -2,7 +2,8 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict, List
+import sys
+from typing import Dict, List, Optional
 
 import torch
 import torch.fx
@@ -12,7 +13,8 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..source import AttrSource, GlobalWeakRefSource
+from ..guards import GuardBuilder
+from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -105,7 +107,6 @@ class ConstDictVariable(VariableTracker):
         elif name == "keys":
             assert not (args or kwargs)
             return SetVariable(
-                tx=tx,
                 items=[
                     ConstDictVariable._key_to_var(
                         tx,
@@ -465,7 +466,7 @@ class CustomizedDictVariable(ConstDictVariable):
     # when is_matching_cls(cls) is true
     @classmethod
     def create(cls, user_cls, args, kwargs, options):
-        # avoid tracing when returnning ModelOutput from forward func
+        # avoid tracing when returning ModelOutput from forward func
         for attr_name in ("__init__", "__post_init__", "__setattr__", "__setitem__"):
             if hasattr(user_cls, attr_name):
                 fn = getattr(user_cls, attr_name)
@@ -587,3 +588,87 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
             self
         )
+
+
+class PythonSysModulesVariable(VariableTracker):
+    """Special case for sys.modules.
+
+    Without this we will guard on the exact set of modules imported in the
+    lifetime of the python program.
+    """
+
+    def python_type(self):
+        return dict
+
+    @staticmethod
+    def reconstruct(self, codegen):
+        codegen.extend_output(
+            [
+                codegen.create_load_python_module(sys, True),
+                codegen.create_load_attr("modules"),
+            ]
+        )
+
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ):
+        from .builder import VariableBuilder
+
+        if name == "__getitem__":
+            return self.call_getitem(tx, *args, **kwargs)
+        elif name == "get":
+            return self.call_get(tx, *args, **kwargs)
+        elif name == "__contains__":
+            return self.call_contains(tx, *args, **kwargs)
+
+        # Fallback to dict implementation
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        real_dict = VariableBuilder(tx, self.source, **options)(sys.modules)
+        return real_dict.call_method(tx, name, args, kwargs)
+
+    def _contains_helper(self, tx, key: VariableTracker):
+        k = ConstDictVariable.get_key(key)
+        has_key = k in sys.modules
+        guard = self.make_guard(
+            functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+        )
+        guards = {*self.guards, guard}
+        return k, has_key, guards
+
+    def call_contains(self, tx, key: VariableTracker):
+        k, has_key, guards = self._contains_helper(tx, key)
+        return ConstantVariable.create(
+            value=has_key,
+            guards=guards,
+        )
+
+    def call_get(
+        self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
+    ):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+
+        if has_key:
+            return VariableBuilder(
+                tx,
+                GetItemSource(self.source, k),
+            )(
+                sys.modules[k]
+            ).add_guards(guards)
+
+        if default is not None:
+            return default.add_guards(guards)
+
+        return ConstantVariable.create(value=None, guards=guards)
+
+    def call_getitem(self, tx, key: VariableTracker):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+        return VariableBuilder(
+            tx,
+            GetItemSource(self.source, k),
+        )(
+            sys.modules[k]
+        ).add_guards(guards)

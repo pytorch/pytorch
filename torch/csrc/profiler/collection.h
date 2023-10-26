@@ -5,6 +5,7 @@
 #include <mutex>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <ATen/Context.h>
 #include <c10/core/Device.h>
@@ -12,7 +13,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/events.h>
@@ -85,7 +85,7 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   c10::optional<AllocationID> allocation_id_;
 };
 
-using op_input_t = c10::variant<
+using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
@@ -114,6 +114,7 @@ struct TorchOpBasicFields {
 using jit_stack_t = std::vector<std::string>;
 using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
+using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
@@ -131,6 +132,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
+      extra_meta_t&& extra_meta,
       FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
       std::unique_ptr<perf_counters_t>&& perf_event_counters)
@@ -142,6 +144,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
+        extra_meta_{std::move(extra_meta)},
         device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
         perf_event_counters_{std::move(perf_event_counters)} {}
@@ -152,6 +155,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
+  extra_meta_t extra_meta_;
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
@@ -345,12 +349,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 
   template <typename T>
   decltype(auto) visit(T&& visitor) {
-    return c10::visit(std::forward<T>(visitor), extra_fields_);
+    return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T>
   decltype(auto) visit(T&& visitor) const {
-    return c10::visit(std::forward<T>(visitor), extra_fields_);
+    return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T, typename Fn>
@@ -379,7 +383,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   int64_t start_time_ns_;
   uint64_t start_tid_;
   kineto::DeviceAndResource kineto_info_;
-  c10::variant<
+  std::variant<
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Vulkan>,
@@ -578,6 +582,9 @@ class TORCH_API ThreadLocalSubqueue {
 
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
+
+    // report extra metadata, i.e. collective communication meta
+    AppendOnlyList<extra_meta_t, BlockSize> extra_meta_;
 
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK

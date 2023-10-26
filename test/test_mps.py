@@ -67,12 +67,8 @@ def mps_ops_grad_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
 
-        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-        'addr': [torch.float16],
-
         # Unimplemented ops
         '__getitem__': [torch.float16],
-        'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
@@ -83,7 +79,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'aminmax': [torch.float32],
+        'aminmax': [torch.float32, torch.float16],
         'polar': [torch.float32],
 
         # Correctness issues
@@ -93,6 +89,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for aten::nextafter is not implemented on CPU
+        'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -169,7 +167,7 @@ def mps_ops_grad_modifier(ops):
         'cumprod': [torch.float32],
     }
 
-    XPASSLIST_GRAD = {
+    SKIPLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
         # failed assertion `destination datatype must be fp32'
         'nn.functional.conv1d': [torch.float16],
@@ -178,6 +176,9 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
+        # Segfaults
+        'all': [torch.float16, torch.float32],
+        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -199,10 +200,10 @@ def mps_ops_grad_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=XFAILLIST_GRAD[key]))
 
-        if key in XPASSLIST_GRAD:
+        if key in SKIPLIST_GRAD:
             addDecorator(op, DecorateInfo(
                          unittest.skip,
-                         dtypes=XPASSLIST_GRAD[key]))
+                         dtypes=SKIPLIST_GRAD[key]))
 
         if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
@@ -236,6 +237,7 @@ def mps_ops_modifier(ops):
         'empty_strided',
         'eye',
         'flatten',
+        'fill',
         'full',
         'imag',
         'isfinite',
@@ -387,6 +389,9 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -434,6 +439,8 @@ def mps_ops_modifier(ops):
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -563,7 +570,6 @@ def mps_ops_modifier(ops):
         'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
-        'nextafter': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
         'nn.functional.fractional_max_pool3d': None,
@@ -590,7 +596,6 @@ def mps_ops_modifier(ops):
         'nn.functional.multilabel_margin_loss': None,
         'nn.functional.pdist': None,
         'nn.functional.rrelu': None,
-        'nn.functional.softshrink': None,
         'nn.functional.norm': None,
         'ormqr': None,
         'pca_lowrank': None,
@@ -717,6 +722,7 @@ def mps_ops_modifier(ops):
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'unravel_index': [torch.int32, torch.int64],
 
         # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
         # the MPS framework doesn't support float64
@@ -741,21 +747,21 @@ def mps_ops_modifier(ops):
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'multinomial': [torch.float32],  # random results
+        'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'randn_like': [torch.float16, torch.float32],
-        'bernoulli': [torch.float32],
+        'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
-        'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32],
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
         'normalin_place': [torch.float16, torch.float32],
         'normalnumber_mean': [torch.float16, torch.float32],
-        'nn.functional.alpha_dropout': [torch.float32],
-        'nn.functional.dropout': [torch.float32],
-        'nn.functional.dropout2d': [torch.float32],
-        'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.alpha_dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout2d': [torch.float16, torch.float32],
+        'nn.functional.dropout3d': [torch.float16, torch.float32],
         'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
@@ -806,6 +812,11 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
+    SKIPLIST = {
+        'all': None,
+        'any': None,
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
@@ -816,6 +827,8 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.skip("Skipping empty ops."),
                          dtypes=EMPTY_OPS_SKIPLIST[key]))
+        if key in SKIPLIST:
+            addDecorator(op, DecorateInfo(unittest.skip("Skipped!"), dtypes=SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -844,6 +857,7 @@ def mps_ops_modifier(ops):
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS:
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
+
         yield op
 
 def mps_ops_error_inputs_modifier(ops):
@@ -10896,7 +10910,7 @@ class TestConsistency(TestCaseMPS):
     # You most likely do NOT want to modify this manually
 
     FP16_LOW_PRECISION_LIST = {
-        'add', 'sub', 'div',
+        'add', 'sub', 'div', 'addcdiv',
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
@@ -10976,7 +10990,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif op.name == "masked.mean":
@@ -10988,6 +11004,12 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
+            elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+                atol = 1.0
+                rtol = 0.0
             else:
                 atol = None
                 rtol = None
@@ -11031,7 +11053,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif (op.name == "masked.mean"):
@@ -11045,6 +11069,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
             else:
                 atol = None
                 rtol = None
@@ -11156,7 +11183,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES:
+        if dtype not in MPS_DTYPES + [torch.complex64]:
             with self.assertRaises(TypeError):
                 ones(device)
         else:

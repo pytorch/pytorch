@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-static Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
+Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -21,6 +21,11 @@ static Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
       inferred_size,
       self_arg.scalar_type(),
   };
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
 
   api::StorageBuffer buffer(context, at::kFloat, v_self.gpu_numel(), true);
 
@@ -46,7 +51,7 @@ inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 
-static Tensor _reshape_alias(
+Tensor _reshape_alias(
     const Tensor& self_arg,
     const IntArrayRef shape,
     const IntArrayRef strides) {

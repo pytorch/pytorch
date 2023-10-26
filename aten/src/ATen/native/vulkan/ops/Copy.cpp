@@ -121,7 +121,7 @@ void transfer_vulkan_to_cpu(vTensor& v_src, Tensor& dst) {
   dst = utils::nc4hw_to_nchw(dst_tmp, v_src.sizes()).to(v_src.dtype());
 }
 
-static void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
+void transfer_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
   api::PipelineBarrier pipeline_barrier{};
@@ -195,10 +195,14 @@ void pack_vulkan_to_cpu(vTensor& src, Tensor& dst) {
     // cmd_mutex_ must be manually managed by the calling thread.
     std::unique_lock<std::mutex> context_lock(context->dispatch_lock());
 
-    utils::pack_vtensor_to_staging(
+    bool submitted_to_gpu = utils::pack_vtensor_to_staging(
         src, staging.buffer(), fence.get_submit_handle());
 
-    fence.wait();
+    // Only wait on the fence if work was actually submitted to the GPU.
+    // Otherwise, it will hang indefinitely.
+    if (submitted_to_gpu) {
+      fence.wait();
+    }
 
     context->flush();
     // cmd_mutex_ will be released when exiting this scope.

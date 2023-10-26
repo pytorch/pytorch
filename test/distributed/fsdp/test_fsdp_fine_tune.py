@@ -151,6 +151,84 @@ class TestFSDPFineTune(FSDPTest):
                     _assert_post_backward_reshard_count(step_idx, num_steps)
                     post_backward_reshard_count = 0
 
+    def _init_multi_traversal_module(self) -> nn.Module:
+        torch.manual_seed(42)
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer_0 = nn.Linear(5, 5, device="cuda")
+                self.layer_no_grad = nn.Linear(5, 5, device="cuda")
+                self.layer_with_grad = nn.Linear(5, 5, device="cuda")
+                self.layer_no_grad.requires_grad_(False)
+
+            def forward(self, x):
+                # Layer `layer_no_grad` and `layer_with_grad` are called
+                # multiple times, IOW, their parameters are used multiple times
+                # during forward pass.
+                x = self.layer_0(x)
+                for _ in range(10):
+                    x = self.layer_no_grad(self.layer_with_grad(x))
+                    # Make sure calling the same layer multiple times works
+                    # regardless whether gradient is enabled.
+                    with torch.no_grad():
+                        x += self.layer_with_grad(x)
+                return x
+
+        return TestModule()
+
+    @skip_if_lt_x_gpu(2)
+    def test_hooks_multi_traversal(self):
+        """
+        Tests that the hooks do reshard / unshard correctly in the case of same
+        parameters being used mutliple times during forward pass.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                    ShardingStrategy.NO_SHARD,
+                ],
+                "use_orig_params": [False, True],
+                "inp_requires_grad": [False, True],
+                "forward_prefetch": [False, True],
+            },
+            self._test_hooks_multi_traversal,
+        )
+
+    def _test_hooks_multi_traversal(
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        inp_requires_grad: bool,
+        forward_prefetch: bool,
+    ):
+        seq = self._init_multi_traversal_module()
+        policy = ModuleWrapPolicy({nn.Linear})
+        fsdp_seq = FSDP(
+            copy.deepcopy(seq),
+            auto_wrap_policy=policy,
+            sharding_strategy=sharding_strategy,
+            use_orig_params=use_orig_params,
+            forward_prefetch=forward_prefetch,
+        )
+        ddp_seq = DDP(copy.deepcopy(seq), device_ids=[self.rank])
+        fsdp_optim = torch.optim.Adam(fsdp_seq.parameters(), lr=1e-2)
+        ddp_optim = torch.optim.Adam(ddp_seq.parameters(), lr=1e-2)
+        torch.manual_seed(self.rank + 1)
+        losses = []
+        for _ in range(6):
+            inp = torch.randn((8, 5), device="cuda", requires_grad=inp_requires_grad)
+            for seq, optim in ((fsdp_seq, fsdp_optim), (ddp_seq, ddp_optim)):
+                loss = seq(inp).sum()
+                losses.append(loss)
+                loss.backward()
+                optim.step()
+                optim.zero_grad()
+            torch.testing.assert_close(losses[0], losses[1])
+            losses.clear()
+
     @skip_if_lt_x_gpu(2)
     def test_parity_with_ddp(self):
         """

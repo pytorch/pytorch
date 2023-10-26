@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -11,7 +12,7 @@
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <torch/csrc/inductor/aoti_runtime/cuda_utils.h>
+#include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
@@ -22,11 +23,26 @@
     }                                 \
   } while (0)
 
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
-  if ((call) != AOTI_TORCH_SUCCESS) {                                      \
-    throw std::runtime_error(                                              \
-        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
-        std::to_string(__LINE__));                                         \
+#if defined(__GNUC__) || defined(__clang__)
+#define AOTI_NOINLINE __attribute__((noinline))
+#elif _MSC_VER
+#define AOTI_NOINLINE __declspec(noinline)
+#else
+#define AOTI_NOINLINE
+#endif
+
+AOTI_NOINLINE static void throw_exception(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  std::stringstream ss;
+  ss << call << " API call failed at " << file << ", line " << line;
+  throw std::runtime_error(ss.str());
+}
+
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
+  if ((call) != AOTI_TORCH_SUCCESS) {           \
+    throw_exception(#call, __FILE__, __LINE__); \
   }
 
 using DeleterFnPtr = void (*)(void*);
@@ -76,6 +92,26 @@ class RAIIAtenTensorHandle {
     handle_.reset();
   }
 
+  int64_t size(int64_t d) {
+    int64_t size;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_size(handle_.get(), d, &size));
+    return size;
+  }
+
+  int64_t stride(int64_t d) {
+    int64_t stride;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_stride(handle_.get(), d, &stride));
+    return stride;
+  }
+
+  int64_t storage_offset() {
+    int64_t storage_offset;
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(handle_.get(), &storage_offset));
+    return storage_offset;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -83,13 +119,13 @@ class RAIIAtenTensorHandle {
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
-std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
+inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
     size_t size) {
   std::vector<RAIIAtenTensorHandle> result;
   result.reserve(size);
   for (size_t i = 0; i < size; i++) {
-    result.push_back(std::move(RAIIAtenTensorHandle(handles[i])));
+    result.emplace_back(handles[i]);
     handles[i] = nullptr;
   }
   return result;
@@ -99,8 +135,7 @@ std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
 // AOTInductor cpp codegen. Since we do not need dynamic dispatch, we rely
 // on curiously recurring template pattern (CRTP) to save some runtime
 // v-table overhead. The generated AOTInductorModel is specialized with
-// methods such as run_impl and members like shape params used for dynamic
-// shape cases.
+// methods such as run_impl.
 template <typename Model>
 class AOTInductorModelBase {
  public:
@@ -112,11 +147,15 @@ class AOTInductorModelBase {
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
-        cubin_dir_(cubin_dir) {
-    AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
+        cubin_dir_(cubin_dir),
+        device_idx_(-1) {
+#ifdef USE_CUDA
+    AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+#endif // USE_CUDA
   }
 
   ~AOTInductorModelBase() {
+#ifdef USE_CUDA
     if (run_finished_) {
       auto code = cudaEventDestroy(*run_finished_);
       if (code != cudaSuccess) {
@@ -124,6 +163,7 @@ class AOTInductorModelBase {
                   << cudaGetErrorString(code) << std::endl;
       }
     }
+#endif // USE_CUDA
   }
 
   AOTInductorModelBase(AOTInductorModelBase&&) = delete;
@@ -139,17 +179,24 @@ class AOTInductorModelBase {
           output_handles, // array for writing output AtenTensorHandle; handles
                           // will be stolen by the caller; the array itself is
                           // borrowed
-      cudaStream_t stream,
+      DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor) {
+#ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished;
-      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 
     auto* model = static_cast<Model*>(this);
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+#else // !USE_CUDA
+    run_finished_ = false;
+    auto* model = static_cast<Model*>(this);
+    model->run_impl(input_handles, output_handles, stream, proxy_executor);
+    run_finished_ = true;
+#endif // USE_CUDA
   }
 
   size_t num_inputs() const {
@@ -172,24 +219,8 @@ class AOTInductorModelBase {
     return outputs_info_.at(idx).name;
   }
 
-  const char* get_input_dtype(int64_t idx) const {
-    return inputs_info_.at(idx).dtype;
-  }
-
-  const char* get_output_dtype(int64_t idx) const {
-    return outputs_info_.at(idx).dtype;
-  }
-
   const char* constant_name(int64_t idx) const {
     return constants_info_.at(idx).name;
-  }
-
-  std::vector<int64_t> max_input_shape(int64_t idx) const {
-    return max_shape(inputs_info_, idx);
-  }
-
-  std::vector<int64_t> max_output_shape(int64_t idx) const {
-    return max_shape(outputs_info_, idx);
   }
 
   size_t constant_ndim(int64_t idx) {
@@ -216,16 +247,25 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
-  std::vector<int64_t> input_shape(int64_t idx) const {
-    return shape(inputs_info_, idx);
-  }
-
-  std::vector<int64_t> output_shape(int64_t idx) const {
-    return shape(outputs_info_, idx);
+  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
+    constants_map_ = std::move(constants_map);
+    if (!constants_map_) {
+      return;
+    }
+    constants_.resize(constants_info_.size());
+    int idx = 0;
+    for (const auto& info : constants_info_) {
+      const auto it = constants_map_->find(info.name);
+      if (it != constants_map_->end()) {
+        constants_[idx] = it->second;
+      }
+      idx++;
+    }
   }
 
   /// Returns true if the model is complete.
   bool is_finished() {
+#ifdef USE_CUDA
     if (!run_finished_) {
       throw std::runtime_error{"Model CUDA event was not initialized"};
     }
@@ -240,114 +280,25 @@ class AOTInductorModelBase {
     throw std::runtime_error(
         std::string("The model did not finish successfully. Error: ") +
         cudaGetErrorString(cudaGetLastError()));
+#else // !USE_CUDA
+    return run_finished_;
+#endif // USE_CUDA
   }
 
   /// Synchronizes completion event.
   void wait_for_completion() {
+#ifdef USE_CUDA
     if (!run_finished_) {
-      throw std::runtime_error{"Model CUDA event was not initialized"};
+      throw std::runtime_error{"Model event was not initialized"};
     }
 
-    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
+    AOTI_RUNTIME_DEVICE_CHECK(cudaEventSynchronize(*run_finished_));
+#endif // USE_CUDA
   }
 
  protected:
-  class DimInfo {
-   public:
-    virtual int64_t value() const = 0;
-    virtual void set_value(int64_t val) = 0;
-    virtual int64_t lower_bound() const = 0;
-    virtual int64_t upper_bound() const = 0;
-    virtual ~DimInfo() {}
-  };
-
-  class StaticDimInfo : public DimInfo {
-   public:
-    StaticDimInfo(int64_t val) : value_(val) {}
-
-    int64_t value() const {
-      return value_;
-    }
-
-    void set_value(int64_t val) {
-      throw std::runtime_error("cannot change the value of a StaticDim");
-    }
-
-    int64_t lower_bound() const {
-      return value_;
-    }
-
-    int64_t upper_bound() const {
-      return value_;
-    }
-
-   private:
-    const int64_t value_;
-  };
-
-  class DynamicDimInfo : public DimInfo {
-   public:
-    DynamicDimInfo(const char* name, int64_t lb, int64_t ub)
-        : name_(name), lower_bound_(lb), upper_bound_(ub), value_(-1) {}
-
-    void set_value(int64_t val) {
-      if (val != 1 && (val < lower_bound_ || val > upper_bound_)) {
-        throw std::runtime_error(
-            std::string(
-                "dim value out of bounds: expected value to be between (") +
-            std::to_string(lower_bound_) + ", " + std::to_string(upper_bound_) +
-            "), but got " + std::to_string(val));
-      }
-      value_ = val;
-    }
-
-    int64_t value() const {
-      return value_;
-    }
-
-    int64_t lower_bound() const {
-      return lower_bound_;
-    }
-
-    int64_t upper_bound() const {
-      return upper_bound_;
-    }
-
-   private:
-    const std::string name_;
-    const int64_t lower_bound_;
-    const int64_t upper_bound_;
-    int64_t value_;
-  };
-
-  DynamicDimInfo* find_dynamic_dim(const char* name) {
-    auto iter = dynamic_dims_.find(name);
-    if (iter == dynamic_dims_.end()) {
-      throw std::runtime_error(
-          std::string("dynamic_dim `") + name + "` does not exist");
-    }
-    return iter->second.get();
-  }
-
-  DynamicDimInfo* make_dynamic_dim(const char* name, int64_t lb, int64_t ub) {
-    if (dynamic_dims_.find(name) != dynamic_dims_.end()) {
-      throw std::runtime_error(
-          std::string("dynamic_dim `") + name + "` already exists");
-    }
-    auto iter = dynamic_dims_.emplace(
-        name, std::make_unique<DynamicDimInfo>(name, lb, ub));
-    return (iter.first->second).get();
-  }
-
-  StaticDimInfo* make_static_dim(int64_t val) {
-    static_dims_.push_back(std::make_unique<StaticDimInfo>(val));
-    return static_dims_.back().get();
-  }
-
   struct ParamInfo {
     const char* name = nullptr;
-    const char* dtype = nullptr;
-    std::vector<DimInfo*> shape;
   };
 
   struct ConstInfo {
@@ -363,48 +314,28 @@ class AOTInductorModelBase {
   std::vector<ParamInfo> outputs_info_;
   std::vector<ConstInfo> constants_info_;
 
-  std::shared_ptr<ConstantMap> constants_;
+  std::shared_ptr<ConstantMap> constants_map_;
+  std::vector<AtenTensorHandle> constants_;
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
+#ifdef USE_CUDA
   std::optional<cudaEvent_t> run_finished_;
+#else // !USE_CUDA
+  bool run_finished_;
+#endif
 
   // Generated model uses this device index to create CUDA guards.
   int device_idx_;
+};
 
- protected:
-  std::vector<std::unique_ptr<StaticDimInfo>> static_dims_;
-  // A map from dynamic symbol names to their dim info
-  std::unordered_map<std::string, std::unique_ptr<DynamicDimInfo>>
-      dynamic_dims_;
-
- private:
-  std::vector<int64_t> shape(
-      const std::vector<ParamInfo>& params,
-      int64_t idx,
-      bool max = false) const {
-    std::vector<int64_t> shape;
-    const ParamInfo& param = params.at(idx);
-    auto rank = param.shape.size();
-    shape.reserve(rank);
-    for (size_t i = 0; i < rank; i++) {
-      if (max) {
-        shape.push_back(param.shape[i]->upper_bound());
-      } else {
-        shape.push_back(param.shape[i]->value());
-      }
-    }
-    return shape;
-  }
-
-  std::vector<int64_t> max_shape(
-      const std::vector<ParamInfo>& params,
-      int64_t idx) const {
-    return shape(params, idx, /*max=*/true);
-  }
+// Codegen-ed classes can derive from this to keep pointers to loaded kernels.
+class AOTInductorModelKernelsBase {
+ public:
+  virtual ~AOTInductorModelKernelsBase() = default;
 };
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
@@ -419,16 +350,20 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
           output_handles, // array for writing output AtenTensorHandle; handles
                           // will be stolen by the caller; the array itself is
                           // borrowed
-      cudaStream_t stream,
+      DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
       std::optional<std::string> cubin_dir) {
-    return std::make_unique<AOTInductorModel>(constants, cubin_dir);
+    return std::make_unique<AOTInductorModel>(std::move(constants), cubin_dir);
   }
+
+ private:
+  std::unique_ptr<AOTInductorModelKernelsBase> kernels_;
 };
 
+#ifdef USE_CUDA
 class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
@@ -445,6 +380,7 @@ class AOTICudaStreamGuard {
  private:
   std::unique_ptr<void, std::function<void(void*)>> guard_;
 };
+#endif // USE_CUDA
 
 } // namespace aot_inductor
 } // namespace torch
