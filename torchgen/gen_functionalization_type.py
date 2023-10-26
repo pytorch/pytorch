@@ -629,7 +629,7 @@ def emit_inplace_functionalization_body(
       if ({str(not any_storage_args and f.func.kind() == SchemaKind.inplace).lower()}) {{
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
-        // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        // (We can only do this for inplace ops today though, because they technically all support meta tensors).
         {meta_conversion_str}
         at::AutoDispatchSkipFunctionalize func_guard;
         c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
@@ -731,7 +731,7 @@ def gen_functionalization_registration(
             # See Note [resize_ in Functionalization]
             return []
         assert not f.is_view_op
-        # functionalization needs to generate and register kernals for inplace ops.
+        # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
         if modifies_arguments(f):

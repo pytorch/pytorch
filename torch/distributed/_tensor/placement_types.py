@@ -419,6 +419,22 @@ class DTensorSpec:
             and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
         )
 
+    def __str__(self) -> str:
+        """
+        human readable representation of the DTensorSpec
+        """
+        if len(self.placements) == 1:
+            placement_str = str(self.placements[0])
+        else:
+            placement_str = str(self.placements)
+
+        if self.tensor_meta is not None:
+            tensor_shape = str(tuple(self.tensor_meta.shape))
+        else:
+            tensor_shape = "unknown shape"
+
+        return f"Spec({placement_str} on {tensor_shape})"
+
     @property
     def shape(self) -> torch.Size:
         if self.tensor_meta is None:
@@ -533,3 +549,9 @@ class DTensorSpec:
                 placements[m] = Shard(i)
 
         return cls(mesh, tuple(placements), tensor_meta=tensor_meta)
+
+    def is_replicated(self):
+        """
+        return True if the current DTensorSpec replicates on all mesh dims (devices)
+        """
+        return all(placement.is_replicate() for placement in self.placements)

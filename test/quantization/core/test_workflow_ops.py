@@ -364,8 +364,8 @@ class TestFakeQuantizeOps(TestCase):
     def _test_backward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64)
         torch_types = (torch.qint8, torch.quint8)
-        tensor_qparam = (True, False)
-        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparam):
+        tensor_qparams = (True, False)
+        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparams):
             X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
