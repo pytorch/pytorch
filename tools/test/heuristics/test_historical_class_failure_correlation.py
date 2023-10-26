@@ -10,20 +10,13 @@ try:
     sys.path.append(str(REPO_ROOT))
 
     from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
-    from tools.testing.target_determination.determinator import (
-        AggregatedHeuristics,
-        get_test_prioritizations,
-        TestPrioritizations,
-    )
-    from tools.testing.target_determination.heuristics import HEURISTICS
+    from tools.testing.target_determination.determinator import TestPrioritizations
     from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
         HistoricalClassFailurCorrelation,
     )
-    from tools.testing.test_run import TestRun, TestRuns
 
 except ModuleNotFoundError as e:
     print("Can't import required modules, exiting")
-    print(e)
     sys.exit(1)
 
 HEURISTIC_CLASS = "tools.testing.target_determination.heuristics.historical_class_failure_correlation."
@@ -85,18 +78,13 @@ class TestHistoricalClassFailureCorrelation(HeuristicsTestMixin):
 
         expected = TestPrioritizations(
             tests_being_ranked=tests_to_prioritize,
-            probable_relevance=[test for test in historical_class_failures["file1"].keys()]
+            probable_relevance=list(historical_class_failures["file1"].keys()),
         )
 
-        print(expected.get_unranked_relevance_tests())
-
-        self.assert_heuristics_match(
+        self.assertHeuristicsMatch(
             test_prioritizations,
-            expected_high_tests=expected.get_high_relevance_tests(),
-            expected_probable_tests=expected.get_probable_relevance_tests(),
-            expected_unranked_tests=expected.get_unranked_relevance_tests(),
+            expected_prioritizations=expected,
         )
-
 
 
 if __name__ == "__main__":

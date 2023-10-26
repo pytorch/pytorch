@@ -21,7 +21,7 @@ try:
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
         _get_previously_failing_tests,
     )
-    from tools.testing.test_run import TestRun, TestRuns
+    from tools.testing.test_run import TestRun
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
@@ -98,11 +98,8 @@ class TestParsePrevTests(HeuristicsTestMixin):
             tests
         ).get_aggregated_priorities()
 
-        self.assert_heuristics_match(
-            test_prioritizations,
-            expected_high_tests=expected_prioritizations.get_high_relevance_tests(),
-            expected_probable_tests=expected_prioritizations.get_probable_relevance_tests(),
-            expected_unranked_tests=expected_prioritizations.get_unranked_relevance_tests(),
+        self.assertHeuristicsMatch(
+            test_prioritizations, expected_prioritizations=expected_prioritizations
         )
 
 
@@ -125,7 +122,7 @@ class TestInterface(HeuristicsTestMixin):
             TestRun("test5"),
         )
 
-        self.assert_heuristics_match(
+        self.assertHeuristicsMatch(
             prioritizations,
             expected_probable_tests=expected_probable_tests,
             expected_unranked_tests=expected_unranked_tests,
@@ -168,7 +165,7 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
         print("Aggregated Heuristics")
         aggregated_pris = aggregator.get_aggregated_priorities()
 
-        self.assert_heuristics_match(
+        self.assertHeuristicsMatch(
             aggregated_pris,
             expected_high_tests=expected_high_relevance,
             expected_probable_tests=expected_probable_relevance,
@@ -205,7 +202,7 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
 
         aggregated_pris = aggregator.get_aggregated_priorities()
 
-        self.assert_heuristics_match(
+        self.assertHeuristicsMatch(
             aggregated_pris,
             expected_high_tests=expected_aggregated_high_relevance,
             expected_probable_tests=expected_aggregated_probable_relevance,
