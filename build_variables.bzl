@@ -484,7 +484,9 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
+    "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/GroupRegistry.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -1287,6 +1289,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/PointwiseOps.cpp",
     "aten/src/ATen/native/Pooling.cpp",
     "aten/src/ATen/native/Pow.cpp",
+    "aten/src/ATen/native/QuantizedLinear.cpp",
     "aten/src/ATen/native/RNN.cpp",
     "aten/src/ATen/native/RangeFactories.cpp",
     "aten/src/ATen/native/ReduceAllOps.cpp",

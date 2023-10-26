@@ -761,6 +761,10 @@ def is_gcc() -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
 
 
+def is_clang() -> bool:
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
+
+
 @functools.lru_cache(None)
 def is_apple_clang() -> bool:
     cxx = cpp_compiler()
@@ -939,6 +943,9 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
+    if config.is_fbcode():
+        return VecAVX2()
+
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
@@ -972,7 +979,10 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
+    flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
+    if is_clang():
+        flags.append("-Werror=ignored-optimization-argument")
+    return " ".join(flags)
 
 
 def cpp_wrapper_flags() -> str:
@@ -1088,10 +1098,12 @@ def get_include_and_linking_paths(
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
+
         libs = []
+
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu"]
+            libs += ["torch", "torch_cpu"]
             libs += ["gomp"]
             if not aot_mode:
                 libs += ["torch_python"]
@@ -1187,17 +1199,20 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
+    # Unconditionally import c10 to use TORCH_CHECK - See PyTorch #108690
+    libs += ["c10"]
+    lpaths += [cpp_extension.TORCH_LIB_PATH]
+
     # third party libs
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
-        ipaths.append(build_paths.gcc_include())
+        ipaths.append(build_paths.cc_include())
         ipaths.append(build_paths.libgcc())
         ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.gcc_install_tools_include())
         ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
