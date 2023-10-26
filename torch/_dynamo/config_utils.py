@@ -183,9 +183,11 @@ class ConfigModule(ModuleType):
     def shallow_copy_dict(self):
         return {**self._config}
 
-    def load_config(self, data):
-        """Restore from a prior call to save_config()"""
-        self._config.update(pickle.loads(data))
+    def load_config(self, config):
+        """Restore from a prior call to save_config() or shallow_copy_dict()"""
+        if not isinstance(config, dict):
+            config = pickle.loads(config)
+        self._config.update(config)
 
     def get_config_copy(self):
         return copy.deepcopy(self._config)
