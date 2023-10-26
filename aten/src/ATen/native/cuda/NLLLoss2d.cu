@@ -319,9 +319,9 @@ void nll_loss2d_forward_out_cuda_template(
       "nll_loss2d_forward_kernel",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
-	AT_DISPATCH_INDEX_TYPES(
-	    at::native::canUse32BitIndexMath(input_, INT_MAX) ? ScalarType::Int : ScalarType::Long,
-	    "nll_loss2d_forward_launcher", [&] {
+    AT_DISPATCH_INDEX_TYPES(
+        at::native::canUse32BitIndexMath(input_, INT_MAX) ? ScalarType::Int : ScalarType::Long,
+        "nll_loss2d_forward_launcher", [&] {
             nll_loss2d_forward_kernel<scalar_t, accscalar_t, index_t>
                 <<<total_blocks,
                   CUDA_NUM_THREADS,
@@ -345,7 +345,7 @@ void nll_loss2d_forward_out_cuda_template(
                       total_weight.const_data_ptr<scalar_t>());
               C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
-	});
+    });
       });
 }
 

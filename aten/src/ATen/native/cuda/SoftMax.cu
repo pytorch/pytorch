@@ -794,7 +794,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
         using accscalar_t = acc_type<scalar_t, true>;
         AT_DISPATCH_INDEX_TYPES(
             at::native::canUse32BitIndexMath(input, INT_MAX) ? ScalarType::Int : ScalarType::Long,
-	    "host_softmax_launcher", [&] {
+        "host_softmax_launcher", [&] {
             if (!half_to_float) {
                 SpatialSoftMax_getLaunchSizes<accscalar_t>(
                     &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, index_t, Epilogue>,
