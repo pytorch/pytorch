@@ -1,0 +1,53 @@
+name: Validate and check if PR is mergable
+
+on:
+  repository_dispatch:
+    types: [try-merge]
+  pull_request:
+
+jobs:
+  do_merge:
+    name: try_merge_pr_${{ github.event.client_payload.pr_num }}
+    runs-on: linux.20_04.4x
+    environment: mergebot
+    env:
+        GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Checkout repo
+        id: checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          check-latest: false
+          cache: pip
+          architecture: x64
+      - run: pip install pyyaml==6.0 rockset==1.0.3
+
+      - name: Dry Run Merge PR
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PR_NUM: ${{ github.event.client_payload.pr_num }}
+          REBASE: ${{ github.event.client_payload.rebase }}
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+        run: |
+          set -ex
+          trap 'if [ $? -ne 0 ]; then echo "This PR is not mergable, please rebase and fix merge conflicts"; fi' EXIT
+          if [ -n "${REBASE}" ]; then
+            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
+            git checkout main
+            git fetch -p
+            # give github some time between the push and start workflows so that Github's messages
+            # on the PR appear in chronological order (timing issues can shuffle them around)
+            sleep 60
+          fi
+          python3 .github/scripts/trymerge.py --force --dry-run "${PR_NUM}"
+# We want newer merge commands to supercede old ones
+concurrency:
+  group: try-merge-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true

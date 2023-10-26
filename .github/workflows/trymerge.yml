@@ -3,7 +3,6 @@ name: Validate and merge PR
 on:
   repository_dispatch:
     types: [try-merge]
-  pull_request:
 
 jobs:
   do_merge:
@@ -34,7 +33,6 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
       - name: Merge PR
-        if : github.event_name == 'repository_dispatch'
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
@@ -72,7 +70,7 @@ jobs:
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
       - name: Comment on Canceled
-        if: ${{ cancelled() && steps.checkout.outcome == 'success' && github.event_name == 'repository_dispatch' }}
+        if: ${{ cancelled() && steps.checkout.outcome == 'success' }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
@@ -80,27 +78,7 @@ jobs:
         run: |
           set -ex
           python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
-      - name: Dry Run Merge PR
-        if: github.event_name == 'pull_request'
-        env:
-          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-          PR_NUM: ${{ github.event.client_payload.pr_num }}
-          FORCE: ${{ github.event.client_payload.force}}
-          REBASE: ${{ github.event.client_payload.rebase }}
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-          DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
-        run: |
-          set -ex
-          trap 'if [ $? -ne 0 ]; then echo "This PR is not mergable, please rebase and fix merge conflicts"; fi' EXIT
-          if [ -n "${REBASE}" ]; then
-            python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
-            git checkout main
-            git fetch -p
-            # give github some time between the push and start workflows so that Github's messages
-            # on the PR appear in chronological order (timing issues can shuffle them around)
-            sleep 60
-          fi
-          python3 .github/scripts/trymerge.py --force --dry-run "${PR_NUM}"
+
 # We want newer merge commands to supercede old ones
 concurrency:
   group: try-merge-${{ github.event.client_payload.pr_num }}
