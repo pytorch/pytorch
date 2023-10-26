@@ -245,7 +245,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
             assert_equal(actualr, desiredr)
             assert_equal(actuali, desiredi)
         except AssertionError:
-            raise AssertionError(msg)
+            raise AssertionError(msg)  # noqa: TRY200
 
     # isscalar test to check cases such as [np.nan] != np.nan
     if isscalar(desired) != isscalar(actual):
@@ -277,7 +277,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
     except (DeprecationWarning, FutureWarning) as e:
         # this handles the case when the two types are not even comparable
         if "elementwise == comparison" in e.args[0]:
-            raise AssertionError(msg)
+            raise AssertionError(msg)  # noqa: TRY200
         else:
             raise
 
@@ -424,7 +424,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
             assert_almost_equal(actualr, desiredr, decimal=decimal)
             assert_almost_equal(actuali, desiredi, decimal=decimal)
         except AssertionError:
-            raise AssertionError(_build_err_msg())
+            raise AssertionError(_build_err_msg())  # noqa: TRY200
 
     if isinstance(actual, (ndarray, tuple, list)) or isinstance(
         desired, (ndarray, tuple, list)
@@ -724,7 +724,7 @@ def assert_array_compare(
             names=("x", "y"),
             precision=precision,
         )
-        raise ValueError(msg)
+        raise ValueError(msg)  # noqa: TRY200
 
 
 def assert_array_equal(x, y, err_msg="", verbose=True, *, strict=False):
@@ -2270,7 +2270,9 @@ def check_free_memory(free_bytes):
         try:
             mem_free = _parse_size(env_value)
         except ValueError as exc:
-            raise ValueError(f"Invalid environment variable {env_var}: {exc}")
+            raise ValueError(  # noqa: TRY200
+                f"Invalid environment variable {env_var}: {exc}"
+            )
 
         msg = (
             f"{free_bytes/1e9} GB memory required, but environment variable "

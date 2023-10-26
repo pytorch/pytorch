@@ -4926,7 +4926,7 @@ def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
     tgt_gen = (make_arg(size) for size in tgt_sizes)
     idx = make_idx((0,), high=1)
     src = make_arg((0,))
-    for tgt, acc in product(tgt, (True, False)):
+    for tgt, acc in product(tgt_gen, (True, False)):
         yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
                           args=(idx.clone(),
                                 src.clone().requires_grad_(requires_grad),
@@ -8190,9 +8190,9 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
-    for qkv_shapes, is_causal, dropout_p in product(
+    for qkv_shape, is_causal, dropout_p in product(
             qkv_shapes, [True, False], [0.0, 0.5]):
-        shape_q, shape_kv = qkv_shapes
+        shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
             make(shape_kv),
@@ -9066,7 +9066,7 @@ foreach_unary_op_db: List[OpInfo] = [
 foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "add",
-        foreach_inputs_sample_func(2, True, True),
+        foreach_inputs_sample_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
@@ -10164,8 +10164,7 @@ op_db: List[OpInfo] = [
            reference_inputs_func=partial(
                reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     OpInfo('addcdiv',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -10788,8 +10787,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_forward_ad=True),
     OpInfo('cumsum',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
@@ -12270,8 +12268,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
@@ -14022,8 +14019,7 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo('topk',
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -16570,7 +16566,7 @@ op_db: List[OpInfo] = [
                wrapper_set_seed(torch.multinomial, inp, *args, **kwargs),
            method_variant=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.Tensor.multinomial, inp, *args, **kwargs),
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_multinomial,
@@ -17033,8 +17029,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_trapezoid),
     OpInfo('cumulative_trapezoid',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
@@ -18095,17 +18090,11 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'all',
         identity=True,
-        supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.all),
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
@@ -18113,17 +18102,11 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'any',
         identity=False,
-        supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.any),
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
@@ -21237,21 +21220,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        supports_multiple_dims=False,
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -21281,16 +21254,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        supports_multiple_dims=True,
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
