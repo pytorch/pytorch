@@ -19,7 +19,6 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.device_mesh import mesh_resources
 
-from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
@@ -611,7 +610,6 @@ def _sharded_pre_load_state_dict_hook(
         zip(handle.flat_param._fqns, handle.flat_param._param_extensions)
     )
 
-    device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
         if not _is_composable(fsdp_state):
             fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
@@ -644,40 +642,24 @@ def _sharded_pre_load_state_dict_hook(
             )
             if len(shards) == 1:
                 local_tensor = shards[0].tensor.flatten()
-                pg_device = _get_pg_default_device(fsdp_state.process_group)
-                if local_tensor.device.type != pg_device.type:
-                    with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
-                        local_tensor = local_tensor.to(pg_device)
+                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                    local_tensor = local_tensor.to(fsdp_state.compute_device)
                 num_padding = chunk_size - local_tensor.numel()
                 if num_padding > 0:
                     local_tensor = F.pad(local_tensor, [0, num_padding])
             else:
-                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+                local_tensor = torch.zeros(
+                    chunk_size, dtype=param.dtype, device=fsdp_state.compute_device
+                )
             tensor = torch.empty(
                 chunk_size * fsdp_state.world_size,
                 dtype=local_tensor.dtype,
-                device=device,
+                device=fsdp_state.compute_device,
             )
-            if local_tensor.is_cpu:
-                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
-                # Convert to CPU so all_gather can work.
-                tensor_dev = tensor.device
-                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
-                    tensor = tensor.cpu()
-                tensor_list = list(
-                    torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+            with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                dist.all_gather_into_tensor(
+                    tensor, local_tensor, group=fsdp_state.process_group
                 )
-                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                    dist.all_gather(
-                        tensor_list, local_tensor, group=fsdp_state.process_group
-                    )
-                with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
-                    tensor.to(tensor_dev)
-            else:
-                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                    dist.all_gather_into_tensor(
-                        tensor, local_tensor, group=fsdp_state.process_group
-                    )
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             state_dict[fqn_from_global_root] = tensor
         else:
