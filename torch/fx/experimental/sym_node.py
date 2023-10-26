@@ -705,7 +705,7 @@ def sympy_is_channels_last_strides_3d(sizes, strides):
     return sympy_is_channels_last_strides_generic(sizes, strides, [1, 4, 3, 2, 0])
 
 
-def is_non_overlapping_and_dense_indicator(sizes, strides):
+def sympy_is_non_overlapping_and_dense_indicator(sizes, strides):
     from torch.utils._sympy.functions import IsNonOverlappingAndDenseIndicator
 
     return IsNonOverlappingAndDenseIndicator(*sizes, *strides)
@@ -719,7 +719,7 @@ sizes_strides_methods = {
     "is_channels_last_contiguous_3d": sympy_is_channels_last_contiguous_3d,
     "is_channels_last_strides_2d": sympy_is_channels_last_strides_2d,
     "is_channels_last_strides_3d": sympy_is_channels_last_strides_3d,
-    "is_non_overlapping_and_dense_indicator": is_non_overlapping_and_dense_indicator,
+    "is_non_overlapping_and_dense_indicator": sympy_is_non_overlapping_and_dense_indicator,
 }
 
 alternate_impl_if_hinted_methods = {
