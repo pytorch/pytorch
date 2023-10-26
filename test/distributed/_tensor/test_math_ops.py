@@ -17,31 +17,32 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class DistMathOpsTest(DTensorTestBase):
     @with_comms
-    @pytest.mark.parametrize('op_str', ('all', 'sum', 'prod', 'mean', 'max', 'min'))
-    def test_linear_op_reductions(self, op_str: str):
+    def test_linear_op_reductions(self):
         device_mesh = self.build_device_mesh()
 
-        shard_spec = [Shard(0)]
+        for op_str in ('all', 'sum', 'prod', 'mean', 'max', 'min'):
+            print(op_str)
+            shard_spec = [Shard(0)]
 
-        x = torch.randn(12, 8, 8)
-        x_dt = distribute_tensor(x, device_mesh, shard_spec)
+            x = torch.randn(12, 8, 8)
+            x_dt = distribute_tensor(x, device_mesh, shard_spec)
 
-        op = getattr(x, op_str)
-        op_dt = getattr(x_dt, op_str)
+            op = getattr(x, op_str)
+            op_dt = getattr(x_dt, op_str)
 
-        keep_dim_or_not = [True, False, None]
-        for dim in range(x.ndim):
-            for keep_dim in keep_dim_or_not:
-                args = (dim, keep_dim) if keep_dim is not None else (dim,)
-                dim_reduced_tensor = op(*args)
-                dt_dim_reduced_tensor = op_dt(*args).redistribute(
-                    device_mesh, [Replicate()] * device_mesh.ndim
-                )
-                self.assertEqual(dt_dim_reduced_tensor.to_local(), dim_reduced_tensor)
+            keep_dim_or_not = [True, False, None]
+            for dim in range(x.ndim):
+                for keep_dim in keep_dim_or_not:
+                    args = (dim, keep_dim) if keep_dim is not None else (dim,)
+                    dim_reduced_tensor = op(*args)
+                    dt_dim_reduced_tensor = op_dt(*args).redistribute(
+                        device_mesh, [Replicate()] * device_mesh.ndim
+                    )
+                    self.assertEqual(dt_dim_reduced_tensor.to_local(), dim_reduced_tensor)
 
-        full_reduced_tensor = op()
-        dt_full_reduced = op_dt().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
-        self.assertEqual(dt_full_reduced.to_local(), full_reduced_tensor)
+            full_reduced_tensor = op()
+            dt_full_reduced = op_dt().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
+            self.assertEqual(dt_full_reduced.to_local(), full_reduced_tensor)
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms

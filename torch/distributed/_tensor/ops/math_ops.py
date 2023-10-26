@@ -1,7 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import List, Optional, Tuple, cast
+from typing import cast, List, Optional, Tuple
 
 import torch
+
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
@@ -14,17 +15,19 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
+    generate_redistribute_costs,
     normalize_dims,
     register_op_strategy,
     register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
+    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
     Shard,
-    _Partial,
 )
+
 
 aten = torch.ops.aten
 
@@ -96,7 +99,7 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(_Partial(reduction_op))
             else:
-                new_placements.append(Shard(reduction_dims_map[shard_dim]))
+                new_placements.append(Shard(new_shard_dim))
     return tuple(new_placements)
 
 
@@ -137,6 +140,7 @@ def common_reduction_strategy(
         out_placements = map_placements_after_reduction(
             input_spec.placements, reduce_dims, reduce_dims_map, reduction_op
         )
+        redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
         reduction_strategy.strategies.append(
             PlacementStrategy(
                 output_spec=DTensorSpec(
@@ -144,6 +148,7 @@ def common_reduction_strategy(
                     placements=out_placements,
                 ),
                 input_specs=(input_spec,),
+                redistribute_cost=redistribute_cost,
             )
         )
 

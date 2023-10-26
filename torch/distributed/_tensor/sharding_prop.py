@@ -1,5 +1,6 @@
 from functools import lru_cache
-from typing import Callable, cast, Dict, Optional, List
+from itertools import chain
+from typing import Callable, Dict, List, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -30,7 +31,7 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,
@@ -87,7 +88,7 @@ class ShardingPropagator:
 
         elif isinstance(fake_out, (tuple, list)):
             tensor_meta_list = []
-            for i, fake_out_item in enumerate(fake_out):
+            for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
                         TensorMeta(
