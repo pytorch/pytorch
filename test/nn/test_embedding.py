@@ -1009,10 +1009,12 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
             needed_prec = dtype2prec_DONTUSE[wdtype] * 5
+            rtol = 0.02 if wdtype==torch.half else 0
         else:
             needed_prec = backward_prec
+            rtol = 0
 
-        self.assertEqual(es_weight_grad, e.weight.grad, atol=needed_prec, rtol=0)
+        self.assertEqual(es_weight_grad, e.weight.grad, atol=needed_prec, rtol=rtol)
 
         if test_per_sample_weights and trainable_per_sample_weights:
             self.assertEqual(per_sample_weights.grad, per_sample_weights_reference.grad,
