@@ -1377,6 +1377,14 @@ class WrapperModule(torch.nn.Module):
 
 if HAS_TRITON:
     # Define shared triton kernels here so that multiple tests can access it
+    # NB: This also addresses a triton limitation where if the kernels are
+    # getting called indirectly, triton cannot find the kernels unless they
+    # are at top level.
+    # Define constants here for the same triton limitation
+    CONSTANT_C = 4
+    STRING_CONSTANT_C = "CONSTANT_C"
+    BOOL_CONSTANT_C = True
+
     @triton.jit
     def add_kernel(
         in_ptr0,
@@ -1422,6 +1430,27 @@ if HAS_TRITON:
         x = tl.load(ptr + offsets, mask=mask)
         output = 2 * x
         tl.store(ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def zero_negs(x):
+        return tl.where(x >= 0, x, 0)
+
+    @triton.jit
+    def indirection_kernel(
+        in_ptr0,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+        ACTIVATION: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        if ACTIVATION == "mul2_inplace_kernel":
+            mul2_inplace_kernel(in_ptr0, n_elements, BLOCK_SIZE=BLOCK_SIZE)
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        tl.store(out_ptr + offsets, x, mask=mask)
 
 
 class DefaultsTests(torch._dynamo.test_case.TestCase):
@@ -1834,6 +1863,133 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
+    def test_triton_kernel_multi_kernel(self, grad):
+        @triton.jit
+        def mul2_and_add_and_zero_negatives_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            ACTIVATION: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            indirection_kernel(
+                in_ptr0,
+                in_ptr0,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
+            indirection_kernel(
+                in_ptr1,
+                in_ptr1,
+                n_elements,
+                BLOCK_SIZE=BLOCK_SIZE,
+                ACTIVATION="mul2_inplace_kernel",
+            )
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            if ACTIVATION == "zero_negs":
+                output = zero_negs(output)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+            xi: torch.Tensor,
+            yi: torch.Tensor,
+        ):
+            output = torch.zeros_like(x, requires_grad=grad)
+            outputi = torch.zeros_like(xi)
+            n_elements = output.numel()
+
+            grid = (x.numel(),)
+            mul2_and_add_and_zero_negatives_kernel[grid](
+                x, y, output, n_elements, BLOCK_SIZE=16, ACTIVATION="zero_negs"
+            )
+            mul2_and_add_and_zero_negatives_kernel[grid](
+                xi, yi, outputi, n_elements, BLOCK_SIZE=16, ACTIVATION=None
+            )
+
+            return (output, outputi)
+
+        t1 = torch.tensor(
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+        )
+        t2 = torch.tensor(
+            [-2.0, -1.0, 0.0, 1.0, 2.0], device="cuda", requires_grad=grad
+        )
+        float_result = 2 * t1 + 2 * t2
+        float_result = float_result.where(float_result >= 0, 0.0)
+
+        t1i = torch.randint(-2, 2, (5,), device="cuda")
+        t2i = torch.randint(-2, 2, (5,), device="cuda")
+        int_result = 2 * t1i + 2 * t2i
+
+        (result, resulti) = call_triton(t1, t2, t1i, t2i)
+        self.assertEqual(float_result, result)
+        self.assertEqual(int_result, resulti)
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_constants(self):
+        @triton.jit
+        def mulC_kernel(
+            in_ptr0,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            CONSTANT_NAME: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            if CONSTANT_NAME.value == STRING_CONSTANT_C:
+                output = CONSTANT_C * x
+            if BOOL_CONSTANT_C:
+                output *= CONSTANT_C
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton(
+            x: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+
+            grid = (x.numel(),)
+            mulC_kernel[grid](
+                x, output, n_elements, BLOCK_SIZE=16, CONSTANT_NAME="CONSTANT_C"
+            )
+            return output
+
+        # Triton kernels capture global constants by their parse time value
+        # not runtime value
+        global CONSTANT_C
+        prev_c = CONSTANT_C
+        # If the behavior of triton kernels change, this test will fail
+        CONSTANT_C = 10
+        assert CONSTANT_C != prev_c
+
+        t = torch.randn(5, device="cuda")
+        torch_result = call_triton(t)
+        compiled_result = torch.compile(call_triton)(t)
+
+        self.assertEqual(torch_result, compiled_result)
+
+        # reset back
+        CONSTANT_C = prev_c
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_native(self, grad, backend):
@@ -2155,6 +2311,24 @@ def forward(self, x_1, output_1):
         # Test aliased
         self.assertEqual(opt_fn(param, param), fn(param, param))
         self.assertEqual(cnts.frame_count, 2)  # Recompiles
+
+    def test_compare_constant_and_tensor(self):
+        for op in [
+            operator.lt,
+            operator.le,
+            operator.gt,
+            operator.ge,
+            operator.ne,
+            operator.eq,
+        ]:
+
+            def fn(x):
+                return op(-10, x)
+
+            opt_fn = torch.compile(fullgraph=True)(fn)
+
+            x = torch.randn(10)
+            self.assertEqual(opt_fn(x), fn(x))
 
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)

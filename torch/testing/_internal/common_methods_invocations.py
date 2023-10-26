@@ -4926,7 +4926,7 @@ def sample_inputs_put(op_info, device, dtype, requires_grad, **kwargs):
     tgt_gen = (make_arg(size) for size in tgt_sizes)
     idx = make_idx((0,), high=1)
     src = make_arg((0,))
-    for tgt, acc in product(tgt, (True, False)):
+    for tgt, acc in product(tgt_gen, (True, False)):
         yield SampleInput(input=tgt.clone().requires_grad_(requires_grad),
                           args=(idx.clone(),
                                 src.clone().requires_grad_(requires_grad),
@@ -8190,9 +8190,9 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
-    for qkv_shapes, is_causal, dropout_p in product(
+    for qkv_shape, is_causal, dropout_p in product(
             qkv_shapes, [True, False], [0.0, 0.5]):
-        shape_q, shape_kv = qkv_shapes
+        shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
             make(shape_q),
             make(shape_kv),
@@ -12268,8 +12268,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
-           dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
@@ -17352,7 +17351,7 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2,
                                                   torch.float32: 1e-4}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
@@ -18091,17 +18090,11 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'all',
         identity=True,
-        supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.all),
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
@@ -18109,17 +18102,11 @@ op_db: List[OpInfo] = [
     ReductionOpInfo(
         'any',
         identity=False,
-        supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.any),
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_result_dtype', dtypes=[torch.uint8]),
         ),
@@ -21233,21 +21220,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        supports_multiple_dims=False,
         skips=(
-            # FIXME: does not support passing keepdim without dim
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
-            # FIXME: does not support dim=None
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
@@ -21277,16 +21254,11 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        supports_multiple_dims=True,
         skips=(
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
                 dtypes=[torch.uint8]),
-            # FIXME: reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
     ),
     ReductionPythonRefInfo(
