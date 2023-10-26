@@ -18,6 +18,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  linux-jammy-py3_8-gcc11-build:
+    name: linux-jammy-py3.8-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      test-matrix: |
+        { include: [
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
+        ]}
+
   macos-12-py3-x86-64-build:
     name: macos-12-py3-x86-64
     uses: ./.github/workflows/_mac-build.yml
