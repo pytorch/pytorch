@@ -4,7 +4,6 @@ import copy
 import hashlib
 import inspect
 import io
-import itertools
 import pickle
 import tokenize
 import unittest
@@ -25,22 +24,15 @@ def install_config_module(module):
     class ConfigModuleInstance(ConfigModule):
         _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
-    def visit(source, dest, prefix, ignore_all=False):
-        """
-        Walk the module structure and move everything to
-        module._config and module._compile_ignored
-        """
-        ignored = get_assignments_with_compile_ignored_comments(source)
+    def visit(source, dest, prefix):
+        """Walk the module structure and move everything to module._config"""
         for key, value in list(source.__dict__.items()):
             if key.startswith("__") or isinstance(value, (ModuleType, FunctionType)):
                 continue
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                if ignore_all or key in ignored:
-                    compile_ignored[name] = value
-                else:
-                    config[name] = value
+                config[name] = value
                 default[name] = value
                 if dest is module:
                     delattr(module, key)
@@ -48,28 +40,27 @@ def install_config_module(module):
                 assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
-                visit(value, proxy, f"{name}.", ignore_all=name in ignored)
+                visit(value, proxy, f"{name}.")
                 setattr(dest, key, proxy)
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config = dict()
-    compile_ignored = dict()
+    compile_ignored_keys = set()
     default = dict()
 
+    compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
     visit(module, module, "")
     module._config = config
-    module._compile_ignored = compile_ignored
     module._default = default
-
-    config_keys, compile_ignored_keys = set(config.keys()), set(compile_ignored.keys())
-    assert config_keys.isdisjoint(compile_ignored_keys)
-    module._allowed_keys = config_keys | compile_ignored_keys
-    module._compile_ignored_keys = set(compile_ignored.keys())
+    module._allowed_keys = set(config.keys())
+    module._compile_ignored_keys = compile_ignored_keys
+    module.__class__ = ConfigModuleInstance
     module._is_dirty = True
     module._hash_digest = None
 
-    module.__class__ = ConfigModuleInstance
+
+COMPILE_IGNORED_MARKER = "@compile_ignored"
 
 
 # Gets all the keys (i.e. assignments) with a @compile_ignored comment
@@ -86,22 +77,30 @@ def get_assignments_with_compile_ignored_comments(module):
     for token in tokens:
         if token.type == tokenize.COMMENT:
             maybe_current = token.string.strip()
-            if "@compile_ignored" in maybe_current:
+            if COMPILE_IGNORED_MARKER in maybe_current:
+                assert current_comment == (
+                    "",
+                    -1,
+                ), f"unconsumed {COMPILE_IGNORED_MARKER}"
                 current_comment = maybe_current, token.start[0]
                 if token.start[0] == prev_assigned[1]:
                     # Check if the current assignment is followed with
-                    # a same-line comment with '@compile_ignored'
+                    # a same-line comment with COMPILE_IGNORED_MARKER
                     assignments.add(prev_assigned[0])
+                    current_comment = "", -1  # reset
         elif token.type == tokenize.NAME:
             prev_name = token.string
         elif token.type == tokenize.OP and token.string == "=":
             prev_assigned = prev_name, token.start[0]
-            # Check if the current assignment follows a comment with '@compile_ignored'
+            # Check if the current assignment follows a comment
+            # with COMPILE_IGNORED_MARKER
             if (
-                "@compile_ignored" in current_comment[0]
+                COMPILE_IGNORED_MARKER in current_comment[0]
                 and current_comment[1] == token.start[0] - 1
             ):
                 assignments.add(prev_name)
+                current_comment = "", -1  # reset
+    assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
     return assignments
 
 
@@ -113,9 +112,6 @@ class ConfigModule(ModuleType):
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
     # maps as "triton.cudagraphs"
     _config: Dict[str, Any]
-    # The same as _config, but for keys that are annotated wtih @compile_ignored
-    # in a comment on the line preceding or the same line
-    _compile_ignored: Dict[str, Any]
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
@@ -125,26 +121,17 @@ class ConfigModule(ModuleType):
             f"use {__name__}.install_config_module(sys.modules[__name__])"
         )
 
-    def __hasattr__(self, name, value):
-        return name in self._config or name in self._compile_ignored
-
     def __setattr__(self, name, value):
         if name in self._bypass_keys:
             super().__setattr__(name, value)
-        elif name in self._compile_ignored_keys:
-            self._compile_ignored[name] = value
-        elif name in self._allowed_keys:
-            self._is_dirty = True
-            self._config[name] = value
-        else:
+        elif name not in self._allowed_keys:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
+        else:
+            self._config[name] = value
 
     def __getattr__(self, name):
         try:
-            if name in self._compile_ignored_keys:
-                return self._compile_ignored[name]
-            else:
-                return self._config[name]
+            return self._config[name]
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -152,15 +139,11 @@ class ConfigModule(ModuleType):
     def __delattr__(self, name):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        if name in self._compile_ignored_keys:
-            del self._compile_ignored[name]
-        else:
-            self._is_dirty = True
-            del self._config[name]
+        del self._config[name]
 
     def save_config(self):
         """Convert config to a pickled blob"""
-        config = {**self._config, **self._compile_ignored}
+        config = dict(self._config)
         for key in config.get("_save_config_ignore", ()):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
@@ -171,11 +154,8 @@ class ConfigModule(ModuleType):
         """
         lines = []
         mod = self.__name__
-        has_saved_config_ignore = hasattr(self, "_save_config_ignore")
-        for k, v in itertools.chain(
-            self._config.items(), self._compile_ignored.items()
-        ):
-            if has_saved_config_ignore and k in self._save_config_ignore:
+        for k, v in self._config.items():
+            if k in self._config.get("_save_config_ignore", ()):
                 continue
             if v == self._default[k]:
                 continue
@@ -201,28 +181,14 @@ class ConfigModule(ModuleType):
         return self.shallow_copy_dict()
 
     def shallow_copy_dict(self):
-        return {**self._config, **self._compile_ignored}
-
-    def load_dict(self, d):
-        assert set(d.keys()) == self._allowed_keys
-        self._is_dirty = True
-        for k, v in d.items():
-            if k in self._compile_ignored_keys:
-                self._compile_ignored[k] = v
-            else:
-                self._config[k] = v
+        return {**self._config}
 
     def load_config(self, data):
         """Restore from a prior call to save_config()"""
-        self._is_dirty = True
-        for k, v in pickle.loads(data).items():
-            if k in self._compile_ignored_keys:
-                self._compile_ignored[k] = v
-            else:
-                self._config[k] = v
+        self._config.update(pickle.loads(data))
 
     def get_config_copy(self):
-        return {**copy.deepcopy(self._config), **copy.deepcopy(self._compile_ignored)}
+        return copy.deepcopy(self._config)
 
     def patch(self, arg1=None, arg2=None, **kwargs):
         """
@@ -255,28 +221,21 @@ class ConfigModule(ModuleType):
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior = {}
-        prior_ignored = {}
         config = self
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
-                for key, val in changes.items():
+                for key in changes.keys():
                     # KeyError on invalid entry
-                    if key in config._compile_ignored_keys:
-                        prior_ignored[key] = config._compile_ignored[key]
-                        config._compile_ignored[key] = val
-                    else:
-                        prior[key] = config._config[key]
-                        config._config[key] = val
+                    prior[key] = config._config[key]
+                config._config.update(changes)
                 config._is_dirty = prior != {}
 
             def __exit__(self, exc_type, exc_val, exc_tb):
                 config._config.update(prior)
-                config._compile_ignored.update(prior_ignored)
                 config._is_dirty = prior != {}
                 prior.clear()
-                prior_ignored.clear()
 
         return ConfigPatch()
 
