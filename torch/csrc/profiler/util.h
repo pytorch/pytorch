@@ -201,6 +201,8 @@ TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
+std::unordered_map<std::string, std::string> TORCH_API
+saveNcclMeta(const at::RecordFunction& fn);
 
 uint64_t TORCH_API computeFlops(
     const std::string& op_name,

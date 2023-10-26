@@ -688,12 +688,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void setGroupName(const std::string& name);
   void enableCollectivesTiming();
 
+  void release_resources() override;
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
 
-  const c10::intrusive_ptr<c10d::Store> store_;
+  c10::intrusive_ptr<c10d::Store> store_;
   const int rank_;
   const int size_;
   const c10::intrusive_ptr<Options> options_;
