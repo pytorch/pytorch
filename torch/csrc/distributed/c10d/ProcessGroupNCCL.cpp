@@ -73,8 +73,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 // Helper function that gets the data type and issues error if not supported
 ncclDataType_t getNcclDataType(at::ScalarType type) {
   auto it = ncclDataType.find(type);
-  TORCH_CHECK_WITH(
-      TypeError,
+  TORCH_CHECK(
       it != ncclDataType.end(),
       "Input tensor data type is not supported for NCCL process group: ",
       type);
@@ -124,8 +123,7 @@ ncclRedOpRAII getNcclReduceOp(
       }
 #ifdef NCCL_HAS_AVG
       if (reduceOp == ReduceOp::AVG) {
-        C10_THROW_ERROR(
-            TypeError, "Cannot use ReduceOp.AVG with boolean inputs");
+        TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
       }
 #endif
     }
@@ -142,38 +140,37 @@ ncclRedOpRAII getNcclReduceOp(
           return unpackPreMulSum<double, ncclDouble>(
               reduceOp, comm, dev_in_group);
         default:
-          C10_THROW_ERROR(
-              TypeError, "PreMulSum Data type must be half, float, or double");
+          TORCH_CHECK(
+              false, "PreMulSum Data type must be half, float, or double");
           ncclRedOp_t unused;
           return unused;
       }
 #else
-      C10_THROW_ERROR(ValueError, "PreMulSum requires NCCL>=2.11.1");
+      TORCH_CHECK(false, "PreMulSum requires NCCL>=2.11.1");
 #endif
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
       case ReduceOp::AVG:
-        C10_THROW_ERROR(
-            ValueError,
-            c10::str(
-                "AVG requires NCCL 2.10+. The current version is ",
-                NCCL_MAJOR,
-                ".",
-                NCCL_MINOR));
+        TORCH_CHECK(
+            false,
+            "AVG requires NCCL 2.10+. The current version is ",
+            NCCL_MAJOR,
+            ".",
+            NCCL_MINOR);
         break;
       case ReduceOp::BAND:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BAND with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
         break;
       case ReduceOp::BOR:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BOR with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BOR with NCCL");
         break;
       case ReduceOp::BXOR:
-        C10_THROW_ERROR(ValueError, "Cannot use ReduceOp.BXOR with NCCL");
+        TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with NCCL");
         break;
       default:
-        C10_THROW_ERROR(ValueError, "Unhandled ReduceOp");
+        TORCH_CHECK(false, "Unhandled ReduceOp");
         break;
     }
   }
@@ -218,7 +215,7 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
 
 // Return CUDA device with ordinal given by input rank.
 at::Device getDeviceForRank(int rank) {
-  TORCH_CHECK_WITH(ValueError, rank >= 0, "Invalid rank ", rank);
+  TORCH_CHECK(rank >= 0, "Invalid rank ", rank);
   auto numGPUs = at::cuda::getNumGPUs();
   int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
   return at::Device(at::DeviceType::CUDA, deviceIdx);
@@ -283,8 +280,7 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
       (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
   static const uint64_t cur_version = torch::cuda::nccl::version();
   if (cur_version < min_version) {
-    TORCH_CHECK_WITH(
-        NotImplementedError,
+    TORCH_CHECK(
         status == c10::cuda::CaptureStatus::None,
         "Capturing NCCL collectives is only allowed with NCCL >= 2.9.6");
   }
@@ -703,7 +699,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
   LOG(ERROR) << exceptionMsg;
   std::exception_ptr exception_ptr =
-      std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
+      std::make_exception_ptr(std::runtime_error(exceptionMsg));
   setException(exception_ptr);
   return true;
 }
@@ -866,8 +862,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
       uid_(process_group_id++) {
-  TORCH_CHECK_WITH(
-      ValueError,
+  TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
@@ -1022,8 +1017,7 @@ void ProcessGroupNCCL::runHealthCheck() {
   }
   // If there is no exception, the likely culprit is a timeout/hang which is how
   // most communicator init issues manifest themselves.
-  TORCH_CHECK_WITH(
-      DistBackendError,
+  TORCH_CHECK(
       healthCheckData.healthCheckSuccess,
       "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
       rank_);
@@ -1038,13 +1032,11 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
 
 void ProcessGroupNCCL::registerOnCompletionHook(
     std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
+  TORCH_CHECK(
       onCompletionHook_ == nullptr,
       "ProcessGroupNCCL OnCompletion hook already registered");
 
-  TORCH_CHECK_WITH(
-      ValueError,
+  TORCH_CHECK(
       enableTiming_.load(),
       "ProcessGroupNCCL OnCompletion hook requires recording start and end "
       "events which require setting NCCL_ENABLE_TIMING environment variable. "
@@ -1184,8 +1176,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       LOG(ERROR) << exitMsg;
       // TODO(whc) clean up the rethrow - why is it stored in a class var and
       // rethrown?
-      watchDogException_ =
-          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
+      watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
       std::rethrow_exception(watchDogException_);
     }
   } catch (...) {
@@ -1194,8 +1185,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
         rank_,
         "] NCCL watchdog thread terminated with exception: unknown");
     LOG(ERROR) << exitMsg;
-    watchDogException_ =
-        std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
+    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
     std::rethrow_exception(watchDogException_);
   }
 }
@@ -1392,18 +1382,15 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     // commFailureReason is set.
     auto commFailureReason = ncclComm->getNcclCommFailureReason();
     if (commFailureReason != c10::nullopt) {
-      return std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
-          c10::str(
-              "NCCL communicator encountered error set by ProcessGroupNCCL: ",
-              *commFailureReason)));
+      return std::make_exception_ptr(std::runtime_error(c10::str(
+          "NCCL communicator encountered error set by ProcessGroupNCCL: ",
+          *commFailureReason)));
     }
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
-      return std::make_exception_ptr(C10_BUILD_ERROR(
-          DistBackendError,
+      return std::make_exception_ptr(std::runtime_error(
           "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr) + "\n" +
-              getNcclErrorDetailStr(ncclAsyncErr)));
+          getNcclErrorDetailStr(ncclAsyncErr)));
     }
   }
 
@@ -1443,10 +1430,7 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   } else {
     try {
       auto vec = store_->get(storeKey);
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          vec.size() == NCCL_UNIQUE_ID_BYTES,
-          "Invalid size for ncclUniqueId");
+      TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
       std::memcpy(ncclID, vec.data(), vec.size());
     } catch (const std::exception& e) {
       std::string exceptionMsg = c10::str(
@@ -1458,13 +1442,13 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
           "', but store->get('",
           storeKey,
           "') got error: ");
-      C10_THROW_ERROR(
-          DistBackendError,
+      TORCH_CHECK(
+          false,
           exceptionMsg + e.what() +
               ". This may indicate a possible application crash on rank 0 or a network set up issue.");
     } catch (...) {
-      C10_THROW_ERROR(
-          DistBackendError,
+      TORCH_CHECK(
+          false,
           c10::str(
               "Unknown exception while [",
               rank_,
@@ -1508,8 +1492,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     bool isSendRecvSelf) {
   // Sanity check
   if (devicesKey.empty()) {
-    C10_THROW_ERROR(
-        DistBackendError,
+    TORCH_CHECK(
+        false,
         "Not able to create/get the NCCL Communicator since "
         "the GPU devices are not known");
   }
@@ -1675,10 +1659,10 @@ namespace {
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
   if (!tensor.is_cuda() || tensor.is_sparse()) {
-    C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
+    TORCH_CHECK(false, "Tensors must be CUDA and dense");
   }
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
-    C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+    TORCH_CHECK(false, "Tensors must be contiguous");
   }
 }
 
@@ -1690,11 +1674,11 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 void check_gpu_tensors_different_devices(
     const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
-    C10_THROW_ERROR(ValueError, "Tensor list must be nonempty");
+    TORCH_CHECK(false, "Tensor list must be nonempty");
   }
   if (tensors.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "Tensor list mustn't be larger than the number of available GPUs");
   }
 
@@ -1706,23 +1690,23 @@ void check_gpu_tensors_different_devices(
 
   for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
-      C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
+      TORCH_CHECK(false, "Tensors must be CUDA and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
-      C10_THROW_ERROR(TypeError, "Tensors must have identical type");
+      TORCH_CHECK(false, "Tensors must have identical type");
     }
     if (t.sizes() != first.sizes()) {
-      C10_THROW_ERROR(ValueError, "Tensors must have identical size");
+      TORCH_CHECK(false, "Tensors must have identical size");
     }
     if (t.strides() != first.strides()) {
-      C10_THROW_ERROR(ValueError, "Tensors must have identical strides");
+      TORCH_CHECK(false, "Tensors must have identical strides");
     }
     if (!t.is_contiguous(t.suggest_memory_format())) {
-      C10_THROW_ERROR(ValueError, "Tensors must be contiguous");
+      TORCH_CHECK(false, "Tensors must be contiguous");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
     if (!inserted) {
-      C10_THROW_ERROR(ValueError, "Tensors must be on distinct GPU devices");
+      TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
     }
   }
 }
@@ -1736,7 +1720,7 @@ void check_gpu_tensors_different_devices(
 // different devices in the same process.
 int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() == 0) {
-    C10_THROW_ERROR(ValueError, "Tensor list must be nonempty");
+    TORCH_CHECK(false, "Tensor list must be nonempty");
   }
 
   const auto& first = tensors.front();
@@ -1744,20 +1728,19 @@ int64_t check_gpu_tensors_same_device(const std::vector<at::Tensor>& tensors) {
   int64_t total_numel = 0;
   for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
-      C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
+      TORCH_CHECK(false, "Tensors must be CUDA and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
-      C10_THROW_ERROR(TypeError, "Tensors must have identical type");
+      TORCH_CHECK(false, "Tensors must have identical type");
     }
     if (!t.is_non_overlapping_and_dense()) {
-      C10_THROW_ERROR(ValueError, "Tensors must be non-overlapping and dense");
+      TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     // If we're in this function, the user called a _coalesced collective
     // on a set of tensors with potentially different sizes and strides.
     // Therefore, we don't check for matching sizes and strides,
     // but we do double-check tensors are on the same device.
-    TORCH_CHECK_WITH(
-        ValueError,
+    TORCH_CHECK(
         t.get_device() == tensors[0].get_device(),
         "Expected list of tensors on the same device");
     total_numel += t.numel();
@@ -1782,8 +1765,8 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<at::Tensor>& other,
     size_t world_size) {
   if (tensor_lists.size() != other.size()) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "Tensor list operands to scatter/gather must have the same length");
   }
   const auto num_devices = tensor_lists.size();
@@ -1793,8 +1776,8 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 
   for (const auto i : c10::irange(size_t{}, num_devices)) {
     if (tensor_lists[i].size() != world_size * num_devices) {
-      C10_THROW_ERROR(
-          ValueError,
+      TORCH_CHECK(
+          false,
           c10::str(
               "Tensor list input to scatter/gather must match number of collective participants ",
               "but got ",
@@ -1810,16 +1793,16 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     // Only check device match for the first tensor in the list; the call to
     // newLikeFlat() below will check the rest.
     if (tensor_lists[i].front().get_device() != other[i].get_device()) {
-      C10_THROW_ERROR(
-          ValueError,
+      TORCH_CHECK(
+          false,
           "Corresponding input/output tensors to scatter/gather must all reside"
           " on the same device");
     }
 
     for (const auto& t : tensor_lists[i]) {
       if (t.numel() != other[i].numel()) {
-        C10_THROW_ERROR(
-            ValueError,
+        TORCH_CHECK(
+            false,
             "All tensor operands to scatter/gather must have the same number of elements");
       }
     }
@@ -2440,8 +2423,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   return work;
 #else
   // If the nccl branch is not "exp" then we just error
-  C10_THROW_ERROR(
-      Error,
+  TORCH_CHECK(
+      false,
       "allreduce_sparse is only available in the NCCL experimental branch.");
 #endif
 }
@@ -2587,8 +2570,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
   // @lint-ignore CLANGTIDY
   auto in_tensor = inputTensors.back();
   if (tensor.numel() != in_tensor.numel()) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "Tensor input and output of _broadcast_oop must have the same number of elements ");
   }
   RECORD_PARAM_COMMS_DATA(
@@ -2694,8 +2677,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
   // @lint-ignore CLANGTIDY
   auto in_tensor = inputTensors.back();
   if (tensor.numel() != in_tensor.numel()) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "Tensor input and output of _reduce_oop must have the same number of elements ");
   }
   RECORD_PARAM_COMMS_DATA(
@@ -2853,9 +2836,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllgatherOptions& /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError,
-      "ProcessGroupNCCL does not support allgather_coalesced");
+  TORCH_CHECK(false, "ProcessGroupNCCL does not support allgather_coalesced");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather_into_tensor_coalesced(
@@ -3006,13 +2987,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
   if (inputTensor.dtype() != outputTensor.dtype()) {
-    C10_THROW_ERROR(
-        TypeError, "input tensor must be the same type as the output tensor.");
+    TORCH_CHECK(
+        false, "input tensor must be the same type as the output tensor.");
   }
 
   if (inputTensor.numel() != outputTensor.numel() * size_) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "input tensor must be the same size as output size times world size");
   }
 
@@ -3393,8 +3374,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
     std::vector<int64_t>& /* unused */,
     std::vector<int64_t>& /* unused */,
     const AllToAllOptions& /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError,
+  TORCH_CHECK(
+      false,
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
@@ -3402,8 +3383,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& /* unused */,
     std::vector<at::Tensor>& /* unused */,
     const AllToAllOptions& /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError,
+  TORCH_CHECK(
+      false,
       "ProcessGroupNCCL only supports alltoall* for NCCL lib version >= 2.7.0");
 }
 
@@ -3411,8 +3392,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError,
+  TORCH_CHECK(
+      false,
       "ProcessGroupNCCL only supports send for NCCL lib version >= 2.7.0");
 }
 
@@ -3420,8 +3401,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */,
     int /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError,
+  TORCH_CHECK(
+      false,
       "ProcessGroupNCCL only supports recv for NCCL lib version >= 2.7.0");
 }
 #endif
@@ -3476,7 +3457,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::gather: " + msg);
+    TORCH_CHECK(false, "ProcessGroupNCCL::gather: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -3562,7 +3543,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    C10_THROW_ERROR(ValueError, "ProcessGroupNCCL::scatter: " + msg);
+    TORCH_CHECK(false, "ProcessGroupNCCL::scatter: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -3648,8 +3629,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
 c10::intrusive_ptr<Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
     int /* unused */) {
-  C10_THROW_ERROR(
-      NotImplementedError, "ProcessGroupNCCL does not support recvAnysource");
+  TORCH_CHECK(false, "ProcessGroupNCCL does not support recvAnysource");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
@@ -3660,13 +3640,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   check_gpu_single_tensor(output_tensor);
 
   if (input_tensor.dtype() != output_tensor.dtype()) {
-    C10_THROW_ERROR(
-        TypeError, "output tensor must have the same type as input tensor");
+    TORCH_CHECK(false, "output tensor must have the same type as input tensor");
   }
 
   if (input_tensor.numel() * size_ != output_tensor.numel()) {
-    C10_THROW_ERROR(
-        ValueError,
+    TORCH_CHECK(
+        false,
         "output tensor size must be equal to world_size times input tensor size");
   }
 
