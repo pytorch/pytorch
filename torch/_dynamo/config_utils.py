@@ -180,7 +180,12 @@ class ConfigModule(ModuleType):
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
-            self._hash_digest = self._get_hash(self._config)
+            dict_to_hash = {
+                k: v
+                for k, v in self._config.items()
+                if k not in self._compile_ignored_keys
+            }
+            self._hash_digest = self._get_hash(dict_to_hash)
             self._is_dirty = False
         return self._hash_digest
 
@@ -236,19 +241,23 @@ use config.shallow_copy_dict() or config.get_config_copy() instead""",
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior = {}
         config = self
+        dirty = False
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
+                nonlocal dirty
                 for key in changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config._config[key]
+                    dirty = key not in config._compile_ignored_keys
                 config._config.update(changes)
-                config._is_dirty = prior != {}
+                config._is_dirty = dirty
 
             def __exit__(self, exc_type, exc_val, exc_tb):
+                nonlocal dirty
                 config._config.update(prior)
-                config._is_dirty = prior != {}
+                config._is_dirty = dirty
                 prior.clear()
 
         return ConfigPatch()
