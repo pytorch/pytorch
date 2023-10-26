@@ -45,10 +45,10 @@ def install_config_module(module):
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config = dict()
-    compile_ignored_keys = set()
     default = dict()
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
+
     visit(module, module, "")
     module._config = config
     module._default = default

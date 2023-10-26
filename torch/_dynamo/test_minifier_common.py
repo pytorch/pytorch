@@ -122,8 +122,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     # around
                     torch._dynamo.reset()
             finally:
-                torch._dynamo.config.load_dict(dynamo_config)
-                torch._inductor.config.load_dict(inductor_config)
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
