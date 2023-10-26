@@ -2030,7 +2030,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             cells_and_freevars_set = set(cells_and_freevars)
 
             self.symbolic_locals = {
-                k: variables.LazyVariableTracker(
+                k: variables.LazyVariableTracker.create(
                     f_locals[k],
                     source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
                 )
