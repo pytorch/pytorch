@@ -933,6 +933,18 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_repeat_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.sin(x)
+                return y, y
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
