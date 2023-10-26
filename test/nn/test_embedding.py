@@ -1009,7 +1009,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
             needed_prec = dtype2prec_DONTUSE[wdtype] * 5
-            rtol = 0.02 if wdtype==torch.half else 0
+            rtol = 0.02 if wdtype == torch.half else 0
         else:
             needed_prec = backward_prec
             rtol = 0
