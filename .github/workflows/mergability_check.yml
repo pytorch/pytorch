@@ -5,7 +5,7 @@ on:
 
 jobs:
   do_merge_dry_run:
-    name: try_merge_pr_${{ github.event.pull_request.number }}
+    name: mergability_check_${{ github.event.pull_request.number }}
     runs-on: linux.20_04.4x
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
