@@ -1528,11 +1528,9 @@ class AOTConfig:
 def maybe_to_fresh_input(idx, t, meta):
     if not isinstance(t, Tensor):
         return t
-    if idx in meta.mutated_inp_indices:
-        if meta.is_train and meta.keep_input_mutations and not meta.input_info[idx].requires_grad:
-            return t
+    if idx in meta.mutated_inp_runtime_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
-        mutated_inp_idx = meta.mutated_inp_indices.index(idx)
+        mutated_inp_idx = meta.mutated_inp_runtime_indices.index(idx)
         assert meta.input_info[idx].requires_grad == meta.requires_grad_info[mutated_inp_idx]
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
             # Make sure the primal we pass to autograd.grad()
