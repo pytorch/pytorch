@@ -133,15 +133,11 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
     def test_merging_multiple_test_class_heuristics(self) -> None:
         tests = ["test1", "test2", "test3", "test4"]
 
-        print("-------------------")
-        print("Gen Heuristics 1")
         heuristic1 = TestPrioritizations(
             tests_being_ranked=tests,
             probable_relevance=["test2::TestFooClass", "test3"],
         )
 
-        print("-------------------")
-        print("Gen Heuristics 2")
         heuristic2 = TestPrioritizations(
             tests_being_ranked=tests,
             high_relevance=["test2::TestFooClass", "test3::TestBarClass"],
@@ -161,8 +157,6 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
         aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
         aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
 
-        print("-------------------")
-        print("Aggregated Heuristics")
         aggregated_pris = aggregator.get_aggregated_priorities()
 
         self.assertHeuristicsMatch(
