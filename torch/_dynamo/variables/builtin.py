@@ -1148,6 +1148,7 @@ class BuiltinVariable(VariableTracker):
                         tuple_args = [SourcelessBuilder()(tx, bases[0])]
                     else:
                         unimplemented(f"unexpected sourceless type bases: {bases}")
+
                     return variables.TupleVariable(tuple_args, **options)
             except NotImplementedError:
                 pass
@@ -1286,11 +1287,6 @@ class BuiltinVariable(VariableTracker):
 
     def call_type(self, tx, obj: VariableTracker):
         from .builder import VariableBuilder
-
-        try:
-            return obj.var_type()
-        except NotImplementedError:
-            pass
 
         try:
             py_type = obj.python_type()
