@@ -47,7 +47,6 @@ class LazyVariableTracker(VariableTracker):
             self.mutable_local.vt = VariableBuilder(tx, self.source)(self._value)
             self.mutable_local.vt.parents_tracker.add(self.parents_tracker)
             self._value = None
-            tx.output.guards.update(self.mutable_local.vt.guards)
         return self.mutable_local.vt
 
     def unwrap(self):
