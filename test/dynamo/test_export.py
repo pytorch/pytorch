@@ -1790,7 +1790,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         has_sym_size = False
         for node in gm.graph.nodes:
-            if node.target is torch.ops.aten.sym_size:
+            if node.target is torch.ops.aten.sym_size.int:
                 has_sym_size = True
 
         self.assertTrue(has_sym_size)
@@ -3190,19 +3190,19 @@ def forward(self, x):
 def forward(self, x):
     arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     slice_tensor = torch.ops.aten.slice.Tensor(arg0, 2, 0, 3)
-    sym_size = torch.ops.aten.sym_size(arg0, 0)
-    sub = sym_size - 1
+    sym_size_int = torch.ops.aten.sym_size.int(arg0, 0)
+    sub = sym_size_int - 1
     slice_tensor_1 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub);  sub = None
-    sym_size_1 = torch.ops.aten.sym_size(arg0, 2)
-    slice_tensor_2 = torch.ops.aten.slice.Tensor(slice_tensor_1, 1, 1, sym_size_1);  slice_tensor_1 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(arg0, 2)
+    slice_tensor_2 = torch.ops.aten.slice.Tensor(slice_tensor_1, 1, 1, sym_size_int_1);  slice_tensor_1 = None
     slice_tensor_3 = torch.ops.aten.slice.Tensor(slice_tensor_2, 2, 1, 3);  slice_tensor_2 = None
-    sub_1 = sym_size - 2
+    sub_1 = sym_size_int - 2
     slice_tensor_4 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_1);  sub_1 = None
-    slice_tensor_5 = torch.ops.aten.slice.Tensor(slice_tensor_4, 1, 2, sym_size_1);  slice_tensor_4 = None
+    slice_tensor_5 = torch.ops.aten.slice.Tensor(slice_tensor_4, 1, 2, sym_size_int_1);  slice_tensor_4 = None
     slice_tensor_6 = torch.ops.aten.slice.Tensor(slice_tensor_5, 2, 2, 3);  slice_tensor_5 = None
-    sub_2 = sym_size - 3;  sym_size = None
+    sub_2 = sym_size_int - 3;  sym_size_int = None
     slice_tensor_7 = torch.ops.aten.slice.Tensor(arg0, 0, 0, sub_2);  arg0 = sub_2 = None
-    slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_1);  slice_tensor_7 = sym_size_1 = None
+    slice_tensor_8 = torch.ops.aten.slice.Tensor(slice_tensor_7, 1, 3, sym_size_int_1);  slice_tensor_7 = sym_size_int_1 = None
     slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
     return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
         )

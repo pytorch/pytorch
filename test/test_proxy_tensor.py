@@ -747,9 +747,6 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
     tracing_mode = "fake"
 
 
-@xfail_inherited_tests([
-    "test_make_fx_overloads",
-])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
 
@@ -1250,8 +1247,8 @@ def forward(self, images_1, handedness_1, valid_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
-    neg = -sym_size;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
+    neg = -sym_size_int;  sym_size_int = None
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
     return empty""")
