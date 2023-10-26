@@ -84,7 +84,7 @@ class RAIIAtenTensorHandle {
     return handle_.release();
   }
 
-  AtenTensorHandle get() {
+  AtenTensorHandle get() const {
     return handle_.get();
   }
 
