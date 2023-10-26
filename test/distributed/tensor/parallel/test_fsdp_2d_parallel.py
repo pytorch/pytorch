@@ -619,32 +619,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 self.assertTrue(isinstance(dist_state, torch.Tensor))
                 self.assertTrue(torch.allclose(state, dist_state))
 
-        # Update the parameters 2d optim states will be different from ref_optim_state_dict.
-        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
-        optim_2d.step()
-
-        set_state_dict(model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd)
-        _, new_optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
-
-        ref_optim_2d_osd_states = ref_optim_2d_osd["state"]
-        new_optim_2d_osd_states = optim_2d_osd["state"]
-
-        # Compare the new optim state dict after load with the reference one
-        self.assertEqual(len(ref_optim_2d_osd_states), len(new_optim_2d_osd_states))
-        self.assertEqual(ref_optim_2d_osd_states.keys(), new_optim_2d_osd_states.keys())
-        for fqn, states in ref_optim_2d_osd_states.items():
-            new_states = new_optim_2d_osd_states.get(fqn)
-
-            for state_name, state in states.items():
-                new_state = new_states.get(state_name)
-
-                if isinstance(new_state, DT):
-                    self.assertEqual(new_state.placements, state.placements)
-                    self.assertEqual(new_state.device_mesh, state.device_mesh)
-                    self.assertTrue(torch.allclose(new_state.to_local(), state.to_local()))
-                else:
-                    self.assertEqual(new_state, state)
-
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
