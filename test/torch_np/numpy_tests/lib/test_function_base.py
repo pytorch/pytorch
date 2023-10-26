@@ -2888,7 +2888,10 @@ class TestPercentile(TestCase):
     def test_linear_interpolation(self, method, expected, input_dtype, expected_dtype):
         expected_dtype = np.dtype(expected_dtype)
 
-        if hasattr(np, '_get_promotion_state') and np._get_promotion_state() == "legacy":
+        if (
+            hasattr(np, "_get_promotion_state")
+            and np._get_promotion_state() == "legacy"
+        ):
             expected_dtype = np.promote_types(expected_dtype, np.float64)
 
         arr = np.asarray([15.0, 20.0, 35.0, 40.0, 50.0], dtype=input_dtype)
