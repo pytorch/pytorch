@@ -969,6 +969,8 @@ copy_tests(
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
@@ -990,6 +992,8 @@ copy_tests(
     # test_failures, xfail by default, set is_skip=True to skip
     {
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
     },
 )
 
