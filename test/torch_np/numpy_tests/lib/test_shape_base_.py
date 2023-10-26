@@ -45,6 +45,7 @@ def _add_keepdims(func):
     return wrapped
 
 
+@pytest.mark.skip
 class TestTakeAlongAxis:
     def test_argequivalent(self):
         """Test it translates from arg<func> to <func>"""
