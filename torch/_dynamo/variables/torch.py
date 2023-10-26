@@ -169,15 +169,38 @@ def check_allowed_op(value):
             f"that is not PT2 compliant. " + err_epilogue
         )
     if isinstance(value, torch._ops.OpOverloadPacket):
-        for overload in value.overloads():
-            op = getattr(value, overload)
+        overloads = tuple(value.overloads())
+        # overloads > 1 is handled when we TorchVariable.call_function.
+        # We need to determine which overload to actually go through.
+        if len(overloads) == 1:
+            op = getattr(value, overloads[0])
             if torch.Tag.pt2_compliant_tag in op.tags:
-                continue
+                return
             unimplemented(
                 f"Encountered the torch.ops.OpOverloadPacket {value} "
-                f"which has an overload ({overload}) that is not PT2 compliant. "
+                f"whose only overload ({overload}) is not PT2 compliant. "
                 + err_epilogue
             )
+
+
+def check_allowed_overload_packet(packet, node, tx):
+    if not config.only_allow_pt2_compliant_ops:
+        return
+    assert isinstance(packet, torch._ops.OpOverloadPacket)
+    args, kwargs = torch._dynamo.utils.get_fake_args_kwargs(node, tx)
+    try:
+        overload = torch._C._jit_resolve_packet(
+            packet._qualified_op_name, *args, **kwargs
+        )
+    except RuntimeError as e:
+        unimplemented(str(e))
+
+    if torch.Tag.pt2_compliant_tag not in getattr(packet, overload).tags:
+        unimplemented(
+            f"Encountered the torch.ops.OpOverloadPacket {packet} "
+            f"which resolves to the overload ({overload}) that is "
+            f"not PT2 compliant. " + err_epilogue
+        )
 
 
 class TorchVariable(VariableTracker):
@@ -191,7 +214,6 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
-        check_allowed_op(value)
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -272,6 +294,7 @@ class TorchVariable(VariableTracker):
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
+        check_allowed_op(self.value)
 
         if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable.make(
@@ -688,14 +711,18 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # have to
                     fn_ = torch._refs.tensor
 
+            proxy = tx.output.create_proxy(
+                "call_function",
+                fn_,
+                *proxy_args_kwargs(args, kwargs),
+            )
+            if isinstance(fn_, torch._ops.OpOverloadPacket):
+                check_allowed_overload_packet(fn_, proxy.node, tx)
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
                 **options,
+                proxy=proxy,
             )
 
             if "out" in kwargs and not (
