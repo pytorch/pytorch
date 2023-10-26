@@ -95,10 +95,6 @@ def serialize_functions() -> None:
             key: kwargs[key]
             for key in ("search_fn", "example_inputs", "trace_fn", "scalar_workaround")
         }
-        gen_kwargs["example_inputs"] = [
-            *gen_kwargs["example_inputs"],
-            *gen_kwargs["scalar_workaround"].values(),
-        ]
 
         from torch._functorch import config as functorch_config
 
