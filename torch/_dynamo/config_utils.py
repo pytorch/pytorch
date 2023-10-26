@@ -1,6 +1,7 @@
 import contextlib
 
 import copy
+import hashlib
 import inspect
 import io
 import pickle
@@ -21,7 +22,7 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set()
+        _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
@@ -55,6 +56,8 @@ def install_config_module(module):
     module._allowed_keys = set(config.keys())
     module._compile_ignored_keys = compile_ignored_keys
     module.__class__ = ConfigModuleInstance
+    module._is_dirty = True
+    module._hash_digest = None
 
 
 COMPILE_IGNORED_MARKER = "@compile_ignored"
@@ -159,6 +162,19 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
+    def get_hash(self):
+        """Hashes the configs that are not compile_ignored"""
+        if self._is_dirty or self._hash_digest is None:
+            dict_to_hash = {
+                k: v
+                for k, v in self._config.items()
+                if k not in self._compile_ignored_keys
+            }
+            string_to_hash = repr(sorted(dict_to_hash.items()))
+            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
+            self._is_dirty = False
+        return self._hash_digest
+
     def to_dict(self):
         warnings.warn(
             (
@@ -213,17 +229,23 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior = {}
         config = self
+        dirty = False
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
+                nonlocal dirty
                 for key in changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config._config[key]
+                    dirty = key not in config._compile_ignored_keys
                 config._config.update(changes)
+                config._is_dirty = dirty
 
             def __exit__(self, exc_type, exc_val, exc_tb):
+                nonlocal dirty
                 config._config.update(prior)
+                config._is_dirty = dirty
                 prior.clear()
 
         return ConfigPatch()
