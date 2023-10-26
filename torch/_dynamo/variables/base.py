@@ -190,20 +190,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if isinstance(value, VariableTracker):
             if not skip_fn(value):
 
-                def updated_dict(v):
+                def update_object_dict(v):
+                    changed = False
                     rv = dict(v.__dict__)
                     for key in rv.keys():
                         if key not in v._nonvar_fields:
-                            rv[key] = cls.apply(fn, rv[key], cache, skip_fn)
-                    return rv
+                            prior = rv[key]
+                            rv[key] = cls.apply(fn, prior, cache, skip_fn)
+                            changed = changed or prior is not rv[key]
+                    if changed:
+                        return v.clone(**rv)
+                    return v
 
                 value = value.unwrap()
                 was_realized = value.is_realized()
-                result = fn(value.clone(**updated_dict(value)))
+                result = fn(update_object_dict(value))
                 if not was_realized and value.is_realized():
                     # running fn() resulted in value getting realized,
                     # which means we missed updating the contents of result
-                    result = result.clone(**updated_dict(result.unwrap()))
+                    result = update_object_dict(result.unwrap())
             else:
                 result = fn(value)
                 if result is not None:

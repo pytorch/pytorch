@@ -1,15 +1,28 @@
 import functools
 from typing import Optional
 
-from .base import MutableLocalBase, MutableLocalSource, VariableTracker
+from .base import VariableTracker
 
 
-class LazyMutableLocal(MutableLocalBase):
+class LazyCache:
     """Container to cache the real VariableTracker"""
 
-    def __init__(self):
-        super().__init__(MutableLocalSource.Local)
+    def __init__(self, value, source):
+        assert source
+        self.value = value
+        self.source = source
         self.vt: Optional[VariableTracker] = None
+
+    def realize(self, parents_tracker):
+        assert self.vt is None
+        from ..symbolic_convert import InstructionTranslator
+        from .builder import VariableBuilder
+
+        tx = InstructionTranslator.current_tx()
+        self.vt = VariableBuilder(tx, self.source)(self.value)
+        self.vt.parents_tracker.add(parents_tracker)
+        del self.value
+        del self.source
 
 
 class LazyVariableTracker(VariableTracker):
@@ -26,43 +39,35 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
-    _nonvar_fields = {"_value", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
-    def __init__(self, _value, source, **kwargs):
-        super().__init__(source=source, **kwargs)
-        self._value = _value
-        if self.mutable_local is None:
-            self.mutable_local = LazyMutableLocal()
-        assert (
-            self.source
-        ), "Illegal construction. LazyVariableTracker deferred creation utilizes VariableBuilder."
+    @staticmethod
+    def create(value, source, **options):
+        return LazyVariableTracker(LazyCache(value, source), source=source, **options)
+
+    def __init__(self, _cache, **kwargs):
+        assert isinstance(_cache, LazyCache)
+        super().__init__(**kwargs)
+        self._cache = _cache
 
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""
-        if self.mutable_local.vt is None:
-            from ..symbolic_convert import InstructionTranslator
-            from .builder import VariableBuilder
-
-            tx = InstructionTranslator.current_tx()
-            self.mutable_local.vt = VariableBuilder(tx, self.source)(self._value)
-            self.mutable_local.vt.parents_tracker.add(self.parents_tracker)
-            self._value = None
-        return self.mutable_local.vt
+        if self._cache.vt is None:
+            self._cache.realize(self.parents_tracker)
+        return self._cache.vt
 
     def unwrap(self):
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
-            return self.mutable_local.vt
+            return self._cache.vt
         return self
 
     def is_realized(self):
-        return self.mutable_local.vt is not None
+        return self._cache.vt is not None
 
     def clone(self, **kwargs):
-        if (
-            kwargs.get("source", self.source) is not self.source
-            or kwargs.get("_value", self._value) is not self._value
-        ):
+        assert kwargs.get("_cache", self._cache) is self._cache
+        if kwargs.get("source", self.source) is not self.source:
             self.realize()
         return VariableTracker.clone(self.unwrap(), **kwargs)
 
