@@ -33,6 +33,11 @@ class TestPaternMatcher(TestCase):
         torch.manual_seed(42)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
+        if inductor_config.cpp_wrapper:
+            # CPP wrapper runs everything twice, so we'll match the pattern twice
+            expected_matches *= 2
+            expected_nodes *= 2
+
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
         )

@@ -861,9 +861,6 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
-    if isinstance(scalar_workaround, dict):
-        example_inputs = [*example_inputs, *scalar_workaround.values()]
-
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
@@ -962,6 +959,8 @@ def gen_pattern(
     search_fn, example_inputs, trace_fn, scalar_workaround=(), exclusive_arg_names=()
 ) -> PatternExpr:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
+    if isinstance(scalar_workaround, dict):
+        example_inputs = [*example_inputs, *scalar_workaround.values()]
     search_gm = trace_fn(search_fn, example_inputs)
     return fx_to_pattern(
         search_gm,
