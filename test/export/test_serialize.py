@@ -257,7 +257,7 @@ class TestDeserialize(TestCase):
                         false_graph1 = getattr(gm1, node1.args[2].target)
                         false_graph2 = getattr(gm2, node2.args[2].target)
                         _check_graph_nodes(false_graph1, false_graph2)
-                    elif node1.target == torch.ops.map_impl:
+                    elif node1.target == torch.ops.higher_order.map_impl:
                         map_graph1 = getattr(gm1, node1.args[0].target)
                         map_graph2 = getattr(gm2, node2.args[0].target)
                         _check_graph_nodes(map_graph1, map_graph2, False)
