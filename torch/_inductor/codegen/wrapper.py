@@ -1813,7 +1813,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         return (
             f"{self.declare}{name} = {self.namespace}empty_strided("
-            f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype})){self.ending}"
+            f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype_code})){self.ending}"
         )
 
     def codegen_reinterpret_view(

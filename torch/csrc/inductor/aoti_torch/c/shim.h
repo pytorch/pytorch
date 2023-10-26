@@ -256,7 +256,7 @@ template <typename T>
 int32_t aoti_torch_dtype();
 
 #define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
-  template<>                                         \
+  template <>                                        \
   inline int32_t aoti_torch_dtype<ctype>() {         \
     return aoti_torch_dtype_##typename();            \
   }
@@ -265,14 +265,14 @@ int32_t aoti_torch_dtype();
 // the wrong types?
 //  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
 //  DEFINE_DTYPE_SPECIALIZATION(half, float16)
-  DEFINE_DTYPE_SPECIALIZATION(float, float32)
-  DEFINE_DTYPE_SPECIALIZATION(double, float64)
-  DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)
-  DEFINE_DTYPE_SPECIALIZATION(int8_t, int8)
-  DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
-  DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
-  DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
-  DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+DEFINE_DTYPE_SPECIALIZATION(float, float32)
+DEFINE_DTYPE_SPECIALIZATION(double, float64)
+DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)
+DEFINE_DTYPE_SPECIALIZATION(int8_t, int8)
+DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
+DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
+DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
+DEFINE_DTYPE_SPECIALIZATION(bool, bool)
 
 #endif
 
