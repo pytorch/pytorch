@@ -312,7 +312,6 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
-    ("profiler::_record_function_exit", datetime.date(2023, 12, 31)),
     ("aten::fbgemm_linear_int8_weight_fp32_activation", datetime.date(2023, 12, 31)),
     ("aten::fbgemm_linear_int8_weight", datetime.date(2023, 12, 31)),
     ("aten::fbgemm_linear_quantize_weight", datetime.date(2023, 12, 31)),
