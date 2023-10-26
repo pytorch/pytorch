@@ -241,6 +241,10 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
+# If true, error if you torch.jit.trace over a dynamo-optimized function.
+# If false, silently suppress dynamo
+error_on_nested_jit_trace = True
+
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -323,6 +327,12 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+# When True, only ops that have the torch.Tag.pt2_compliant tag
+# will be allowed into the graph; all other ops will be disallowed
+# and will fall back to eager-mode PyTorch. Useful to ensure
+# correctness of custom ops.
+only_allow_pt2_compliant_ops = False
+
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
@@ -353,7 +363,6 @@ _autograd_backward_strict_mode_banned_ops.extend(
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
 
 from .config_utils import install_config_module
 

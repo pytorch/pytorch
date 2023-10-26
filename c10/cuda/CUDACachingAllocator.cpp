@@ -725,7 +725,7 @@ struct PrivatePool {
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critial though,
+  // check in BlockComparator. BlockComparator is performance- critical though,
   // I'd rather not add more logic to it.
   BlockPool large_blocks;
   BlockPool small_blocks;
@@ -1118,7 +1118,7 @@ class DeviceCachingAllocator {
           format_size(alloc_size),
           ". GPU ",
           device,
-          " has a total capacty of ",
+          " has a total capacity of ",
           format_size(device_total),
           " of which ",
           format_size(device_free),
@@ -1649,7 +1649,7 @@ class DeviceCachingAllocator {
     const auto all_blocks = get_all_blocks();
 
     for (const Block* const head_block : all_blocks) {
-      // For expandable segments, we report one segment for each continguous
+      // For expandable segments, we report one segment for each contiguous
       // mapped range of memory
       if (head_block->prev && head_block->prev->mapped) {
         continue;
@@ -2078,7 +2078,7 @@ class DeviceCachingAllocator {
       // cannot be freed when requested, but fully free pages
       // of expandable blocks can always be freed.
       // The logic to track this as statistic is pretty involved,
-      // so we simply just exclude expandable segements from
+      // so we simply just exclude expandable segments from
       // inactive_split
       if (!block->expandable_segment_) {
         update_stat(
