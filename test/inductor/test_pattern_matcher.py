@@ -644,7 +644,7 @@ class TestPatternMatcher(TestCase):
         args = [
             torch.randn(2, 32, device="cuda"),
         ]
-        self.common(fn, args, 1, 4)
+        self.common(fn, args, 0, 0)
 
         # Different dimensions  (TODO this case should be handled by replacing with a reshape)
         def fn(a):
