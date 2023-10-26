@@ -526,13 +526,188 @@ def _load_optim_state_dict(
         _state_dict_fn(optim, "load_state_dict")(optim_state_dict)
 
 
-def get_state_dict(
+def get_model_state_dict(
     model: nn.Module,
     *,
-    optimizers: Union[
-        None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
-    ] = None,
-    optim_only: bool = False,
+    submodules: Optional[Set[nn.Module]] = None,
+    options: Optional[StateDictOptions] = None,
+) -> Dict[str, ValueType]:
+    """
+    Return the model state_dict and optimizers state_dict.
+
+    ``state_dict`` is a function that can process any module
+    that is parallelized by FSDP/fully_shard, DDP/replicate,
+    tensor_parallel/parallelize_module,
+    and any combination of these parallelisms. The main functions of
+    ``state_dict`` are: 1.) creating a model and optimizer state_dict that can
+    be resharded with different workers and/or different parallelisms.
+    2.) eliminating the need for users to call parallelism-specific state_dict
+    APIs.  3.) sanity checking the result state_dict.
+
+    The keys of the result state_dict are the canonical FQNs (Fully Qualified Names).
+    A canonical FQN refers to the FQN based on a parameter's position in an
+    nn.Module hierarchy. More specifically, a canonical FQN to a parameter is the
+    FQN returned by ``module.named_parameters()`` or ``module.named_buffers()``
+    when module is not distributed by any parallelisms. Since the optimizer
+    internally uses parameter IDs to represent a parameter, a conversion will
+    happen to convert the parameter IDs to the canonical FQNs. The value of the
+    result state_dict will be either ShardedTensor, DTensor if the value is
+    sharded across ranks or Tensor, scalar values if the value is duplicated
+    because of DDP/replicate.
+
+    ``state_dict`` can also process a module that is not parallelized.
+    In such a case, ``state_dict`` only performs one function --
+    converting the optimizer parameter IDs to the canonical FQNs.
+
+    Example:
+
+        import torch
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        from torch.distributed.checkpoint.state_dict import state_dict
+
+        fsdp_model = FSDP(copy.deepcopy(model))
+        fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        ddp_model = DDP(copy.deepcopy(model))
+        ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+
+        ddp_state_dict, ddp_optim_state_dict = state_dict(ddp_model, ddp_optim)
+        fsdp_state_dict, fsdp_optim_state_dict = state_dict(fsdp_model, fsdp_optim)
+
+        # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
+        # the asserts will fail.
+        assert ddp_state_dict == fsdp_state_dict
+        assert ddp_optim_state == fsdp_optim_state_dict
+
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
+            The optimizers that are used to optimize ``model``.
+        optim_only (bool): if optim_only is True, the returned model state_dict
+            will be empty (default: False)
+        submodules: Optional[Set[nn.Module]]: only return the model parameters
+            that belong to the submodules.
+
+        options (StateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be returned. See
+            `StateDictOptions` for the details.
+
+    Returns:
+        ``Tuple`` that contain model state_dict and optimizer state_dict:
+            The model state_dict will be empty if `optim_only` is True.
+            The optimizer state_dict will be empty if optimizers` is empty.
+    """
+    with gc_context():
+        info = _verify_options(
+            model,
+            tuple(),
+            optim_only=False,
+            submodules=submodules,
+            options=options,
+        )
+        model_state_dict = _get_model_state_dict(model, info)
+        _verify_state_dict(model_state_dict, {}, info)
+        return model_state_dict
+
+
+def get_optimizer_state_dict(
+    model: nn.Module,
+    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    *,
+    submodules: Optional[Set[nn.Module]] = None,
+    options: Optional[StateDictOptions] = None,
+) -> Dict[str, ValueType]:
+    """
+    Return the model state_dict and optimizers state_dict.
+
+    ``state_dict`` is a function that can process any module
+    that is parallelized by FSDP/fully_shard, DDP/replicate,
+    tensor_parallel/parallelize_module,
+    and any combination of these parallelisms. The main functions of
+    ``state_dict`` are: 1.) creating a model and optimizer state_dict that can
+    be resharded with different workers and/or different parallelisms.
+    2.) eliminating the need for users to call parallelism-specific state_dict
+    APIs.  3.) sanity checking the result state_dict.
+
+    The keys of the result state_dict are the canonical FQNs (Fully Qualified Names).
+    A canonical FQN refers to the FQN based on a parameter's position in an
+    nn.Module hierarchy. More specifically, a canonical FQN to a parameter is the
+    FQN returned by ``module.named_parameters()`` or ``module.named_buffers()``
+    when module is not distributed by any parallelisms. Since the optimizer
+    internally uses parameter IDs to represent a parameter, a conversion will
+    happen to convert the parameter IDs to the canonical FQNs. The value of the
+    result state_dict will be either ShardedTensor, DTensor if the value is
+    sharded across ranks or Tensor, scalar values if the value is duplicated
+    because of DDP/replicate.
+
+    ``state_dict`` can also process a module that is not parallelized.
+    In such a case, ``state_dict`` only performs one function --
+    converting the optimizer parameter IDs to the canonical FQNs.
+
+    Example:
+
+        import torch
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        from torch.distributed.checkpoint.state_dict import state_dict
+
+        fsdp_model = FSDP(copy.deepcopy(model))
+        fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        ddp_model = DDP(copy.deepcopy(model))
+        ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+
+        ddp_state_dict, ddp_optim_state_dict = state_dict(ddp_model, ddp_optim)
+        fsdp_state_dict, fsdp_optim_state_dict = state_dict(fsdp_model, fsdp_optim)
+
+        # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
+        # the asserts will fail.
+        assert ddp_state_dict == fsdp_state_dict
+        assert ddp_optim_state == fsdp_optim_state_dict
+
+
+    Args:
+        model (nn.Module): the nn.Module to the model.
+        optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
+            The optimizers that are used to optimize ``model``.
+        optim_only (bool): if optim_only is True, the returned model state_dict
+            will be empty (default: False)
+        submodules: Optional[Set[nn.Module]]: only return the model parameters
+            that belong to the submodules.
+
+        options (StateDictOptions): the options to control how
+            model state_dict and optimizer state_dict should be returned. See
+            `StateDictOptions` for the details.
+
+    Returns:
+        ``Tuple`` that contain model state_dict and optimizer state_dict:
+            The model state_dict will be empty if `optim_only` is True.
+            The optimizer state_dict will be empty if optimizers` is empty.
+    """
+    with gc_context():
+        optimizers = (
+            (optimizers,)
+            if isinstance(optimizers, torch.optim.Optimizer)
+            else tuple(optimizers)
+        )
+        info = _verify_options(
+            model,
+            optimizers,
+            optim_only=True,
+            submodules=submodules,
+            options=options,
+        )
+        optim_state_dict = _get_optim_state_dict(model, optimizers, info)
+        _verify_state_dict({}, optim_state_dict, info)
+        return optim_state_dict
+
+
+def get_state_dict(
+    model: nn.Module,
+    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    *,
     submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
@@ -606,18 +781,14 @@ def get_state_dict(
 
     with gc_context():
         optimizers = (
-            tuple()
-            if optimizers is None
-            else (
-                (optimizers,)
-                if isinstance(optimizers, torch.optim.Optimizer)
-                else tuple(optimizers)
-            )
+            (optimizers,)
+            if isinstance(optimizers, torch.optim.Optimizer)
+            else tuple(optimizers)
         )
         info = _verify_options(
             model,
             optimizers,
-            optim_only=optim_only,
+            optim_only=False,
             submodules=submodules,
             options=options,
         )
@@ -653,16 +824,51 @@ def _unflatten_model_state_dict(
         return cast(Dict[str, ValueType], state_dict)
 
 
+def set_model_state_dict(
+    model: nn.Module,
+    model_state_dict: Union[
+        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
+    ],
+    *,
+    options: Optional[StateDictOptions] = None,
+) -> None:
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model, model_state_dict
+    )
+    with gc_context():
+        info = _verify_options(model, tuple(), optim_only=False, options=options)
+
+        _verify_state_dict(model_state_dict, {}, info)
+        _load_model_state_dict(model, model_state_dict, info)
+
+
+def set_optimizer_state_dict(
+    model: nn.Module,
+    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    *,
+    optim_state_dict: OptimizerStateType,
+    options: Optional[StateDictOptions] = None,
+) -> None:
+    with gc_context():
+        optimizers = (
+            (optimizers,)
+            if isinstance(optimizers, torch.optim.Optimizer)
+            else tuple(optimizers)
+        )
+        info = _verify_options(model, optimizers, optim_only=True, options=options)
+
+        _verify_state_dict({}, optim_state_dict, info)
+        _load_optim_state_dict(model, optimizers, optim_state_dict, info)
+
+
 def set_state_dict(
     model: nn.Module,
+    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
     *,
-    optimizers: Union[
-        None, torch.optim.Optimizer, Iterable[torch.optim.Optimizer]
-    ] = None,
     model_state_dict: Union[
-        None, Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
-    ] = None,
-    optim_state_dict: Optional[OptimizerStateType] = None,
+        Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]
+    ],
+    optim_state_dict: OptimizerStateType,
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Load the model state_dict and optimizers state_dict.
@@ -696,19 +902,14 @@ def set_state_dict(
         None
     """
 
-    model_state_dict: Dict[str, ValueType] = (
-        _unflatten_model_state_dict(model, model_state_dict) if model_state_dict else {}
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model, model_state_dict
     )
-    optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
         optimizers = (
-            tuple()
-            if optimizers is None
-            else (
-                (optimizers,)
-                if isinstance(optimizers, torch.optim.Optimizer)
-                else tuple(optimizers)
-            )
+            (optimizers,)
+            if isinstance(optimizers, torch.optim.Optimizer)
+            else tuple(optimizers)
         )
         info = _verify_options(
             model, optimizers, optim_only=not model_state_dict, options=options
@@ -749,21 +950,19 @@ def _patch_model_state_dict(
     """
 
     _state_dict_call = functools.partial(
-        get_state_dict,
+        get_model_state_dict,
         model=model,
-        optimizers=None,
         options=options,
     )
 
     def state_dict_call():
-        return _state_dict_call()[0]
+        return _state_dict_call()
 
     model.state_dict = state_dict_call
 
     _load_state_dict_call = functools.partial(
-        set_state_dict,
+        set_model_state_dict,
         model=model,
-        optimizers=None,
         options=options,
     )
 
@@ -810,18 +1009,17 @@ def _patch_optimizer_state_dict(
     """
 
     _state_dict_call = functools.partial(
-        get_state_dict,
+        get_optimizer_state_dict,
         model=model,
         optimizers=optimizers,
-        optim_only=True,
         options=options,
     )
 
     def state_dict_call():
-        return _state_dict_call()[1]
+        return _state_dict_call()
 
     _load_state_dict_call = functools.partial(
-        set_state_dict,
+        set_optimizer_state_dict,
         model=model,
         optimizers=optimizers,
         options=options,
