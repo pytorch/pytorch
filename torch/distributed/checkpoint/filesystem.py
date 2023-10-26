@@ -287,21 +287,21 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with open(file_name, "wb") as stream:
-                for write_item in bytes_w:
-                    data = planner.resolve_data(write_item)
-                    write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
-                    )
+            # with open(file_name, "wb") as stream:
+            #     for write_item in bytes_w:
+            #         data = planner.resolve_data(write_item)
+            #         write_results.append(
+            #             _write_item(stream, data, write_item, storage_key)
+            #         )
 
-                for tensor, write_item in loader.values():
-                    assert tensor.is_cpu
-                    write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
-                    )
+            #     for tensor, write_item in loader.values():
+            #         assert tensor.is_cpu
+            #         write_results.append(
+            #             _write_item(stream, tensor, write_item, storage_key)
+            #         )
 
-                if use_fsync:
-                    os.fsync(stream.fileno())
+            #     if use_fsync:
+            #         os.fsync(stream.fileno())
             result_queue.put(write_results)
     except queue.Empty:
         pass

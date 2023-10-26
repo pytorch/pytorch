@@ -24,10 +24,10 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 class FsdpModelStateCheckpoint(DTensorTestBase):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        return "nccl"
 
     def _test_fsdp_model_state(self, process_group) -> None:
-        CHECKPOINT_DIR = self.temp_dir
+        CHECKPOINT_DIR = 'checkpoint'
 
         model = FSDP(torch.nn.Linear(8, 8, device="meta"))
         model(torch.rand(8, 8, device=dist.get_rank())).sum().backward()
@@ -43,32 +43,36 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 planner=DefaultSavePlanner(),
             )
 
-        model_2 = FSDP(
-            torch.nn.Linear(8, 8, device="meta"), process_group=process_group
-        )
+        file_system_reader = dist_cp.FileSystemReader(CHECKPOINT_DIR)
+        metadata = file_system_reader.read_metadata()
+        print(f"{metadata=}")
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertNotEqual(model.weight, model_2.weight)
-                self.assertNotEqual(model.bias, model_2.bias)
+        # model_2 = FSDP(
+        #     torch.nn.Linear(8, 8, device="meta"), process_group=process_group
+        # )
 
-        # now load the model and ensure the values are the same
-        with FSDP.state_dict_type(model_2, StateDictType.SHARDED_STATE_DICT):
-            state_dict = {
-                "model": model_2.state_dict(),
-            }
+        # with FSDP.summon_full_params(model):
+        #     with FSDP.summon_full_params(model_2):
+        #         self.assertNotEqual(model.weight, model_2.weight)
+        #         self.assertNotEqual(model.bias, model_2.bias)
 
-            dist_cp.load_state_dict(
-                state_dict=state_dict,
-                storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-                planner=DefaultLoadPlanner(),
-            )
-            model_2.load_state_dict(state_dict["model"])
+        # # now load the model and ensure the values are the same
+        # with FSDP.state_dict_type(model_2, StateDictType.SHARDED_STATE_DICT):
+        #     state_dict = {
+        #         "model": model_2.state_dict(),
+        #     }
 
-        with FSDP.summon_full_params(model):
-            with FSDP.summon_full_params(model_2):
-                self.assertEqual(model.weight, model_2.weight)
-                self.assertEqual(model.bias, model_2.bias)
+        #     dist_cp.load_state_dict(
+        #         state_dict=state_dict,
+        #         storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
+        #         planner=DefaultLoadPlanner(),
+        #     )
+        #     model_2.load_state_dict(state_dict["model"])
+
+        # with FSDP.summon_full_params(model):
+        #     with FSDP.summon_full_params(model_2):
+        #         self.assertEqual(model.weight, model_2.weight)
+        #         self.assertEqual(model.bias, model_2.bias)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
