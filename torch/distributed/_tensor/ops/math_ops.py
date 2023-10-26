@@ -156,6 +156,7 @@ def common_reduction_strategy(
 
 REDUCTION_LINEAR_OP_MAP = {
     aten.all.default: c10d.ReduceOp.SUM,
+    aten.all.dim: c10d.ReduceOp.SUM,
     aten.sum.default: c10d.ReduceOp.SUM,
     aten.sum.dim_IntList: c10d.ReduceOp.SUM,
     aten.prod.default: c10d.ReduceOp.PRODUCT,
