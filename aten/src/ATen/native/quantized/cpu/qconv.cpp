@@ -1405,12 +1405,12 @@ static at::Tensor _quantized_convolution_onednn(
   bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
   bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
   if (fp32_output || bfloat16_output) {
-    // When fp32_output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
+    // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default inv_output_scale as 1.0 and output_zero_point as 0, since
     // when inv_output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
     // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
-    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 output, inv_output_scale must be 1.0.");
-    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 output, output_zero_point must be 0");
+    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, inv_output_scale must be 1.0.");
+    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf 16 output, output_zero_point must be 0");
   }
 
   int kSpatialDim = act.dim() - 2;
@@ -1419,7 +1419,13 @@ static at::Tensor _quantized_convolution_onednn(
   bool has_binary_post_op = binary_attr.has_value() && binary_attr.value() != "none";
   bool has_unary_post_op = unary_attr.has_value() && unary_attr.value() != "none";
   // has_accum_postop_sum: extra input besides the conv to do conv add fusion with post op sum.
-  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "add" && !fp32_output;
+  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "add";
+
+  if (has_accum_postop_sum && (fp32_output || bfloat16_output)) {
+    TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
+    TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf 16 output, accum_zero_point must be 0");
+  }
+
   std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
   if (has_binary_post_op) {
@@ -1586,12 +1592,28 @@ static at::Tensor _quantized_convolution_onednn(
   ideep::tensor dst;
   at::Tensor accum_contig;
   if (has_accum_postop_sum) {
-    auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
-        kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
-    accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
-    TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
-    // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
-    dst.init(dst_desc, accum_contig.data_ptr());
+    if (fp32_output || bfloat16_output) {
+      auto dst_desc = ideep::tensor::desc(dst_dims, fp32_output ? ideep::tensor::data_type::f32 : ideep::tensor::data_type::bf16,
+          kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+      accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
+      TORCH_CHECK((accum_contig.scalar_type() == c10::kFloat) or (accum_contig.scalar_type() == c10::kBFloat16), "The accum_contig tensor should be KFloat or KBFloat.");
+      TORCH_CHECK((output.scalar_type() == c10::kFloat) or (output.scalar_type() == c10::kBFloat16), "The output tensor should be KFloat or KBFloat.");
+      if (accum_contig.scalar_type() != output.scalar_type()){
+        // accum_contig is KFloat32 and we expect a kBFloat16 output
+        // or accum_contig is kBFloat16 and we expect a KFloat32 output
+        accum_contig = accum_contig.to(output.scalar_type());
+      }
+      TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
+      // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
+      dst.init(dst_desc, accum_contig.data_ptr());
+    } else {
+      auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
+          kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+      accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
+      TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
+      // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
+      dst.init(dst_desc, accum_contig.data_ptr());
+    }
   } else {
     if (fp32_output || bfloat16_output) {
       // Conv without add: int8-in, fp32-output

@@ -6373,6 +6373,7 @@ class TestQuantizedConv(TestCase):
         X2_zero_point=0,
         qconv_output_dtype=None,  # None, torch.float32, torch.bfloat16
         weight_in_channel_last_format=False,
+        qconv_x2_dtype=None,
     ):
         # ONEDNN only supports symmetric quantization of weight
         if W_zero_point is not None:
@@ -6382,6 +6383,8 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             Y_scale = 1.0
             Y_zero_point = 0
+            X2_scale = 1.0
+            X2_zero_point = 0
         batch_size = 3
         o_pads = None
         device = torch.device("cpu")
@@ -6484,7 +6487,9 @@ class TestQuantizedConv(TestCase):
                 X_q_cpu_tensor,
                 X_scale,
                 X_zero_point,
-                X2_q_cpu_tensor,
+                X2_q_cpu_tensor
+                if qconv_output_dtype is None
+                else X2_q.dequantize().to(qconv_x2_dtype),
                 X2_scale,
                 X2_zero_point,
                 packed_weight,
@@ -6524,13 +6529,13 @@ class TestQuantizedConv(TestCase):
                 post_op.scalars,
                 post_op.algorithm,
             )
-            if fp32_output or bfloat16_output:
-                self.assertTrue(Y_q_cpu_tensor.dtype == qconv_output_dtype)
-                Y_q_cpu_tensor = torch.quantize_per_tensor(
-                    Y_q_cpu_tensor
-                    if fp32_output
-                    else Y_q_cpu_tensor.to(torch.float32), scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
-                ).int_repr()
+        if fp32_output or bfloat16_output:
+            self.assertTrue(Y_q_cpu_tensor.dtype == qconv_output_dtype)
+            Y_q_cpu_tensor = torch.quantize_per_tensor(
+                Y_q_cpu_tensor
+                if fp32_output
+                else Y_q_cpu_tensor.to(torch.float32), scale=Y_scale, zero_point=Y_zero_point, dtype=output_dtype
+            ).int_repr()
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -6744,8 +6749,9 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [0]
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
-        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-        for groups, use_bias, use_channelwise in options:
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+        for groups, use_bias, use_channelwise, output_dtype in options:
             qconv = torch.ops.onednn.qconv2d_pointwise
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
@@ -6775,6 +6781,7 @@ class TestQuantizedConv(TestCase):
                 use_bias=use_bias,
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
+                qconv_output_dtype=output_dtype,
             )
 
     # Test qconv with post op add
@@ -6792,11 +6799,12 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [-3]
         use_bias_list = [False, True]
         use_channelwise_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
         X2_zero_point_list = [0, 1]
         options = itertools.product(
-            groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list
+            groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list, output_dtype_list
         )
-        for groups, use_bias, use_channelwise, X2_zero_point in options:
+        for groups, use_bias, use_channelwise, X2_zero_point, output_dtype in options:
             qconv = torch.ops.onednn.qconv2d_pointwise.binary
             qconv_prepack = torch.ops.onednn.qconv_prepack
             conv_op = torch.nn.Conv2d(
@@ -6827,6 +6835,7 @@ class TestQuantizedConv(TestCase):
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
                 X2_zero_point=X2_zero_point,
+                qconv_output_dtype=output_dtype,
             )
 
     # Test qconv with post op add relu
@@ -6879,6 +6888,67 @@ class TestQuantizedConv(TestCase):
                 post_op=pointwise_post_op,
                 use_channelwise=use_channelwise,
                 X2_zero_point=X2_zero_point,
+            )
+
+    # Test qconv with post op add
+    @skipIfNoONEDNN
+    def test_qconv2d_add_relu_float_output_pt2e(self):
+        groups = 1
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        input_feature_map_shape = (10, 10)
+        kernels = (3, 3)
+        strides = (2, 2)
+        pads = (1, 1)
+        dilations = (1, 1)
+        W_scale = [1.5]
+        W_zero_point = [-3]
+        use_bias_list = [False, True]
+        use_channelwise = True
+        qconv_x2_dtype_list = [torch.float32, torch.bfloat16]
+        output_dtype_list = [torch.float32, torch.bfloat16]
+        X2_zero_point = 0
+        use_relu_list = [True, False]
+        options = itertools.product(
+            use_bias_list, output_dtype_list, qconv_x2_dtype_list, use_relu_list
+        )
+        for use_bias, output_dtype, qconv_x2_dtype, use_relu in options:
+            qconv = torch.ops.onednn.qconv2d_pointwise.binary
+            qconv_prepack = torch.ops.onednn.qconv_prepack
+            conv_op = torch.nn.Conv2d(
+                input_channels_per_group * groups,
+                output_channels_per_group * groups,
+                kernels,
+                strides,
+                pads,
+                dilations,
+                groups,
+            )
+            pointwise_post_op = (
+                PointwisePostOp(binary_attr="add", unary_attr="relu")
+                if use_relu
+                else PointwisePostOp(binary_attr="add")
+            )
+            self._test_qconv_impl_cpu_tensor(
+                qconv,
+                qconv_prepack,
+                conv_op,
+                input_channels_per_group=input_channels_per_group,
+                input_feature_map_shape=input_feature_map_shape,
+                output_channels_per_group=output_channels_per_group,
+                groups=groups,
+                kernels=kernels,
+                strides=strides,
+                pads=pads,
+                dilations=dilations,
+                W_scale=W_scale,
+                W_zero_point=W_zero_point,
+                use_bias=use_bias,
+                post_op=pointwise_post_op,
+                use_channelwise=use_channelwise,
+                X2_zero_point=X2_zero_point,
+                qconv_output_dtype=output_dtype,
+                qconv_x2_dtype=qconv_x2_dtype,
             )
 
 class TestPadding(TestCase):
