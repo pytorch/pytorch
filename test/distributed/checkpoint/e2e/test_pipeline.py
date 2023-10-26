@@ -1,17 +1,10 @@
-import functools
-import os
 import sys
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dist_cp
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.state_dict import (
-    get_state_dict,
-    set_state_dict,
-    StateDictOptions,
-)
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -73,9 +66,9 @@ class TestPipeline(FSDPTest):
         # Save state_dict
         model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
         saved_state_dict = {"model": model_state_dict, "optim": optim_state_dict}
-        dist_cp.save_state_dict(
+        dcp.save_state_dict(
             state_dict=saved_state_dict,
-            storage_writer=dist_cp.FileSystemWriter(pipeline_dir),
+            storage_writer=dcp.FileSystemWriter(pipeline_dir),
         )
 
     def load_with_fsdp(self, pipeline_dir: str) -> None:
@@ -84,9 +77,9 @@ class TestPipeline(FSDPTest):
 
         # Load the checkpoint
         model_state_dict, optim_state_dict = get_state_dict(model, optimizers=optim)
-        dist_cp.load_state_dict(
+        dcp.load_state_dict(
             {"model": model_state_dict, "optim": optim_state_dict},
-            storage_reader=dist_cp.FileSystemReader(pipeline_dir),
+            storage_reader=dcp.FileSystemReader(pipeline_dir),
         )
         set_state_dict(
             model,
