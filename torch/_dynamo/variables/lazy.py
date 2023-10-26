@@ -56,7 +56,7 @@ class LazyVariableTracker(VariableTracker):
             self.rvtc.vt = VariableBuilder(tx, self.source)(self._value)
             self.rvtc.vt.parents_tracker.add(self.parents_tracker)
             self._value = None
-        return self.rvtc.vt.add_options(self)
+        return self.rvtc.vt
 
     def unwrap(self):
         """Return the real VariableTracker if it already exists"""
