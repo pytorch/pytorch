@@ -25,10 +25,6 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.recursively_contains = (
-            set()
-        )  # This var doesn't contain any child vars and doesn't support clone() properly,
-        # so don't populate this automatically
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -520,24 +516,20 @@ class StreamVariable(VariableTracker):
             )
             return variables.ConstantVariable(None)
         elif name == "query":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         elif name == "record_event":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=EventVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         else:
             unimplemented(self.device + " stream method " + name + " unsupported")
@@ -570,14 +562,12 @@ class EventVariable(VariableTracker):
             )
             return variables.ConstantVariable(None)
         elif name == "query":
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return wrap_fx_proxy_cls(
                 target_cls=variables.ConstantVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
                 ),
-                **options,
             )
         else:
             unimplemented(f"event method {name} unsupported")

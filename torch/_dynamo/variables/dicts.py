@@ -22,8 +22,8 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+    def __init__(self, items, user_cls, **kwargs):
+        super().__init__(**kwargs)
         self.items = items
         self.user_cls = user_cls
 
@@ -131,15 +131,9 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
-            new_rec_contains = self.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self,
-                self.modifed(newval, new_rec_contains),
+                self.modifed(newval),
             )
         elif (
             name in ("pop", "get")
@@ -158,7 +152,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, None))
+            tx.replace_all(self, self.modifed(newval))
             return result
         elif (
             name == "update"
@@ -168,10 +162,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            new_rec_contains = self.recursively_contains.union(
-                args[0].recursively_contains
-            )
-            result = self.modifed(newval, recursively_contains=new_rec_contains)
+            result = self.modifed(newval)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -189,11 +180,9 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, recursively_contains, **options):
+    def modifed(self, items, **options):
         """a copy of self with different items"""
-        return self.clone(
-            items=items, recursively_contains=recursively_contains, **options
-        )
+        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
         val = self.items
@@ -269,12 +258,7 @@ class DefaultDictVariable(ConstDictVariable):
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
-                    new_rec_contains = self.recursively_contains.union(
-                        default_var.recursively_contains
-                    )
-                    if default_var.mutable_local is not None:
-                        new_rec_contains.add(default_var.mutable_local)
-                    tx.replace_all(self, self.modifed(new_val, new_rec_contains))
+                    tx.replace_all(self, self.modifed(new_val))
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)

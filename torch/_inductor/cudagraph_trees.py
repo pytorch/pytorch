@@ -2048,7 +2048,7 @@ class CUDAGraphTreeManager:
         self.warned_functions.add(function_id)
         warnings.warn(
             "Unable to hit fast path of CUDAGraphs because of pending, uninvoked backwards. "
-            "Consider running with torch.no_grad() or using torch._inductor.cudagraph_mark_step_begin() "
+            "Consider running with torch.no_grad() or using torch.compiler.cudagraph_mark_step_begin() "
             "before each model invocation"
         )
 
@@ -2071,7 +2071,7 @@ class CUDAGraphTreeManager:
                     "Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run. "
                     f"Stack trace: {stack_trace}. "
                     "To prevent overwriting, clone the tensor outside of torch.compile() "
-                    "before running the model again."
+                    "or call torch.compiler.cudagraph_mark_step_begin() before each model invocation."
                 )
                 torch._C._set_storage_access_error_msg(ten, msg)
 
