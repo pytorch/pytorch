@@ -94,7 +94,7 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
 
         with config.patch({"verbose": not config.verbose}):
             new_hash = config.get_hash()
-            assert "verbose" in config._compile_ignored
+            assert "verbose" in config._compile_ignored_keys
             assert new_hash == starting_hash
 
         new_hash = config.get_hash()
@@ -102,8 +102,14 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
 
         with config.patch({"dead_code_elimination": not config.dead_code_elimination}):
             changed_hash = config.get_hash()
-            assert "dead_code_elimination" not in config._compile_ignored
+            assert "dead_code_elimination" not in config._compile_ignored_keys
             assert changed_hash != starting_hash
+
+            # Test nested patch
+            with config.patch({"verbose": not config.verbose}):
+                inner_changed_hash = config.get_hash()
+                assert inner_changed_hash == changed_hash
+                assert inner_changed_hash != starting_hash
 
         newest_hash = config.get_hash()
         assert changed_hash != newest_hash
