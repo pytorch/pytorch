@@ -158,8 +158,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            if isinstance(self, variables.UserDefinedClassVariable):
-                options = {"type_tracker": self}
             var = tx.output.side_effects.track_object_new(
                 self.source,
                 self.value,
