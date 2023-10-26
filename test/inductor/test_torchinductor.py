@@ -814,6 +814,7 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     @skipIfRocm
+    @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):

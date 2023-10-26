@@ -6120,7 +6120,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, check=True):
+            def indirect_indexing(index_proxy, size, add_asserts=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -6130,7 +6130,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, check)
+                        var, V.ops.indirect_indexing(new_var, size, add_asserts)
                     )
 
                 tracer.create_proxy(
