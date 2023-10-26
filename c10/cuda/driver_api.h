@@ -59,11 +59,15 @@ namespace cuda {
 
 struct DriverAPI {
 // #define CREATE_MEMBER(name, n) decltype(&name) name##_;
-#define CREATE_MEMBER(name) decltype(&name) name##_;
   // C10_FORALL_DRIVER_API(CREATE_MEMBER)
-  C10_LIBCUDA_DRIVER_API(CREATE_MEMBER)
-  C10_NVML_DRIVER_API(CREATE_MEMBER)
-#undef CREATE_MEMBER
+
+#define CREATE_LIBCUDA_MEMBER(name) decltype(&name) name##_;
+  C10_LIBCUDA_DRIVER_API(CREATE_LIBCUDA_MEMBER)
+#undef CREATE_LIBCUDA_MEMBER
+#define CREATE_NVML_MEMBER(name) decltype(&name) name##_;
+  C10_NVML_DRIVER_API(CREATE_NVML_MEMBER)
+#undef CREATE_NVML_MEMBER
+
   static DriverAPI* get();
 };
 
