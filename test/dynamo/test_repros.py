@@ -856,7 +856,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertEqual(
-            cnt.frame_count,
+            torch._dynamo.utils.counters["frames"]["total"],
             torch._dynamo.utils.counters["frames"]["ok"],
         )
 
