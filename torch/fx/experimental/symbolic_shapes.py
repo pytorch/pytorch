@@ -28,8 +28,7 @@ from torch.fx.experimental.recording import (
     replay_shape_env_events,
     shape_env_check_state_equal
 )
-from torch.fx.experimental.sym_node import SymNode
-from torch.fx.experimental._sym_dispatch_mode import set_sym_function_mode, sym_function_mode
+from torch.fx.experimental.sym_node import SymNode, SymTypes
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
@@ -44,7 +43,6 @@ from torch._utils_internal import signpost_event
 
 InputList = List
 DimList = List
-SymTypes = (SymInt, SymFloat, SymBool)
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +57,7 @@ aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
-    "guard_int", "guard_float", "guard_scalar", "wrap_node",
+    "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
@@ -100,17 +98,6 @@ def create_contiguous(shape):
     for dim in reversed(shape[:-1]):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
-
-def _handle_sym_dispatch(func, args, kwargs):
-    mode = sym_function_mode()
-    assert mode
-    set_sym_function_mode(mode.inner)
-    try:
-        # TODO: properly compute types
-        types: List[Type] = []
-        return mode.__sym_dispatch__(func, types, args, kwargs)
-    finally:
-        set_sym_function_mode(mode)
 
 def hint_int(a):
     if isinstance(a, torch.SymInt):
@@ -540,20 +527,6 @@ def guard_float(a):
     assert isinstance(a, float), a
     return a
 
-def to_node(self, num):
-    if isinstance(num, SymTypes):
-        return num.node
-    elif type(num) is bool:
-        return self.wrap_bool(num)
-    elif type(num) is int:
-        return self.wrap_int(num)
-    elif type(num) is float:
-        return self.wrap_float(num)
-    else:
-        # NotImplemented is important so that Python tries the
-        # other magic method
-        return NotImplemented
-
 # Given a GraphModule, return all the FakeTensors for all the placeholders
 def fx_placeholder_vals(gm):
     return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
@@ -795,20 +768,6 @@ SYMPY_INTERP = {
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
 }
-
-def wrap_node(x):
-    # TODO: let C++ also take advantage of this
-    if isinstance(x, SymNode) and x.constant is not None:
-        return x.constant
-    if x.is_int():
-        return SymInt(x)
-    elif x.is_float():
-        return SymFloat(x)
-    elif x.is_bool():
-        return SymBool(x)
-    else:
-        raise AssertionError(f"unrecognized return type {x}")
-
 
 def _translation_validation_enabled() -> bool:
     from torch.fx.experimental.validator import translation_validation_enabled
