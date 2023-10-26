@@ -23,7 +23,7 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
-from torch._functorch.aot_autograd import make_boxed_func
+from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -132,6 +132,35 @@ def _warn_tf32_disabled():
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
+
+
+def _unlift_graph(mod, gm, graph_signature):
+    state_dict = {}
+    for name, param in mod.named_parameters(remove_duplicate=False):
+        state_dict[name] = param
+    for name, param in mod.named_buffers(remove_duplicate=False):
+        state_dict[name] = param
+
+    from torch._export.exported_program import (
+        _construct_inp_pos_to_param_buffer_name,
+        _unlift,
+    )
+
+    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
+        gm,
+        graph_signature,
+        state_dict,
+    )
+    unlifted_gm = _unlift(
+        gm,
+        inp_pos_to_param_buffer_name,
+        pytree.LeafSpec(),
+        None,
+        state_dict,
+        graph_signature.buffers_to_mutate,
+        set(graph_signature.user_outputs),
+    )
+    return unlifted_gm
 
 
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
@@ -1038,11 +1067,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        if not config.from_export:
-            # Since handle_dynamo_export_graph will trigger compile_fx again,
-            # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-            # If we come from export, the graph is already in aten IR, so pre-grad passes is no-op.
-            model_ = pre_grad_passes(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1181,9 +1206,13 @@ def compile_fx(
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
 
-    if config.from_export and V.aot_compilation is True:
+    if V.aot_compilation is True:
+        gm, graph_signature = aot_export_module(
+            model_, example_inputs_, trace_joint=False, decompositions=decompositions
+        )
+        unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(model_, example_inputs_)
+            return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context
