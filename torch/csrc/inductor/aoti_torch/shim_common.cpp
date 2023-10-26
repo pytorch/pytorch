@@ -17,6 +17,7 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/_scaled_mm.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -283,6 +284,40 @@ AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* out_tensor = new at::Tensor();
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+}
+
+AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    int32_t out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    bool use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    at::Tensor* scale_a_tensor = tensor_handle_to_tensor_pointer(scale_a);
+    at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
+    at::Tensor* scale_result_tensor =
+        tensor_handle_to_tensor_pointer(scale_result);
+    auto [r0, r1] = at::_scaled_mm(
+        *self_tensor,
+        *mat2_tensor,
+        *bias_tensor,
+        static_cast<c10::ScalarType>(out_dtype),
+        *scale_a_tensor,
+        *scale_b_tensor,
+        scale_result_tensor ? c10::make_optional(*scale_result_tensor) : c10::nullopt);
+    at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
+    *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
+    at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
+    *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
   });
 }
 

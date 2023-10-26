@@ -352,9 +352,10 @@ def meta_copy_(self, src, non_blocking=False):
             "more than one element of the written-to tensor refers to a single memory location"
         )
 
-    intermediate = src.to(self, non_blocking)
-    if self.size() != intermediate.size():
-        aten.expand_copy.default(intermediate, self.size())
+    if isinstance(src, Tensor):
+        intermediate = src.to(self, non_blocking)
+        if self.size() != intermediate.size():
+            aten.expand_copy.default(intermediate, self.size())
     return self
 
 
@@ -1890,19 +1891,24 @@ def meta_mm(a, b):
     return a.new_empty(N, P)
 
 
-
 @register_meta([aten._scaled_mm.default])
 @out_wrapper("output", "output_amax")
 def meta__scaled_mm(a, b, bias, out_dtype, scale_a, scale_b, scale_result=None):
-    torch._check(a.dim() >=2, lambda: "a must > 2D")
-    torch._check(b.dim() >=2, lambda: "b must be 2D")
-    torch._check(scale_a.dtype == torch.float32, lambda: f"scale_a must be FP32, but get {scale_a.dtype}")
-    torch._check(scale_b.dtype == torch.float32, lambda: f"scale_b must be FP32, but get {scale_b.dtype}")
+    torch._check(a.dim() >= 2, lambda: "a must > 2D")
+    torch._check(b.dim() >= 2, lambda: "b must be 2D")
+    torch._check(
+        scale_a.dtype == torch.float32,
+        lambda: f"scale_a must be FP32, but get {scale_a.dtype}",
+    )
+    torch._check(
+        scale_b.dtype == torch.float32,
+        lambda: f"scale_b must be FP32, but get {scale_b.dtype}",
+    )
     a_shape = a.shape
     b_shape = b.shape
     torch._check(
         a_shape[-1] == b_shape[0],
-        lambda: f"a and b must have same reduction dim: but got {a_shape} {b_shape}"
+        lambda: f"a and b must have same reduction dim: but got {a_shape} {b_shape}",
     )
     new_shape = a_shape[:-1] + b_shape[1:]
     res = torch.empty(new_shape, dtype=out_dtype, device=a.device)
@@ -3032,6 +3038,39 @@ def meta__foreach_binop_list(self, other, alpha=1):
 )
 def meta__foreach_binop__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta(
+    [
+        aten._foreach_add.Tensor,
+    ]
+)
+def meta__foreach_binop_tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.Tensor,
+    ]
+)
+def meta__foreach_binop__tensor(self, other, alpha=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(other, torch.Tensor),
+        lambda: f"The second argument must be Tensor, but got {type(other)}.",
+    )
 
 
 @register_meta(
@@ -5259,8 +5298,8 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 @register_meta(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     grad_output: Tensor,
-    output_size: Sequence[Union[int, torch.types.SymInt]],
-    input_size: Sequence[Union[int, torch.types.SymInt]],
+    output_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ):
