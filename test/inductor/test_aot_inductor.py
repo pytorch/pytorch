@@ -933,6 +933,24 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_dup_unbacked_sym_decl(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                abs_1 = torch.ops.aten.abs.default(x)
+                lt = torch.ops.aten.lt.Scalar(abs_1, 0.001)
+                eq = torch.ops.aten.eq.Scalar(lt, 0)
+                index_1 = torch.ops.aten.index.Tensor(x, [eq])
+                sin = torch.ops.aten.sin.default(index_1)
+                index_2 = torch.ops.aten.index.Tensor(x, [eq])
+                div_3 = torch.ops.aten.div.Tensor(sin, index_2)
+                return div_3
+
+        example_inputs = (torch.randn(4, 4, 4, 4).to(self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -951,6 +969,7 @@ copy_tests(
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
+        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
@@ -977,6 +996,7 @@ copy_tests(
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
     {
+        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
     },
 )
