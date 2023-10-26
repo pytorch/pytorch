@@ -439,7 +439,7 @@ class VariableBuilder:
                     return key
 
             result = {
-                k: LazyVariableTracker(
+                k: LazyVariableTracker.create(
                     value[k],
                     source=GetItemSource(self.get_source(), index_source(k)),
                 ).add_guards(guards)
