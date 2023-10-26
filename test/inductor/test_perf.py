@@ -596,12 +596,18 @@ class NoopTests(TestCase):
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
         def f(a, b):
-            a = a.cos()
-            a[b] = 1
+            aten.index_put_(a, (b,), torch.tensor(1.0))
             return a
 
         inp = (T(10), TI(2, mx=5))
-        self.assertExpectedInline(count_numel(f, *inp), """26""")
+        self.assertExpectedInline(count_numel(f, *inp), """6""")
+
+        def f(a, b):
+            aten._unsafe_index_put_(a, (b,), torch.tensor(1.0))
+            return a
+
+        inp = (T(10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """6""")
 
     def test_inplace_scatter_noop_view(self):
         def f(a, b):
@@ -651,6 +657,17 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 1, 8), T(1, 10, 8))
         self.assertExpectedInline(count_numel(f, *inp), """170""")
+
+    # We need more sophisticated decisions for inplacing
+    # This tests randperm + scatter pattern match as well as inplacing
+    def test_inplace_randperm_scatter(self):
+        def scaled_index_add(x, y, scale_y):
+            index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
+            out = x.index_add_(dim=0, source=y * scale_y, index=index)
+            return out
+
+        inp = (T(10, 10), T(5, 10), T(10))
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
 
 
 if __name__ == "__main__":
