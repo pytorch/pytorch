@@ -10,8 +10,8 @@ namespace {
 DriverAPI create_driver_api() {
   void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
   TORCH_INTERNAL_ASSERT(handle_0);
-  try{
-    void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY)
+  void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  try {
     TORCH_INTERNAL_ASSERT(handle_1);
   } catch (...) {
     nvml_is_available = false;
