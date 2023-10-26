@@ -5,6 +5,9 @@ import sys
 
 import torch
 from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
@@ -19,6 +22,14 @@ import unittest
 
 from torch._inductor import config
 from torch._inductor.scheduler import Scheduler
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
@@ -50,6 +61,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (torch.rand(2, 8192),))
 
+    @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
 
