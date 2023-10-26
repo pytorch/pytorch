@@ -11,11 +11,6 @@ DriverAPI create_driver_api() {
   void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
   TORCH_INTERNAL_ASSERT(handle_0);
   void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  try {
-    TORCH_INTERNAL_ASSERT(handle_1);
-  } catch (...) {
-    nvml_is_available = false;
-  }
 
   DriverAPI r{};
 
@@ -25,7 +20,7 @@ DriverAPI create_driver_api() {
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
 #undef LOOKUP_LIBCUDA_ENTRY
 
-  if (nvml_is_available) {
+  if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
   r.name##_ = ((decltype(&name))dlsym(handle_1, #name)); \
   TORCH_INTERNAL_ASSERT(r.name##_)
