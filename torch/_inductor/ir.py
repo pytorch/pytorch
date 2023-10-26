@@ -2718,18 +2718,18 @@ class Buffer(IRNode):
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
             wrapper.writeline(
-                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
             )
             symbols_to_define.remove(s)
         assert (
