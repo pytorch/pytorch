@@ -676,7 +676,10 @@ def stack_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.embedding.default, "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?")
+@register_jagged_func(
+    torch.ops.aten.embedding.default,
+    "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?",
+)
 def embedding_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
