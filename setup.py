@@ -189,9 +189,6 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVFUSER_SOURCE_DIR
-#     specify nvfuser root directory
-#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -632,11 +629,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        if cmake_cache_vars["BUILD_NVFUSER"]:
-            report("-- Building nvfuser")
-        else:
-            report("-- Not Building nvfuser")
-
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv("CFLAGS", ""))
@@ -728,22 +720,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
-            dst = os.path.join(os.path.realpath(self.build_lib), filename)
-            if os.path.exists(src):
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst_dir = os.path.dirname(dst)
-                if not os.path.exists(dst_dir):
-                    os.makedirs(dst_dir)
-                self.copy_file(src, dst)
-
-        # Copy nvfuser extension
-        for i, ext in enumerate(self.extensions):
-            if ext.name != "nvfuser._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = self.get_ext_filename(fullname)
-            fileext = os.path.splitext(filename)[1]
-            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
                 report(f"Copying {ext.name} from {src} to {dst}")
@@ -1011,8 +987,6 @@ def configure_extension_build():
         excludes.extend(["caffe2", "caffe2.*"])
     if not cmake_cache_vars["BUILD_FUNCTORCH"]:
         excludes.extend(["functorch", "functorch.*"])
-    if not cmake_cache_vars["BUILD_NVFUSER"]:
-        excludes.extend(["nvfuser", "nvfuser.*"])
     packages = find_packages(exclude=excludes)
     C = Extension(
         "torch._C",
@@ -1045,10 +1019,6 @@ def configure_extension_build():
     if cmake_cache_vars["BUILD_FUNCTORCH"]:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
-        )
-    if cmake_cache_vars["BUILD_NVFUSER"]:
-        extensions.append(
-            Extension(name="nvfuser._C", sources=[]),
         )
 
     cmdclass = {
@@ -1312,8 +1282,6 @@ def main():
         "include/torch/csrc/jit/tensorexpr/*.h",
         "include/torch/csrc/jit/tensorexpr/operators/*.h",
         "include/torch/csrc/jit/codegen/cuda/*.h",
-        "include/torch/csrc/jit/codegen/cuda/ops/*.h",
-        "include/torch/csrc/jit/codegen/cuda/scheduler/*.h",
         "include/torch/csrc/onnx/*.h",
         "include/torch/csrc/profiler/*.h",
         "include/torch/csrc/profiler/orchestration/*.h",
@@ -1355,18 +1323,6 @@ def main():
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
     ]
-    if get_cmake_cache_vars()["BUILD_NVFUSER"]:
-        torch_package_data.extend(
-            [
-                "share/cmake/nvfuser/*.cmake",
-                "include/nvfuser/*.h",
-                "include/nvfuser/kernel_db/*.h",
-                "include/nvfuser/multidevice/*.h",
-                "include/nvfuser/ops/*.h",
-                "include/nvfuser/python_frontend/*.h",
-                "include/nvfuser/scheduler/*.h",
-            ]
-        )
 
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(
