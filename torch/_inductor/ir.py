@@ -2236,10 +2236,28 @@ class Layout(IRNode):
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
+
+        # ignore dimensions of size 1, they dont affect layout
+        non_1_indices = [
+            i
+            for i, dim in enumerate(self.size)
+            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+        ]
+
+        stride = [self.stride[i] for i in non_1_indices]
+        order = [order[i] for i in non_1_indices]
+
+        def sorted_indices(arr):
+            sorted_arr = sorted(arr)
+            return [sorted_arr.index(element) for element in arr]
+
+        # since we may have removed dimensions, need to re-sort & re-index order
+        order = sorted_indices(order)
+
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
@@ -3490,6 +3508,8 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
+            while isinstance(x.get_layout(), AliasedLayout):
+                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
