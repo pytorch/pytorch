@@ -78,7 +78,6 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
     // TODO: after we add Get<Tensor>(c10::DeviceType)
     // and changed all the callsites, we can add
     // a static assert here to enforce T != Tensor
-    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.UndefReturn)
     return *static_cast<const T*>(pointer_);
   }
 

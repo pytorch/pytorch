@@ -2,31 +2,106 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List
+import sys
+from typing import Any, Dict, List, Optional
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..guards import make_dupe_guard
-from ..source import AttrSource
-from ..utils import HashableTracker, is_hashable, iter_contains
+from ..guards import GuardBuilder, make_dupe_guard
+from ..source import AttrSource, GetItemSource
+from ..utils import iter_contains
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+def is_hashable_python_var(x):
+    from torch import Tensor
+
+    # Note: Keep me in sync with is_hashable!
+    # Even better, we should have a map of functions connecting the two
+    from ..allowed_functions import is_builtin_callable
+
+    return (
+        variables.ConstantVariable.is_literal(x)
+        or isinstance(x, Tensor)
+        or is_builtin_callable(x)
+    )
+
+
+def is_hashable(x):
+    # Keep me in sync with is_hashable_python_var!
+    # Even better, we should have a map of functions connecting the two
+    if isinstance(x, variables.TensorVariable):
+        # Tensors are hashable if they have an example_value (a fake tensor)
+        # Most VT's should have one.
+        # It'd be nice if at some point we could assert that they all have one
+        return x.as_proxy().node.meta.get("example_value") is not None
+    else:
+        return isinstance(
+            x,
+            (
+                variables.BuiltinVariable,
+                variables.ConstantVariable,
+                variables.EnumVariable,
+            ),
+        )
+
+
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
+    class _HashableTracker:
+        """
+        Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
+        This should not be seen or touched by anything outside of ConstDictVariable and its kids
+        """
+
+        def __init__(self, vt):
+            assert is_hashable(vt), type(vt)
+            self.vt = vt
+
+        @property
+        def underlying_value(self):
+            if isinstance(self.vt, variables.TensorVariable):
+                x = self.vt.as_proxy().node
+            else:
+                x = self.vt.as_python_constant()
+            return x
+
+        def __hash__(self):
+            return hash(self.underlying_value)
+
+        def __eq__(self, other: object) -> bool:
+            return (
+                isinstance(other, ConstDictVariable._HashableTracker)
+                and self.underlying_value == other.underlying_value
+            )
+
+    def __init__(self, items, user_cls=dict, recursively_contains=None, **kwargs):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
 
         assert all(
-            isinstance(x, HashableTracker) and isinstance(v, VariableTracker)
+            isinstance(x, self._HashableTracker) and isinstance(v, VariableTracker)
             for x, v in items.items()
         )
         self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
+
+    @classmethod
+    def create(
+        cls, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
+    ):
+        assert all(
+            isinstance(x, VariableTracker) and isinstance(v, VariableTracker)
+            for x, v in items.items()
+        )
+
+        items_wrapped = {
+            ConstDictVariable._HashableTracker(x): v for x, v in items.items()
+        }
+        return cls(items_wrapped, user_cls, **kwargs)
 
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -64,7 +139,7 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        key = HashableTracker(arg)
+        key = self._HashableTracker(arg)
         return self.items[key].add_options(self, arg)
 
     def call_method(
@@ -78,6 +153,8 @@ class ConstDictVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
+
+        arg_hashable = args and is_hashable(args[0])
 
         if name == "__getitem__":
             return self.getitem_const(args[0])
@@ -99,14 +176,9 @@ class ConstDictVariable(VariableTracker):
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items), **options)
-        elif (
-            name == "__setitem__"
-            and args
-            and is_hashable(args[0])
-            and self.mutable_local
-        ):
+        elif name == "__setitem__" and arg_hashable and self.mutable_local:
             assert not kwargs and len(args) == 2
-            k = HashableTracker(args[0])
+            k = self._HashableTracker(args[0])
 
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
@@ -123,16 +195,15 @@ class ConstDictVariable(VariableTracker):
             )
         elif (
             name in ("pop", "get")
-            and args
-            and is_hashable(args[0])
-            and HashableTracker(args[0]) not in self.items
+            and arg_hashable
+            and self._HashableTracker(args[0]) not in self.items
             and len(args) == 2
         ):
             # missing item, return the default value
             return args[1].add_options(options)
-        elif name == "pop" and args and is_hashable(args[0]) and self.mutable_local:
+        elif name == "pop" and arg_hashable and self.mutable_local:
             newval = collections.OrderedDict(val)
-            result = newval.pop(HashableTracker(args[0]))
+            result = newval.pop(self._HashableTracker(args[0]))
             tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
@@ -152,15 +223,14 @@ class ConstDictVariable(VariableTracker):
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
-            and args
-            and is_hashable(args[0])
-            and HashableTracker(args[0]) in self.items
+            and arg_hashable
+            and self._HashableTracker(args[0]) in self.items
         ):
-            result = self.items[HashableTracker(args[0])]
+            result = self.items[self._HashableTracker(args[0])]
             return result.add_options(options)
         elif name == "__contains__" and args:
             return ConstantVariable.create(
-                is_hashable(args[0]) and HashableTracker(args[0]) in self.items,
+                arg_hashable and self._HashableTracker(args[0]) in self.items,
                 **options,
             )
         else:
@@ -174,6 +244,10 @@ class ConstDictVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
+
+    @staticmethod
+    def _make_const_key(k):
+        return ConstDictVariable._HashableTracker(variables.ConstantVariable.create(k))
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -206,7 +280,7 @@ class DefaultDictVariable(ConstDictVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
-            k = HashableTracker(args[0])
+            k = self._HashableTracker(args[0])
 
             if k in self.items:
                 return self.getitem_const(args[0])
@@ -282,15 +356,22 @@ class SetVariable(VariableTracker):
     # Note - this is only used for producing a set
     def _as_set_element(self, vt):
         from .base import VariableTracker
+        from .misc import MethodWrapperVariable
         from .tensor import TensorVariable
 
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
+            fake_tensor = vt.as_proxy().node.meta.get("example_value")
+            if fake_tensor is None:
+                unimplemented(
+                    "Cannot check Tensor object identity without its fake value"
+                )
+            return SetVariable.SetElement(vt, fake_tensor)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, MethodWrapperVariable):
+            return SetVariable.SetElement(vt, vt.as_python_constant())
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
@@ -367,7 +448,9 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx, options)
+            return iter_contains(
+                self.items, args[0], tx, options, check_tensor_identity=True
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -427,6 +510,7 @@ class DataClassVariable(ConstDictVariable):
         items = collections.OrderedDict()
         for key in keys:
             val = bound.arguments[key]
+            key = ConstDictVariable._make_const_key(key)
             if isinstance(val, VariableTracker):
                 items[key] = val
             else:
@@ -573,13 +657,10 @@ class CustomizedDictVariable(ConstDictVariable):
         else:
             unimplemented("custome dict init with args/kwargs unimplemented")
 
-        def make_key(k):
-            return HashableTracker(variables.ConstantVariable.create(k))
-
         items = collections.OrderedDict()
         for key in raw_items.keys():
             val = raw_items[key]
-            key = make_key(key)
+            key = ConstDictVariable._make_const_key(key)
             if isinstance(val, VariableTracker):
                 items[key] = val
             elif variables.ConstantVariable.is_literal(val):
@@ -677,3 +758,87 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
             self
         )
+
+
+class PythonSysModulesVariable(VariableTracker):
+    """Special case for sys.modules.
+
+    Without this we will guard on the exact set of modules imported in the
+    lifetime of the python program.
+    """
+
+    def python_type(self):
+        return dict
+
+    @staticmethod
+    def reconstruct(self, codegen):
+        codegen.extend_output(
+            [
+                codegen.create_load_python_module(sys, True),
+                codegen.create_load_attr("modules"),
+            ]
+        )
+
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ):
+        from .builder import VariableBuilder
+
+        if name == "__getitem__":
+            return self.call_getitem(tx, *args, **kwargs)
+        elif name == "get":
+            return self.call_get(tx, *args, **kwargs)
+        elif name == "__contains__":
+            return self.call_contains(tx, *args, **kwargs)
+
+        # Fallback to dict implementation
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        real_dict = VariableBuilder(tx, self.source, **options)(sys.modules)
+        return real_dict.call_method(tx, name, args, kwargs)
+
+    def _contains_helper(self, tx, key: VariableTracker):
+        k = key.value
+        has_key = k in sys.modules
+        guard = self.make_guard(
+            functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+        )
+        guards = {*self.guards, guard}
+        return k, has_key, guards
+
+    def call_contains(self, tx, key: VariableTracker):
+        k, has_key, guards = self._contains_helper(tx, key)
+        return ConstantVariable.create(
+            value=has_key,
+            guards=guards,
+        )
+
+    def call_get(
+        self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
+    ):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+
+        if has_key:
+            return VariableBuilder(
+                tx,
+                GetItemSource(self.source, k),
+            )(
+                sys.modules[k]
+            ).add_guards(guards)
+
+        if default is not None:
+            return default.add_guards(guards)
+
+        return ConstantVariable.create(value=None, guards=guards)
+
+    def call_getitem(self, tx, key: VariableTracker):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+        return VariableBuilder(
+            tx,
+            GetItemSource(self.source, k),
+        )(
+            sys.modules[k]
+        ).add_guards(guards)
