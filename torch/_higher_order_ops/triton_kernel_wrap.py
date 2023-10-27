@@ -79,7 +79,23 @@ triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
     kernel = kernel_side_table.get_kernel(kernel_idx)
-    kernel[grid](**kwargs)
+    assert len(grid) != 0
+    if len(grid) == 1:
+        grid_fn = grid[0]
+    else:
+
+        def grid_fn(meta):
+            configs = kernel.configs
+            assert len(grid) == len(configs)
+            for i, (grid_val, config) in enumerate(zip(grid, configs)):
+                guards = [
+                    f"meta['{name}'] == {val}" for name, val in config.kwargs.items()
+                ]
+                guards = " and ".join(guards)
+                if eval(guards):
+                    return grid[i]
+
+    kernel[grid_fn](**kwargs)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)

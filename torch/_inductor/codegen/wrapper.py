@@ -495,10 +495,28 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid = f"grid({grid[0]})"
+        else:
+            grid_wrapper = IndentedBuffer()
+            grid_wrapper.writeline(f"def grid_wrapper_for_{kernel_name}(meta):")
+            assert len(grid) == len(configs)
+            with grid_wrapper.indent():
+                for i, (grid_val, conf) in enumerate(zip(grid, configs)):
+                    guards = [
+                        f"meta['{name}'] == {val}" for name, val in conf.kwargs.items()
+                    ]
+                    guards = " and ".join(guards)
+                    grid_wrapper.writeline(f"if {guards}: return grid({grid[i]})(meta)")
+
+            self.header.splice(grid_wrapper.getvalue(), strip=True)
+            grid = f"grid_wrapper_for_{kernel_name}"
+
         stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
         self.writeline(
-            f"{kernel_name}.run({', '.join(args)}, grid=grid({grid}), stream={stream_name})"
+            f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
 
     def generate_scatter_fallback(
@@ -1620,7 +1638,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_user_defined_triton_kernel(self, kernel_name, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
         raise AssertionError(
             "User defined triton kernels are not supported in CPP mode"
         )

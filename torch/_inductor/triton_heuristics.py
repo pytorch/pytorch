@@ -1191,9 +1191,10 @@ def foreach(meta, num_warps, filename=None):
 
 def grid(*numels):
     """Helper function to compute triton grids"""
-
     if len(numels) == 1 and isinstance(numels[0], tuple):
-        numels = numels[0]
+        # when passed as a single tuple, calling convention order is not
+        # followed, so we need to reverse to match calling conversion order
+        numels = numels[0][::-1]
 
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
@@ -1205,8 +1206,10 @@ def grid(*numels):
         raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
-        if numel is None or block is None:
+        if numel is None:
             return 1
+        if block is None:
+            return numel
         return ceildiv(numel, block)
 
     def grid_fn(meta):
