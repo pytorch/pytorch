@@ -704,7 +704,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
