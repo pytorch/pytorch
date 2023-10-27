@@ -90,9 +90,6 @@ def register_pytree_node(
     cls: Type[Any],
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
-    *,
-    to_dumpable_context: Optional[ToDumpableContextFn] = None,
-    from_dumpable_context: Optional[FromDumpableContextFn] = None,
     namespace: str = "torch",
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
