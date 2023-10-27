@@ -19,11 +19,13 @@ class RandomBaseline(HeuristicInterface):
         # Probabilities for each type of test.
         # The sum of all probabilities should be 1.0.
         PROB_UNRANKED = 0.5
-        PROB_NO_RELEVANCE = 0
-        PROB_UNLIKELY_RELEVANCE = 0
 
         PROB_HIGH_RELEVANCE = 0.25
         PROB_PROBABLE_RELEVANCE = 0.25
+
+        # These catagorizations are not supported yet.
+        PROB_NO_RELEVANCE = 0
+        PROB_UNLIKELY_RELEVANCE = 0
 
         assert (
             PROB_UNRANKED
