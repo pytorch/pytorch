@@ -37,7 +37,7 @@ from ..utils import (
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
-from .constant import ConstantVariable, EnumVariable
+from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import ConstDictVariable, SetVariable
 from .lists import (
@@ -861,30 +861,6 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_iter_tuple_list
     call_set = _call_iter_tuple_list
 
-    @staticmethod
-    def is_supported_call_dict_arg(tx, arg):
-        return (
-            arg is None
-            or isinstance(arg, ConstDictVariable)
-            or (
-                isinstance(
-                    arg,
-                    (
-                        ListVariable,
-                        TupleVariable,
-                        ListIteratorVariable,
-                    ),
-                )
-                and all(
-                    isinstance(x, (ListVariable, TupleVariable))
-                    and isinstance(
-                        x.unpack_var_sequence(tx)[0], (ConstantVariable, EnumVariable)
-                    )
-                    for x in arg.unpack_var_sequence(tx)
-                )
-            )
-        )
-
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
 
@@ -893,35 +869,6 @@ class BuiltinVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(True).add_options(arg)
 
-    @staticmethod
-    def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None or isinstance(arg, dict):
-            return ConstDictVariable(
-                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        elif isinstance(arg, variables.ConstDictVariable):
-            return arg.clone(
-                user_cls=user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        elif isinstance(
-            arg,
-            (
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
-        ):
-            items = user_cls()
-            for x in arg.unpack_var_sequence(tx):
-                k = x.unpack_var_sequence(tx)[0].as_python_constant()
-                v = x.unpack_var_sequence(tx)[1]
-                items.update({k: v})
-            return ConstDictVariable(
-                items, user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        else:
-            raise AssertionError("call_dict_helper with illegal arg")
-
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
             return args[1]
@@ -929,20 +876,38 @@ class BuiltinVariable(VariableTracker):
         unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
 
     def call_dict(self, tx, *args, **kwargs):
-        if not (args or kwargs):
-            return self.call_dict_helper(tx, dict, None)
-        elif (
-            not kwargs
-            and len(args) == 1
-            and self.is_supported_call_dict_arg(tx, args[0])
-        ):
-            return self.call_dict_helper(tx, dict, args[0])
+        return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+
+    @staticmethod
+    def call_custom_dict(tx, user_cls, *args, **kwargs):
+        if not kwargs:
+            if not args:
+                args = ({},)
+            assert len(args) == 1
+            arg = args[0]
+            if isinstance(arg, dict):
+                return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
+            elif isinstance(arg, variables.ConstDictVariable):
+                return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+            elif isinstance(
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ListIteratorVariable,
+                ),
+            ):
+                items = user_cls()
+                for x in arg.unpack_var_sequence(tx):
+                    k, v = x.unpack_var_sequence(tx)
+                    k = ConstDictVariable.get_key(k)
+                    items.update({k: v})
+                return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=dict, mutable_local=MutableLocal()
+                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
-        else:
-            unimplemented(f"dict(): {args} {kwargs}")
+        unimplemented(f"dict(): {args} {kwargs}")
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
