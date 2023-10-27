@@ -34,6 +34,7 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from .types import DynamoFrameType
 from .utils import getfile
 
 from .variables.functions import (
@@ -361,7 +362,7 @@ def check_verbose(func, allow_torch=False):
         f_code = func.get_code()
         if isinstance(func, UserMethodVariable):
             obj = func.obj
-    elif isinstance(func, types.FrameType):
+    elif isinstance(func, DynamoFrameType):
         filename = func.f_code.co_filename
         if len(func.f_locals) > 1:
             obj = list(func.f_locals.values())[0]

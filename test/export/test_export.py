@@ -707,10 +707,10 @@ class TestExport(TestCase):
                 num_buffer += 1
                 buffer.append(get_buffer(ep, node))
         self.assertEqual(num_buffer, 3)
+        buffer_shape_set = set([x.shape for x in buffer])
+        expected = {torch.Size([]), torch.Size([100]), torch.Size([100])}
 
-        self.assertEqual(buffer[0].shape, torch.Size([100]))  # running_mean
-        self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
-        self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
+        self.assertEqual(buffer_shape_set, expected)
 
 
     def test_export_dynamo_config(self):
