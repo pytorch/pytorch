@@ -1003,6 +1003,10 @@ class VariableBuilder:
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
+        # We cannot already be tracking the tensor, which implies
+        # it would have already been wrapped
+        assert value not in self.tx.output.side_effects
+
         if (
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
