@@ -192,7 +192,7 @@ void PyTorchStreamReader::init() {
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   try {
-    version_ = caffe2::stoull(version);
+    version_ = std::stoull(version);
   } catch (const std::invalid_argument& e) {
     CAFFE_THROW("Couldn't parse the version ",
                  version,
@@ -379,6 +379,9 @@ size_t PyTorchStreamReader::getRecord(
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
+  }
+  if (chunk_size <= 0) {
+    chunk_size = n;
   }
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;

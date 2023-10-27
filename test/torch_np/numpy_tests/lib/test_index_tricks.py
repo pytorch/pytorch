@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
-import pytest
+import functools
+
+from unittest import expectedFailure as xfail, skipIf
 
 import torch._numpy as np
 
@@ -14,10 +16,19 @@ from torch._numpy.testing import (
     assert_array_equal,
     assert_equal,
 )
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+
+skip = functools.partial(skipIf, True)
 
 
-@pytest.mark.xfail(reason="unravel_index not implemented")
-class TestRavelUnravelIndex:
+@xfail  # (reason="unravel_index not implemented")
+@instantiate_parametrized_tests
+class TestRavelUnravelIndex(TestCase):
     def test_basic(self):
         assert_equal(np.unravel_index(2, (2, 2)), (1, 0))
 
@@ -169,7 +180,7 @@ class TestRavelUnravelIndex:
         assert_raises_regex(ValueError, "0d array", np.unravel_index, [0], ())
         assert_raises_regex(ValueError, "out of bounds", np.unravel_index, [1], ())
 
-    @pytest.mark.parametrize("mode", ["clip", "wrap", "raise"])
+    @parametrize("mode", ["clip", "wrap", "raise"])
     def test_empty_array_ravel(self, mode):
         res = np.ravel_multi_index(
             np.zeros((3, 0), dtype=np.intp), (2, 1, 0), mode=mode
@@ -189,8 +200,9 @@ class TestRavelUnravelIndex:
             np.unravel_index([1], (2, 1, 0))
 
 
-@pytest.mark.xfail(reason="mgrid not implemented")
-class TestGrid:
+@xfail  # (reason="mgrid not implemented")
+@instantiate_parametrized_tests
+class TestGrid(TestCase):
     def test_basic(self):
         a = mgrid[-1:1:10j]
         b = mgrid[-1:1:0.1]
@@ -203,7 +215,7 @@ class TestGrid:
         assert_almost_equal(b[-1], b[0] + 19 * 0.1, 11)
         assert_almost_equal(a[1] - a[0], 2.0 / 9.0, 11)
 
-    @pytest.mark.xfail(reason="retstep not implemented")
+    @xfail  # (reason="retstep not implemented")
     def test_linspace_equivalence(self):
         y, st = np.linspace(2, 10, retstep=True)
         assert_almost_equal(st, 8 / 49.0)
@@ -230,7 +242,7 @@ class TestGrid:
         for f, b in zip(grid_full, grid_broadcast):
             assert_equal(f, b)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "start, stop, step, expected",
         [
             (None, 10, 10j, (200, 10)),
@@ -249,7 +261,7 @@ class TestGrid:
         assert_equal(grid.size, expected[0])
         assert_equal(grid_small.size, expected[1])
 
-    @pytest.mark.xfail(reason="mgrid not implementd")
+    @xfail  # (reason="mgrid not implementd")
     def test_accepts_npfloating(self):
         # regression test for #16466
         grid64 = mgrid[0.1:0.33:0.1,]
@@ -263,7 +275,7 @@ class TestGrid:
         assert_(grid32.dtype == np.float64)
         assert_array_almost_equal(grid64, grid32)
 
-    @pytest.mark.skip(reason="longdouble")
+    @skip(reason="longdouble")
     def test_accepts_longdouble(self):
         # regression tests for #16945
         grid64 = mgrid[0.1:0.33:0.1,]
@@ -282,7 +294,7 @@ class TestGrid:
         assert_(grid128.dtype == np.longdouble)
         assert_array_almost_equal(grid64, grid128)
 
-    @pytest.mark.skip(reason="longdouble")
+    @skip(reason="longdouble")
     def test_accepts_npcomplexfloating(self):
         # Related to #16466
         assert_array_almost_equal(
@@ -306,8 +318,8 @@ class TestGrid:
         assert_array_equal(grid64_a, grid64_b)
 
 
-@pytest.mark.xfail(reason="r_ not implemented")
-class TestConcatenator:
+@xfail  # (reason="r_ not implemented")
+class TestConcatenator(TestCase):
     def test_1d(self):
         assert_array_equal(r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6]))
         b = np.ones(5)
@@ -349,8 +361,8 @@ class TestConcatenator:
         assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])
 
 
-@pytest.mark.xfail(reason="ndenumerate not implemented")
-class TestNdenumerate:
+@xfail  # (reason="ndenumerate not implemented")
+class TestNdenumerate(TestCase):
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
         assert_equal(
@@ -358,7 +370,7 @@ class TestNdenumerate:
         )
 
 
-class TestIndexExpression:
+class TestIndexExpression(TestCase):
     def test_regression_1(self):
         # ticket #1196
         a = np.arange(2)
@@ -372,8 +384,8 @@ class TestIndexExpression:
         assert_equal(a[:, :3, [1, 2]], a[s_[:, :3, [1, 2]]])
 
 
-@pytest.mark.xfail(reason="ix_ not implemented")
-class TestIx_:
+@xfail  # (reason="ix_ not implemented")
+class TestIx_(TestCase):
     def test_regression_1(self):
         # Test empty untyped inputs create outputs of indexing type, gh-5804
         (a,) = ix_(range(0))
@@ -415,13 +427,14 @@ class TestIx_:
         assert_equal(x.shape, (length_of_vector,))
 
 
-@pytest.mark.xfail(reason="c_ not implemented")
-def test_c_():
-    a = np.c_[np.array([[1, 2, 3]]), 0, 0, np.array([[4, 5, 6]])]
-    assert_equal(a, [[1, 2, 3, 0, 0, 4, 5, 6]])
+class TestC(TestCase):
+    @xfail  # (reason="c_ not implemented")
+    def test_c_(self):
+        a = np.c_[np.array([[1, 2, 3]]), 0, 0, np.array([[4, 5, 6]])]
+        assert_equal(a, [[1, 2, 3, 0, 0, 4, 5, 6]])
 
 
-class TestFillDiagonal:
+class TestFillDiagonal(TestCase):
     def test_basic(self):
         a = np.zeros((3, 3), dtype=int)
         fill_diagonal(a, 5)
@@ -503,25 +516,28 @@ class TestFillDiagonal:
             fill_diagonal(a, 2)
 
 
-def test_diag_indices():
-    di = diag_indices(4)
-    a = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]])
-    a[di] = 100
-    assert_array_equal(
-        a,
-        np.array([[100, 2, 3, 4], [5, 100, 7, 8], [9, 10, 100, 12], [13, 14, 15, 100]]),
-    )
+class TestDiagIndices(TestCase):
+    def test_diag_indices(self):
+        di = diag_indices(4)
+        a = np.array([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]])
+        a[di] = 100
+        assert_array_equal(
+            a,
+            np.array(
+                [[100, 2, 3, 4], [5, 100, 7, 8], [9, 10, 100, 12], [13, 14, 15, 100]]
+            ),
+        )
 
-    # Now, we create indices to manipulate a 3-d array:
-    d3 = diag_indices(2, 3)
+        # Now, we create indices to manipulate a 3-d array:
+        d3 = diag_indices(2, 3)
 
-    # And use it to set the diagonal of a zeros array to 1:
-    a = np.zeros((2, 2, 2), dtype=int)
-    a[d3] = 1
-    assert_array_equal(a, np.array([[[1, 0], [0, 0]], [[0, 0], [0, 1]]]))
+        # And use it to set the diagonal of a zeros array to 1:
+        a = np.zeros((2, 2, 2), dtype=int)
+        a[d3] = 1
+        assert_array_equal(a, np.array([[[1, 0], [0, 0]], [[0, 0], [0, 1]]]))
 
 
-class TestDiagIndicesFrom:
+class TestDiagIndicesFrom(TestCase):
     def test_diag_indices_from(self):
         x = np.random.random((4, 4))
         r, c = diag_indices_from(x)
@@ -539,32 +555,31 @@ class TestDiagIndicesFrom:
             diag_indices_from(x)
 
 
-@pytest.mark.xfail(reason="ndindex not implemented")
-def test_ndindex():
-    x = list(ndindex(1, 2, 3))
-    expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]
-    assert_array_equal(x, expected)
+class TestNdIndex(TestCase):
+    @xfail  # (reason="ndindex not implemented")
+    def test_ndindex(self):
+        x = list(ndindex(1, 2, 3))
+        expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]
+        assert_array_equal(x, expected)
 
-    x = list(ndindex((1, 2, 3)))
-    assert_array_equal(x, expected)
+        x = list(ndindex((1, 2, 3)))
+        assert_array_equal(x, expected)
 
-    # Test use of scalars and tuples
-    x = list(ndindex((3,)))
-    assert_array_equal(x, list(ndindex(3)))
+        # Test use of scalars and tuples
+        x = list(ndindex((3,)))
+        assert_array_equal(x, list(ndindex(3)))
 
-    # Make sure size argument is optional
-    x = list(ndindex())
-    assert_equal(x, [()])
+        # Make sure size argument is optional
+        x = list(ndindex())
+        assert_equal(x, [()])
 
-    x = list(ndindex(()))
-    assert_equal(x, [()])
+        x = list(ndindex(()))
+        assert_equal(x, [()])
 
-    # Make sure 0-sized ndindex works correctly
-    x = list(ndindex(*[0]))
-    assert_equal(x, [])
+        # Make sure 0-sized ndindex works correctly
+        x = list(ndindex(*[0]))
+        assert_equal(x, [])
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

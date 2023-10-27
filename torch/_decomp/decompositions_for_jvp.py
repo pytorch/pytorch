@@ -4,6 +4,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import torch
 import torch._decomp
 from torch import Tensor
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 decomposition_table = torch._decomp.decomposition_table
 decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
@@ -62,6 +63,12 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
     else:
         raise RuntimeError(f"could not find decomposition for {decomp}")
     decomp_fn = decomposition_table_used[decomp]
+
+    # `out_wrapper` extends a decompositions signature with
+    # an `out` parameter. However jit will use the unwrapped function's
+    # signature instead so we need to unwrap here to prevent an error
+    decomp_fn = _maybe_remove_out_wrapper(decomp_fn)
+
     if use_python:
         decomp_fn = torch.jit.ignore(decomp_fn)
         sig = inspect.signature(decomp_fn)

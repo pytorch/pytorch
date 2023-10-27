@@ -104,7 +104,6 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
-    output_grad_targets.clear();
     compiled_fn = nullptr;
   }
 
@@ -208,9 +207,6 @@ struct CacheNode {
   std::vector<SizeInput> expected_sizes;
 
   THPObjectPtr compiled_fn;
-  // Maps each return value of compiled_fn to an input index.  After the graph
-  // runs we do: `inputs[output_grad_targets[i]].mutable_grad() = outputs[i]`
-  std::vector<size_t> output_grad_targets;
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -290,8 +286,15 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
   ~ClosingTHPObjectPtr() {
+    if (PyErr_Occurred()) {
+      // do nothing, do not attempt to close
+      return;
+    }
     static PyObject* method_name = PyUnicode_InternFromString("close");
-    check(PyObject_CallMethodNoArgs(get(), method_name));
+    if (PyObject_CallMethodNoArgs(get(), method_name) == nullptr) {
+      PyErr_WriteUnraisable(get());
+      PyErr_Clear();
+    }
   }
 };
 
@@ -313,6 +316,7 @@ variable_list compiled_autograd(
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
+
   for (const auto i : c10::irange(output_edges.size())) {
     compiler_call.node_calls.lookup(output_edges[i].function)
         .mark_output(output_edges[i].input_nr, i);
@@ -455,15 +459,16 @@ variable_list compiled_autograd(
     }
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
-    cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
-  }
+  } // End cache miss region
 
   // TODO(jansel): we should release all the variables and then use a
   //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
-  for (auto& call : calls) {
-    call->node->release_variables();
+  if (!graph_task.keep_graph_) {
+    for (auto& call : calls) {
+      call->node->release_variables();
+    }
   }
 
   THPObjectPtr inputs(THPVariable_WrapList(compiler_call.tensor_args.inputs));
@@ -472,21 +477,8 @@ variable_list compiled_autograd(
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
-  if (accumulate_grad) {
-    TORCH_INTERNAL_ASSERT(outputs.size() == cache->output_grad_targets.size());
-    for (const auto i : c10::irange(outputs.size())) {
-      // Here we set the `var.grad = ...` for each call to
-      // `saved.assign_mutable_grad(var, ...)`.  For the case on inplace grad
-      // accumuation there will be an `add_` op in the graph and no return
-      // value.
-      compiler_call.tensor_args.inputs[cache->output_grad_targets[i]]
-          .mutable_grad() = outputs[i];
-    }
-    return variable_list();
-  } else {
-    TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-    return outputs;
-  }
+  TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  return outputs;
 }
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {

@@ -199,7 +199,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       bool is_tensor_subclass,
       bool is_nested) noexcept {
     uint32_t input_nr = input_metadata_.size();
-    auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
+    auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
         options, meta_shape, is_tensor_subclass, is_nested);
     return input_nr;

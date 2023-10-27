@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     run_tests,
     skipIfTorchDynamo,
 )
@@ -443,6 +444,7 @@ core_backward_failures = {
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.hardshrink'),
     xfail('nn.functional.softshrink'),
     skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs
@@ -463,6 +465,20 @@ core_backward_failures = {
     skip('xlogy'),  # slow: fails with --timeout=360 secs
     xfail('zero_'),
 }
+if not TEST_WITH_SLOW:
+    core_backward_failures.update({
+        skip('addr'),  # slow: takes 46 sec on A100
+        skip('baddbmm'),  # slow: takes 800+ sec on A100
+        skip('clamp_min'),  # slow: takes 800 sec on A100
+        skip('clamp_max'),  # slow: takes 800 sec on A100
+        skip('logit'),  # slow: takes 44 sec on A100
+        skip('nn.functional.hardswish'),  # slow: takes 60 sec on A100
+        skip('std_mean'),  # slow: takes 170 sec on A100
+        skip('split', variant_name='list_args'),  # slow: takes 118 sec on A100
+        skip('transpose'),  # slow: takes 50 sec on A100
+        skip('unbind'),  # slow: takes 70 sec on A100
+        skip('unsafe_split'),  # slow: takes 49 sec on A100
+    })
 
 
 class TestDecomp(TestCase):
@@ -857,6 +873,17 @@ class DecompOneOffTests(TestCase):
         ref = torch.ops.aten.elu_backward(grad_out, 1.0, 1, 1, True, out)
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_threshold_backward_dtype(self, device):
+        grad = torch.randint(10, (4,), device=device)
+        input_tensor = torch.randint(10, (4,), device=device)
+
+        ref = torch.ops.aten.threshold_backward(grad, input_tensor, 1)
+        res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
+        self.assertEqual(ref.dtype, res.dtype)
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

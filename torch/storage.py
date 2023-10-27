@@ -84,6 +84,7 @@ class _StorageBase:
     @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
     def _byteswap(self, *args, **kwargs): ...  # noqa: E704
+    def _get_filename(self, *args, **kwargs) -> _Optional[str]: ...  # type: ignore[empty-body, misc] # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -197,6 +198,14 @@ class _StorageBase:
     def complex_float(self):
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
+
+    def float8_e5m2(self):
+        """Casts this storage to float8_e5m2 type"""
+        return self._to(torch.float8_e5m2)
+
+    def float8_e4m3fn(self):
+        """Casts this storage to float8_e4m3fn type"""
+        return self._to(torch.float8_e4m3fn)
 
     def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
         r"""Determine whether the CPU storage is already pinned on device.
@@ -320,6 +329,12 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
     @property
     def is_hpu(self):
         return self.device.type == 'hpu'
+
+    @property
+    def filename(self) -> _Optional[str]:
+        """Returns the file name associated with this storage if the storage was memory mapped from a file.
+           or ``None`` if the storage was not created by memory mapping a file."""
+        return self._get_filename()
 
     @_share_memory_lock_protected
     def share_memory_(self, *args, **kwargs):
@@ -449,6 +464,12 @@ class TypedStorage:
     @property
     def _dtype(self):
         return self.dtype
+
+    @property
+    def filename(self) -> _Optional[str]:
+        """Returns the file name associated with this storage if the storage was memory mapped from a file.
+           or ``None`` if the storage was not created by memory mapping a file."""
+        return self._untyped_storage.filename
 
     def fill_(self, value):
         _warn_typed_storage_removal()
@@ -1027,23 +1048,34 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._to(torch.cfloat)
 
+    def float8_e5m2(self):
+        """Casts this storage to float8_e5m2 type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e5m2)
+
+    def float8_e4m3fn(self):
+        """Casts this storage to float8_e4m3fn type"""
+        _warn_typed_storage_removal()
+        return self._to(torch.float8_e4m3fn)
+
     @classmethod
     def from_file(cls, filename, shared, size):
-        """
-        from_file(filename, shared=False, size=0) -> Storage
+        """from_file(filename, shared=False, size=0) -> Storage
 
-        If `shared` is `True`, then memory is shared between all processes.
-        All changes are written to the file. If `shared` is `False`, then the changes on
+        Creates a CPU storage backed by a memory-mapped file.
+
+        If ``shared`` is ``True``, then memory is shared between all processes.
+        All changes are written to the file. If ``shared`` is ``False``, then the changes on
         the storage do not affect the file.
 
-        `size` is the number of elements in the storage. If `shared` is `False`,
-        then the file must contain at least `size * sizeof(Type)` bytes
-        (`Type` is the type of storage). If `shared` is `True` the file will be
-        created if needed.
+        ``size`` is the number of elements in the storage. If ``shared`` is ``False``,
+        then the file must contain at least ``size * sizeof(Type)`` bytes
+        (``Type`` is the type of storage). If ``shared`` is ``True`` the file will be created if needed.
 
         Args:
             filename (str): file name to map
-            shared (bool): whether to share memory
+            shared (bool): whether to share memory (whether ``MAP_SHARED`` or ``MAP_PRIVATE`` is passed to the
+                            underlying `mmap(2) call <https://man7.org/linux/man-pages/man2/mmap.2.html>`_)
             size (int): number of elements in the storage
         """
         _warn_typed_storage_removal()

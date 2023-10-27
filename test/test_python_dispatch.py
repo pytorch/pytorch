@@ -4,7 +4,7 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.library import Library, impl, fallthrough_kernel
-from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
@@ -695,7 +695,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch._C._TensorBase):
+            class A(torch._C.TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -715,7 +715,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
     def test_invalid_ret(self) -> None:
         # test invalid return gets reasonable error message
-        class A(torch._C._TensorBase):
+        class A(torch._C.TensorBase):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -2258,6 +2258,12 @@ class TestWrapperSubclassAliasing(TestCase):
         # (I'm using inference_mode to make sure conv2d doesn't decompose and goes to torch_dispatch)
         with torch.inference_mode():
             self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_out_op(self, device):
+        # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
+        args = (torch.ones(4), torch.ones(4))
+        kwargs = {'out': torch.empty(4)}
+        self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 

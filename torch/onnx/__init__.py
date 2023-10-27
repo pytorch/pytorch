@@ -8,6 +8,7 @@ from torch._C._onnx import (
 )
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
+    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -43,14 +44,15 @@ from .utils import (
 )
 
 from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
+    DiagnosticOptions,
     ExportOptions,
     ExportOutput,
     ExportOutputSerializer,
-    dynamo_export,
+    InvalidExportOptionsError,
     OnnxExporterError,
-    enable_fake_mode,
     OnnxRegistry,
-    DiagnosticOptions,
+    dynamo_export,
+    enable_fake_mode,
 )
 
 from ._internal.onnxruntime import (
@@ -97,14 +99,15 @@ __all__ = [
     # Errors
     "CheckerError",  # Backwards compatibility
     # Dynamo Exporter
+    "DiagnosticOptions",
     "ExportOptions",
     "ExportOutput",
     "ExportOutputSerializer",
-    "dynamo_export",
+    "InvalidExportOptionsError",
     "OnnxExporterError",
-    "enable_fake_mode",
     "OnnxRegistry",
-    "DiagnosticOptions",
+    "dynamo_export",
+    "enable_fake_mode",
     # DORT / torch.compile
     "is_onnxrt_backend_supported",
 ]
@@ -116,6 +119,7 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
+InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
 OnnxRegistry.__module__ = "torch.onnx"
@@ -127,6 +131,13 @@ _OrtBackend.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
+
+
+@_deprecation.deprecated(
+    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
+)
+def _export(*args, **kwargs):
+    return utils._export(*args, **kwargs)
 
 
 # TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.

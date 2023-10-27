@@ -107,7 +107,14 @@ class VariableTracker(metaclass=HasPostInit):
     """
 
     # fields to leave unmodified in apply()
-    _nonvar_fields = ["value"]
+    _nonvar_fields = {
+        "value",
+        "guards",
+        "source",
+        "mutable_local",
+        "recursively_contains",
+        "user_code_variable_name",
+    }
 
     @staticmethod
     def propagate(*vars: List[List["VariableTracker"]]):
@@ -269,7 +276,7 @@ class VariableTracker(metaclass=HasPostInit):
             raise NotImplementedError()
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable(value, **options)
+        return variables.ConstantVariable.create(value, **options)
 
     def is_proxy(self):
         try:
@@ -314,7 +321,7 @@ class VariableTracker(metaclass=HasPostInit):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
             )
         elif (

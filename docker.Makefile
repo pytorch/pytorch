@@ -8,7 +8,7 @@ $(warning WARNING: No docker user found using results from whoami)
 DOCKER_ORG                = $(shell whoami)
 endif
 
-CUDA_VERSION              = 11.8.0
+CUDA_VERSION              = 12.1.1
 CUDNN_VERSION             = 8
 BASE_RUNTIME              = ubuntu:20.04
 BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu20.04

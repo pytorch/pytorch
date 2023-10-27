@@ -307,15 +307,14 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event = nullptr;
-  uint64_t corr_id = 0;
-  std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
-      fn.seqNr(),
-      fn.forwardThreadId(),
-      fn.scope(),
-      fn.isAsync(),
-      fn.debugHandle(),
-      fn.name());
+  auto [event, corr_id] = torch_ops_.op_events_.emplace_back(
+      torch::profiler::impl::TorchOpBasicFields{
+          fn.seqNr(),
+          fn.forwardThreadId(),
+          fn.scope(),
+          fn.isAsync(),
+          fn.debugHandle(),
+          fn.name()});
   if (config_.report_input_shapes) {
     torch_ops_.inputs_outputs_.push(fn.inputs());
   }
@@ -341,6 +340,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.extra_args_.emplace_back(
         torch::profiler::impl::saveExtraArgs(fn));
   }
+
+  // Record NCCL metadata for specific CPU ops
+  fn.isNcclMeta() ? torch_ops_.extra_meta_.emplace_back(
+                        torch::profiler::impl::saveNcclMeta(fn))
+                  : torch_ops_.extra_meta_.emplace_back();
 
   auto out = std::make_unique<KinetoObserverContext>(event);
 
@@ -435,6 +439,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
+  auto extra_meta = StealOrDefault<decltype(extra_meta_)>(extra_meta_);
   auto gpu_fallback =
       StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
@@ -448,6 +453,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         jit_stack(),
         jit_module(),
         extra_args(),
+        extra_meta(),
         gpu_fallback(),
         event->allow_tf32_cublas_,
         std::move(event->counters_)};
@@ -694,7 +700,7 @@ void generateForwardBackwardLink(
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
         tidSeq2activity) {
   const ExtraFields<EventType::TorchOp>& extra_fields =
-      c10::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
+      std::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
   if (extra_fields.forward_tid_ > 0) {
     // act is backward op.
     uint64_t key = getForwardThreadKey(
@@ -777,9 +783,9 @@ void generateForwardBackwardLinks(
       torch_events.end(),
       [](const result_activity_t& left, const result_activity_t& right) {
         auto left_end_time =
-            c10::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+            std::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
                 .end_time_ns_;
-        auto right_end_time = c10::get<ExtraFields<EventType::TorchOp>>(
+        auto right_end_time = std::get<ExtraFields<EventType::TorchOp>>(
                                   right.first->extra_fields_)
                                   .end_time_ns_;
         return left_end_time < right_end_time;
@@ -1140,7 +1146,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     // events are already marked finished before the main tree building
     // algorithm. It's fine to ignore them; the root event of these subtrees
     // not a Kineto op and will be handled normally.
-    if (c10::holds_alternative<ExtraFields<EventType::Kineto>>(
+    if (std::holds_alternative<ExtraFields<EventType::Kineto>>(
             event->extra_fields_) &&
         event->finished_) {
       return;
