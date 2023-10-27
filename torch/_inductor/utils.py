@@ -100,7 +100,11 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     filtered_events = EventList(
-        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+        ]
     )
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
