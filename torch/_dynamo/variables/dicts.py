@@ -115,10 +115,8 @@ class ConstDictVariable(VariableTracker):
             and isinstance(v, VariableTracker)
             for x, v in items.items()
         )
-        items = {make_hashable(x): v for x, v in items.items()}
-
-        self.guards.update(VariableTracker.propagate(items.values())["guards"])
-        self.items = items
+        self.items = {make_hashable(x): v for x, v in items.items()}
+        self.guards.update(VariableTracker.propagate([x.vt for x in self.items.keys()], self.items.values())["guards"])
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -483,6 +481,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
+        keys = tuple(x.vt for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
@@ -612,6 +611,7 @@ class CustomizedDictVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
+        keys = tuple(x.vt for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
