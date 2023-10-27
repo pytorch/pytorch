@@ -34,7 +34,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
-from torch.distributed.checkpoint.planer import LoadPlanner
+from torch.distributed.checkpoint.planner import LoadPlanner
 
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
