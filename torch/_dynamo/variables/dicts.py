@@ -19,6 +19,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, GetItemSource
+from ..utils import dict_keys, dict_values
 from .base import VariableTracker
 from .constant import ConstantVariable
 
@@ -119,10 +120,8 @@ class ConstDictVariable(VariableTracker):
             and isinstance(v, VariableTracker)
             for x, v in items.items()
         )
-        items = {make_hashable(x): v for x, v in items.items()}
-
-        self.guards.update(VariableTracker.propagate(items.values())["guards"])
-        self.items = items
+        self.items = {make_hashable(x): v for x, v in items.items()}
+        self.guards.update(VariableTracker.propagate([x.vt for x in self.items.keys()], self.items.values())["guards"])
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -405,19 +404,17 @@ class DictView(VariableTracker):
         assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
+        self.guards.update(VariableTracker.propagate(self.view_items)["guards"])
 
     @property
     def view_items(self):
+        return getattr(self.dv_dict.items, self.kv)()
+
+    def unpack_var_sequence(self, tx):
         def unwrap(x):
             return x.vt if self.kv == "keys" else x
 
-        yield (x for x in getattr(self.dv_dict.items, self.kv)())
-
-    def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.view_items]
-
-    def python_type(self):
-        raise NotImplementedError(f"Cannot instantiate {self.__class__}")
+        return [unwrap(x).add_options(self.dv_dict) for x in self.view_items]
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
@@ -445,6 +442,9 @@ class DictKeys(DictView):
     def set_items(self):
         return set(self.dv_dict.items.keys())
 
+    def python_type(self):
+        return dict_keys
+
     def call_method(
         self,
         tx,
@@ -461,6 +461,9 @@ class DictKeys(DictView):
 class DictValues(DictView):
     # DictValues is an iterable but cannot be compared.
     kv = "values"
+
+    def python_type(self):
+        return dict_values
 
 
 class DataClassVariable(ConstDictVariable):
@@ -559,6 +562,7 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
+        keys = tuple(x.vt for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
@@ -688,6 +692,7 @@ class CustomizedDictVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
+        keys = tuple(x.vt for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
