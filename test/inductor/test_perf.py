@@ -427,7 +427,7 @@ class FusionTests(TestCase):
         # kernel 3: (input = first-level amax, output = final amax)
         # scale (1) + X (4*2048*hidden_size) * 3 + amax (num_splits * 2 + 1)
         # num_splits depends on SM architectures.
-        expected_numel = 1 + 4 * 2048 * hidden_size * 3 + 432 * 2 + 1
+        expected_numel = 1 + 4 * 2048 * hidden_size * 3 + 1
         actual_numel_amax_keep_dim = count_numel(f, *inp, True)
         actual_numel_amax_no_keep_dim = count_numel(f, *inp, False)
         self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
