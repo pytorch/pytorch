@@ -370,6 +370,7 @@ class TestAverage(TestCase):
         assert wsum.shape == np.shape(expected_wsum)
         assert_array_equal(wsum, expected_wsum)
 
+    @skip(reason="NP_VER: fails on CI")
     def test_weights(self):
         y = np.arange(10)
         w = np.arange(10)
