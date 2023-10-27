@@ -1429,6 +1429,7 @@ def _unflatten_orig_param_states(
         value = gathered_state[state_name]
         param_idx = fsdp_param_info.param_indices[fqn]
 
+        # TODO: This solution is not general and only apply to PTD TP solution.
         if isinstance(value, DTensor):
             placement = value.placements[0]
             # If gathered state is a DTensor and its TP placement is not Replicate(), we need to
@@ -1443,8 +1444,8 @@ def _unflatten_orig_param_states(
             # If gathered state is a replicate DTensor, we directly reshape it.
             else:
                 value = value.reshape(flat_param._shapes[param_idx])
-        # If gathered state is a tensor, we directly reshape it into unflatten state.
         else:
+            # If gathered state is a tensor, we directly reshape it into unflatten state.
             value = value.reshape(flat_param._shapes[param_idx])
 
         if shard_state:
