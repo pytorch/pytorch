@@ -202,6 +202,7 @@ MOD_INLINELIST = {
     "torch._dynamo.polyfill",
     "torch._inductor.test_operators",
     "torch.ao.nn",
+    "torch.ao.quantization.experimental._gpu_quantization",
     "torch.distributions",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
