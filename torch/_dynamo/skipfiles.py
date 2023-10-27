@@ -364,7 +364,7 @@ def check_verbose(func, allow_torch=False):
             obj = func.obj
     elif isinstance(func, DynamoFrameType):
         filename = func.f_code.co_filename
-        if hasattr(func.f_locals, '__len__') and len(func.f_locals) > 1:
+        if hasattr(func.f_locals, "__len__") and len(func.f_locals) > 1:
             obj = list(func.f_locals.values())[0]
         f_code = func.f_code
     elif isinstance(func, (types.FunctionType, types.MethodType)):
