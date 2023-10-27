@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from typing import Dict
 
 import torch
 import torch._export
@@ -59,77 +60,81 @@ class AOTInductorModelRunner:
     @classmethod
     def compile(cls, model, example_inputs, options=None, constraints=None):
         # The exact API is subject to change
-        so_path, exported = torch._export.aot_compile(
+        so_path = torch._export.aot_compile(
             model,
             example_inputs,
             options=options,
             constraints=constraints,
             remove_runtime_assertions=True,
         )
-        return so_path, exported
+        return so_path
 
     @classmethod
-    def load(cls, so_path, example_inputs):
-        is_cpu = all(x.device.type == "cpu" for x in example_inputs)
+    def load(cls, device, so_path, example_inputs):
         if IS_FBCODE:
             from .fb import test_aot_inductor_model_runner_pybind
 
-            optimized = test_aot_inductor_model_runner_pybind.Runner(
-                so_path, is_cpu
-            ).run
-        else:
-            launcher = aot_inductor_launcher
-            if is_cpu:
-                launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+            module = test_aot_inductor_model_runner_pybind.Runner(
+                so_path, device == "cpu"
+            )
 
-            optimized = torch.utils.cpp_extension.load_inline(
+            call_spec = module.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+
+            def optimized(*args):
+                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+                flat_outputs = module.run(flat_inputs)
+                return pytree.tree_unflatten(flat_outputs, out_spec)
+
+        else:
+            module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[launcher],
+                cpp_sources=[aot_inductor_launcher(so_path, device)],
                 # use a unique build directory to avoid test interference
                 build_directory=tempfile.mkdtemp(),
-                functions=["run"],
-                extra_ldflags=[so_path],
-                with_cuda=not is_cpu,
-            ).run
+                functions=["run", "get_call_spec"],
+                with_cuda=(device == "cuda"),
+            )
+
+            call_spec = module.get_call_spec()
+            in_spec = pytree.treespec_loads(call_spec[0])
+            out_spec = pytree.treespec_loads(call_spec[1])
+
+            def optimized(*args):
+                flat_inputs = fx_pytree.tree_flatten_spec((*args, {}), in_spec)
+                flat_outputs = module.run(flat_inputs)
+                return pytree.tree_unflatten(flat_outputs, out_spec)
 
         return optimized
 
     @classmethod
-    def run_compiled(cls, optimized, exported, example_inputs):
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            (example_inputs, {}), exported.call_spec.in_spec
-        )
-        output_tensors = optimized(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
-
-    @classmethod
-    def run(cls, model, example_inputs, options=None, constraints=None):
-        so_path, exported = AOTInductorModelRunner.compile(
+    def run(cls, device, model, example_inputs, options=None, constraints=None):
+        so_path = AOTInductorModelRunner.compile(
             model, example_inputs, options=options, constraints=constraints
         )
-        optimized = AOTInductorModelRunner.load(so_path, example_inputs)
-        return AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
+        optimized = AOTInductorModelRunner.load(device, so_path, example_inputs)
+        return optimized(example_inputs)
 
     @classmethod
     def run_multiple(
         cls,
+        device,
         model,
         list_example_inputs,
         options=None,
         constraints=None,
     ):
-        so_path, exported = AOTInductorModelRunner.compile(
+        so_path = AOTInductorModelRunner.compile(
             model,
             list_example_inputs[0],
             options=options,
             constraints=constraints,
         )
-        optimized = AOTInductorModelRunner.load(so_path, list_example_inputs[0])
+        optimized = AOTInductorModelRunner.load(device, so_path, list_example_inputs[0])
         list_output_tensors = []
         for example_inputs in list_example_inputs:
-            list_output_tensors.append(
-                AOTInductorModelRunner.run_compiled(optimized, exported, example_inputs)
-            )
+            list_output_tensors.append(optimized(example_inputs))
         return list_output_tensors
 
 
@@ -143,11 +148,16 @@ def check_model(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(example_inputs)
         expected = ref_model(*ref_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
+
+        torch.manual_seed(0)
+        actual = AOTInductorModelRunner.run(
+            self.device, model, example_inputs, options, constraints
+        )
 
     self.assertTrue(same(actual, expected))
 
@@ -162,12 +172,15 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
+        torch.manual_seed(0)
         model = model.to(self.device)
         ref_model = copy.deepcopy(model)
         ref_inputs = copy.deepcopy(list_example_inputs)
         list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
         list_actual = AOTInductorModelRunner.run_multiple(
-            model, list_example_inputs, options, constraints
+            self.device, model, list_example_inputs, options, constraints
         )
 
     self.assertTrue(same(list_actual, list_expected))
@@ -757,7 +770,7 @@ class AOTInductorTestsTemplate:
         with torch.cuda.device(0), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
-            so_path, exported = AOTInductorModelRunner.compile(
+            so_path = AOTInductorModelRunner.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
             )
@@ -766,11 +779,25 @@ class AOTInductorTestsTemplate:
         for i in range(torch.cuda.device_count()):
             with torch.cuda.device(i):
                 example_inputs = tuple(t.cuda(i) for t in inputs)
-                optimized = AOTInductorModelRunner.load(so_path, example_inputs)
-                result_cuda = AOTInductorModelRunner.run_compiled(
-                    optimized, exported, example_inputs
-                )
+                optimized = AOTInductorModelRunner.load("cuda", so_path, example_inputs)
+                result_cuda = optimized(example_inputs)
             self.assertTrue(same(result_cpu, result_cuda.cpu()))
+
+    def test_pytree_inputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x: Dict[str, torch.Tensor]):
+                add_ = torch.zeros(5)
+                mul_ = torch.ones(5)
+                for v in x.values():
+                    add_ += v
+                    mul_ *= v
+
+                return [add_, mul_]
+
+        self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
 
     @requires_multigpu()
     def test_non_default_cuda_device(self):
@@ -793,14 +820,14 @@ class AOTInductorTestsTemplate:
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTInductorModelRunner.run(
-                Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
+                "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
             "aot_inductor.abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTInductorModelRunner.run(
-                Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
+                "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
             )
 
         self.assertTrue(same(result_cpu, result_cuda_0.cpu()))
@@ -825,7 +852,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
         if self.device == "cuda":
-            so_path, _ = torch._export.aot_compile(Model(), example_inputs)
+            so_path = torch._export.aot_compile(Model(), example_inputs)
             with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
                 src_code = cpp.read()
                 FileCheck().check_count(
@@ -885,6 +912,27 @@ class AOTInductorTestsTemplate:
             torch.float32, self.device == "cuda"
         )
 
+    def test_normal_functional(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten.normal_functional.default(x)
+
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+
+    def test_empty_graph(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        example_inputs = (torch.randn(8, 4, 4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -907,6 +955,7 @@ copy_tests(
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
+        "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
@@ -927,9 +976,13 @@ copy_tests(
     AOTInductorTestABICompatibleCuda,
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+    },
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCpu(TestCase):
     device = "cpu"
     abi_compatible = False
@@ -955,6 +1008,7 @@ copy_tests(
 )
 
 
+@unittest.skipIf(IS_FBCODE, "NonABI mode should not be used in fbcode")
 class AOTInductorTestNonABICompatibleCuda(TestCase):
     device = "cuda"
     abi_compatible = False

@@ -55,7 +55,7 @@ __all__ = [
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond',
 ]
 
@@ -390,6 +390,9 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __sym_ite__(self, then_val, else_val):
+        raise AssertionError("type stub not overridden")
+
     def __eq__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -455,6 +458,12 @@ def sym_min(a, b):
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
+
+def sym_ite(b, t, f):
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    if isinstance(b, SymBool):
+        return b.__sym_ite__(t, f)
+    return t if b else f
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -720,14 +729,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
-        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
-          quantized, sets new elements to a known value.  Floating point or
-          complex values are set to NaN. Integer values are set to the maximum
-          value.
-        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
-          and :func:`torch.empty_permuted` will fill the output tensor with a known
-          value. Floating point or complex dtype tensors are filled with NaN. Integer
-          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -771,6 +772,11 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
+
+    In addition, several operations fill uninitialized memory when this setting
+    is turned on and when
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
+    See the documentation for that attribute for more information.
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -1582,7 +1588,7 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-        current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+        current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")

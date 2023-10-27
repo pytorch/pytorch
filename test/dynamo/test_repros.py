@@ -3201,6 +3201,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_jit_trace_errors(self):
+        @torch.compile(backend="eager", dynamic=True)
+        def f(x):
+            return x + 1
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.trace(f, torch.randn(3))
+
+        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
+            torch.jit.trace(f, torch.randn(3))
+
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -3515,6 +3526,59 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager")
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_add_sub_alpha_out(self):
+        inp = torch.randn(2, 3, 4)
+        other = 1
+        alpha = 2
+        for op in [torch.add, torch.sub]:
+            out = torch.zeros(2, 3, 4)
+            compile_out = torch.zeros(2, 3, 4)
+            op(inp, other, alpha=alpha, out=out)
+            compiled_fn = torch.compile(op, dynamic=True)
+            compiled_fn(inp, other, alpha=alpha, out=compile_out)
+            self.assertTrue(same(out, compile_out))
+
+    def test_addr_alpha_beta_out(self):
+        inp = torch.randn(2, 3)
+        vec1 = torch.randn(2)
+        vec2 = torch.randn(3)
+        alpha = 2
+        beta = 5
+
+        out = torch.zeros(2, 3)
+        compile_out = torch.zeros(2, 3)
+
+        torch.addr(inp, vec1, vec2, alpha=alpha, beta=beta, out=out)
+        compiled_fn = torch.compile(torch.addr, dynamic=True)
+        compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
+        self.assertTrue(same(out, compile_out))
+
+    def test_numpy_not_ndarray_recompiles(self):
+        import torch
+
+        def fn(x=None):
+            if x is None:
+                x = np.ones(3)
+            elif isinstance(x, int):
+                x = np.ones(6)
+            elif isinstance(x, str):
+                x = np.ones(9)
+            return x**2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+
+        x = np.zeros((2, 2))
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(opt_fn(), fn())
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(10), fn(10))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_fn("10"), fn("10"))
+        self.assertEqual(cnt.frame_count, 4)
 
 
 if __name__ == "__main__":
