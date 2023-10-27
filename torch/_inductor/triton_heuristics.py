@@ -373,7 +373,7 @@ class CachingAutotuner(KernelInterface):
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    def clone_args(self, *args, **kwargs):
+    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -468,7 +468,7 @@ class CachingAutotuner(KernelInterface):
             # skip triton template
             return launcher
 
-        cloned_args = self.clone_args(*args)
+        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
