@@ -2808,7 +2808,6 @@ class TestInterp(TestCase):
 
 @instantiate_parametrized_tests
 class TestPercentile(TestCase):
-
     @skip(reason="NP_VER: fails on CI; no method=")
     def test_basic(self):
         x = np.arange(8) * 0.5
@@ -2992,6 +2991,7 @@ class TestPercentile(TestCase):
             np.percentile(x, (25, 50, 75), axis=1, method="higher").shape, (3, 3, 5, 6)
         )
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
     def test_scalar_q(self):
         # test for no empty dimensions for compatibility with old percentile
         x = np.arange(12).reshape(3, 4)
@@ -3470,6 +3470,7 @@ class TestQuantile(TestCase):
         arr_c = np.array([0.5 + 3.0j, 2.1 + 0.5j, 1.6 + 2.3j], dtype="F")
         assert_raises(TypeError, np.quantile, arr_c, 0.5)
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
     def test_no_p_overwrite(self):
         # this is worth retesting, because quantile does not make a copy
         p0 = np.array([0, 0.75, 0.25, 0.5, 1.0])
@@ -3482,12 +3483,14 @@ class TestQuantile(TestCase):
         np.quantile(np.arange(100.0), p, method="midpoint")
         assert_array_equal(p, p0)
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
     @xpassIfTorchDynamo  # (reason="TODO: make quantile preserve integers")
     @parametrize("dtype", "Bbhil")  # np.typecodes["AllInteger"])
     def test_quantile_preserve_int_type(self, dtype):
         res = np.quantile(np.array([1, 2], dtype=dtype), [0.5], method="nearest")
         assert res.dtype == dtype
 
+    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails with NumPy 1.21.2 on CI")
     @parametrize(
         "method",
         [
