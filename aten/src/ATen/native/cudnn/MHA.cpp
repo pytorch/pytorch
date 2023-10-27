@@ -1023,7 +1023,8 @@ run_cudnn_LLM_fprop(int64_t b,
     if (q.scalar_type() == kBFloat16) {
       dtype = fe::DataType_t::HALF;
     }
-    o = at::zeros({b, s_q, h, d}, q.options());
+    //o = at::zeros({b, s_q, h, d}, q.options());
+    o = at::empty_strided({b, s_q, h, d}, {h * d, d, b * h * d, 1}, q.options());
     if (return_softmaxstats) {
       softmaxstats = at::zeros({b, h, s_q}, q.options());
     }
@@ -1115,9 +1116,11 @@ run_cudnn_LLM_fprop(int64_t b,
 
     auto [O, Stats] = mha_graph.scaled_dot_product_flash_attention(Q, K, V, scaled_dot_product_flash_attention_options);
 
-    O->set_output(true).set_stride({h * d, d, b * h * d, 1});
+    //O->set_output(true).set_stride({h * d, d, b * h * d, 1});
     std::vector<int64_t> o_stride;
     o_stride.assign(o.strides().data(), o.strides().data() + o.strides().size());
+    std::cout << "out stride set: " << h*d << " " << d << " " << b * h * d << " " << 1 << std::endl;
+    std::cout << "tensor stride: " << o.strides() << std::endl;
     O->set_output(true).set_stride(o_stride);
 
     // Check that Stats tensor is real, which is only when its training step

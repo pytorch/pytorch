@@ -65,6 +65,8 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
+#include <iostream>
+
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
 #include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
@@ -771,11 +773,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       attention/*Tensor o*/,
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
-
+  
   // Reshape output to convert nnz to batch_size and seq_len
-  attention =
-      attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
-
+  //attention =
+  //    attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
+  std::cout << "got attention shape and stride before: " << attention.sizes() << " " << attention.strides() << std::endl;
+  attention = attention.transpose(1, 2);
+  std::cout << "got attention shape and stride after: " << attention.sizes() << " " << attention.strides() << std::endl;
   return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
 
