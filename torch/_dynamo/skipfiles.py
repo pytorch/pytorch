@@ -351,29 +351,43 @@ f2 is not skipped.
 """
 
 
-def check_verbose(obj, allow_torch=False):
+def check_verbose(func, allow_torch=False):
+    obj = None
+    f_code = None
     if isinstance(
-        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        func, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
     ):
-        filename = obj.get_filename()
-        obj = obj.get_code()
-    elif isinstance(obj, types.CodeType):
-        filename = obj.co_filename
-    elif isinstance(obj, (types.FunctionType, types.MethodType)):
-        filename = getfile(obj)
-        obj = obj.__code__
+        filename = func.get_filename()
+        f_code = func.get_code()
+        if isinstance(func, UserMethodVariable):
+            obj = func.obj
+    elif isinstance(func, types.FrameType):
+        filename = func.f_code.co_filename
+        if len(func.f_locals) > 1:
+            obj = list(func.f_locals.values())[0]
+        f_code = func.f_code
+    elif isinstance(func, (types.FunctionType, types.MethodType)):
+        filename = getfile(func)
+        f_code = func.__code__
+        if isinstance(func, types.MethodType):
+            obj = func.__self__
     else:
-        filename = getfile(obj)
-    if obj in get_func_inlinelist():
+        filename = getfile(func)
+    if f_code in get_func_inlinelist():
         return SkipResult(
             False,
             "inlined according skipfiles.FUNC_INLINELIST",
         )
+    elif is_module_forward(obj, f_code):
+        return SkipResult(
+            False,
+            "inlining for module forward",
+        )
     return check_file(filename, allow_torch)
 
 
-def check(obj, allow_torch=False):
-    return check_verbose(obj, allow_torch).skipped
+def check(func, allow_torch=False):
+    return check_verbose(func, allow_torch).skipped
 
 
 # skip common third party libs
@@ -381,6 +395,10 @@ for _name in THIRDPARTY_SKIPLIST:
     add(_name)
 
 _recompile_re()
+
+
+def is_module_forward(obj, f_code):
+    return obj is not None and isinstance(obj, torch.nn.Module) and f_code.co_name == "forward"
 
 
 def is_torch_inline_allowed(filename):

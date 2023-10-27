@@ -1632,9 +1632,11 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 return x
 
         mod = MockModule()
-        # For the third iteration, we would reach the cache size limit, and
-        # therefore the total number of expected frame count is 2 *
-        # num_submodules.
+        # SubModule.forward would reach the cache size limit after the second iteration,
+        # and therefore the number of expected frame count is `2 * num_submodules` until then.
+        # After reaching the cache size limit, SubModule.forward woull be executed in eager,
+        # however, the torch.nn.ReLU.forward frame will be evaluated recursively, which will
+        # add another `num_submodules` times to the total number of expected frame count.
         with unittest.mock.patch(
             "torch._dynamo.config.cache_size_limit",
             cache_size_limit,
@@ -1646,7 +1648,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             ]:
                 x = torch.randn(size)
                 mod(x)
-        self.assertEqual(cnts.frame_count, 2 * num_submodules)
+        self.assertEqual(cnts.frame_count, 3 * num_submodules)
 
     def test_recursion(self):
         mod = MockModule()
