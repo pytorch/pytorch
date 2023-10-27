@@ -793,20 +793,12 @@ class WrapperCodeGen(CodeGen):
         )
         compile_wrapper.newline()
 
-        # TODO(oulgen): num_stages and num_warps are default values of
-        # triton.Config. Can we do better? Or ask the user to provide?
-        num_stages = 2
-        num_warps = 4
-
         from ..ir import Buffer
         from .common import SizeArg, TensorArg
 
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
-            # Not a real argument
-            if key == "grid":
-                continue
             if (
                 key in kernel.__annotations__
                 and "constexpr" in kernel.__annotations__[key]
