@@ -3908,6 +3908,7 @@ class ShapeEnv:
             if a not in self.replacements or expr != self.replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
+        log.info("set_replacement %s = %s", a, expr)
         self.replacements[a] = expr
 
         # When specializing 'a == expr', the equality should be also conveyed to
@@ -3956,9 +3957,6 @@ class ShapeEnv:
             return
         # NB: prioritize unbacked symints for solving by ordering them last
         free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
-        # Never substitute backed with unbacked
-        if self.is_unbacked_symint(free[0]):
-            return
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):
@@ -3969,7 +3967,19 @@ class ShapeEnv:
                 r = try_solve(expr, free[0], floordiv_inequality=False)
                 if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     new_var = self._find(r[1])
-                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                    ok = False
+                    if self.is_unbacked_symint(free[0]):
+                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                        # s0 - i0 - i1.  Arguably this should be OK but the
+                        # runtime assert machinery is very delicate right now
+                        # so this causes things to fail e.g.,
+                        # test_split_unbacked_sizes
+                        ok = len(free_unbacked_symbols(new_var)) <= 1
+                    else:
+                        # Never substitute backed with unbacked
+                        ok = len(free_unbacked_symbols(new_var)) == 0
+                    if ok:
+                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
