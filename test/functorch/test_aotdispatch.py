@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import torch
+import torch._dynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
@@ -2249,6 +2250,26 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
+
+    def test_aot_export_predispatch(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return (self.linear(x),)
+
+        mod = M()
+        inp = torch.randn(4, 4)
+        gm_dynamo, _ = torch._dynamo.export(mod, inp)
+        fake_args = []
+        for node in gm_dynamo.graph.nodes:
+            if node.op == "placeholder":
+                fake_args.append(node.meta["val"])
+
+        gm, _ = aot_export_module(gm_dynamo, fake_args, trace_joint=False, pre_dispatch=True)
+        print(gm.graph)
 
     def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
         class M(torch.nn.Module):
