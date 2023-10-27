@@ -5,8 +5,6 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include <mutex>
-
 namespace at {
 
 struct CUDAGeneratorImpl;
@@ -21,9 +19,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  static void inc_pending_event_queries();
-  static void dec_pending_event_queries();
-  static int num_pending_event_queries();
   void capture_begin(MempoolId_t pool={0, 0}, cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void replay();
@@ -37,8 +32,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
 #endif
-
-  static std::atomic<int> pending_event_queries;
 
   // internal states so reset() can do its best cleaning up
   // Set to true in capture_end if cudaStreamEndCapture succeeded
