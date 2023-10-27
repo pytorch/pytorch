@@ -5097,6 +5097,109 @@ TEST_F(VulkanAPITest, unbind_3d_depth_large) {
   test_unbind({100, 1, 144}, 0);
 }
 
+void test_var(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool unbiased=true, bool keepdim=false) {
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::var(in_cpu, dim_list, unbiased, keepdim);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::var(in_vulkan, dim_list, unbiased, keepdim);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, var_2d_unbiased) {
+  test_var({3, 5}, {1}, true, true);
+  test_var({3, 5}, {1}, true, false);
+
+  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  test_var({3, 5}, {0, 1}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_2d_biased) {
+  test_var({3, 5}, {1}, false, true);
+  test_var({3, 5}, {1}, false, false);
+
+  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  test_var({3, 5}, {0, 1}, false, true);
+}
+
+TEST_F(VulkanAPITest, var_3d_unbiased) {
+  test_var({3, 5, 7}, {1}, true, true);
+  test_var({3, 5, 7}, {1}, true, false);
+
+  test_var({3, 5, 7}, {0, 1}, true, true);
+  test_var({3, 5, 7}, {0, 1}, true, false);
+
+  test_var({3, 5, 7}, {0, 2}, true, true);
+  test_var({3, 5, 7}, {0, 2}, true, false);
+
+  test_var({3, 5, 7}, {-1, -2}, true, true);
+  test_var({3, 5, 7}, {-1, -2}, true, false);
+
+  test_var({3, 5, 7}, {0, 1, 2}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_3d_biased) {
+  test_var({3, 5, 7}, {1}, false, true);
+  test_var({3, 5, 7}, {1}, false, false);
+
+  test_var({3, 5, 7}, {0, 1}, false, true);
+  test_var({3, 5, 7}, {0, 1}, false, false);
+
+  test_var({3, 5, 7}, {0, 2}, false, true);
+  test_var({3, 5, 7}, {0, 2}, false, false);
+
+  test_var({3, 5, 7}, {-1, -2}, false, true);
+  test_var({3, 5, 7}, {-1, -2}, false, false);
+
+  test_var({3, 5, 7}, {0, 1, 2}, false, true);
+}
+
+TEST_F(VulkanAPITest, var_4d_unbiased) {
+  test_var({3, 5, 7, 11}, {0}, true, true);
+  test_var({3, 5, 7, 11}, {1}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1}, true, true);
+  test_var({3, 5, 7, 11}, {0, 1}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 2}, true, true);
+  test_var({3, 5, 7, 11}, {0, 2}, true, false);
+
+  test_var({3, 5, 7, 11}, {-1, -2}, true, true);
+  test_var({3, 5, 7, 11}, {-1, -2}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2}, true, true);
+  test_var({3, 5, 7, 11}, {0, -1, 2}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2, 3}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_4d_biased) {
+  test_var({3, 5, 7, 11}, {0}, false, true);
+  test_var({3, 5, 7, 11}, {1}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1}, false, true);
+  test_var({3, 5, 7, 11}, {0, 1}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 2}, false, true);
+  test_var({3, 5, 7, 11}, {0, 2}, false, false);
+
+  test_var({3, 5, 7, 11}, {-1, -2}, false, true);
+  test_var({3, 5, 7, 11}, {-1, -2}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2}, false, true);
+  test_var({3, 5, 7, 11}, {0, -1, 2}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2, 3}, false, true);
+}
+
 TEST_F(VulkanAPITest, view_explicit) {
   c10::InferenceMode mode;
 
