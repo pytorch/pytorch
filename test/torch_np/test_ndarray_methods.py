@@ -1,34 +1,26 @@
 # Owner(s): ["module: dynamo"]
 
 import itertools
-from unittest import expectedFailure as xfail, skipIf as skipif
-
-import numpy
+from unittest import expectedFailure as xfail, skipIf as skip
 
 import pytest
+
+import torch._numpy as np
+
+# import numpy as np
 from pytest import raises as assert_raises
+from torch._numpy.testing import assert_equal
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skipIfTorchDynamo,
     subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
 )
-
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy.testing import assert_equal
-else:
-    import torch._numpy as np
-    from torch._numpy.testing import assert_equal
 
 
 class TestIndexing(TestCase):
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attr, type of a[0, 0]")
     def test_indexing_simple(self):
         a = np.array([[1, 2, 3], [4, 5, 6]])
 
@@ -44,7 +36,6 @@ class TestIndexing(TestCase):
 
 
 class TestReshape(TestCase):
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_function(self):
         arr = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10, 11, 12]]
@@ -53,7 +44,6 @@ class TestReshape(TestCase):
         arr = np.asarray(arr)
         assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
 
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_reshape_method(self):
         arr = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
         arr_shape = arr.shape
@@ -95,7 +85,6 @@ class TestReshape(TestCase):
 
 
 class TestTranspose(TestCase):
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_function(self):
         arr = [[1, 2], [3, 4], [5, 6]]
         tgt = [[1, 3, 5], [2, 4, 6]]
@@ -104,7 +93,6 @@ class TestTranspose(TestCase):
         arr = np.asarray(arr)
         assert np.transpose(arr, (1, 0)).tensor._base is arr.tensor
 
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_transpose_method(self):
         a = np.array([[1, 2], [3, 4]])
         assert_equal(a.transpose(), [[1, 3], [2, 4]])
@@ -117,7 +105,6 @@ class TestTranspose(TestCase):
 
 
 class TestRavel(TestCase):
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_function(self):
         a = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]]
         tgt = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -126,7 +113,6 @@ class TestRavel(TestCase):
         arr = np.asarray(a)
         assert np.ravel(arr).tensor._base is arr.tensor
 
-    @skipif(TEST_WITH_TORCHDYNAMO, reason=".tensor attribute")
     def test_ravel_method(self):
         a = np.array([[0, 1], [2, 3]])
         assert_equal(a.ravel(), [0, 1, 2, 3])
@@ -203,7 +189,6 @@ class TestArgmaxArgminCommon(TestCase):
         (256,),
     ]
 
-    @skipif(numpy.__version__ < "1.22", reason="NP_VER: fails on NumPy 1.21.x")
     @parametrize(
         "size, axis",
         list(
@@ -287,7 +272,7 @@ class TestArgmaxArgminCommon(TestCase):
             with pytest.raises(ValueError):
                 method(arr.T, axis=axis, out=wrong_outarray, keepdims=True)
 
-    @skipif(True, reason="XXX: need ndarray.chooses")
+    @skip(True, reason="XXX: need ndarray.chooses")
     @parametrize("method", ["max", "min"])
     def test_all(self, method):
         # a = np.random.normal(0, 1, (4, 5, 6, 7, 8))
@@ -411,38 +396,27 @@ class TestArgmax(TestCase):
         )
     ]
     nan_arr = darr + [
-        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xpassIfTorchDynamo]),
-        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xpassIfTorchDynamo]),
-        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]),
-        subtest(
-            ([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xpassIfTorchDynamo]
-        ),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xfail],
         ),
         subtest(
             ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xfail],
         ),
         subtest(
             ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-            decorators=[xpassIfTorchDynamo],
+            decorators=[xfail],
         ),
-        subtest(
-            ([complex(0, 0), complex(0, 2), complex(0, 1)], 1),
-            decorators=[xpassIfTorchDynamo],
-        ),
-        subtest(
-            ([complex(1, 0), complex(0, 2), complex(0, 1)], 0),
-            decorators=[xpassIfTorchDynamo],
-        ),
-        subtest(
-            ([complex(1, 0), complex(0, 2), complex(1, 1)], 2),
-            decorators=[xpassIfTorchDynamo],
-        ),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xfail]),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
         ([True, False, False, False, False], 0),
@@ -645,12 +619,11 @@ class TestNoExtraMethods(TestCase):
 
 
 class TestIter(TestCase):
-    @skipIfTorchDynamo
     def test_iter_1d(self):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) == np.ndarray for x in lst), f"{[type(x) for x in lst]}"
+        assert all(type(x) == np.ndarray for x in lst)
         assert all(x.ndim == 0 for x in lst)
 
     def test_iter_2d(self):

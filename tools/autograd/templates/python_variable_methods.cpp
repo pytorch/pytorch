@@ -100,7 +100,8 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "size(int64_t? dim=None)",
+    "size(int64_t dim)",
+    "size()",
     "size(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
@@ -111,9 +112,6 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
   if (r.idx == 0) {
-    if (!r.toInt64Optional(0).has_value()) {
-      return THPSize_NewFromSymSizes(self_);
-    }
     if (jit::tracer::isTracing()) {
       // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
@@ -121,6 +119,9 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
       return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
+    return THPSize_NewFromSymSizes(self_);
+  }
+  else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
       TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
     }
@@ -134,7 +135,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "stride(int64_t? dim=None)",
+    "stride(int64_t dim)",
+    "stride()",
     "stride(Dimname dim)",
   });
   auto& self_ = THPVariable_Unpack(self);
@@ -146,9 +148,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    if (r.toInt64Optional(0).has_value()) {
-      return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
-    }
+    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
+  } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
     at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
@@ -162,7 +163,8 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
       PyTuple_SET_ITEM(tuple.get(), i, s);
     }
     return tuple.release();
-  } else if (r.idx == 1) {
+  }
+  else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
   }
   Py_RETURN_NONE;
