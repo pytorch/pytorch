@@ -33,7 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-from .. import config, mutation_guard, replay_record, skipfiles
+from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
     is_allowed,
     is_builtin_callable,
@@ -723,6 +723,10 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif trace_rules.lookup(value) is not None:
+            return trace_rules.lookup(value).create_with_source(
+                value, source=self.source
             )
         elif is_allowed(value):
             if is_user_defined_allowed(value):
