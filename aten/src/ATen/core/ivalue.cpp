@@ -861,7 +861,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
 
   }
-  return out << "InvalidIValue(tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ")";
+  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ">";
 }
 
 #undef TORCH_FORALL_TAGS
