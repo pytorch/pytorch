@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.immutable_collections import immutable_dict
 
-from .. import config, ir, pattern_matcher
+from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -683,7 +683,7 @@ def reinplace_scatters(graph):
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
         aten._unsafe_index_put.default: InplaceableOp(
-            aten._unsafe_index_put_.default, 0
+            inductor_prims._unsafe_index_put_, 0
         ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}

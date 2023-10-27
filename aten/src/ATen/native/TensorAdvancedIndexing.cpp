@@ -705,11 +705,6 @@ Tensor _unsafe_index_put(const Tensor& self, const torch::List<c10::optional<Ten
   return at::index_put(self, indices, value, accumulate);
 }
 
-
-Tensor & _unsafe_index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate) {
-  return at::index_put_(self, indices, value, accumulate);
-}
-
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
