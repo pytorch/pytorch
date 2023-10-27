@@ -10,8 +10,6 @@
 
 namespace at {
 
-extern const std::string kParamCommsCallName = "record_param_comms";
-
 namespace {
 
 // Used to generate unique callback handles
@@ -714,7 +712,6 @@ uint64_t RecordFunction::currentThreadId() {
 void RecordFunction::before(const char* name, int64_t sequence_nr) {
   fn_ = name;
   sequence_nr_ = sequence_nr;
-  is_nccl_meta_ = (std::strcmp(name, kParamCommsCallName.c_str()) == 0);
 
 #ifndef NDEBUG
     inputs_valid_ = true;
@@ -724,7 +721,6 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
-  is_nccl_meta_ = (name == kParamCommsCallName);
   fn_ = std::move(name);
   sequence_nr_ = sequence_nr;
 
@@ -740,7 +736,6 @@ void RecordFunction::before(
     int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
   fn_ = schema;
-  is_nccl_meta_ = (schema.get().name() == kParamCommsCallName);
 
 #ifndef NDEBUG
     inputs_valid_ = true;

@@ -14,9 +14,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         c10::optional<at::Tensor> &out_,             // batch_size x seqlen_q x num_heads x head_size
         const float p_dropout,
         const float softmax_scale,
-        bool is_causal,
-        const int window_size_left,
-        int window_size_right,
+        const bool is_causal,
         const bool return_softmax,
         c10::optional<at::Generator> gen_);
 
@@ -33,8 +31,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                const float softmax_scale,
                const bool zero_tensors,
                const bool is_causal,
-               const int window_size_left,
-               int window_size_right,
                const bool return_softmax,
                c10::optional<at::Generator> gen_);
 
@@ -52,8 +48,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const float p_dropout,         // probability to drop
         const float softmax_scale,
         const bool is_causal,
-        const int window_size_left,
-        int window_size_right,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset);
 
@@ -75,8 +69,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const float softmax_scale,
                const bool zero_tensors,
                const bool is_causal,
-               const int window_size_left,
-               int window_size_right,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset);
 

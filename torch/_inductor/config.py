@@ -100,6 +100,9 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
+# TODO: capture whether the graph is from export
+from_export = False
+
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
 
@@ -484,16 +487,8 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
-    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
-
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
-
-    # Serialized tree spec for flattening inputs
-    serialized_in_spec = ""
-
-    # Serialized tree spec for flattening outputs
-    serialized_out_spec = ""
 
 
 class cuda:

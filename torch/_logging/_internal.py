@@ -170,7 +170,6 @@ def set_logs(
     post_grad_graphs: bool = False,
     onnx_diagnostics: bool = False,
     fusion: bool = False,
-    overlap: bool = False,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -293,9 +292,6 @@ def set_logs(
         fusion (:class:`bool`):
             Whether to emit detailed Inductor fusion decisions. Default: ``False``
 
-        overlap (:class:`bool`):
-            Whether to emit detailed Inductor compute/comm overlap decisions. Default: ``False``
-
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -405,7 +401,6 @@ def set_logs(
         onnx=onnx,
         onnx_diagnostics=onnx_diagnostics,
         fusion=fusion,
-        overlap=overlap,
     )
 
 

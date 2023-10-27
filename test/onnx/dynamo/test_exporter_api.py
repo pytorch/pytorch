@@ -46,7 +46,7 @@ class TestExportOptionsAPI(common_utils.TestCase):
             ResolvedExportOptions(options=12)  # type: ignore[arg-type]
 
     def test_dynamic_shapes_default(self):
-        options = ResolvedExportOptions(ExportOptions())
+        options = ResolvedExportOptions(None)
         self.assertFalse(options.dynamic_shapes)
 
     def test_dynamic_shapes_explicit(self):
