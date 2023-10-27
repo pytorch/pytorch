@@ -385,6 +385,16 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
+                args.append(v)
+
+        if kwargs:
+            unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
+
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
@@ -557,8 +567,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # consistent
         example_value = true_r.as_proxy().node.meta["example_value"]
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
-
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -566,7 +574,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 torch.ops.higher_order.cond,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
