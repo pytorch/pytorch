@@ -878,9 +878,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             CustomModule(), args=inputs
         )
 
-        onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            loaded_exported_program, inputs, skip_dynamic_shapes_check=True
+            exported_program, inputs, skip_dynamic_shapes_check=True
         )
 
 
