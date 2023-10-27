@@ -880,8 +880,8 @@ class LocalElasticAgentTest(unittest.TestCase):
 
         # global world size == sum of all the role world sizes
         expected_world_size = sum(expected_role_world_sizes.values())
-        for role, run_results in run_results.items():
-            for result in run_results:
+        for role, results in run_results.items():
+            for result in results:
                 res = result.return_values
                 for role_info in res.values():
                     rank = role_info.rank
