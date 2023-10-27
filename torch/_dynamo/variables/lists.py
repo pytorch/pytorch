@@ -40,7 +40,7 @@ def _listlike_contains_helper(items, search, tx, check_tensor_identity=False):
             and x.as_python_constant() == search.as_python_constant()
             for x in items
         )
-        return variables.ConstantVariable.create(result)
+        return variables.ConstantVariable.create(found)
 
     from .builtin import BuiltinVariable
 
