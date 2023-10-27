@@ -2947,6 +2947,7 @@ class TestPercentile(TestCase):
         x = np.arange(8) * 0.5
         assert_equal(np.percentile(x, [0, 100, 50]), [0, 3.5, 1.75])
 
+    @skip(reason="NP_VER: fails on CI")
     def test_axis(self):
         x = np.arange(12).reshape(3, 4)
 
