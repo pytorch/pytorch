@@ -18,9 +18,9 @@ class RandomBaseline(HeuristicInterface):
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
         # Probabilities for each type of test.
         # The sum of all probabilities should be 1.0.
-        PROB_UNRANKED = 0.2
-        PROB_NO_RELEVANCE = 0.2
-        PROB_UNLIKELY_RELEVANCE = 0.1
+        PROB_UNRANKED = 0.5
+        PROB_NO_RELEVANCE = 0
+        PROB_UNLIKELY_RELEVANCE = 0
 
         PROB_HIGH_RELEVANCE = 0.25
         PROB_PROBABLE_RELEVANCE = 0.25
@@ -41,15 +41,15 @@ class RandomBaseline(HeuristicInterface):
         probable_relevance_tests = []
         for test in tests:
             num = random.random()
-            if num < PROB_UNRANKED:
+            if num <= PROB_UNRANKED:
                 unranked_tests.append(test)
-            elif num < PROB_UNRANKED + PROB_HIGH_RELEVANCE:
+            elif num <= PROB_UNRANKED + PROB_HIGH_RELEVANCE:
                 high_relevance_tests.append(test)
-            elif num < PROB_UNRANKED + PROB_HIGH_RELEVANCE + PROB_UNLIKELY_RELEVANCE:
+            elif num <= PROB_UNRANKED + PROB_HIGH_RELEVANCE + PROB_UNLIKELY_RELEVANCE:
                 unlikely_relevance_tests.append(test)
             elif (
                 num
-                < PROB_UNRANKED
+                <= PROB_UNRANKED
                 + PROB_HIGH_RELEVANCE
                 + PROB_UNLIKELY_RELEVANCE
                 + PROB_NO_RELEVANCE
