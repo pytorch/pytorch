@@ -103,7 +103,6 @@ _ref_test_ops = tuple(
         op_db,
     )
 )
-_ops_and_refs = op_db + python_ref_db
 
 def reduction_dtype_filter(op):
     if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
@@ -118,7 +117,7 @@ def reduction_dtype_filter(op):
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
 # then they do not need to be compared to each other
-_ops_and_refs_with_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
+_ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
@@ -650,7 +649,7 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
+    @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
@@ -785,7 +784,7 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
@@ -977,7 +976,7 @@ class TestCommon(TestCase):
                         op_out(out=out)
 
 
-    @ops(filter(reduction_dtype_filter, _ops_and_refs), dtypes=(torch.int16,))
+    @ops(filter(reduction_dtype_filter, ops_and_refs), dtypes=(torch.int16,))
     def test_out_integral_dtype(self, device, dtype, op):
         def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
             out = None
