@@ -26,10 +26,10 @@ from torch.ao.quantization.quantize_pt2e import (
     prepare_qat_pt2e,
 )
 from torch.ao.quantization.quantizer import (
-    Quantizer,
+    DerivedQuantizationSpec,
     QuantizationAnnotation,
     QuantizationSpec,
-    DerivedQuantizationSpec,
+    Quantizer,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
