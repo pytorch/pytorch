@@ -56,7 +56,7 @@ try:
         NP_SUPPORTED_MODULES = {}
 
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
     pass
 
@@ -69,7 +69,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map_only
 
 
 counters = collections.defaultdict(collections.Counter)
@@ -913,27 +913,47 @@ def enum_repr(value, local):
     return local_name
 
 
-def iter_contains(items, search, tx, options):
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
+def iter_contains(items, search, tx, options, check_tensor_identity=False):
     from .variables import BuiltinVariable, ConstantVariable
 
     if search.is_python_constant():
-        result = any(
-            x.as_python_constant() == search.as_python_constant() for x in items
+        found = any(
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
         )
-        return ConstantVariable.create(result, **options)
+        return ConstantVariable.create(found, **options)
 
-    result = None
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, variables.TensorVariable):
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
+    found = None
     for x in items:
-        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-        if result is None:
-            result = check
+        if must_check_tensor_id:
+            if isinstance(x, variables.TensorVariable):
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
         else:
-            result = BuiltinVariable(operator.or_).call_function(
-                tx, [check, result], {}
-            )
-    if result is None:
-        result = ConstantVariable.create(None)
-    return result
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, found], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 def dict_param_key_ids(value):
@@ -1219,11 +1239,14 @@ def format_func_info(code):
 def disable_cache_limit():
     prior = config.cache_size_limit
     config.cache_size_limit = sys.maxsize
+    prior_acc_limit = config.accumulated_cache_size_limit
+    config.accumulated_cache_size_limit = sys.maxsize
 
     try:
         yield
     finally:
         config.cache_size_limit = prior
+        config.accumulated_cache_size_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code
@@ -1357,9 +1380,23 @@ def get_debug_dir():
     return _get_debug_dir(debug_root)
 
 
-def get_fake_value(node, tx):
+def extract_fake_example_value(node, required=True):
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
+    elif required:
+        unimplemented("`FakeTensor` example value was required but not available")
+    else:
+        return None
+
+
+def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     Run the computation represented by `node` using fake tensors and return the result.
+
+    allow_non_graph_fake: whether to allow the return result to be:
+        1. non-fake or 2. fake that is not created by this instance of Dynamo.
+        If `True`, you must be prepared to deal with such return values, ideally
+        by further wrapping them as this graph's fakes.
     """
     from .exc import (
         TorchRuntimeError,
@@ -1371,17 +1408,20 @@ def get_fake_value(node, tx):
 
     op = node.op
 
-    def fake_wrapper(e):
-        if isinstance(e, torch.Tensor):
-            assert is_fake(e)
+    # FX Node should always return the same fake value
+    if "example_value" in node.meta and is_fake(node.meta["example_value"]):
+        return node.meta["example_value"]
+
+    def ensure_graph_fake(e):
+        assert maybe_get_fake_mode(e) is tx.fake_mode
         return e
 
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
 
     args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map(fake_wrapper, args)
-    kwargs = tree_map(fake_wrapper, kwargs)
+    args = tree_map_only(torch.Tensor, ensure_graph_fake, args)
+    kwargs = tree_map_only(torch.Tensor, ensure_graph_fake, kwargs)
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1403,7 +1443,7 @@ def get_fake_value(node, tx):
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
-            return wrap_fake_exception(
+            ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
     except Unsupported:
@@ -1432,17 +1472,21 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(
+            raise UserError(  # noqa: TRY200
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
-                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
                 "You will need to explicitly give hint to the compiler. Please take a look at "
-                "constrain_as_value OR constrain_as_size APIs",
+                f"constrain_as_value OR constrain_as_size APIs.  {cause}",
                 case_name="constrain_as_size_example",
             )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+    if not allow_non_graph_fake:
+        _ = tree_map_only(torch.Tensor, ensure_graph_fake, ret_val)
+    return ret_val
 
 
 _current_node = threading.local()
@@ -2193,9 +2237,18 @@ def is_rng_state_getter_or_setter(value):
     return value in (*setters, *getters)
 
 
+def is_tensor_base_attr_getter(value):
+    return (
+        isinstance(value, types.MethodWrapperType)
+        and value.__name__ == "__get__"
+        and isinstance(value.__self__, types.GetSetDescriptorType)
+        and value.__self__.__objclass__ is torch._C._TensorBase
+    )
+
+
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
     from torch._dynamo.variables import UserDefinedObjectVariable
-    from torch._dynamo.variables.tensor import TensorWithTFOverrideVariable
+    from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
     return isinstance(vt, TensorWithTFOverrideVariable) or (
         isinstance(vt, UserDefinedObjectVariable)
