@@ -327,6 +327,7 @@ class WrapperCodeGen(CodeGen):
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
         self.user_defined_kernel_count = 0
+        self.unbacked_symbol_decls = set()
 
         self.write_header()
         self.write_prefix()
@@ -1106,6 +1107,15 @@ class WrapperCodeGen(CodeGen):
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
 
+    def codegen_unbacked_symbol_decl(self, symbol):
+        name = str(symbol)
+        if name in self.unbacked_symbol_decls:
+            return name
+        else:
+            # When in CppWrapperCodeGen, we should only generate the declaration once
+            self.unbacked_symbol_decls.add(name)
+            return self.declare + name
+
 
 class CppWrapperCodeGen(WrapperCodeGen):
     """
@@ -1437,6 +1447,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
