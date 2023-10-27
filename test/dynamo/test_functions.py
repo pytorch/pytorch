@@ -1402,6 +1402,30 @@ if HAS_TRITON:
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.autotune(
+        configs=[
+            triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+            triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+        ],
+        key=[],
+    )
+    @triton.jit
+    def add_kernel_autotuned(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)
+
     @triton.jit
     def mul2_kernel(
         in_ptr0,
@@ -1986,6 +2010,25 @@ def forward(self, x_1, output_1):
 
         # reset back
         CONSTANT_C = prev_c
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_autotune(self, grad, backend):
+        def call_triton(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x, requires_grad=grad)
+            n_elements = output.numel()
+            grid = (n_elements,)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        t1 = torch.rand(5, device="cuda", requires_grad=grad)
+        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+
+        torch_add = t1 + t2
+        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        self.assertEqual(compiled_func(t1, t2), torch_add)
 
     @requires_cuda()
     @requires_triton()

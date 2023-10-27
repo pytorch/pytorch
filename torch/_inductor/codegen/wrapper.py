@@ -777,7 +777,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count += 1
         return new_name
 
-    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
         original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -787,7 +787,7 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import template
+            from torch._inductor.triton_heuristics import user_autotune
             """,
             strip=True,
         )
@@ -828,12 +828,20 @@ class WrapperCodeGen(CodeGen):
             "configs": [config_of(signature)],
             "kernel_name": name,
         }
+        configs = [
+            {
+                "kwargs": config.kwargs,
+                "num_warps": config.num_warps,
+                "num_stages": config.num_stages,
+            }
+            for config in configs
+        ]
         compile_wrapper.splice(
             f"""
-            @template(
-                num_stages={num_stages},
-                num_warps={num_warps},
-                meta={triton_meta!r}
+            @user_autotune(
+                configs={configs!r},
+                meta={triton_meta!r},
+                filename=__file__
             )
             @triton.jit
             """
