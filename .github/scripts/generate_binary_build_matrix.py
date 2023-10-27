@@ -41,22 +41,33 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = (
 
 def get_nccl_submodule_version() -> str:
     from pathlib import Path
-    nccl_version_mk = Path(__file__).absolute().parent.parent.parent / "third_party" / "nccl" / "nccl" / "makefiles" / "version.mk"
+
+    nccl_version_mk = (
+        Path(__file__).absolute().parent.parent.parent
+        / "third_party"
+        / "nccl"
+        / "nccl"
+        / "makefiles"
+        / "version.mk"
+    )
     if not nccl_version_mk.exists():
-        raise RuntimeError("Please make sure that nccl submodule is checked out when importing this script")
+        raise RuntimeError(
+            "Please make sure that nccl submodule is checked out when importing this script"
+        )
     with nccl_version_mk.open("r") as f:
         content = f.read()
-    d={}
+    d = {}
     for l in content.split("\n"):
         if not l.startswith("NCCL_"):
             continue
         (k, v) = l.split(":=")
-        d[k.strip()]=v.strip()
+        d[k.strip()] = v.strip()
     return f"{d['NCCL_MAJOR']}.{d['NCCL_MINOR']}.{d['NCCL_PATCH']}"
 
 
 def get_nccl_wheel_version() -> str:
     import re
+
     requrements = map(str.strip, re.split("[;|]", PYTORCH_EXTRA_INSTALL_REQUIREMENTS))
     return [x for x in requrements if x.startswith("nvidia-nccl-cu")][0].split("==")[1]
 
@@ -65,7 +76,9 @@ def validate_nccl_dep_consistency() -> None:
     wheel_ver = get_nccl_wheel_version()
     submodule_ver = get_nccl_submodule_version()
     if wheel_ver != submodule_ver:
-        raise RuntimeError(f"NCCL submodule version {submodule_ver} differs from wheel version {wheel_ver}")
+        raise RuntimeError(
+            f"NCCL submodule version {submodule_ver} differs from wheel version {wheel_ver}"
+        )
 
 
 def arch_type(arch_version: str) -> str:
@@ -312,5 +325,6 @@ def generate_wheels_matrix(
                 }
             )
     return ret
+
 
 validate_nccl_dep_consistency()
