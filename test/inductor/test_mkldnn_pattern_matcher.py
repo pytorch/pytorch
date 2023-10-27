@@ -472,7 +472,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
         # Totally pattern_matcher_count 3,
-        # pattern_matcher_nodes 18
+        # pattern_matcher_nodes 10
         # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
         #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
         # 2. dequant-conv pattern matched in quantization weight prepack
