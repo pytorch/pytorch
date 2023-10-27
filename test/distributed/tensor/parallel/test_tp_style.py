@@ -22,14 +22,14 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
+    NUM_DEVICES,
 )
 
 
 class TensorParallelStyleTest(DTensorTestBase):
     @property
     def world_size(self):
-        gpu_num = torch.cuda.device_count()
-        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+        return NUM_DEVICES
 
     def _1d_input_func_check(
         self,
