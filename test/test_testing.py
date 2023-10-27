@@ -414,13 +414,25 @@ if __name__ == '__main__':
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
     @onlyCPU
-    def test_supported_dtypes(self, device):
-        for op in op_db:
-          if len(op.supported_dtypes('cpu').symmetric_difference(op.supported_dtypes('cuda'))) > 0:
-            break
-        self.assertNotEqual(op.supported_dtypes('cpu'), op.supported_dtypes('cuda'))
-        self.assertEqual(op.supported_dtypes('cuda'), op.supported_dtypes('cuda:0'))
-        self.assertEqual(op.supported_dtypes(torch.device('cuda')), op.supported_dtypes(torch.device('cuda', index=1)))
+    @ops(
+        [
+            op
+            for op in op_db
+            if len(
+                op.supported_dtypes("cpu").symmetric_difference(
+                    op.supported_dtypes("cuda")
+                )
+            )
+            > 0
+        ][:1],
+        dtypes=OpDTypes.none,
+    )
+    def test_supported_dtypes(self, device, op):
+        self.assertNotEqual(op.supported_dtypes("cpu"), op.supported_dtypes("cuda"))
+        self.assertEqual(op.supported_dtypes("cuda"), op.supported_dtypes("cuda:0"))
+        self.assertEqual( op.supported_dtypes(torch.device("cuda")),
+            op.supported_dtypes(torch.device("cuda", index=1)),
+        )
 
 instantiate_device_type_tests(TestTesting, globals())
 
