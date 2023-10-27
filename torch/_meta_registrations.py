@@ -2976,7 +2976,6 @@ def meta__foreach_unaop_(self):
 
 @register_meta(
     [
-        aten._foreach_abs.default,
         aten._foreach_acos.default,
         aten._foreach_asin.default,
         aten._foreach_ceil.default,
@@ -3013,6 +3012,21 @@ def meta__foreach_unaop(self):
         lambda: f"Expect List[Tensor] but got {type(self)}",
     )
     return [torch.empty_like(s) for s in self]
+
+
+@register_meta([aten._foreach_abs.default])
+def meta__foreach_abs(self):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"Expect List[Tensor] but got {type(self)}",
+    )
+    return [
+        torch.empty_like(
+            s,
+            dtype=corresponding_real_dtype(s.dtype) if s.dtype.is_complex else s.dtype,
+        )
+        for s in self
+    ]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
