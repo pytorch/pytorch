@@ -6,7 +6,6 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 
-from tools.testing.target_determination.heuristics.utils import get_correlated_tests
 
 # This heuristic should never go into production. It is only used for benchmarking our current heuristics.
 # It randomly assigns tests to the different categories to show the usefulness of our actual heuristics.
@@ -14,7 +13,7 @@ from tools.testing.target_determination.heuristics.utils import get_correlated_t
 class RandomBaseline(HeuristicInterface):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
-        assert super().trial_mode, "RandomBaseline should only be used in trial mode"
+        assert self.trial_mode, "RandomBaseline should only be used in trial mode"
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
         # Probabilities for each type of test.
@@ -39,7 +38,13 @@ class RandomBaseline(HeuristicInterface):
                 high_relevance_tests.append(test)
             elif num < PROB_UNRANKED + PROB_HIGH_RELEVANCE + PROB_UNLIKELY_RELEVANCE:
                 unlikely_relevance_tests.append(test)
-            elif num < PROB_UNRANKED + PROB_HIGH_RELEVANCE + PROB_UNLIKELY_RELEVANCE + PROB_NO_RELEVANCE:
+            elif (
+                num
+                < PROB_UNRANKED
+                + PROB_HIGH_RELEVANCE
+                + PROB_UNLIKELY_RELEVANCE
+                + PROB_NO_RELEVANCE
+            ):
                 no_relevance_tests.append(test)
             else:
                 probable_relevance_tests.append(test)
