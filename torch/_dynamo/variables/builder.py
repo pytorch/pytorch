@@ -125,6 +125,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
+    SavedTensorBox,
     SkipFilesVariable,
     TypingVariable,
 )
@@ -556,12 +557,21 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            # The autograd.function context
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            saved_tensors = [
+                VariableBuilder(
+                    self.tx, GetItemSource(AttrSource(self.source, "saved_tensors"), n)
+                )(v)
+                for n, v in enumerate(value.saved_tensors)
+            ]
             return self.tx.output.side_effects.track_object_existing(
                 self.source,
                 value,
-                AutogradFunctionContextVariable(value, source=self.source),
+                AutogradFunctionContextVariable(
+                    value,
+                    source=self.source,
+                    saved_tensors=SavedTensorBox(saved_tensors),
+                ),
             )
         elif (
             isinstance(value, types.MethodType)
