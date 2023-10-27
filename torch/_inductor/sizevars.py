@@ -8,6 +8,7 @@ from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from .utils import sympy_subs, sympy_symbol, VarRanges
 from .virtualized import V
@@ -377,6 +378,14 @@ class SizeVarAllocator:
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
+            sym_vrs = {
+                s: self.shape_env.var_to_range.get(s, None) for s in expr.free_symbols
+            }
+            if all(vr is not None for vr in sym_vrs.values()):
+                expr_vr = bound_sympy(expr, sym_vrs)
+                lower = self.size_hint(expr_vr.lower)
+                upper = self.size_hint(expr_vr.upper)
+                fallback = min(max(fallback, lower), upper)
             return fallback
         try:
             return int(out)
@@ -384,8 +393,13 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out)
             raise
 
-    def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
-        return tuple(self.size_hint(x) for x in exprs)
+    def size_hints(
+        self,
+        exprs: List[Expr],
+        *,
+        fallback: Optional[int] = None,
+    ) -> Tuple[int, ...]:
+        return tuple(self.size_hint(x, fallback=fallback) for x in exprs)
 
     def _lru_cache(self, fn, maxsize=None):
         """

@@ -145,7 +145,7 @@ TEST(IRVerifier, Block) {
     StmtPtr block1 = alloc<Block>(std::vector<StmtPtr>({store}));
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     StmtPtr block2 = alloc<Block>(std::vector<StmtPtr>({store}));
-    // Stmt can't have multiple parrents, thus inserting it into several blocks
+    // Stmt can't have multiple parents, thus inserting it into several blocks
     // is illegal
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto,clang-analyzer-cplusplus.NewDeleteLeaks)
     EXPECT_ANY_THROW(verify(block2));
