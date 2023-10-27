@@ -16,6 +16,7 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+    - [Cherry Picking Reverts](#cherry-picking-reverts)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
@@ -211,6 +212,11 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+### Cherry Picking Reverts
+
+If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+
+Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 
 ## Promoting RCs to Stable
 
