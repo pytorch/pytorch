@@ -683,7 +683,7 @@ class TritonKernelVariable(VariableTracker):
         )
         kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
         normalized_args = {**dict(zip(names, args)), **kwargs}
-        meta = ConstDictVariable.create(normalized_args)
+        meta = ConstDictVariable(normalized_args)
 
         # If the grid is a function, then lets execute it and convert it to
         # a list

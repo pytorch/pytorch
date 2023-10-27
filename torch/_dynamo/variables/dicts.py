@@ -6,6 +6,8 @@ import sys
 from types import MethodWrapperType
 from typing import Dict, List, Optional
 
+from torch._subclasses.fake_tensor import is_fake
+
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
@@ -28,6 +30,7 @@ def is_hashable_python_var(x):
         variables.ConstantVariable.is_literal(x)
         or isinstance(x, (Tensor, MethodWrapperType))
         or is_builtin_callable(x)
+        or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
     )
 
 
@@ -40,6 +43,8 @@ def is_hashable(x):
         # Most VT's should have one.
         # It'd be nice if at some point we could assert that they all have one
         return x.as_proxy().node.meta.get("example_value") is not None
+    elif isinstance(x, variables.TupleVariable):
+        return all(is_hashable(e) for e in x.items)
     else:
         return isinstance(
             x,
@@ -56,7 +61,8 @@ class ConstDictVariable(VariableTracker):
     class _HashableTracker:
         """
         Auxiliary opaque internal class that wraps a VariableTracker and makes it hashable
-        This should not be seen or touched by anything outside of ConstDictVariable and its kids
+        This should not be seen or touched by anything outside of ConstDictVariable and its children
+        Note that it's also fine to put VTs into dictionaries and sets, but doing so does not take into account aliasing
         """
 
         def __init__(self, vt):
@@ -66,7 +72,10 @@ class ConstDictVariable(VariableTracker):
         @property
         def underlying_value(self):
             if isinstance(self.vt, variables.TensorVariable):
-                x = self.vt.as_proxy().node
+                x = self.vt.as_proxy().node.meta["example_value"]
+            elif isinstance(self.vt, variables.TupleVariable):
+                Hashable = ConstDictVariable._HashableTracker
+                x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -74,36 +83,43 @@ class ConstDictVariable(VariableTracker):
         def __hash__(self):
             return hash(self.underlying_value)
 
+        @staticmethod
+        def _eq_impl(a: VariableTracker, b: VariableTracker):
+            # TODO: Put this in utils and share it between variables/builtin.py and here
+            if type(a) != type(b):
+                return False
+            elif isinstance(a, tuple):
+                return len(a) == len(b) and all(_eq_impl(u, v) for u, v in zip(a, b))
+            elif is_fake(a):
+                return a is b
+            else:
+                return a == b
+
         def __eq__(self, other: object) -> bool:
-            return (
-                isinstance(other, ConstDictVariable._HashableTracker)
-                and self.underlying_value == other.underlying_value
-            )
+            Hashable = ConstDictVariable._HashableTracker
+            if not isinstance(other, Hashable):
+                return False
+            return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
     def __init__(self, items, user_cls=dict, recursively_contains=None, **kwargs):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
 
+        Hashable = ConstDictVariable._HashableTracker
+
+        # Keys will just be HashableTrackers when cloning, in any other case they'll be VariableTrackers
+        def make_hashable(key):
+            return key if isinstance(key, Hashable) else Hashable(key)
+
         assert all(
-            isinstance(x, self._HashableTracker) and isinstance(v, VariableTracker)
+            isinstance(x, (VariableTracker, Hashable))
+            and isinstance(v, VariableTracker)
             for x, v in items.items()
         )
+        items = {make_hashable(x): v for x, v in items.items()}
+
         self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
         self.user_cls = user_cls
-
-    @classmethod
-    def create(
-        cls, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
-    ):
-        assert all(
-            isinstance(x, VariableTracker) and isinstance(v, VariableTracker)
-            for x, v in items.items()
-        )
-
-        items_wrapped = {
-            ConstDictVariable._HashableTracker(x): v for x, v in items.items()
-        }
-        return cls(items_wrapped, user_cls, **kwargs)
 
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
@@ -141,7 +157,7 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        key = self._HashableTracker(arg)
+        key = ConstDictVariable._HashableTracker(arg)
         return self.items[key].add_options(self, arg)
 
     def call_method(
@@ -155,6 +171,7 @@ class ConstDictVariable(VariableTracker):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
+        Hashable = ConstDictVariable._HashableTracker
 
         arg_hashable = args and is_hashable(args[0])
 
@@ -176,7 +193,7 @@ class ConstDictVariable(VariableTracker):
             return ConstantVariable.create(len(self.items), **options)
         elif name == "__setitem__" and arg_hashable and self.mutable_local:
             assert not kwargs and len(args) == 2
-            k = self._HashableTracker(args[0])
+            k = Hashable(args[0])
 
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
@@ -194,14 +211,14 @@ class ConstDictVariable(VariableTracker):
         elif (
             name in ("pop", "get")
             and arg_hashable
-            and self._HashableTracker(args[0]) not in self.items
+            and Hashable(args[0]) not in self.items
             and len(args) == 2
         ):
             # missing item, return the default value
             return args[1].add_options(options)
         elif name == "pop" and arg_hashable and self.mutable_local:
             newval = collections.OrderedDict(val)
-            result = newval.pop(self._HashableTracker(args[0]))
+            result = newval.pop(Hashable(args[0]))
             tx.replace_all(self, self.modifed(newval, None, **options))
             return result.add_options(options)
         elif (
@@ -222,13 +239,13 @@ class ConstDictVariable(VariableTracker):
         elif (
             name in ("get", "__getattr__")
             and arg_hashable
-            and self._HashableTracker(args[0]) in self.items
+            and Hashable(args[0]) in self.items
         ):
-            result = self.items[self._HashableTracker(args[0])]
+            result = self.items[Hashable(args[0])]
             return result.add_options(options)
         elif name == "__contains__" and args:
             return ConstantVariable.create(
-                arg_hashable and self._HashableTracker(args[0]) in self.items,
+                arg_hashable and Hashable(args[0]) in self.items,
                 **options,
             )
         else:
@@ -245,7 +262,8 @@ class ConstDictVariable(VariableTracker):
 
     @staticmethod
     def _make_const_key(k):
-        return ConstDictVariable._HashableTracker(variables.ConstantVariable.create(k))
+        Hashable = ConstDictVariable._HashableTracker
+        return Hashable(variables.ConstantVariable.create(k))
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -276,9 +294,10 @@ class DefaultDictVariable(ConstDictVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
+        Hashable = ConstDictVariable._HashableTracker
 
         if name == "__getitem__":
-            k = self._HashableTracker(args[0])
+            k = Hashable(args[0])
 
             if k in self.items:
                 return self.getitem_const(args[0])
