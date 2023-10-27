@@ -362,7 +362,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
         nullptr, &out->fallback_->device_event_start_, nullptr);
   }
 
-  event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->start_time_ = c10::getApproximateTime();
   event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
@@ -402,7 +402,7 @@ struct StealOrDefault {
 
 void ThreadLocalSubqueue::TorchOpStorage::materialize(
     std::vector<std::shared_ptr<Result>>& out,
-    const std::function<time_t(approx_time_t)>& time_converter,
+    const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
@@ -471,7 +471,7 @@ void materialize_vulkan(
     std::vector<std::shared_ptr<Result>>& out,
     AppendOnlyList<ExtraFields<EventType::Vulkan>::raw_event_t, BlockSize>&
         raw_events,
-    const std::function<time_t(approx_time_t)>& time_converter,
+    const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
     const uint64_t tid,
     const kineto::DeviceAndResource& kineto_info) {
   for (const auto& i : raw_events) {
@@ -530,7 +530,7 @@ int64_t torchOpEndNS(
     const ExtraFields<EventType::TorchOp>& e,
     const bool finished,
     const std::weak_ptr<Result>& parent) {
-  if (finished && e.end_time_ns_ == std::numeric_limits<time_t>::min()) {
+  if (finished && e.end_time_ns_ == std::numeric_limits<c10::time_t>::min()) {
     auto p = parent.lock();
     if (p) {
       return p->endTimeNS();
@@ -1176,7 +1176,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
     if (event->endTimeNS() > event->start_time_ns_) {
       stacks[event->start_tid_] = event;
       end_events_.push(event);
-    } else if (event->endTimeNS() == std::numeric_limits<time_t>::min()) {
+    } else if (event->endTimeNS() == std::numeric_limits<c10::time_t>::min()) {
       // We use min time to indicate the lack of a termination event, so if we
       // encounter such a case we don't push to `end_events_`.
       stacks[event->start_tid_] = event;
@@ -1350,12 +1350,12 @@ std::pair<
     std::vector<std::shared_ptr<Result>>,
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
 RecordQueue::getRecords(
-    std::function<time_t(approx_time_t)> time_converter,
+    std::function<c10::time_t(c10::approx_time_t)> time_converter,
     uint64_t start_time_us,
     uint64_t end_time_us) {
-  auto converter = [&](approx_time_t t) {
-    return t == std::numeric_limits<approx_time_t>::min()
-        ? std::numeric_limits<time_t>::min()
+  auto converter = [&](c10::approx_time_t t) {
+    return t == std::numeric_limits<c10::approx_time_t>::min()
+        ? std::numeric_limits<c10::time_t>::min()
         : time_converter(t);
   };
   std::vector<std::shared_ptr<Result>> out;
@@ -1364,7 +1364,7 @@ RecordQueue::getRecords(
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
-        time_t start_time_ns = 0;
+        c10::time_t start_time_ns = 0;
         if constexpr (std::is_same_v<
                           std::remove_reference_t<decltype(i)>,
                           ExtraFields<EventType::Backend>>) {
