@@ -8,8 +8,8 @@ from beartype import roar
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.exporter import (
-    ONNXProgramSerializer,
     LargeProtobufONNXProgramSerializer,
+    ONNXProgramSerializer,
     ProtobufONNXProgramSerializer,
     ResolvedExportOptions,
 )

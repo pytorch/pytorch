@@ -948,9 +948,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     real_model(*args, **kwargs)
                 )
                 # ORT outputs.
-                args_not_none = onnx_program.adapt_torch_inputs_to_onnx(
-                    *args, **kwargs
-                )
+                args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args, **kwargs)
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,
