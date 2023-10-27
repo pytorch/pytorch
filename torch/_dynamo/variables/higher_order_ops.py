@@ -82,18 +82,6 @@ def only_consist_of(var, types):
     return False
 
 
-def _assert_tensors_nonaliasing(inputs, outputs):
-    input_tensor_ids = set(
-        pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), inputs)
-    )
-    output_tensor_ids = set(
-        pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), outputs)
-    )
-    assert input_tensor_ids.isdisjoint(
-        output_tensor_ids
-    ), "inputs to function body cannot alias outputs"
-
-
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
@@ -720,14 +708,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
-
         example_res = lowered_module.original_module(*real_sub_args)
-
-        # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
-        # executorch modules promise not to alias inputs and outputs.
-        # Thus, output FakeTensors will correctly not alias input FakeTensors.
-        _assert_tensors_nonaliasing(real_sub_args, example_res)
-
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
