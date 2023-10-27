@@ -28,7 +28,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
@@ -323,19 +323,19 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for a, b in itertools.zip_longest(
+    for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if b == 1:
-            output.append(a)
-        elif a == 1:
-            output.append(b)
+        if y == 1:
+            output.append(x)
+        elif x == 1:
+            output.append(y)
         else:
-            V.graph.sizevars.guard_equals(a, b)
-            if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
-                output.append(b)  # prefer shorter formula
+            V.graph.sizevars.guard_equals(x, y)
+            if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
+                output.append(y)  # prefer shorter formula
             else:
-                output.append(a)
+                output.append(x)
     return tuple(reversed(output))
 
 
@@ -2850,6 +2850,11 @@ def index_put_fallback(self, indices, values, accumulate):
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, add_asserts=True)
+
+
+@register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
+def _unsafe_index_put_(self, indices, values, accumulate=False):
+    return index_put_impl_(self, indices, values, accumulate, add_asserts=False)
 
 
 def index_put_impl_(self, indices, values, accumulate, add_asserts):
