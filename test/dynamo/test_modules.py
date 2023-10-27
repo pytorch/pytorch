@@ -2273,6 +2273,26 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         generate(torch.randn(10, 10), 0)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_builtin_module_forward_always_compiled(self):
+        # module.forward should not be skipped even the higher level function call got skipped.
+        # https://github.com/pytorch/pytorch/issues/111966
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        def forward_pre_hook_with_graph_break(module: torch.nn.Module, inp: Tuple):
+            torch._dynamo.graph_break()
+            return torch.sin(inp[0] + 1)
+
+        mod = torch.nn.Linear(10, 10, bias=False)
+        mod.register_forward_pre_hook(forward_pre_hook_with_graph_break)
+        opt_mod = torch.compile(mod, backend=cnt)
+        x = torch.randn((10, 10))
+        y = torch.randn((10, 10))
+        ref = mod(x, y)
+        res = opt_mod(x, y)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
