@@ -296,29 +296,10 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
-def _is_matching_transformers_cls(cls) -> bool:
-    try:
-        from transformers.file_utils import ModelOutput
-
-        return issubclass(cls, ModelOutput)
-    except ImportError:
-        return False
-
-
-def _is_matching_diffusers_cls(cls) -> bool:
-    try:
-        from diffusers.utils import BaseOutput
-
-        return issubclass(cls, BaseOutput)
-    except ImportError:
-        return False
-
-
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
-    transformers.file_utils.ModelOutput() from huggingface, and
-    diffusers.utils.BaseOutput() from diffusers.
+    transformers.file_utils.ModelOutput() from huggingface.
 
     ModelOutput causes trouble because it a a mix of a dataclass and a
     OrderedDict and it calls super() methods implemented in C.
@@ -328,38 +309,27 @@ class DataClassVariable(ConstDictVariable):
     include_none = False
 
     @staticmethod
-    def _try_patch_transformers():
+    @functools.lru_cache(None)
+    def _patch_once():
         try:
             from transformers.file_utils import ModelOutput
 
-            DataClassVariable._patch_cls(ModelOutput)
+            for obj in ModelOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
         except ImportError:
             pass
-
-    @staticmethod
-    def _try_patch_diffusers():
-        try:
-            from diffusers.utils import BaseOutput
-
-            DataClassVariable._patch_cls(BaseOutput)
-        except ImportError:
-            pass
-
-    @staticmethod
-    def _patch_cls(cls):
-        for obj in cls.__dict__.values():
-            if callable(obj):
-                skip_code(obj.__code__)
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def _patch_once():
-        DataClassVariable._try_patch_transformers()
-        DataClassVariable._try_patch_diffusers()
 
     @staticmethod
     def is_matching_cls(cls):
-        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
+        try:
+            from transformers.file_utils import ModelOutput
+
+            return issubclass(cls, ModelOutput)
+        except ImportError:
+            pass
+
+        return False
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -479,18 +449,21 @@ class CustomizedDictVariable(ConstDictVariable):
             and not hasattr(cls, "__post_init__")
         ):
             return True
-        # hack for HF/diffusers usecase:
-        #   assume dataclass annotation for ModelOutput/BaseOutput subclass
-        #   assume self.create is AA to ModelOutput/BaseOutput.__post_init__
+        # hack for HF usecase:
+        #   assume dataclass annotation for ModelOutput subclass
+        #   assume self.create is AA to ModelOutput.__post_init__
         # for non-HF usecase:
         #   check __module__ string to avoid costy HF import
-        if (
-            cls.__module__ != "transformers.modeling_outputs"
-            and not cls.__module__ != "diffusers.utils"
-        ):
+        if cls.__module__ != "transformers.modeling_outputs":
             return False
+        try:
+            from transformers.file_utils import ModelOutput
 
-        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
+            return issubclass(cls, ModelOutput)
+        except ImportError:
+            pass
+
+        return False
 
     @classmethod
     def is_matching_object(cls, obj):
