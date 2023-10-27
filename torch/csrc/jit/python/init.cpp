@@ -1628,7 +1628,10 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto sortedOps = getAllSortedOperatorsFor(symbol);
-          TORCH_CHECK(!sortedOps.empty(), "No such operator ", op_name);
+          if (unsortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
