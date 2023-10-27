@@ -921,7 +921,7 @@ def _get_fake_tensor(vt):
 
 
 def iter_contains(items, search, tx, options, check_tensor_identity=False):
-    from .variables import BuiltinVariable, ConstantVariable
+    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
 
     if search.is_python_constant():
         found = any(
@@ -932,7 +932,7 @@ def iter_contains(items, search, tx, options, check_tensor_identity=False):
         return ConstantVariable.create(found, **options)
 
     must_check_tensor_id = False
-    if check_tensor_identity and isinstance(search, variables.TensorVariable):
+    if check_tensor_identity and isinstance(search, TensorVariable):
         must_check_tensor_id = True
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
@@ -940,7 +940,7 @@ def iter_contains(items, search, tx, options, check_tensor_identity=False):
     found = None
     for x in items:
         if must_check_tensor_id:
-            if isinstance(x, variables.TensorVariable):
+            if isinstance(x, TensorVariable):
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
@@ -2241,7 +2241,6 @@ def is_tensor_base_attr_getter(value):
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
-        and isinstance(value.__self__, types.GetSetDescriptorType)
         and value.__self__.__objclass__ is torch._C._TensorBase
     )
 
