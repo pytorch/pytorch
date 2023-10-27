@@ -184,9 +184,10 @@ class FakeNode:
         self.meta = {}
 
 class LazyListProxy:
-    def __init__(self, lst_proxy, idx):
+    def __init__(self, lst_proxy, idx, max_len):
         self.lst_proxy = lst_proxy
         self.idx = idx
+        self.max_len = max_len
         self.node = FakeNode()
 
 
@@ -205,7 +206,10 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
-                wrap_with_proxy(ee, LazyListProxy(proxy, idx), get_constant(idx))
+                if isinstance(proxy, fx.Proxy):
+                    wrap_with_proxy(ee, LazyListProxy(proxy, idx, len(e)), get_constant(idx))
+                else:
+                    wrap_with_proxy(ee, proxy[idx], get_constant(idx))
         elif isinstance(e, dict):
             # In theory we could support const-prop when proxy-tensor-tracing
             # operators that returns dicts of tensors, but we have no use case
@@ -369,13 +373,15 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         if isinstance(arg, list):
             is_full_lst = True
             lst_proxy = None
+            max_len = None
             for lst_idx, a in enumerate(arg):
                 if isinstance(a, LazyListProxy) and a.idx == lst_idx:
                     lst_proxy = a.lst_proxy
+                    max_len = a.max_len
                     continue
                 else:
                     is_full_lst = False
-            if is_full_lst:
+            if is_full_lst and len(arg) == max_len:
                 proxy_args[idx] = lst_proxy
 
     proxy_args = tuple(proxy_args)
