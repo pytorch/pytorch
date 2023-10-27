@@ -588,6 +588,7 @@ class TestDistBackend(MultiProcessTestCase):
         self._barrier()
 
         self.run_test(test_name, pipe)
+        print("test hit here ", self.rank)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
@@ -9771,7 +9772,7 @@ class DistributedTest:
             def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(device))._abort()
+                    pg._get_backend(torch.device(device))._shutdown()
                     time.sleep(1)
 
             if self.rank != 1:

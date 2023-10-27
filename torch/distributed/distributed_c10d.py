@@ -531,15 +531,21 @@ class _World:
         and configurations (types and ranks).
         """
         config_info = []
+        default_pg_size = _get_group_size(None)
         for pg, backend in self.pg_map.items():
             # backend is a tuple with the first element being the backend type ("nccl", etc.)
             backend_type = Backend.backend_type_map[backend[0]]
+            ranks = self.pg_group_ranks[pg]
             config_info.append(
                 {
-                    "pg_id": pg._id(),
+                    "pg_name": self.pg_names[pg],
                     "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
-                    "ranks": self.pg_group_ranks[pg],
+                    "ranks": list(ranks.values())
+                    if len(ranks) != default_pg_size
+                    else [],  # 'ranks' is an empty list when all ranks are involved in a pg
+                    "group_size": len(ranks),
+                    "group_count": self.group_count,
                 }
             )
         return config_info
@@ -681,7 +687,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise DistStoreError(
+                raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
                     "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
                         rank, store_key, world_size, worker_count, timeout

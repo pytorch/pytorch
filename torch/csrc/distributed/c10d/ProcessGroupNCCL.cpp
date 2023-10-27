@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
+#include <mutex>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -16,6 +17,7 @@
 #include <time.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -27,6 +29,9 @@
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/torch.h>
@@ -286,6 +291,237 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 
 } // namespace
 
+namespace {
+std::string pickle_str(const c10::IValue& v) {
+  std::vector<char> result;
+  {
+    auto writer = [&](const char* data, size_t size) {
+      result.insert(result.end(), data, data + size);
+    };
+    torch::jit::Pickler pickler(
+        writer, nullptr, nullptr, nullptr, nullptr, false);
+    pickler.protocol();
+    pickler.pushIValue(v);
+    pickler.stop();
+  }
+  return std::string(result.begin(), result.end());
+}
+c10::Dict<c10::IValue, c10::IValue> new_dict() {
+  return c10::Dict<c10::IValue, c10::IValue>(
+      c10::AnyType::get(), c10::AnyType::get());
+}
+c10::List<c10::IValue> new_list() {
+  return c10::List<c10::IValue>(c10::AnyType::get());
+}
+
+} // namespace
+
+struct NCCLTraceBuffer {
+  static NCCLTraceBuffer* get() {
+    // intentionally leak on exit
+    // because this will hold python state that may get destructed
+    static NCCLTraceBuffer* instance = new NCCLTraceBuffer();
+    return instance;
+  }
+  NCCLTraceBuffer() {
+    max_entries_ = parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0);
+    enabled_ = max_entries_ > 0;
+  }
+  using EventList = std::vector<at::cuda::CUDAEvent>;
+  struct Entry {
+    size_t id_; // incremented id in the trace buffer
+                // used to figure out where in the circular entries
+                // buffer this entry will be located to
+                // update state information
+    size_t pg_id_;
+    size_t seq_id_; // as tracked by the process group
+    const char* profiling_name_;
+
+    std::shared_ptr<torch::CapturedTraceback> traceback_;
+    // we borrow pointser to start_ and end_ so we can query the state
+    // on reporting. However, once the event is completed, the call
+    // to `complete` will clear these.
+    EventList *start_, *end_;
+    const char* state_ = "scheduled";
+
+    // size information for input/output tensors
+    c10::SmallVector<int, 4> input_dims_;
+    c10::SmallVector<int, 4> output_dims_;
+    c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
+  };
+
+  bool enabled_ = false;
+  std::mutex mutex_;
+  std::vector<Entry> entries_;
+  size_t max_entries_ = 0;
+  size_t next_ = 0;
+  size_t id_ = 0;
+
+  c10::optional<size_t> record(
+      size_t pg_id,
+      size_t seq_id,
+      const char* profiling_name,
+      const std::vector<at::Tensor>& inputs,
+      const std::vector<at::Tensor>& outputs,
+      EventList* start,
+      EventList* end) {
+    if (!enabled_) {
+      return c10::nullopt;
+    }
+    auto traceback = torch::CapturedTraceback::gather(true, true, true);
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    auto te = Entry{
+        id_,
+        pg_id,
+        seq_id,
+        profiling_name,
+        std::move(traceback),
+        std::move(start),
+        std::move(end)};
+
+    for (const auto& input : inputs) {
+      c10::IntArrayRef sizes = input.sizes();
+      te.input_dims_.push_back(sizes.size());
+      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+    }
+
+    for (const auto& output : outputs) {
+      c10::IntArrayRef sizes = output.sizes();
+      te.output_dims_.push_back(sizes.size());
+      te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
+    }
+
+    if (entries_.size() < max_entries_) {
+      entries_.emplace_back(std::move(te));
+    } else {
+      entries_[next_++] = std::move(te);
+      if (next_ == max_entries_) {
+        next_ = 0;
+      }
+    }
+    return id_++;
+  }
+
+  std::vector<Entry> dump_entries() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    std::vector<Entry> result;
+    result.reserve(entries_.size());
+    result.insert(result.end(), entries_.begin() + next_, entries_.end());
+    result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
+    // query any remaining events
+    for (auto& r : result) {
+      if (r.start_ != nullptr) {
+        bool started = true;
+        for (auto& ev : *r.start_) {
+          if (!ev.query()) {
+            started = false;
+            break;
+          }
+        }
+        if (started) {
+          r.state_ = "started";
+        }
+        r.start_ = nullptr;
+      }
+      if (r.end_ != nullptr) {
+        bool completed = true;
+        for (auto& ev : *r.end_) {
+          if (!ev.query()) {
+            completed = false;
+            break;
+          }
+        }
+        if (completed) {
+          r.state_ = "completed";
+        }
+        r.end_ = nullptr;
+      }
+    }
+    return result;
+  }
+
+  void complete(c10::optional<size_t> id) {
+    if (!enabled_ || !id) {
+      return;
+    }
+    std::lock_guard<std::mutex> guard(mutex_);
+    auto& entry = entries_.at(*id % max_entries_);
+    if (entry.id_ == *id) {
+      entry.state_ = "completed";
+      entry.start_ = entry.end_ = nullptr;
+    }
+  }
+
+  std::string dump() {
+    auto result = dump_entries();
+    auto entries = new_list();
+    c10::IValue pg_id_s = "pg_id";
+    c10::IValue seq_id_s = "seq_id";
+    c10::IValue profiling_name_s = "profiling_name";
+    c10::IValue input_sizes_s = "input_sizes";
+    c10::IValue output_sizes_s = "output_sizes";
+
+    c10::IValue frames_s = "frames";
+    c10::IValue state_s = "state";
+    c10::IValue line_s = "line";
+    c10::IValue name_s = "name";
+    c10::IValue filename_s = "filename";
+
+    std::vector<torch::CapturedTraceback*> tracebacks;
+    for (auto& e : result) {
+      tracebacks.push_back(e.traceback_.get());
+    }
+    torch::SymbolizedTracebacks stracebacks = torch::symbolize(tracebacks);
+    std::vector<c10::IValue> all_frames;
+    for (const auto& f : stracebacks.all_frames) {
+      auto d = new_dict();
+      d.insert(name_s, f.funcname);
+      d.insert(filename_s, f.filename);
+      d.insert(line_s, int64_t(f.lineno));
+      all_frames.emplace_back(std::move(d));
+    }
+
+    for (auto i : c10::irange(result.size())) {
+      auto& e = result.at(i);
+      auto& tb = stracebacks.tracebacks.at(i);
+      auto dict = new_dict();
+      dict.insert(pg_id_s, int64_t(e.pg_id_));
+      dict.insert(seq_id_s, int64_t(e.seq_id_));
+      dict.insert(profiling_name_s, e.profiling_name_);
+
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = new_list();
+        for (auto dim : dims) {
+          auto arg_sizes = new_list();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+
+      dict.insert(input_sizes_s, read_sizes(e.input_dims_));
+      dict.insert(output_sizes_s, read_sizes(e.output_dims_));
+      dict.insert(state_s, e.state_);
+      auto frames = new_list();
+      for (int64_t frame : tb) {
+        frames.push_back(all_frames.at(frame));
+      }
+      dict.insert(frames_s, frames);
+      entries.push_back(dict);
+    }
+    return pickle_str(entries);
+  }
+};
+
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump();
+}
+
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
@@ -358,7 +594,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       numelIn_(w.numelIn_),
       numelOut_(w.numelOut_),
       store_(w.store_),
-      timingEnabled_(w.timingEnabled_) {
+      timingEnabled_(w.timingEnabled_),
+      trace_id_(w.trace_id_) {
   exception_ = w.exception_;
 }
 
@@ -567,7 +804,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
@@ -612,6 +850,8 @@ bool ProcessGroupNCCL::CoalescedWorkNCCL::wait(
   return true;
 }
 
+static std::atomic<size_t> process_group_id = 0;
+
 ProcessGroupNCCL::ProcessGroupNCCL(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -623,7 +863,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ncclCommCounter_(0),
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
-      terminateProcessGroup_(false) {
+      terminateProcessGroup_(false),
+      uid_(process_group_id++) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
@@ -632,10 +873,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  watch_timeout_secs_ =
-      parseEnvVarIntDefault(NCCL_PG_WATCHDOG_TIMEOUT, 10 * 60);
+  std::memset(&watchdogTimeoutSpec_, 0, sizeof(watchdogTimeoutSpec_));
+  watchdogTimeoutSpec_.it_value.tv_sec =
+      parseEnvVarIntDefault(TORCH_NCCL_WATCHDOG_TIMEOUT, 10 * 60);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  enableTiming_.store(parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_);
+  enableTiming_.store(
+      parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
+      parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
@@ -701,7 +945,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      size_); // worldSize
 
 #ifdef USE_NCCL_WITH_UCC
   static c10::once_flag initialize_ucc_lib_flag;
@@ -878,12 +1123,9 @@ void abortCommsFromMap(
 void killNCCLPGWatchDogDeadlock(union sigval sv) {
   LOG(ERROR) << "NCCL PG Watchdog hang and timeout";
   timer_t timerID = *(timer_t*)sv.sival_ptr;
-  int rv = ::timer_delete(timerID);
-  if (rv < 0) {
-    const auto exitMsg = c10::str("NCCL watchdog timer delete error");
-    LOG(ERROR) << exitMsg;
-  }
-  rv = ::kill(::getpid(), SIGKILL);
+  const auto errMsg = c10::str("NCCL watchdog timer delete error");
+  TIMER_CHECK(::timer_delete(timerID), errMsg);
+  ::kill(::getpid(), SIGKILL);
 }
 
 // Abort all communicators on this rank
@@ -893,18 +1135,33 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
 }
 
-ProcessGroupNCCL::~ProcessGroupNCCL() {
+void ProcessGroupNCCL::shutdown() {
+  // Don't join threads here since the purpose of this method is to abort all
+  // communicators and signal the threads to exit. Joining on the threads could
+  // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
 
+  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
+  abort(abortReason);
+
   workMetaListCV_.notify_one();
+}
+
+ProcessGroupNCCL::~ProcessGroupNCCL() {
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  ncclCommWatchdogThread_.join();
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+  }
 #endif
 
   if (onCompletionHookThread_.joinable())
     onCompletionHookThread_.join();
 
-  // Abort all NCCL Communicators on Process Group Destruction
+  // Abort communicators after all threads have exited to avoid having the
+  // threads dying due to aborted communicator and raising a SIGABRT
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
 }
@@ -918,19 +1175,19 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     std::memset(&action, 0, sizeof(action));
     action.sigev_notify = SIGEV_THREAD;
     action.sigev_notify_function = killNCCLPGWatchDogDeadlock;
-    int rv = ::timer_create(CLOCK_REALTIME, &action, &timerId_);
-    if (rv < 0) {
-      // Append error message reported from workCleanupLoop
-      const auto exitMsg = c10::str(
-          "[Rank ", rank_, "] NCCL watchdog thread timer creation errors!");
-      LOG(ERROR) << exitMsg;
-    }
+    const auto errMsg = c10::str(
+        "[Rank ", rank_, "] NCCL watchdog thread timer creation errors!");
+    TIMER_CHECK(::timer_create(CLOCK_MONOTONIC, &action, &timerId_), errMsg);
 
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
+    const auto errMsg = c10::str(
+        "[Rank ", rank_, "] NCCL watchdog thread timer deletion errors!");
+    TIMER_CHECK(::timer_delete(timerId_), errMsg);
+
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       LOG(INFO)
@@ -952,6 +1209,9 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
       std::rethrow_exception(watchDogException_);
     }
   } catch (...) {
+    const auto errMsg = c10::str(
+        "[Rank ", rank_, "] NCCL watchdog thread timer deletion errors!");
+    TIMER_CHECK(::timer_delete(timerId_), errMsg);
     const auto exitMsg = c10::str(
         "[Rank ",
         rank_,
@@ -991,16 +1251,15 @@ void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
-    struct itimerspec timerspec;
-    std::memset(&timerspec, 0, sizeof(timerspec));
-    timerspec.it_value.tv_sec = watch_timeout_secs_;
-    int rv = ::timer_settime(
-        timerId_, /*flags=*/0, &timerspec, /*old_value=*/nullptr);
-    if (rv < 0) {
-      const auto exitMsg =
-          c10::str("[Rank ", rank_, "] NCCL watchdog timer set error");
-      LOG(ERROR) << exitMsg;
-    }
+    const auto errMsg =
+        c10::str("[Rank ", rank_, "] NCCL watchdog timer set error");
+    TIMER_CHECK(
+        ::timer_settime(
+            timerId_,
+            /*flags=*/0,
+            &watchdogTimeoutSpec_,
+            /*old_value=*/nullptr),
+        errMsg);
 
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1055,6 +1314,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        NCCLTraceBuffer::get()->complete(work.trace_id_);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
           // thread
@@ -1067,6 +1327,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         } else {
           it = workMetaList_.erase(it);
         }
+        at::cuda::CUDAGraph::dec_pending_event_queries();
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -1599,16 +1860,27 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     int rank,
     OpType opType,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs) {
-  return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<at::Tensor>& outputs) {
+  auto r = c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
       devices,
       rank,
       opType,
       seq_,
       profilingTitle,
-      inputs,
+      profilingTitle != nullptr ? c10::optional<std::vector<at::Tensor>>(inputs)
+                                : c10::nullopt,
       desyncDebug_,
       enableTiming_.load());
+  r->trace_id_ = NCCLTraceBuffer::get()->record(
+      uid_,
+      seq_,
+      profilingTitle,
+      inputs,
+      outputs,
+      r->ncclStartEvents_.get(),
+      r->ncclEndEvents_.get());
+  return r;
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1683,8 +1955,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   auto devices = coalescedDevices_[0];
 
   // Create Work object
-  auto work = initWork(
-      devices, rank_, OpType::COALESCED, "nccl:coalesced", c10::nullopt);
+  auto work = initWork(devices, rank_, OpType::COALESCED, "nccl:coalesced");
 
   // Record stream event
   // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
@@ -1767,13 +2038,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   bool can_profile = outputs.size() == 1;
+
   auto work = initWork(
       devices,
       rank_,
       opType,
       can_profile ? profilingTitle : nullptr,
-      can_profile ? c10::optional<std::vector<at::Tensor>>(inputs)
-                  : c10::nullopt);
+      inputs,
+      outputs);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -1888,8 +2160,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -1957,8 +2234,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       rank_,
       opType,
       can_profile ? profilingTitle : nullptr,
-      can_profile ? c10::optional<std::vector<at::Tensor>>(tensors)
-                  : c10::nullopt);
+      tensors,
+      {});
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   // Note that these outputs are only valid for recv(), as send() does not
@@ -2067,8 +2344,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Enqueue P2P op so that it can be cancelled by NCCL watchdog
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
+
+  // Notify graphs before we check the capture status preemptively
+  at::cuda::CUDAGraph::inc_pending_event_queries();
+
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
   return work;
@@ -2233,7 +2516,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensors, opts);
@@ -2258,7 +2542,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       tensors[0].scalar_type(), // dType
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensors, opts);
@@ -2271,7 +2556,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
-
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -2284,7 +2568,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collective(
@@ -2343,7 +2628,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   return collective(
       inputTensors,
@@ -2384,7 +2670,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   int dev_in_group = 0;
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2447,7 +2734,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   int dev_in_group{0};
   return collective(
@@ -2501,10 +2789,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         "all_gather", // colName
         tensor.numel(), // inSize
         tensor.numel() * // outSize
-            this->getSize(), // dType
-        tensor.scalar_type(),
+            this->getSize(),
+        tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSize
+        std::vector<int64_t>(), // outSplitSize
+        this->getSize()); // worldSize
 
     return collective(
         inputTensors,
@@ -2644,7 +2933,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         tensor.numel(), // outSize
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSizes
+        std::vector<int64_t>(), // outSplitSizes
+        this->getSize()); // worldSize
 
     return collective(
         inputFlattened,
@@ -2750,7 +3040,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   // @lint-ignore CLANGTIDY
   const auto& tensor = outputTensor;
-
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -2759,12 +3048,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       outputTensor, // outputTensor
       rank_, // rank
       "_reduce_scatter_base", // colName
-      tensor.numel() * // inSize
-          this->getSize(),
+      inputTensor.numel(), // inSize
       tensor.numel(), // outSize
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
   auto outputs = std::vector<at::Tensor>{outputTensor};
@@ -2850,7 +3139,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   std::vector<at::Device> devices;
 
@@ -2930,7 +3220,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSizes
+        std::vector<int64_t>(), // outSplitSizes
+        this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -2971,7 +3262,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
-        outputSplitSizes); // outSplitSizes
+        outputSplitSizes, // outSplitSizes
+        this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -3017,6 +3309,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
+  std::vector<int64_t> inSplitSizes;
+  std::vector<int64_t> outSplitSizes;
+  int64_t total_numel = 0;
+
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
     check_gpu_single_tensor(outputTensors[r]);
@@ -3025,7 +3321,26 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
         "Tensors must be on the same device")
+    inSplitSizes.push_back(inputTensors[r].numel());
+    outSplitSizes.push_back(outputTensors[r].numel());
+    total_numel += inputTensors[r].numel();
   }
+
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      inputTensors, // inputTensors
+      outputTensors, // outputTensors
+      rank_, // rank
+      "all_to_all", // colName
+      total_numel, // inSize
+      total_numel, // outSize
+      inputTensors.front().scalar_type(), // dType
+      inSplitSizes, // inSplitSizes
+      outSplitSizes, // outSplitSizes
+      this->getSize()); // worldSize
+
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
   std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
   return collective(
@@ -3050,7 +3365,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       },
       [](std::vector<at::cuda::CUDAStream>&,
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-      OpType::ALLTOALL);
+      OpType::ALLTOALL,
+      "nccl:all_to_all");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
@@ -3235,7 +3551,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSize
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
@@ -3321,7 +3638,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSize
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
@@ -3371,6 +3689,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
         false,
         "output tensor size must be equal to world_size times input tensor size");
   }
+
+  // @lint-ignore CLANGTIDY
+  const auto& tensor = output_tensor;
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      input_tensor, // inputTensors
+      output_tensor, // outputTensors
+      rank_, // rank
+      "_allgather_base", // colName
+      input_tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
 
   // just a wrapper to fit the collective interface
   auto inputs = std::vector<at::Tensor>{input_tensor};

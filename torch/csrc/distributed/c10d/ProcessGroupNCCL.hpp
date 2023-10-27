@@ -44,7 +44,8 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
-constexpr const char* NCCL_PG_WATCHDOG_TIMEOUT = "NCCL_PG_WATCHDOG_TIMEOUT";
+constexpr const char* TORCH_NCCL_WATCHDOG_TIMEOUT =
+    "TORCH_NCCL_PG_WATCHDOG_TIMEOUT";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -68,6 +69,11 @@ enum ErrorHandlingMode {
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
 
 #define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
+
+#define TIMER_CHECK(timer, msg) \
+  if (timer < 0) {              \
+    LOG(ERROR) << msg;          \
+  }
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
@@ -275,6 +281,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
     bool timingEnabled_;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    c10::optional<uint64_t> trace_id_;
     friend class ProcessGroupNCCL;
   };
 
@@ -499,6 +508,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
 
+  void shutdown();
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -525,7 +536,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {});
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
   initCoalescedWork(
@@ -774,7 +786,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // timer for watch dog thread;
   timer_t timerId_;
   // Default watchdog timeout is 10 minutes.
-  int watch_timeout_secs_;
+  struct itimerspec watchdogTimeoutSpec_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
@@ -800,7 +812,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
   c10::intrusive_ptr<Backend> uccPG_;
 #endif
+  size_t uid_;
 };
+
+TORCH_API std::string dump_nccl_trace();
 
 } // namespace c10d
 
