@@ -1623,6 +1623,27 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_jit_resolve_packet",
+      [](const char* op_name, py::args args, py::kwargs kwargs) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          const auto overloads = getAllSortedOperatorsFor(symbol);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
+          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          auto result = overload->schema().overload_name();
+          if (result == "") {
+            result = "default";
+          }
+          return result;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
