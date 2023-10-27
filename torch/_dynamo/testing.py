@@ -253,7 +253,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected = CompileCounter()
         try:
             gm = torch.fx.symbolic_trace(fn)
-            expected(gm, [])
+            expected(gm)  # type: ignore[call-arg] # FIXME: https://github.com/pytorch/pytorch/issues/112230
             print("\nfx.symbolic_trace graph:")
             gm.graph.print_tabular()
             expected_ops = expected.op_count
