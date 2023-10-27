@@ -282,6 +282,11 @@ TEST_F(VulkanAPITest, zero_size_tensor) {
   ASSERT_TRUE(at::equal(out_vk, cpu));
 }
 
+TEST_F(VulkanAPITest, zero_size_tensor_numel) {
+  auto vk = at::rand({18, 0, 5}, at::device(at::kVulkan).dtype(at::kFloat));
+  ASSERT_TRUE(vk.numel() == 0);
+}
+
 TEST_F(VulkanAPITest, zero_dim_tensor_1) {
   auto cpu = at::rand({}, at::device(at::kCPU).dtype(at::kFloat));
   auto vv = cpu.item<float>();
@@ -300,6 +305,12 @@ TEST_F(VulkanAPITest, zero_dim_tensor_2) {
   auto vk = at::empty({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
 
   ASSERT_TRUE(almostEqual(cpu, vk.cpu()));
+}
+
+TEST_F(VulkanAPITest, zero_dim_tensor_3) {
+  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat));
+
+  ASSERT_TRUE(vk.cpu().item<float>() == 0.0f);
 }
 
 TEST_F(VulkanAPITest, local_scalar_dense) {
@@ -4530,6 +4541,8 @@ TEST_F(VulkanAPITest, sum_test) {
   test_sum({6});
   test_sum({5, 6});
   test_sum({0, 3, 1});
+  test_sum({5, 0, 1});
+  test_sum({5, 3, 0});
   test_sum({3, 3, 1});
   test_sum({7, 6, 6});
   test_sum({7, 8, 5, 6});
