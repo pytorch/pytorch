@@ -2,10 +2,10 @@
 from collections import OrderedDict
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
-    _parallelize_linear,
+    _parallelize_linear_like_module,
     _parallelize_mlp,
     parallelize_module,
 )
@@ -15,6 +15,8 @@ from torch.distributed.tensor.parallel.style import (
     make_output_replicate_1d,
     PairwiseParallel,
     ParallelStyle,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -23,6 +25,14 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     with_comms,
 )
+
+
+class DummyModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x
 
 
 class TensorParallelAPITests(DTensorTestBase):
@@ -220,7 +230,13 @@ class TensorParallelAPITests(DTensorTestBase):
     def test_parallelize_mlp_error(self):
         class DummyParallel(ParallelStyle):
             def __init__(self) -> None:
-                super().__init__(make_input_replicate_1d, make_output_replicate_1d)
+                super().__init__(
+                    make_input_replicate_1d,
+                    make_output_replicate_1d,
+                    input_layouts=None,
+                    output_layouts=None,
+                    use_local_output=False,
+                )
 
         model_tp = MLPModule(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -248,7 +264,7 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear(model_tp, device_mesh, rowwise)
+        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, rowwise)
 
         # let each rank generate unique local input
         torch.manual_seed(self.rank)
@@ -267,9 +283,30 @@ class TensorParallelAPITests(DTensorTestBase):
 
         # parallelize model_tp
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        model_tp = _parallelize_linear(model_tp, device_mesh, colwise)
+        model_tp = _parallelize_linear_like_module(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
+
+    @with_comms
+    def test_prepare_module_input(self):
+        module = DummyModule()
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(module, device_mesh, PrepareModuleInput())
+        inp = torch.rand(5, 7, device=self.device_type)
+        output = module(inp).redistribute(device_mesh, [Shard(0)]).to_local()
+        self.assertEqual(inp, output)
+
+    @with_comms
+    def test_prepare_module_output(self):
+        module = DummyModule()
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        parallelize_module(module, device_mesh, PrepareModuleOutput())
+        torch.manual_seed(15)
+        inp = torch.rand(16, 7, device=self.device_type)
+        dtensor = DTensor.from_local(inp, device_mesh, [Replicate()], run_check=False)
+        output = module(dtensor)
+        inp = dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
+        self.assertEqual(inp, output)
 
 
 if __name__ == "__main__":

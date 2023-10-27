@@ -24,7 +24,6 @@ from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
     get_custom_getattr,
-    is_hashable,
     is_namedtuple_cls,
     is_utils_checkpoint,
     istype,
@@ -551,7 +550,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
             assert isinstance(subobj, collections.OrderedDict)
             if not subobj:
-                return variables.ConstDictVariable(
+                return variables.ConstDictVariable.create(
                     subobj, collections.OrderedDict, **options
                 )
 
@@ -585,6 +584,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
+        from .dicts import is_hashable
 
         # TODO this should probably be merged with the dict handling
 

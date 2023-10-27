@@ -129,6 +129,19 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
       { *ret_output_names = container->output_name(output_idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+    AOTInductorModelContainerHandle container_handle,
+    const char** in_spec,
+    const char** out_spec) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *in_spec = container->get_in_spec();
+    *out_spec = container->get_out_spec();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
@@ -187,4 +200,19 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
+#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
+
+  CACHE_TORCH_DTYPE(bfloat16);
+  CACHE_TORCH_DTYPE(float16);
+  CACHE_TORCH_DTYPE(float32);
+  CACHE_TORCH_DTYPE(float64);
+  CACHE_TORCH_DTYPE(uint8);
+  CACHE_TORCH_DTYPE(int8);
+  CACHE_TORCH_DTYPE(int16);
+  CACHE_TORCH_DTYPE(int32);
+  CACHE_TORCH_DTYPE(int64);
+  CACHE_TORCH_DTYPE(bool);
+
+  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
+  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

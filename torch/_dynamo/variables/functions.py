@@ -551,7 +551,9 @@ def _traceable_collectives_source(fn):
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        base=AttrSource(
+            base=GlobalSource(global_name="__import_torch"), member="distributed"
+        ),
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
@@ -666,7 +668,6 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from ..utils import HashableTracker
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
 
@@ -675,15 +676,14 @@ class TritonKernelVariable(VariableTracker):
         if grid is None:
             raise Unsupported("Triton kernels should always be called with a grid")
 
-        def wrap_key(k):
-            return HashableTracker(variables.ConstantVariable.create(k))
-
         # Both for grid's meta as well as for the kernel, we need combined
         # args and kwargs normalized
-        names = (wrap_key(name) for name in self.kernel.arg_names)
-        kwargs = {wrap_key(k): v for k, v in kwargs.items()}
+        names = (
+            variables.ConstantVariable.create(name) for name in self.kernel.arg_names
+        )
+        kwargs = {variables.ConstantVariable.create(k): v for k, v in kwargs.items()}
         normalized_args = {**dict(zip(names, args)), **kwargs}
-        meta = ConstDictVariable(normalized_args, dict)
+        meta = ConstDictVariable.create(normalized_args)
 
         # If the grid is a function, then lets execute it and convert it to
         # a list
