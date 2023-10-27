@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import itertools
 import unittest
 
 import torch
@@ -739,13 +740,15 @@ class GraphModule(torch.nn.Module):
 
 
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
-    def _get_jagged_tensor(self, nested_size, offsets):
+    def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
         # Makes a jagged tensor with N constituent tensors with size
         # as specified ((S0, S1, S2), D)
         D = nested_size[1]
         out = []
         for s in nested_size[0]:
-            out.append(torch.randn(s, D, requires_grad=True, dtype=torch.float64))
+            out.append(
+                torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
+            )
         return jagged_from_list(out, offsets)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
@@ -857,6 +860,73 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         # tensors are different.
         self._check_recompiles(fn, (nt,), (nt2,), False)
         self._check_recompiles(fn, (nt,), (nt3,), True)
+
+    def _get_views(self):
+        # There are three cases to consider here based on the logic in
+        # meta_utils.py
+        #
+        # (1) basic case:
+        # view is not a leaf and has the same requires grad as its basic case
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+        self.assertEqual(x.is_leaf, False)
+        yield x.unsqueeze(-1)
+
+        # (2) leaf view case:
+        # the view has to be a leaf (w/ requires_grad True or requires_grad False)
+        # base w/ requires_grad True or requires_grad False
+        for requires_grad_1, requires_grad_2 in itertools.product(
+            [True, False], repeat=2
+        ):
+            x, _ = self._get_jagged_tensor(
+                ((2, 3, 4), 3), None, requires_grad=requires_grad_1
+            )
+            with torch.no_grad():
+                x_view = x.unsqueeze(-1)
+                # The issue is this doesn't quite work
+                x_view.requires_grad_(requires_grad_2)
+            yield x_view
+
+        # (3) obscure case:
+        # view is not a leaf (implies requires_grad True)
+        # base w/ requires_grad False)
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
+        # intermediate leaf view
+        with torch.no_grad():
+            x_view = x.unsqueeze(-1)
+        x_view.requires_grad_(True)
+        x_view_view = x_view.unsqueeze(-1)
+        yield x_view_view
+
+    def test_inputs_to_compiled_fn_are_views(self):
+        for nt_view in self._get_views():
+
+            def fn(x):
+                return x.sin()
+
+            out_ref = fn(nt_view)
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend="aot_eager", dynamic=True
+            )
+            out = compile_fn(nt_view)
+
+            # Check metadata and values are correct
+            self.assertTrue(out.size() == out_ref.size())
+            self.assertTrue(out.stride() == out_ref.stride())
+            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+
+            # Check that no guards are incurred
+            def backend(gm, args):
+                context = torch._guards.TracingContext.get()
+                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
+                self.assertEqual(len(val_to_guards), 0)
+                return gm
+
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend=backend, dynamic=True
+            )
+            out = compile_fn(nt_view)
 
 
 if __name__ == "__main__":
