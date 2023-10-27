@@ -389,6 +389,15 @@ class _TorchDynamoContext:
                 else:
                     return fn(*args, **kwargs)
 
+            if torch.jit.is_tracing():
+                if config.error_on_nested_jit_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to torch.jit.trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
             on_enter()
             prior = set_eval_frame(callback)
             backend_cache_manager = backend_cache_wrapper(self.callback)
@@ -817,10 +826,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def run_node(self, n):
         self.current_node = n
-        r = super().run_node(n)
+        result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
-            r.node.meta["val"] = self.current_node.meta["val"]
-        return r
+            result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if self.current_node.op != "output":
+            result_proxy.node._rename(
+                getattr(self.current_node, "name", result_proxy.node.name)
+            )
+        return result_proxy
 
 
 class ExportResult(NamedTuple):
@@ -1286,7 +1299,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(
+                    raise UserError(  # noqa: TRY200
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
                         case_name="cond_operands",

@@ -742,6 +742,12 @@ def gen_pyi(
             "_functionalize_commit_update": [
                 "def _functionalize_commit_update(t: Tensor) -> None: ..."
             ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
@@ -977,12 +983,12 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                "def size(self) -> Size: ...",
+                "def size(self, dim: None = None) -> Size: ...",
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int, ...]: ...",
-                "def stride(self, _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."

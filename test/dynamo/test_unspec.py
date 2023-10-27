@@ -59,6 +59,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    @unittest.expectedFailure  # array scalars decay to 0D arrays
     def test_builtin_max_min(self):
         # test unspecialized primitive max/min
         def fn(x, y, z):
@@ -211,6 +212,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
 
+    @unittest.expectedFailure  # fails as long as numpy scalars are 0D arrays
     def test_specializing_numpy_float_in_control_flow(self):
         # np.float is unspecialized by default,
         # but it should be specialized when used in control flow.
@@ -331,6 +333,64 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(f, backend="eager", fullgraph=True)
         x = torch.randn(2, 3)
         opt_fn(x)
+
+    def test_sum_dimlist_spec(self):
+        def fn(inputs, dim):
+            return torch.sum(inputs, dim)
+
+        inputs = torch.randn(128, 5, 24, 24)
+        dim = (-1, 1, 0, 2)
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(inputs, dim), fn(inputs, dim))
+
+    # https://github.com/pytorch/pytorch/issues/104812
+    def test_argmin_coerces_symint_to_intlist_spec(self):
+        def fn(x, dim):
+            # the python arg parser coerces dim into a vector<int>
+            return torch.amin(x, dim=dim, keepdim=True)
+
+        x = torch.randn(4, 4, 4)
+        dim = 2
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(x, dim), fn(x, dim))
+
+    def test_exponential(self):
+        def fn(inputs, op_inputs_dict):
+            res = inputs.exponential_(**op_inputs_dict)
+            return res
+
+        inputs = torch.randn(2, 3, 4)
+        op_inputs_dict = {"lambd": 10, "generator": None}
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager", fullgraph=True)
+        self.assertEqual(compl_fn(inputs, op_inputs_dict), fn(inputs, op_inputs_dict))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_data_dependent_evaluate_expr_graph_break(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # To ensure that the continuation frame is compiled,
+        # have to write the test function in this funny way.
+        # See https://github.com/pytorch/pytorch/issues/111918
+        def test(y):
+            if y > 2:
+                return True
+            else:
+                return False
+
+        @torch._dynamo.optimize(cnts)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if test(y):
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+
+        self.assertExpectedInline(cnts.frame_count, """2""")
+        self.assertExpectedInline(cnts.op_count, """3""")
 
 
 if __name__ == "__main__":
