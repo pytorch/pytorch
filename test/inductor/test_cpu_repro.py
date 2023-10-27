@@ -2534,6 +2534,23 @@ class CPUReproTests(TestCase):
             )
             assert metrics.generated_kernel_count == 0
 
+    def test_group_norm_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.group_norm = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.group_norm(x)
+
+        metrics.reset()
+        mod = M().eval()
+        x = torch.randn(2, 32, 32, 32)
+        with torch.no_grad():
+            self.common(mod, (x,))
+            # 2 generated kernels (one for var_mean, the other for result)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
