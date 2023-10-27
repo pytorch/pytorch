@@ -125,7 +125,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = dtensor.full_tensor()
+        local_tensor = funcol.all_gather_tensor(
+            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
+        )
 
         # compare with local tensors from other ranks
         self_slice = slice(4 * self.rank, 4 * self.rank + 4)
