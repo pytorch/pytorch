@@ -1640,6 +1640,14 @@ def forward(self, arg0_1):
     return add""")
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_python_functionalization_lift_fresh_storage(self):
+        unlifted = torch.tensor([0.0])
+
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with maybe_disable, FunctionalTensorMode():
+            lifted = torch.ops.aten.lift_fresh.default(unlifted)
+
+        self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
 
 @xfail_inherited_tests([
