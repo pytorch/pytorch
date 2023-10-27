@@ -283,9 +283,9 @@ class TensorParallelStyleTest(DTensorTestBase):
         )
         output = test_mod(
             torch.randn(2, 8, device=self.device_type),
-            torch.ones(self.world_size * 2, 8, device=self.device_type)
+            torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
         )
-        self.assertEqual(output.shape, (16, 8))
+        self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
 
     @with_comms
     def test_prepare_module_output(self):
