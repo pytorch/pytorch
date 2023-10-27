@@ -87,6 +87,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
+    SetVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -107,7 +108,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    SetVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
