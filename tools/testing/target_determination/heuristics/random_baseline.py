@@ -25,6 +25,15 @@ class RandomBaseline(HeuristicInterface):
         PROB_HIGH_RELEVANCE = 0.25
         PROB_PROBABLE_RELEVANCE = 0.25
 
+        assert (
+            PROB_UNRANKED
+            + PROB_NO_RELEVANCE
+            + PROB_UNLIKELY_RELEVANCE
+            + PROB_HIGH_RELEVANCE
+            + PROB_PROBABLE_RELEVANCE
+            == 1.0
+        )
+
         unranked_tests = []
         high_relevance_tests = []
         unlikely_relevance_tests = []
