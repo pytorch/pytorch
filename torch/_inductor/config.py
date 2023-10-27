@@ -484,6 +484,8 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
+    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
 

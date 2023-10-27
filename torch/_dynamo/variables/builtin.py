@@ -39,7 +39,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable, DictKeys, SetVariable
+from .dicts import ConstDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -869,9 +869,7 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 1
             arg = args[0]
             if isinstance(arg, dict):
-                return ConstDictVariable.create(
-                    arg, user_cls, mutable_local=MutableLocal()
-                )
+                return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.ConstDictVariable):
                 return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
             elif isinstance(
@@ -886,12 +884,10 @@ class BuiltinVariable(VariableTracker):
                 for x in arg.unpack_var_sequence(tx):
                     k, v = x.unpack_var_sequence(tx)
                     items.update({k: v})
-                return ConstDictVariable.create(
-                    items, user_cls, mutable_local=MutableLocal()
-                )
+                return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
-            return variables.ConstDictVariable.create(
+            return variables.ConstDictVariable(
                 items, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"dict(): {args} {kwargs}")
@@ -913,7 +909,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            items = {HashableTracker(x) for x in arg.unpack_var_sequence(tx)}
+            items = set(arg.unpack_var_sequence(tx))
             return SetVariable(items, mutable_local=MutableLocal())
         else:
             unimplemented(f"set(): {args} {kwargs}")
@@ -1408,10 +1404,9 @@ class BuiltinVariable(VariableTracker):
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
 
-        if isinstance(left, (SetVariable, DictKeys)):
-            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
-                _unimplemented()
-            return ConstantVariable.create(op(left.set_items, right._items))
+        # If they implement set semantics (e.g. SetVariable or DictKeys)
+        if hasattr(left, "set_items") and hasattr(right, "set_items"):
+            return ConstantVariable.create(op(left.set_items, right.set_items))
 
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
