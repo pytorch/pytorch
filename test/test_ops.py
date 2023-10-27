@@ -2196,7 +2196,7 @@ class TestFakeTensor(TestCase):
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
-    @ops([op for op in op_db if op.is_factory_function])
+    @ops([op for op in ops_and_refs if op.is_factory_function])
     def test_strided_layout(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
