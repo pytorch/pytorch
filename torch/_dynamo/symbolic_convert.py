@@ -716,6 +716,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
+            breakpoint()
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise

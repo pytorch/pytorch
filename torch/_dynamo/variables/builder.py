@@ -1875,6 +1875,8 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif isinstance(value, torch.fx.graph_module.GraphModule):
+            return UserDefinedObjectVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
