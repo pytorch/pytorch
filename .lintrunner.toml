@@ -254,6 +254,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/**',
     'c10/**/*.cpp',
     'torch/csrc/**/*.cpp',
 ]
