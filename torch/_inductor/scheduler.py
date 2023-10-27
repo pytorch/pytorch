@@ -558,9 +558,12 @@ class BaseSchedulerNode:
                     # TODO(xmfan): find a better heuristic to model FLOPS/latency relationship
                     factor = 1.0
                     counted_flops = flop_counter_mode.get_total_flops()
+                    counted_bytes = self.get_read_write_buffers_sizes()
+                    compute_time = (factor * counted_flops / gpu_flops) * 1e9
+                    transfer_time = counted_bytes / gpu_memory_bandwidth
 
                     # Return estimated runtime in nanoseconds
-                    return (factor * counted_flops / gpu_flops) * 1e9
+                    return max(compute_time, transfer_time)
 
         elif isinstance(self, FusedSchedulerNode) or isinstance(
             self.node, ComputedBuffer
