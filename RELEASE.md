@@ -216,7 +216,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
 
-Reverts for changes that was commited into the main branch priot to the branch, must be propagated into release branch as well.
+Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 
 ## Promoting RCs to Stable
 
