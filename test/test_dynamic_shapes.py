@@ -482,14 +482,11 @@ def forward(self, x_1):
     def test_expect_true_basic(self):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
+        i0_sym = i0.node.expr
         # This doesn't error
         self.assertTrue(expect_true(i0 == 0))
-        # This generates a deferred runtime assert
-        self.assertExpectedInline(
-            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[Eq(i0, 0)]"""
-        )
-        self.assertIn("test_dynamic_shapes.py", shape_env.deferred_runtime_asserts[i0.node.expr][0].msg)
+        # This generates a deferred runtime assert via replacement
+        self.assertEqual(shape_env.replacements[i0_sym], 0)
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
 
