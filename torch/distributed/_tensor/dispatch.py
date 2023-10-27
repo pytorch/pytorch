@@ -23,7 +23,7 @@ from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 try:
-    from torch.utils._cxx_pytree import tree_flatten, tree_unflatten
+    from torch.utils._pytree.api.cxx import tree_flatten, tree_unflatten
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[assignment]
         tree_flatten,

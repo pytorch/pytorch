@@ -213,9 +213,9 @@ def register_pytree_node(
         )
 
     if __register_python_pytree_node:
-        from . import _pytree
+        from . import python
 
-        _pytree.register_pytree_node(
+        python.register_pytree_node(
             cls,
             flatten_func,
             unflatten_func,
@@ -803,7 +803,7 @@ def treespec_dumps(treespec: PyTreeSpec) -> str:
             f"treespec_dumps(spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    from ._pytree import (
+    from .python import (
         tree_structure as _tree_structure,
         treespec_dumps as _treespec_dumps,
     )
@@ -814,7 +814,7 @@ def treespec_dumps(treespec: PyTreeSpec) -> str:
 
 def treespec_loads(serialized: str) -> PyTreeSpec:
     """Deserialize a treespec from a JSON string."""
-    from ._pytree import (
+    from .python import (
         tree_unflatten as _tree_unflatten,
         treespec_loads as _treespec_loads,
     )

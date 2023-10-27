@@ -180,11 +180,11 @@ def register_pytree_node(
 
     if __register_cxx_pytree_node:
         try:
-            from . import _cxx_pytree
+            from . import cxx
         except ImportError:
             pass
         else:
-            _cxx_pytree.register_pytree_node(
+            cxx.register_pytree_node(
                 typ,
                 flatten_fn,
                 unflatten_fn,

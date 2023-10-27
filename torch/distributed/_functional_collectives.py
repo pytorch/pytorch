@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only
+    from torch.utils._pytree.api.cxx import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
