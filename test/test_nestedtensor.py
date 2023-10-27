@@ -790,14 +790,13 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: layer_norm(nt),
         )
 
-    @skipMeta
-    @torch.inference_mode()
-    def test_embedding(self, device):
+    @parametrize("layout", [torch.strided, torch.jagged])
+    def test_embedding(self, device, layout):
         inputs = [
             torch.randint(100, (L,), device=device, dtype=torch.int64)
             for L in torch.randint(5, 50, (8,))
         ]
-        x = torch.nested.nested_tensor(inputs, device=device, dtype=torch.int64)
+        x = torch.nested.nested_tensor(inputs, device=device, dtype=torch.int64, layout=layout)
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
         ys = y.unbind()
