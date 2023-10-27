@@ -363,6 +363,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
+    def check_kwargs(self, kwargs, supported_types):
+        if not all(isinstance(value, supported_types) for value in kwargs.values()):
+            raise unimplemented(
+                f"Only kwargs of the following types are supported: {supported_types}"
+            )
+
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
@@ -610,11 +616,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        if len(kwargs) > 0:
-            unsupported(
-                "torch.ops.higher_order.map: kwargs are not supported in the map operator."
-            )
-
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
@@ -671,6 +672,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r.new_empty([sample_shape[0], *r.shape])
 
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
+
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -678,7 +681,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs={},
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )
@@ -688,7 +691,10 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import ConstantVariable
         from .builder import wrap_fx_proxy
+
+        self.check_kwargs(kwargs, ConstantVariable)
 
         # This is operator for delegation within Executorch which calls a
         # specific function in the given lowered module with the given
@@ -696,10 +702,6 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         # This is a bad hierarchical violation since
         # executorch_call_delegate sits at a higher level than dynamo, but
         # there's no real solution to this issue yet.
-        if len(kwargs) > 0:
-            unimplemented(
-                "executorch_call_delegate: kwargs arguments were not enabled."
-            )
         lowered_module = tx.output.get_submodule(args[0].module_key)
 
         lowered_node = make_attr(tx, args[0].module_key)
@@ -712,6 +714,8 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
+
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
 
         # Store the invocation as a call
         return wrap_fx_proxy(
@@ -930,7 +934,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not isinstance(out_dims, (ConstantVariable, TupleVariable)):
             unimplemented("torch.func.vmap: out_dims is not an int or tuple variable.")
 
-        if len(kwargs) > 0:
+        if kwargs:
             unimplemented(
                 "NYI - torch.func.vmap: kwargs arguments are currently unsupported."
             )
@@ -1082,15 +1086,12 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import UserFunctionVariable
+        from . import ConstantVariable, UserFunctionVariable
         from .builder import wrap_fx_proxy
 
         tracer = self.fwd_bwd_tracer
 
-        if len(kwargs) > 0:
-            unimplemented(
-                "kwargs have not been implemented for torch.autograd.Function"
-            )
+        self.check_kwargs(kwargs, ConstantVariable)
 
         from . import TorchVariable
 
@@ -1147,6 +1148,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         r = body_r.as_proxy().node.meta["example_value"]
         example_value = r
 
+        _, p_kwargs = proxy_args_kwargs([], kwargs)
+
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -1154,7 +1157,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs={},
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )
@@ -1210,13 +1213,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        # This flattens the kwargs into lifted args
         p_args, p_kwargs, example_value, treespec = self.create_wrapped_node(
             tx, args, kwargs, "wrap"
         )
-
-        if len(p_kwargs) > 0:
-            unimplemented("kwargs should have been flattened into lifted args")
 
         # Store the invocation as a call
         variable = wrap_fx_proxy(
@@ -1225,7 +1224,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs={},
+                kwargs=p_kwargs,
             ),
             example_value=example_value,
         )
@@ -1247,7 +1246,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        if len(kwargs) > 0:
+        if len(kwargs) != 0:
             unimplemented("out_dtype does not handle kwargs")
 
         p_args = tuple(arg.as_proxy() for arg in args)
