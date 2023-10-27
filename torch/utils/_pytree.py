@@ -48,9 +48,6 @@ Context = Any
 PyTree = Any
 FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
 UnflattenFunc = Callable[[Iterable, Context], PyTree]
-DumpableContext = Any  # Any json dumpable text
-ToDumpableContextFn = Callable[[Context], DumpableContext]
-FromDumpableContextFn = Callable[[DumpableContext], Context]
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
 MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
 
