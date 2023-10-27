@@ -121,7 +121,7 @@ SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
-def _register_pytree_node(
+def register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
@@ -180,11 +180,11 @@ def _register_pytree_node(
 
     if __register_cxx_pytree_node:
         try:
-            from ._cxx_pytree import _register_pytree_node
+            from . import _cxx_pytree
         except ImportError:
             pass
         else:
-            _register_pytree_node(
+            _cxx_pytree.register_pytree_node(
                 typ,
                 flatten_fn,
                 unflatten_fn,
@@ -192,6 +192,9 @@ def _register_pytree_node(
                 from_dumpable_context=from_dumpable_context,
                 __register_python_pytree_node=False,
             )
+
+
+_register_pytree_node = register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
