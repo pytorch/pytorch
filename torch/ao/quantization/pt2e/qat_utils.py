@@ -373,8 +373,8 @@ def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node
 
         {name: (original_node, replacement_node)}
 
-    The returned map must contain entries for "conv", "bn", "getitem" as names,
-    and may optionally contain an entry for "relu".
+    The returned map must contain entries for "conv", "conv_weight", "conv_input",
+    "bn", "getitem" as names, and may optionally contain an entry for "relu".
     """
     def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node, Optional[Node]]:
         """
@@ -407,11 +407,40 @@ def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node
     o_conv, o_bn, o_getitem, o_relu = _get_nodes(original_nodes)
     r_conv, r_bn, r_getitem, r_relu = _get_nodes(r.replacements)
 
+    # Extract conv input and weight
+    # Note: here we extract the original nodes indirectly through the pattern nodes
+    # because the args of the original nodes are no longer available after replacement
+    (p_conv, _, _, _) = _get_nodes(list(r.nodes_map.keys()))
+    (p_conv_input, p_conv_weight, *_) = p_conv.args
+    (r_conv_input, r_conv_weight, *_) = r_conv.args
+    assert isinstance(p_conv_input, Node)
+    assert isinstance(p_conv_weight, Node)
+    assert isinstance(r_conv_input, Node)
+    assert isinstance(r_conv_weight, Node)
+    o_conv_input = r.nodes_map[p_conv_input]
+    o_conv_weight = r.nodes_map[p_conv_weight]
+
+    # Extract conv bias
+    if len(p_conv.args) > 2 and len(r_conv.args) > 2:
+        p_conv_bias = p_conv.args[2]
+        r_conv_bias = r_conv.args[2]
+        assert isinstance(p_conv_bias, Node)
+        assert isinstance(r_conv_bias, Node)
+        o_conv_bias = r.nodes_map[p_conv_bias]
+    else:
+        o_conv_bias = None
+        r_conv_bias = None
+
+    # Create the mapping from original node to replacement node
     mapping = {
         "conv": (o_conv, r_conv),
+        "conv_input": (o_conv_input, r_conv_input),
+        "conv_weight": (o_conv_weight, r_conv_weight),
         "bn": (o_bn, r_bn),
         "getitem": (o_getitem, r_getitem),
     }
+    if o_conv_bias is not None:
+        mapping["conv_bias"] = (o_conv_bias, r_conv_bias)
     if o_relu is not None:
         assert r_relu is not None
         mapping["relu"] = (o_relu, r_relu)
