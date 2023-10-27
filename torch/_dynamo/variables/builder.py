@@ -557,11 +557,13 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            saved_tensors_source = AttrSource(self.source, "saved_tensors")
+            install_guard(
+                self.source.make_guard(GuardBuilder.TYPE_MATCH),
+                saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH),
+            )
             saved_tensors = [
-                VariableBuilder(
-                    self.tx, GetItemSource(AttrSource(self.source, "saved_tensors"), n)
-                )(v)
+                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
                 for n, v in enumerate(value.saved_tensors)
             ]
             return self.tx.output.side_effects.track_object_existing(
