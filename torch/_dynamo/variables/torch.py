@@ -181,26 +181,6 @@ def check_allowed_op(value):
             )
 
 
-torch_ctx_manager_classes = {
-    torch.no_grad,
-    torch.enable_grad,
-    torch.set_grad_enabled,
-    torch.inference_mode,
-    torch.cuda.streams.Stream,
-    torch.amp.autocast_mode.autocast,
-    torch.cuda.amp.autocast,
-    torch.cpu.amp.autocast,
-    torch.profiler.profile,
-    torch.profiler.record_function,
-    torch.autograd.profiler.profile,
-    torch.autograd.profiler.record_function,
-}
-
-
-def is_torch_ctx_manager_class(obj):
-    return obj in torch_ctx_manager_classes
-
-
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
