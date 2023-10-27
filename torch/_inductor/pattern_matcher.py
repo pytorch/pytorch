@@ -959,9 +959,20 @@ def gen_pattern(
     search_fn, example_inputs, trace_fn, scalar_workaround=(), exclusive_arg_names=()
 ) -> PatternExpr:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
-    if isinstance(scalar_workaround, dict):
-        example_inputs = [*example_inputs, *scalar_workaround.values()]
-    search_gm = trace_fn(search_fn, example_inputs)
+
+    if scalar_workaround == ():
+        scalar_workaround = {}
+    flat_inputs = []
+    input_idx = 0  # Positional arguments index
+
+    for argname in argnames:
+        if argname in scalar_workaround:
+            flat_inputs.append(scalar_workaround[argname])
+        else:
+            flat_inputs.append(example_inputs[input_idx])
+            input_idx += 1
+
+    search_gm = trace_fn(search_fn, flat_inputs)
     return fx_to_pattern(
         search_gm,
         ignore_types=(int, float, list, torch.device, torch.dtype),
