@@ -2,7 +2,6 @@
 
 import functools
 import unittest
-from typing import Tuple
 
 import torch
 from torch import Tensor
