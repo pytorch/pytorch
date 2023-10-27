@@ -1697,6 +1697,17 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_resolve_packet(self):
+        x = torch.randn(3)
+        result = torch._C._jit_resolve_packet("aten::sum", x)
+        self.assertEqual(result, "default")
+
+        result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
+        self.assertEqual(result, "dim_IntList")
+
+        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+            result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
+
     def test_define_bad_schema(self):
         lib = self.lib()
         with self.assertRaisesRegex(ValueError, "expected schema to look like"):
