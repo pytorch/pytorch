@@ -15,6 +15,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     UnsupportedOperatorException,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
@@ -509,6 +510,12 @@ class FakeTensorTest(TestCase):
             x = torch.rand([10, 10])
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+
+    def test_tolist(self):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
+            x = torch.rand([10])
+            x.tolist()
 
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2, check_strides=True)

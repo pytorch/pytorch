@@ -1280,11 +1280,8 @@ class FakeTensor(torch.Tensor):
     # of the tensor to create the output Python list, and (2) creating unbacked
     # symints for each element of the list.
     def tolist(self):
-        # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import is_symbolic
-
-        assert self.dim() == 1 and is_symbolic(self.shape[0])
-        shape_env = self.shape[0].node.shape_env
+        assert self.dim() == 1, "NYI for higher dims"
+        shape_env = self.fake_mode.shape_env
         out = []
         # Specialize on the length of the list
         for _ in range(self.shape[0]):
