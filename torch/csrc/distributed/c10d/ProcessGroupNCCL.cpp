@@ -3051,7 +3051,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   // stream so that the caching allocator can reuse memory pool for this stream
   // in a clever way. This setting is added for libraries like FSDP which uses
   // `reduce_scatter_tensor`.
-  bool avoidRecordStreams = !opts.asyncOp;
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
   return collective(
       inputs,
@@ -3706,7 +3706,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   // stream so that the caching allocator can reuse memory pool for this stream
   // in a clever way. This setting is added for libraries like FSDP which uses
   // `all_gather_into_tensor`.
-  bool avoidRecordStreams = !opts.asyncOp;
+  bool avoidRecordStreams = avoidRecordStreams_ || (!opts.asyncOp);
 
   return collective(
       inputs,
