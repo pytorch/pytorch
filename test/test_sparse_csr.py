@@ -3793,6 +3793,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                         break
 
                     self.assertEqual(result, expected)
+        torch.sparse._triton_ops._bsr_scatter_mm_indices_data.cache_clear()
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
