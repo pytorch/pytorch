@@ -14,8 +14,9 @@ import torch.fx
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
-from torch.fx.experimental import symbolic_shapes
+from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.sym_node import to_node, sym_sqrt, SymNode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraints,
     DimDynamic,
@@ -25,10 +26,6 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_int,
     GuardOnDataDependentSymNode,
     ShapeEnv,
-    sym_float,
-    sym_sqrt,
-    SymNode,
-    to_node,
     is_symbolic,
 )
 from torch.testing._internal.common_utils import (
@@ -334,7 +331,7 @@ class TestPySymInt(TestCase):
     def test_int_to_float(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
-        r = sym_float(x.shape[0])
+        r = torch.sym_float(x.shape[0])
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
 
     def test_aten_ops(self):
@@ -386,7 +383,7 @@ class TestPySymInt(TestCase):
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
 
         a3 = create_symint(shape_env, 3)
-        r = sym_int(2.0 * sym_float(a3))
+        r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
@@ -669,11 +666,11 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return contextlib.nullcontext()
 
-        if fn in symbolic_shapes.magic_methods_on_math:
+        if fn in sym_node.magic_methods_on_math:
             lambda_apply = getattr(math, fn)
-        elif fn in symbolic_shapes.magic_methods_on_submodule:
-            lambda_apply = getattr(symbolic_shapes, fn)
-        elif fn in symbolic_shapes.magic_methods_on_operator_with_trailing_underscore:
+        elif fn in sym_node.magic_methods_on_submodule:
+            lambda_apply = getattr(sym_node, fn)
+        elif fn in sym_node.magic_methods_on_operator_with_trailing_underscore:
             lambda_apply = getattr(operator, f"{fn}_")
         else:
             lambda_apply = getattr(operator, fn)
@@ -700,7 +697,7 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
-            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+            if fn not in sym_node.alternate_impl_if_hinted_methods:
                 self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
@@ -712,7 +709,7 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
-            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+            if fn not in sym_node.alternate_impl_if_hinted_methods:
                 self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
@@ -720,24 +717,24 @@ class TestSymNumberMagicMethods(TestCase):
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
-            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+            if fn not in sym_node.alternate_impl_if_hinted_methods:
                 self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
 
-    @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
+    @parametrize("fn", list(sym_node.magic_methods.keys()))
     def test_bool_method(self, fn):
         # sym_ite has its own tests
-        if fn not in symbolic_shapes.bool_magic_methods or fn == "sym_ite":
+        if fn not in sym_node.bool_magic_methods or fn == "sym_ite":
             self.skipTest(f"{fn} is non-bool")
 
-        is_unary_fn = fn in symbolic_shapes.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_magic_methods
         shape_env = ShapeEnv()
         self._do_test(fn, True, False, shape_env, is_unary_fn)
 
 
-    @parametrize("fn", list(symbolic_shapes.magic_methods.keys()))
+    @parametrize("fn", list(sym_node.magic_methods.keys()))
     @parametrize("first_type", ["int", "float"])
     @parametrize("second_type", ["int", "float"])
     def test_method(self, fn, first_type, second_type):
@@ -745,12 +742,12 @@ class TestSymNumberMagicMethods(TestCase):
             # TODO: Hmm, this looks like we skip all floats
             self.skipTest(f"{fn} is not a float magic method")
 
-        is_unary_fn = fn in symbolic_shapes.unary_magic_methods
+        is_unary_fn = fn in sym_node.unary_magic_methods
         # Second argument is ignored for unary function. So only run for one type
         if is_unary_fn and second_type == "float":
             self.skipTest(f"{fn} is unary and already tested")
 
-        if fn in symbolic_shapes.bool_magic_methods:
+        if fn in sym_node.bool_magic_methods:
             self.skipTest(f"{fn} is bool")
 
         # Only floats here since these will be converted to int if necessary.
@@ -1080,7 +1077,6 @@ class TestFloorDiv(TestCase):
 class TestDimConstraints(TestCase):
     def test_dim_constraints_reduce_congruences_simple(self):
         from sympy import Symbol
-        from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
         dim_constraints = DimConstraints({}, {}, set(), {})
