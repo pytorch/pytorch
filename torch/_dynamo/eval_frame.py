@@ -1207,8 +1207,8 @@ def export(
             if not isinstance(arg, prim_types):
                 if dataclasses.is_dataclass(arg):
                     raise RuntimeError(
-                        "Dataclasses are supposed to be pytree nodes to be exportable."
-                        "Please take a look at torch._export.utils.register_dataclass_as_pytree_node "
+                        "Dataclasses are supposed to be pytree nodes to be exportable. "
+                        "Please take a look at torch.export.register_dataclass "
                         "for more information.",
                     )
                 else:

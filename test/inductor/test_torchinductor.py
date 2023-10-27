@@ -827,7 +827,6 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     @skipIfRocm
-    @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
@@ -893,11 +892,6 @@ class CommonTemplate:
 
         # Constant is propagated as we can prove that the result is always negative.
         test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
-
-        def unsafe_index(a, b):
-            return aten._unsafe_index(a, (b,))
-
-        test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
 
     def test_computed_buffer_inlining(self):
         def flip(x):
@@ -3552,14 +3546,6 @@ class CommonTemplate:
         )
         out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
         self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
-
-    def test_remove_noop_copy(self):
-        def fn(x, y):
-            x = x.cos()
-            a = x.copy_(y)
-            return a.sin()
-
-        self.common(fn, (torch.randn(8, 8), torch.randn(8)))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -6773,6 +6759,11 @@ class CommonTemplate:
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
     @requires_cuda()
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support SDPA or pre-SM80 hardware",
+    )
+    @skipIfRocm
     def test_sdpa(self):
         def foo(arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             view = torch.ops.aten.view.default(arg3_1, [23760, 128])
