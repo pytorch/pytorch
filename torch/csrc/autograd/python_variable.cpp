@@ -525,7 +525,10 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-static PyObject* view_func_impl(PyObject* self_, PyObject* arg, bool check_has_same_meta) {
+static PyObject* view_func_impl(
+    PyObject* self_,
+    PyObject* arg,
+    bool check_has_same_meta) {
   HANDLE_TH_ERRORS
   const auto& self = THPVariable_Unpack(self_);
   TORCH_CHECK(
@@ -540,7 +543,8 @@ static PyObject* view_func_impl(PyObject* self_, PyObject* arg, bool check_has_s
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     const auto& view_info = diff_view_meta->get_backward_view();
     // Ensure that the newly provided base is similar to the original base
-    if (!check_has_same_meta || torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
+    if (!check_has_same_meta ||
+        torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
         out = view_info.view_fn()(new_base);
