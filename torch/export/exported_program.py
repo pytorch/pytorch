@@ -12,10 +12,18 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
+
+    from torch.utils._sympy.value_ranges import ValueRanges
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -24,7 +32,6 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-from torch.utils._sympy.value_ranges import ValueRanges
 
 
 __all__ = [
@@ -425,18 +432,14 @@ class ExportedProgram:
         root: Union[torch.nn.Module, Dict[str, Any]],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        call_spec: Any,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
-        range_constraints: Dict[sympy.Symbol, Any],
+        range_constraints: "Dict[sympy.Symbol, Any]",
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         dialect: Optional[str] = None,
     ):
-        from torch._export.exported_program import (
-            _create_graph_module_for_export,
-            CallSpec,
-        )
+        from torch._export.exported_program import _create_graph_module_for_export
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             InputDim,
         )
@@ -448,9 +451,8 @@ class ExportedProgram:
             self._graph_module.meta.update(root.meta)
 
         self._graph_signature: ExportGraphSignature = graph_signature
-        self._call_spec: CallSpec = call_spec
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
+        self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
         self._equality_constraints: List[
             Tuple[InputDim, InputDim]
         ] = equality_constraints
@@ -514,11 +516,6 @@ class ExportedProgram:
 
     @property
     @compatibility(is_backward_compatible=False)
-    def call_spec(self):
-        return self._call_spec
-
-    @property
-    @compatibility(is_backward_compatible=False)
     def range_constraints(self):
         return self._range_constraints
 
@@ -538,6 +535,19 @@ class ExportedProgram:
         return self._example_inputs
 
     @property
+    @compatibility(is_backward_compatible=False)
+    def call_spec(self):
+        from torch._export.exported_program import CallSpec
+
+        if len(self.module_call_graph) == 0:
+            return CallSpec(in_spec=None, out_spec=None)
+        assert self.module_call_graph[0].fqn == ""
+        return CallSpec(
+            in_spec=self.module_call_graph[0].signature.in_spec,
+            out_spec=self.module_call_graph[0].signature.out_spec,
+        )
+
+    @property
     def dialect(self):
         return self._dialect
 
@@ -553,7 +563,7 @@ class ExportedProgram:
                 )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise TypeError(
+                raise TypeError(  # noqa: TRY200
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -590,7 +600,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(
+                raise error.InternalError(  # noqa: TRY200
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -683,8 +693,12 @@ class ExportedProgram:
             for old_node, new_node in zip(old_outputs, new_outputs)
         }
 
-        def make_argument_spec(node) -> ArgumentSpec:
-            val = node.meta["val"]
+        def make_argument_spec(old_node, node) -> ArgumentSpec:
+            if "val" not in node.meta:
+                assert len(node.users) == 0
+                val = old_node.meta["val"]
+            else:
+                val = node.meta["val"]
             if isinstance(val, torch.Tensor):
                 return TensorArgument(name=node.name)
             elif isinstance(val, torch.SymInt):
@@ -715,15 +729,15 @@ class ExportedProgram:
             grad_user_inputs={},
             loss_output=None,
             inputs=[
-                make_argument_spec(node)
-                for node in gm.graph.nodes
+                make_argument_spec(old_placeholders[i], node)
+                for i, node in enumerate(gm.graph.nodes)
                 if node.op == "placeholder"
             ],
             outputs=[
-                make_argument_spec(node)
-                for node in pytree.tree_flatten(
-                    next(iter(reversed(gm.graph.nodes))).args
-                )[0]
+                make_argument_spec(old_outputs[i], node)
+                for i, node in enumerate(
+                    pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]
+                )
             ],
         )
 
@@ -764,7 +778,6 @@ class ExportedProgram:
             gm,
             gm.graph,
             new_graph_signature,
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             new_range_constraints,
             new_equality_constraints,
@@ -881,7 +894,6 @@ class ExportedProgram:
             transformed_gm,
             transformed_gm.graph,
             _get_updated_graph_signature(self.graph_signature, transformed_gm),
-            copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
             copy.deepcopy(self.equality_constraints),
@@ -928,7 +940,7 @@ class ExportedProgram:
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-) -> Dict[sympy.Symbol, Any]:
+) -> "Dict[sympy.Symbol, Any]":
     def get_shape_env(gm):
         vals = [
             node.meta["val"]

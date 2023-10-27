@@ -344,6 +344,9 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
+    def __iter__(self):
+        return (ndarray(x) for x in self.tensor.__iter__())
+
     def __str__(self):
         return (
             str(self.tensor)
@@ -367,10 +370,10 @@ class ndarray:
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
-        except Exception:
+        except Exception as exc:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
-            )
+            ) from exc
 
     def __bool__(self):
         return bool(self.tensor)

@@ -32,7 +32,7 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_constant
+from .allowed_functions import is_allowed, is_builtin_constant, is_forbidden
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -68,7 +68,6 @@ from .utils import (
     get_fake_value,
     get_instruction_source_311,
     graph_break_dup_warning_checker,
-    HashableTracker,
     istype,
     LazyString,
     proxy_args_kwargs,
@@ -520,11 +519,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
+    inconsistent_side_effects: bool
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+
+    def mark_inconsistent_side_effects(self):
+        """
+        InstructionTranslator has encountered instructions which may cause
+        dynamo to see a different version of history from eager
+        See: https://github.com/pytorch/pytorch/issues/110765
+        """
+        self.inconsistent_side_effects = True
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -572,12 +580,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             inner_fn = fn.value
         if hasattr(fn, "fn"):
             inner_fn = fn.fn
-        if (
-            inner_fn
-            and callable(inner_fn)
-            and hasattr(inner_fn, "_dynamo_forbidden")
-            and inner_fn._dynamo_forbidden
-        ):
+        if inner_fn and callable(inner_fn) and is_forbidden(inner_fn):
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))
 
@@ -1145,7 +1148,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable({}, dict)
+            kwargsvars = ConstDictVariable.create({})
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -1195,6 +1198,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
+
+    def LOAD_METHOD_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        if sys.version_info < (3, 11):
+            self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
+        else:
+            self.LOAD_METHOD(dataclasses.replace(inst, argval=argval))
+
+    def LOAD_ATTR_SUPER(self, inst):
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
+        arg = inst.argval[0]
+        argval = self.code_options["co_names"][arg]
+        self.LOAD_ATTR(dataclasses.replace(inst, argval=argval))
 
     def LOAD_METHOD(self, inst):
         self.LOAD_ATTR(inst)
@@ -1311,7 +1329,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented("missing: BUILD_SET")
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        items = set(map(HashableTracker, items))
         new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
         self.push(new_set)
 
@@ -1334,8 +1351,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def BUILD_MAP(self, inst):
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
-        d = dict(zip(map(HashableTracker, items[::2]), items[1::2]))
-        self.push(ConstDictVariable(d, dict, mutable_local=MutableLocal(), **options))
+        d = dict(zip(items[::2], items[1::2]))
+        self.push(ConstDictVariable.create(d, mutable_local=MutableLocal(), **options))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1346,9 +1363,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
         self.push(
-            ConstDictVariable(
+            ConstDictVariable.create(
                 result,
-                dict,
                 mutable_local=MutableLocal(),
                 **VariableTracker.propagate(items),
             )
@@ -1360,13 +1376,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         keys = self.pop()
         values = self.popn(inst.argval)
         options = VariableTracker.propagate([keys] + values)
+
         assert isinstance(keys, TupleVariable)
         assert keys.is_python_constant()
-        keys = map(HashableTracker, keys.items)
+
+        keys = keys.unpack_var_sequence(self)
+        assert len(keys) == len(values)
+
         self.push(
-            ConstDictVariable(
+            ConstDictVariable.create(
                 dict(zip(keys, values)),
-                dict,
                 mutable_local=MutableLocal(),
                 **options,
             )
@@ -1634,13 +1653,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def MATCH_KEYS(self, inst):
         tos = self.stack[-1]
-        assert tos.is_python_constant()
-        keys = tos.as_python_constant()
         tos1 = self.stack[-2]
         assert isinstance(tos1, ConstDictVariable)
-        match_obj = tos1.items
-        if all(key in match_obj for key in keys):
-            self.push(TupleVariable([match_obj[key] for key in keys]))
+
+        def is_in(x, d):
+            return d.call_method(self, "__contains__", [x], {}).value
+
+        def get(x, d):
+            return d.call_method(self, "__getattr__", [x], {})
+
+        if all(is_in(k, tos1) for k in tos):
+            self.push(TupleVariable([get(k, tos1) for k in tos]))
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -1961,6 +1984,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
+        self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
         self.log_starts_line()
 
@@ -2184,6 +2208,7 @@ class InstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
+            and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
@@ -2222,12 +2247,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented("Patched init cannot be inlined.")
 
         try:
-            if id(func.get_function()) in allowed_functions._disallowed_function_ids:
-                unimplemented(f"inlining disallowed: {func.get_function()}")
+            func_value = func.get_function()
         except NotImplementedError:
-            pass  # closures
+            func_value = None
 
-        result = skipfiles.check_verbose(func, extra_check=True)
+        if (
+            func.get_name() == "__torch_function__"
+            or func_value is torch._tensor._convert
+        ):
+            return skipfiles.SkipResult(False, "Allow __torch_function__")
+
+        if func_value and id(func_value) in allowed_functions._disallowed_function_ids:
+            unimplemented(f"inlining disallowed: {func_value}")
+
+        result = skipfiles.check_verbose(func, allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
@@ -2271,7 +2304,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(
+            raise ArgsMismatchError(  # noqa: TRY200
                 "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
                     reason=str(e),
                     func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
@@ -2349,6 +2382,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
+
+        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
 

@@ -634,6 +634,24 @@ static PyObject* THPStorage_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+
+  const auto& self_ = THPStorage_Unpack(self);
+  const c10::DataPtr& data_ptr = self_.data_ptr();
+  at::MapAllocator* map_allocator = at::MapAllocator::fromDataPtr(data_ptr);
+
+  if (map_allocator == nullptr) {
+    TORCH_WARN(
+        "Only storages with data pointers created via at::MapAllocator have a filename.");
+    Py_RETURN_NONE;
+  }
+  std::string filename = map_allocator->filename();
+
+  return THPUtils_packString(filename);
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -663,6 +681,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
     {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {"_fix_weakref", THPStorage_fix_weakref, METH_NOARGS, nullptr},
+    {"_get_filename", THPStorage__get_filename, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {
