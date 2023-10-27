@@ -1,6 +1,5 @@
 import math
 import torch
-import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
 
@@ -676,48 +675,35 @@ def bsr_dense_mm_meta(M, K, N, Ms, Ks,
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient memory reference based comparision as an
-    approximation to data equality based keys.
+    keys with efficient data-pointer/shape/strides based comparision
+    as an approximation to data equality based keys.
 
-    Motivation: the hash value of a torch tensor is tensor instance
-    based that does not use data equality and makes the usage of
-    tensors as keys less useful. For instance, the result of
+    Motivation: the hash value of a torch tensor is tensor-pointer
+    based that completely ignores data equality and makes the usage of
+    tensors as keys rather pointless. For instance, the result of
     ``len({a.crow_indices(), a.crow_indices()})`` is `2`, although,
-    the tensor results from `crow_indices` method call are equal, in
-    fact, these share the same data storage.
+    the results of `crow_indices` method hold the same data storage.
     On the other hand, for efficient caching of tensors we want to
-    avoid calling torch.equal that compares tensors item-wise.
-
-    TensorAsKey offers a compromise in that it guarantees key equality
-    of tensors that references data in the same storage in the same
-    manner and without accessing underlying data. However, this
-    approach does not always guarantee correctness. For instance, for
-    a complex tensor ``x``, we have ``TensorAsKey(x) ==
-    TensorAsKey(x.conj())`` while ``torch.equal(x, x.conj())`` would
-    return False.
+    avoid calling torch.equal at the expense of having a possibly
+    larger cache as it may contain tensors that are element-wise equal
+    but that use different data storages.
     """
-
     def __init__(self, obj):
-        self._obj_ref = weakref.ref(obj)
-        self.key = (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride())
+        self.obj = obj
+        self.key = (obj.data_ptr(), obj.shape, obj.stride())
         self._hash = hash(self.key)
 
     def __hash__(self):
         return self._hash
 
     def __eq__(self, other):
+        if self is other:
+            return True
         if not isinstance(other, TensorAsKey):
             return False
-        if self.obj is None or other.obj is None:
-            # dead objects always compare unequal unless these are
-            # same objects
-            return self is other
+        if self.obj is other.obj:
+            return True
         return self.key == other.key
-
-    @property
-    def obj(self):
-        """Return object if alive, otherwise None."""
-        return self._obj_ref()
 
 
 @lru_cache(maxsize=128)
@@ -741,10 +727,7 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
         non_zero_row_indices = crow_indices_diff.nonzero()
         a = non_zero_row_indices * (Ms * N)
         r_offsets = (a + b).view(-1)
-        # crow_indices consitutes a part of a key in lru_cache as well
-        # as of a value. To avoid infinite lifetime of such tensors,
-        # the value will contain a clone of the tensor:
-        c_indices = crow_indices.clone()
+        c_indices = crow_indices
         # swizzle operation: mm elements with longer sums are computed first:
         nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
         nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
@@ -816,10 +799,9 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
     if 'allow_tf32' not in meta_input:
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
     SPLIT_N = meta['SPLIT_N']
-    crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     indices_data = _bsr_scatter_mm_indices_data(
         indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N,
-        TensorAsKey(crow_indices), TensorAsKey(col_indices))
+        TensorAsKey(bsr.crow_indices()), TensorAsKey(bsr.col_indices()))
 
     if indices_format == 'bsr_strided_mm_compressed':
         meta.update(is_compressed=True)
