@@ -123,7 +123,7 @@ class TestForeach(TestCase):
         dtypes=(torch.float32,)
     )
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
-        wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
+        wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
             if not op.has_no_out_of_place:
@@ -147,9 +147,9 @@ class TestForeach(TestCase):
         else:
             func, ref, _, _ = self._get_funcs(op)
         for sample in op.sample_inputs(device, dtype, noncontiguous=noncontiguous):
-            kwargs = sample.kwargs
-            disable_fastpath = kwargs.pop("disable_fastpath")
-            expect_fastpath = not (noncontiguous or disable_fastpath)
+            ref_kwargs = sample.kwargs
+            kwargs = ref_kwargs.copy()
+            expect_fastpath = not (noncontiguous or sample.disable_fastpath)
             if op in foreach_pointwise_op_db:
                 values = kwargs.pop("values", None)
                 if values is not None:
@@ -168,9 +168,9 @@ class TestForeach(TestCase):
                     if not (op.has_no_in_place or op.has_no_out_of_place)
                     else self.assertRaises(type(e))
                 ):
-                    ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
+                    ref([ref_input, *sample.ref_args], **ref_kwargs)
             else:
-                expected = ref([ref_input, *sample.ref_args], **sample.ref_kwargs)
+                expected = ref([ref_input, *sample.ref_args], **ref_kwargs)
                 self.assertEqual(expected, actual)
 
     def _binary_test(
@@ -227,7 +227,6 @@ class TestForeach(TestCase):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs
             alpha = kwargs.pop("alpha", None)
-            _ = kwargs.pop("disable_fastpath") if is_fastpath else False
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             if isinstance(rhs_arg, Number) and not scalar_self_arg_test_complete:
                 scalar_self_arg_test_complete = True
@@ -255,7 +254,7 @@ class TestForeach(TestCase):
             assert len(sample.args) == 2
             inputs = [sample.input, *sample.args]
             kwargs = sample.kwargs
-            disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
+            disable_fastpath = sample.disable_fastpath and is_fastpath
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             values = kwargs.pop("values", None)
 
@@ -691,7 +690,6 @@ class TestForeach(TestCase):
         func, *_ = self._get_funcs(op)
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
         self.assertTrue(all(t.requires_grad for t in sample.input))
-        sample.kwargs.pop("disable_fastpath")
         if func.func in foreach_pointwise_op_db:
             sample.kwargs.pop("values", None)
         (out1, out2) = func([sample.input, *sample.args], is_cuda=False, is_fastpath=False, **sample.kwargs)
