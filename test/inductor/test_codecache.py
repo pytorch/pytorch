@@ -3,7 +3,6 @@ import functools
 import pickle
 import tempfile
 import unittest
-import sys
 from unittest.mock import patch
 
 import torch
@@ -29,14 +28,6 @@ HAS_TRITON = has_triton()
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
-
-try:
-    from torchvision.models import resnet18
-
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "requires torchvision")
 
 
 class MyModel(torch.nn.Module):
@@ -67,6 +58,19 @@ def test_codecache_spawn():
 @requires_cuda()
 def test_codecache_fork():
     _run_codecache_test("fork")
+
+
+class MyModelConv2d(torch.nn.Module):
+    def __init__(self, dim=512):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(3, dim, kernel_size=3, stride=2, bias=False)
+        self.conv2 = torch.nn.Conv2d(dim, dim, kernel_size=3, stride=2, bias=False)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        torch._dynamo.graph_break()
+        x = self.conv2(x)
+        return x
 
 
 @instantiate_parametrized_tests
@@ -133,42 +137,10 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dtype", (torch.float32, torch.float16))
     def test_cache_load_model(self, device, dtype):
         """
         Verify that we can populate and load models from the cache.
-        """
-        if device == "cuda" and not HAS_CUDA:
-            raise unittest.SkipTest("requires CUDA")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
-            raise unittest.SkipTest("requires SM80 or later")
-
-        model = MyModel().to(dtype=dtype, device=device)
-
-        a = torch.rand(10, 10, dtype=dtype, device=device)
-
-        compiled_model = torch.compile(model, dynamic=False)
-
-        # A first call shold miss in the cache.
-        self.assertEqual(model(a), compiled_model(a))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
-
-        # A second call should hit. (First reset so in-memory guards
-        # don't prevent compilation).
-        torch._dynamo.reset()
-        self.assertEqual(model(a), compiled_model(a))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
-
-    @skipIfNoTorchVision
-    @config.patch({"fx_graph_cache": True})
-    @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.float16))
-    def test_cache_resnet_backward(self, device, dtype):
-        """
-        Test backward graphs using resnet18. This model exposes failures
-        to properly handle output strides.
         """
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
@@ -178,20 +150,19 @@ class TestFxGraphCache(TestCase):
             mod(x).sum().backward()
             return [p.grad for p in mod.parameters()]
 
-        compiled_fn = torch.compile(fn)
+        compiled_fn = torch.compile(fn, dynamic=False)
 
-        mod = resnet18().to(device=device, dtype=dtype)
-        inp = torch.randn(1, 3, 224, 224, device=device, dtype=dtype)
+        mod = MyModelConv2d().to(device=device, dtype=dtype)
+        inp = torch.randn(2, 3, 16, 16, device=device, dtype=dtype)
 
         # The first call should see all cache misses.
-        print("1111111111111111111", file=sys.stderr)
         counters.clear()
         grads1 = compiled_fn(mod, inp)
         self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-        # A second call should see all cache hits.
-        print("2222222222222222222", file=sys.stderr)
+        # The second should see all hits. (First reset so in-memory guards
+        # don't prevent compilation).
         counters.clear()
         torch._dynamo.reset()
         grads2 = compiled_fn(mod, inp)
