@@ -82,7 +82,7 @@ def _process_dynamic_shapes(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> Optional[List[Constraint]]:
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return None
@@ -107,7 +107,7 @@ def _process_dynamic_shapes(
             for i, shape in enumerate(dynamic_shapes):
                 yield from tree_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
-            if not isinstance(dynamic_shapes, Mapping):
+            if not isinstance(dynamic_shapes, (Mapping, Sequence)):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
@@ -118,8 +118,16 @@ def _process_dynamic_shapes(
                     UserErrorType.INVALID_INPUT,
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
-            for k, shape in dynamic_shapes.items():
-                yield from tree_zip(combined_args[k], shape)
+
+            if isinstance(dynamic_shapes, Mapping):
+                for k, shape in dynamic_shapes.items():
+                    yield from tree_zip(combined_args[k], shape)
+            else:
+                # This means user didn't specify dynamic shapes
+                # with argument names.
+                combined_args_list = list(combined_args.values())
+                yield from tree_zip(combined_args_list, dynamic_shapes)
+
         elif dataclasses.is_dataclass(combined_args):
             if not type(dynamic_shapes) == type(combined_args):
                 raise UserError(
@@ -229,14 +237,16 @@ def export__RC__(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> ExportedProgram:
     """
     API for exporting with dynamic shape specifications instead of constraints.
     It should be considered "release candidate" (RC), meant to replace `export`.
 
     Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
-    argument names of `f` to dynamic shape specifications, as follows:
+    argument names of `f` to dynamic shape specifications OR a tuple where each element
+    corresponds to the original order of the arguments defined in the function signature
+    , as follows:
     - The dynamic shape of a tensor argument can be specified as:
       - Either a dict from dynamic dimension indices to Dim types. It is not
         required to include static dimension indices in this dict, but when
