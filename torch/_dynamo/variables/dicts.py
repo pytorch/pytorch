@@ -2,7 +2,8 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List
+import sys
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
@@ -12,8 +13,8 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 
 from ..exc import unimplemented
-from ..guards import make_dupe_guard
-from ..source import AttrSource, GlobalWeakRefSource
+from ..guards import GuardBuilder, make_dupe_guard
+from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor, iter_contains
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -349,15 +350,22 @@ class SetVariable(VariableTracker):
     # Note - this is only used for producing a set
     def _as_set_element(self, vt):
         from .base import VariableTracker
+        from .misc import MethodWrapperVariable
         from .tensor import TensorVariable
 
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            tensor_node = vt.as_proxy().node
-            return SetVariable.SetElement(vt, tensor_node)
+            fake_tensor = vt.as_proxy().node.meta.get("example_value")
+            if fake_tensor is None:
+                unimplemented(
+                    "Cannot check Tensor object identity without its fake value"
+                )
+            return SetVariable.SetElement(vt, fake_tensor)
         if isinstance(vt, ConstantVariable):
             return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, MethodWrapperVariable):
+            return SetVariable.SetElement(vt, vt.as_python_constant())
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
@@ -434,7 +442,9 @@ class SetVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx, options)
+            return iter_contains(
+                self.items, args[0], tx, options, check_tensor_identity=True
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -740,3 +750,87 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
             self
         )
+
+
+class PythonSysModulesVariable(VariableTracker):
+    """Special case for sys.modules.
+
+    Without this we will guard on the exact set of modules imported in the
+    lifetime of the python program.
+    """
+
+    def python_type(self):
+        return dict
+
+    @staticmethod
+    def reconstruct(self, codegen):
+        codegen.extend_output(
+            [
+                codegen.create_load_python_module(sys, True),
+                codegen.create_load_attr("modules"),
+            ]
+        )
+
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ):
+        from .builder import VariableBuilder
+
+        if name == "__getitem__":
+            return self.call_getitem(tx, *args, **kwargs)
+        elif name == "get":
+            return self.call_get(tx, *args, **kwargs)
+        elif name == "__contains__":
+            return self.call_contains(tx, *args, **kwargs)
+
+        # Fallback to dict implementation
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        real_dict = VariableBuilder(tx, self.source, **options)(sys.modules)
+        return real_dict.call_method(tx, name, args, kwargs)
+
+    def _contains_helper(self, tx, key: VariableTracker):
+        k = ConstDictVariable.get_key(key)
+        has_key = k in sys.modules
+        guard = self.make_guard(
+            functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
+        )
+        guards = {*self.guards, guard}
+        return k, has_key, guards
+
+    def call_contains(self, tx, key: VariableTracker):
+        k, has_key, guards = self._contains_helper(tx, key)
+        return ConstantVariable.create(
+            value=has_key,
+            guards=guards,
+        )
+
+    def call_get(
+        self, tx, key: VariableTracker, default: Optional[VariableTracker] = None
+    ):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+
+        if has_key:
+            return VariableBuilder(
+                tx,
+                GetItemSource(self.source, k),
+            )(
+                sys.modules[k]
+            ).add_guards(guards)
+
+        if default is not None:
+            return default.add_guards(guards)
+
+        return ConstantVariable.create(value=None, guards=guards)
+
+    def call_getitem(self, tx, key: VariableTracker):
+        from .builder import VariableBuilder
+
+        k, has_key, guards = self._contains_helper(tx, key)
+        return VariableBuilder(
+            tx,
+            GetItemSource(self.source, k),
+        )(
+            sys.modules[k]
+        ).add_guards(guards)

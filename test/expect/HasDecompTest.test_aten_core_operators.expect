@@ -49,6 +49,8 @@ aten::amin.out
 aten::any
 aten::any.all_out
 aten::any.dim
+aten::any.dims
+aten::any.dims_out
 aten::any.out
 aten::arange.out
 aten::arange.start_out
@@ -77,6 +79,7 @@ aten::bitwise_and.Scalar_Tensor_out
 aten::bitwise_and.Scalar_out
 aten::bitwise_and.Tensor
 aten::bitwise_and.Tensor_out
+aten::bitwise_and_.Scalar
 aten::bitwise_and_.Tensor
 aten::bitwise_left_shift.Scalar_Tensor
 aten::bitwise_left_shift.Scalar_Tensor_out
@@ -89,11 +92,13 @@ aten::bitwise_left_shift_.Tensor_Scalar
 aten::bitwise_not
 aten::bitwise_not.out
 aten::bitwise_not_
+aten::bitwise_or.Scalar
 aten::bitwise_or.Scalar_Tensor
 aten::bitwise_or.Scalar_Tensor_out
 aten::bitwise_or.Scalar_out
 aten::bitwise_or.Tensor
 aten::bitwise_or.Tensor_out
+aten::bitwise_or_.Scalar
 aten::bitwise_or_.Tensor
 aten::bitwise_right_shift.Scalar_Tensor
 aten::bitwise_right_shift.Scalar_Tensor_out
@@ -103,11 +108,13 @@ aten::bitwise_right_shift.Tensor_Scalar_out
 aten::bitwise_right_shift.Tensor_out
 aten::bitwise_right_shift_.Tensor
 aten::bitwise_right_shift_.Tensor_Scalar
+aten::bitwise_xor.Scalar
 aten::bitwise_xor.Scalar_Tensor
 aten::bitwise_xor.Scalar_Tensor_out
 aten::bitwise_xor.Scalar_out
 aten::bitwise_xor.Tensor
 aten::bitwise_xor.Tensor_out
+aten::bitwise_xor_.Scalar
 aten::bitwise_xor_.Tensor
 aten::bucketize.Scalar
 aten::bucketize.Scalar_out
@@ -216,6 +223,7 @@ aten::flip.out
 aten::floor
 aten::floor.out
 aten::floor_
+aten::floor_divide_.Scalar
 aten::floor_divide_.Tensor
 aten::fmax
 aten::fmax.out
