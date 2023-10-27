@@ -50,10 +50,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             local_tensor = dtensor.to_local()
 
-            # allgather the local tensors
-            dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-            local_tensor_gathered = dtensor.to_local()
-
             # compare with local tensors from other ranks
             for other_rank in range(self.world_size):
                 if self.rank != other_rank:
@@ -64,7 +60,7 @@ class DistTensorRandomInitTest(DTensorTestBase):
                         ),
                     ]
                     # other rank should have a different local tensor
-                    self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
+                    self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
 
     @with_comms
     def test_init_ops(self):
@@ -129,9 +125,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = dropout(dtensor)
 
         # allgather the local tensors
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+        local_tensor = dtensor.full_tensor()
 
         # compare with local tensors from other ranks
         self_slice = slice(4 * self.rank, 4 * self.rank + 4)
@@ -276,10 +270,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             # the local shard
             local_tensor = dtensor.to_local()
             # allgather the local tensors
-            dtensor = dtensor.redistribute(
-                device_mesh, [Replicate(), Replicate(), Replicate()]
-            )
-            local_tensor_gathered = dtensor.to_local()
+            full_tensor = dtensor.full_tensor()
 
             # compare local tensor with each other shard
             for other_local_shard in local_shard_comb:
@@ -288,9 +279,9 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     slice(offset, offset + size) for offset, size in other_local_shard
                 ]
                 if local_shard_offset == other_local_shard_offset:
-                    self.assertEqual(local_tensor_gathered[slice_idx], local_tensor)
+                    self.assertEqual(full_tensor[slice_idx], local_tensor)
                 else:
-                    self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
+                    self.assertNotEqual(full_tensor[slice_idx], local_tensor)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
