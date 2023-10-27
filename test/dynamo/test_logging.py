@@ -597,6 +597,7 @@ exclusions = {
     "output_code",
     "schedule",
     "fusion",
+    "overlap",
     "aot_graphs",
     "post_grad_graphs",
     "compiled_autograd",
