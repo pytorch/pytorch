@@ -297,7 +297,7 @@ class DefaultDictVariable(ConstDictVariable):
 
 
 def _is_matching_transformers_cls(cls) -> bool:
-    if cls.__module__ != "transformers.modeling_outputs":
+    if not cls.__module__.startswith("transformers."):
         return False
 
     try:
