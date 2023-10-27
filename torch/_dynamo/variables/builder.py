@@ -404,7 +404,7 @@ class VariableBuilder:
                 )
                 for k in value.keys()
             }
-            return ConstDictVariable.create(result, type(value))
+            return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(
@@ -438,14 +438,14 @@ class VariableBuilder:
             result = dict(build_key_value(k, v) for k, v in value.items())
 
             if istype(value, collections.defaultdict):
-                result = DefaultDictVariable.create(
+                result = DefaultDictVariable(
                     result,
                     type(value),
                     default_factory=self._wrap(value.default_factory),
                     guards=guards,
                 )
             else:
-                result = ConstDictVariable.create(result, type(value), guards=guards)
+                result = ConstDictVariable(result, type(value), guards=guards)
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
@@ -510,7 +510,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif isinstance(value, np.generic):
+        elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
@@ -803,15 +803,6 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-
-    def tensor_can_be_dict_key(self, value):
-        # only allow Parameter and another specific Tensor can be used as dict key
-        return (
-            isinstance(value, torch.nn.Parameter)
-            or isinstance(self.source, AttrSource)
-            and self.source.member == "state"
-            and isinstance(self.source.base, LocalSource)
-        )
 
     def tensor_should_specialize(self):
         return (
@@ -1845,7 +1836,7 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable.create(items, mutable_local=MutableLocal())
+            return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()

@@ -550,7 +550,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
             assert isinstance(subobj, collections.OrderedDict)
             if not subobj:
-                return variables.ConstDictVariable.create(
+                return variables.ConstDictVariable(
                     subobj, collections.OrderedDict, **options
                 )
 
