@@ -404,7 +404,7 @@ class VariableBuilder:
                 )
                 for k in value.keys()
             }
-            return ConstDictVariable.create(result, type(value))
+            return ConstDictVariable(result, type(value))
         elif value is sys.modules:
             return PythonSysModulesVariable(source=self.source)
         elif istype(
@@ -438,14 +438,14 @@ class VariableBuilder:
             result = dict(build_key_value(k, v) for k, v in value.items())
 
             if istype(value, collections.defaultdict):
-                result = DefaultDictVariable.create(
+                result = DefaultDictVariable(
                     result,
                     type(value),
                     default_factory=self._wrap(value.default_factory),
                     guards=guards,
                 )
             else:
-                result = ConstDictVariable.create(result, type(value), guards=guards)
+                result = ConstDictVariable(result, type(value), guards=guards)
 
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
@@ -510,7 +510,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif isinstance(value, np.generic):
+        elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
@@ -804,35 +804,6 @@ class VariableBuilder:
                 self.source, value, result
             )
 
-    def tensor_can_be_dict_key(self, value):
-        # only allow Parameter and another specific Tensor can be used as dict key
-        return (
-            isinstance(value, torch.nn.Parameter)
-            or isinstance(self.source, AttrSource)
-            and self.source.member == "state"
-            and isinstance(self.source.base, LocalSource)
-        )
-
-    def tensor_should_specialize(self):
-        return (
-            self.source
-            and isinstance(self.source, GetItemSource)
-            and isinstance(self.source.base, GetItemSource)
-            and self.source.base.index == "params"
-            and isinstance(self.source.base.base, GetItemSource)
-            and isinstance(self.source.base.base.base, AttrSource)
-            and self.source.base.base.base.member == "param_groups"
-            and isinstance(self.source.base.base.base.base, LocalSource)
-            and (
-                isinstance(
-                    self.tx.f_locals[self.source.base.base.base.base.local_name],
-                    torch.optim.Optimizer,
-                )
-                if self.source.base.base.base.base.local_name in self.tx.f_locals.keys()
-                else True
-            )
-        )
-
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
@@ -1110,7 +1081,6 @@ class VariableBuilder:
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            should_specialize=self.tensor_should_specialize(),
             subclass_type=subclass_type,
             source=source,
             **options,
@@ -1458,11 +1428,6 @@ def wrap_fx_proxy_cls(
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
-        should_specialize = options.pop("should_specialize", False)
-        if is_parameter or should_specialize:
-            specialized_value = initial_example_value
-        else:
-            specialized_value = None
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
@@ -1480,8 +1445,6 @@ def wrap_fx_proxy_cls(
             specialized_props["class_type"] = (
                 torch.nn.Parameter if is_parameter else tensor_type
             )
-
-        specialized_props["specialized_value"] = specialized_value
 
         options.update(specialized_props)
         return target_cls(proxy, **options)
@@ -1845,7 +1808,7 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, dict):
             items = {self(tx, k): self(tx, v) for k, v in value.items()}
-            return ConstDictVariable.create(items, mutable_local=MutableLocal())
+            return ConstDictVariable(items, mutable_local=MutableLocal())
         elif isinstance(value, set):
             return SetVariable(
                 [self(tx, x) for x in value], mutable_local=MutableLocal()

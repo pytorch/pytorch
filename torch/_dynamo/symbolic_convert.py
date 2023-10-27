@@ -1148,7 +1148,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def CALL_FUNCTION_EX(self, inst):
         if inst.argval == 0:
-            kwargsvars = ConstDictVariable.create({})
+            kwargsvars = ConstDictVariable({})
             argsvars = self.pop()
         elif inst.argval == 1:
             kwargsvars = self.pop()
@@ -1352,7 +1352,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         items = self.popn(inst.argval * 2)
         options = VariableTracker.propagate(items)
         d = dict(zip(items[::2], items[1::2]))
-        self.push(ConstDictVariable.create(d, mutable_local=MutableLocal(), **options))
+        self.push(ConstDictVariable(d, mutable_local=MutableLocal(), **options))
 
     def BUILD_MAP_UNPACK(self, inst):
         items = self.popn(inst.argval)
@@ -1363,7 +1363,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert isinstance(x, ConstDictVariable)
             result.update(x.items)
         self.push(
-            ConstDictVariable.create(
+            ConstDictVariable(
                 result,
                 mutable_local=MutableLocal(),
                 **VariableTracker.propagate(items),
@@ -1384,7 +1384,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert len(keys) == len(values)
 
         self.push(
-            ConstDictVariable.create(
+            ConstDictVariable(
                 dict(zip(keys, values)),
                 mutable_local=MutableLocal(),
                 **options,
