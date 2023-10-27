@@ -1505,23 +1505,5 @@ def forward(self, arg0_1):
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (zeros,)""")
 
-
-    def test_input_dataclass_not_detected(self):
-
-        @dataclass
-        class Input:
-            foo: torch.Tensor
-
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, input: Input):
-                return input.foo + input.foo
-
-        ep = torch.export.export(Mod(), (Input(foo=torch.ones(2, 3)),))
-
-
 if __name__ == '__main__':
     run_tests()

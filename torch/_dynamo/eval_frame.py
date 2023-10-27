@@ -1203,7 +1203,16 @@ def export(
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
         for arg in flat_args:
-            prim_types = (torch.Tensor, str, int, float, bool)
+            prim_types = (
+                torch.Tensor,
+                str,
+                int,
+                float,
+                bool,
+                torch.SymBool,
+                torch.SymInt,
+                torch.SymFloat,
+            )
             if not isinstance(arg, prim_types):
                 if dataclasses.is_dataclass(arg):
                     raise RuntimeError(
