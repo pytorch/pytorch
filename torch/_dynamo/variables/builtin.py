@@ -39,12 +39,11 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable
+from .dicts import ConstDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -821,7 +820,11 @@ class BuiltinVariable(VariableTracker):
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
-        cls = variables.BaseListVariable.cls_for(self.fn)
+        # TODO This should probably be treated as a dict, or dicts should also be treated here
+        if self.fn == set:
+            cls = SetVariable
+        else:
+            cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
             if cls is SetVariable:
                 return cls(
