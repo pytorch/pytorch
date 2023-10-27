@@ -20,7 +20,6 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
-from torch._logging import warning_once
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
