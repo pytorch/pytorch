@@ -60,6 +60,19 @@ def test_codecache_fork():
     _run_codecache_test("fork")
 
 
+class MyModelConv2d(torch.nn.Module):
+    def __init__(self, dim=512):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(3, dim, kernel_size=3, stride=2, bias=False)
+        self.conv2 = torch.nn.Conv2d(dim, dim, kernel_size=3, stride=2, bias=False)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        torch._dynamo.graph_break()
+        x = self.conv2(x)
+        return x
+
+
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
     @classmethod
@@ -124,33 +137,40 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dtype", (torch.float32, torch.float16))
     def test_cache_load_model(self, device, dtype):
         """
         Verify that we can populate and load models from the cache.
         """
         if device == "cuda" and not HAS_CUDA:
             raise unittest.SkipTest("requires CUDA")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
-            raise unittest.SkipTest("requires SM80 or later")
 
-        model = MyModel().to(dtype=dtype, device=device)
+        def fn(mod, x):
+            mod.zero_grad()
+            mod(x).sum().backward()
+            return [p.grad for p in mod.parameters()]
 
-        a = torch.rand(10, 10, dtype=dtype, device=device)
+        compiled_fn = torch.compile(fn, dynamic=False)
 
-        compiled_model = torch.compile(model, dynamic=False)
+        mod = MyModelConv2d().to(device=device, dtype=dtype)
+        inp = torch.randn(2, 3, 16, 16, device=device, dtype=dtype)
 
-        # A first call shold miss in the cache.
-        self.assertEqual(model(a), compiled_model(a))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        # The first call should see all cache misses.
+        counters.clear()
+        grads1 = compiled_fn(mod, inp)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
-        # A second call should hit. (First reset so in-memory guards
+        # The second should see all hits. (First reset so in-memory guards
         # don't prevent compilation).
+        counters.clear()
         torch._dynamo.reset()
-        self.assertEqual(model(a), compiled_model(a))
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        grads2 = compiled_fn(mod, inp)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # And the results should be the same.
+        self.assertEqual(grads1, grads2)
 
 
 class TestFxGraphCacheHashing(TestCase):
