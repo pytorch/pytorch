@@ -9196,7 +9196,7 @@ def reference_sgn(x):
     if out.ndim == 0:
         # Handle x == 0 case
         if (x == 0):
-            # Can't assign to np.complex object
+            # Can't assign to complex object
             # So make a new one.
             return np.array(complex(0, 0), dtype=x.dtype)
         return out
