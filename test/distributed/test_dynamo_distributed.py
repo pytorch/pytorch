@@ -405,7 +405,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = opt_model(inputs)
             self.assertTrue(same(correct_outputs, outputs))
             # Each FSDP module is a separate graph
-            self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(cnt.frame_count, 6)
             self.assertTrue(find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None)
 
 

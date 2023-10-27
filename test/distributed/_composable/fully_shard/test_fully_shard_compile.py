@@ -2,6 +2,7 @@
 
 import copy
 import sys
+import unittest
 
 import torch
 import torch.distributed as dist
@@ -9,6 +10,7 @@ import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard
 from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -35,6 +37,7 @@ class TestCompile(FSDPTest):
     def world_size(self) -> int:
         return torch.cuda.device_count()
 
+    @unittest.skipIf(not SM70OrLater, "need sm_70")
     @skip_if_lt_x_gpu(2)
     def test_compile(self):
         self.run_subtests(
