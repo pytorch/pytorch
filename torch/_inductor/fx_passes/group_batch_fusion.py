@@ -37,6 +37,10 @@ MAX_FUSE_SEARCH_DEPTH = 5
 # The maximum tensor size that can go into the fusion group
 MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
 
+# exclude these nodes from BFS
+# excluding get item improves optimizer compilation time by 60s
+SEARCH_EXCLUSIONS = {operator.getitem}
+
 
 class GroupBatchFusionBase:
     def match(self, node):
@@ -582,6 +586,10 @@ def get_fusion_candidates(
     candidate_dict: DefaultDict[Any, List[torch.fx.Node]] = collections.defaultdict(
         list
     )
+
+    if root_node.target in SEARCH_EXCLUSIONS:
+        return candidate_dict
+
     visited_set: Set[torch.fx.Node] = set()
 
     for next_node in root_node.all_input_nodes:
