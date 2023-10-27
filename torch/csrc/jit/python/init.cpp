@@ -1628,7 +1628,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto sortedOps = getAllSortedOperatorsFor(symbol);
-          if (unsortedOps.empty()) {
+          if (sortedOps.empty()) {
             // No such operator
             return py::make_tuple(py::none(), py::none());
           }
