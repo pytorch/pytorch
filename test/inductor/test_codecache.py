@@ -3,6 +3,7 @@ import functools
 import pickle
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 
 import torch
@@ -183,12 +184,14 @@ class TestFxGraphCache(TestCase):
         inp = torch.randn(1, 3, 224, 224, device=device, dtype=dtype)
 
         # The first call should see all cache misses.
+        print("1111111111111111111", file=sys.stderr)
         counters.clear()
         grads1 = compiled_fn(mod, inp)
         self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
         # A second call should see all cache hits.
+        print("2222222222222222222", file=sys.stderr)
         counters.clear()
         torch._dynamo.reset()
         grads2 = compiled_fn(mod, inp)

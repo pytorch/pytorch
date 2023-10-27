@@ -471,6 +471,7 @@ def _reduce_fake_tensor(t):
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
     metadata = extract_tensor_metadata(t)
+    print(str(metadata), file=sys.stderr)
     return (_ident, (metadata,))
 
 
