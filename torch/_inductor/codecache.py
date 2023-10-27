@@ -990,7 +990,9 @@ def cpp_wrapper_flags() -> str:
 
 
 def optimization_flags() -> str:
-    base_flags = "-O3 -DNDEBUG -ffast-math -fno-finite-math-only"
+    base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
+    base_flags += " -ffast-math -fno-finite-math-only"
+
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
         # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
@@ -1199,9 +1201,10 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
-    # Unconditionally import c10 to use TORCH_CHECK - See PyTorch #108690
-    libs += ["c10"]
-    lpaths += [cpp_extension.TORCH_LIB_PATH]
+    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
+    if not config.is_fbcode():
+        libs += ["c10"]
+        lpaths += [cpp_extension.TORCH_LIB_PATH]
 
     # third party libs
     if config.is_fbcode():
