@@ -179,6 +179,17 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
+class FakeNode:
+    def __init__(self):
+        self.meta = {}
+
+class LazyListProxy:
+    def __init__(self, lst_proxy, idx):
+        self.lst_proxy = lst_proxy
+        self.idx = idx
+        self.node = FakeNode()
+
+
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
     def wrap_with_proxy(e, proxy, constant):
         if isinstance(e, torch.Tensor):
@@ -194,7 +205,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
-                wrap_with_proxy(ee, proxy[idx], get_constant(idx))
+                wrap_with_proxy(ee, LazyListProxy(proxy, idx), get_constant(idx))
         elif isinstance(e, dict):
             # In theory we could support const-prop when proxy-tensor-tracing
             # operators that returns dicts of tensors, but we have no use case
@@ -255,7 +266,6 @@ HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
-
     def can_handle_tensor(x):
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
         if proxy_mode._allow_fake_constant:
@@ -354,6 +364,21 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+    proxy_args = list(proxy_args)
+    for idx, arg in enumerate(proxy_args):
+        if isinstance(arg, list):
+            is_full_lst = True
+            lst_proxy = None
+            for lst_idx, a in enumerate(arg):
+                if isinstance(a, LazyListProxy) and a.idx == lst_idx:
+                    lst_proxy = a.lst_proxy
+                    continue
+                else:
+                    is_full_lst = False
+            if is_full_lst:
+                proxy_args[idx] = lst_proxy
+
+    proxy_args = tuple(proxy_args)
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -459,6 +484,10 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, (SymInt, SymFloat, SymBool)):
             assert a.node.constant is not None
             return a.node.constant
+        elif isinstance(a, LazyListProxy):
+            proxy =  a.lst_proxy[a.idx]
+            proxy.node.meta = a.node.meta
+            return proxy.node
         return super().create_arg(a)
 
     def unwrap_proxy(self, e):
