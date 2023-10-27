@@ -26,24 +26,21 @@ from typing import (
     Union,
 )
 
-import torch
-from ._pytree import TreeSpec as PyTreeSpec
-
-try:
-    if torch._running_with_deploy() and torch.compiled_with_cxx11_abi():
-        raise ModuleNotFoundError
-    import optree
-except ModuleNotFoundError:
-    optree = None  # type: ignore[assignment]
-else:
-    from optree import (  # type: ignore[assignment]  # noqa: F811
-        PyTreeSpec,  # direct import for type annotations
-    )
+import optree
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
     "PyTree",
-    "PyTreeSpec",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
+    "_register_pytree_node",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
@@ -57,7 +54,6 @@ __all__ = [
     "tree_any",
     "tree_all_only",
     "tree_any_only",
-    "broadcast_prefix",
     "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
@@ -97,7 +93,7 @@ def register_pytree_node(
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     namespace: str = "torch",
-    _register_python_pytree_node: bool = True,
+    __register_python_pytree_node: bool = True,
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
 
@@ -206,7 +202,15 @@ def register_pytree_node(
             )
         )
     """
-    if _register_python_pytree_node:
+    if not optree.is_structseq_class(cls):
+        optree.register_pytree_node(
+            cls,
+            flatten_func,
+            _reverse_args(unflatten_func),
+            namespace=namespace,
+        )
+
+    if __register_python_pytree_node:
         from ._pytree import _register_pytree_node
 
         _register_pytree_node(
@@ -215,16 +219,11 @@ def register_pytree_node(
             unflatten_func,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
-            _register_cxx_pytree_node=False,
+            __register_cxx_pytree_node=False,
         )
 
-    if optree is not None and not optree.is_structseq_class(cls):
-        optree.register_pytree_node(
-            cls,
-            flatten_func,
-            _reverse_args(unflatten_func),
-            namespace=namespace,
-        )
+
+_register_pytree_node = register_pytree_node
 
 
 def tree_flatten(
@@ -837,37 +836,14 @@ def treespec_pprint(treespec: PyTreeSpec) -> str:
     return repr(dummy_tree)
 
 
-if optree is not None:
+class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
+    def __instancecheck__(self, instance: object) -> bool:
+        return isinstance(instance, PyTreeSpec) and instance.is_leaf()
 
-    class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
-        def __instancecheck__(self, instance: object) -> bool:
-            return isinstance(instance, PyTreeSpec) and instance.is_leaf()
 
-    class PyTreeLeafSpec(PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
-        def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
-            return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
+class PyTreeLeafSpec(PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
+    def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
+        return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
 
-    LeafSpec = PyTreeLeafSpec
 
-else:
-    from ._pytree import (  # type: ignore[no-redef,assignment]  # noqa: F401,F811
-        _broadcast_to_and_flatten,
-        _register_pytree_node as register_pytree_node,
-        LeafSpec,
-        tree_all,
-        tree_all_only,
-        tree_any,
-        tree_any_only,
-        tree_flatten,
-        tree_leaves,
-        tree_map,
-        tree_map_,
-        tree_map_only,
-        tree_map_only_,
-        tree_structure,
-        tree_unflatten,
-        TreeSpec,
-        treespec_dumps,
-        treespec_loads,
-        treespec_pprint,
-    )
+LeafSpec = PyTreeLeafSpec
