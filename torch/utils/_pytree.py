@@ -28,6 +28,7 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    OrderedDict as GenericOrderedDict,
     overload,
     Tuple,
     Type,
@@ -190,14 +191,14 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return context
 
 
-def _odict_flatten(d: OrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
+def _odict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
 def _odict_unflatten(
     values: Iterable[Any],
     context: Context,
-) -> OrderedDict[Any, Any]:
+) -> GenericOrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
