@@ -3051,7 +3051,6 @@ def _check_foreach_binop_tensor_lists(self, other):
         aten._foreach_add.List,
         aten._foreach_sub.List,
         aten._foreach_mul.List,
-        aten._foreach_div.List,
         aten._foreach_maximum.List,
         aten._foreach_minimum.List,
         aten._foreach_clamp_min.List,
@@ -3060,6 +3059,38 @@ def _check_foreach_binop_tensor_lists(self, other):
 )
 def meta__foreach_binop_list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
+    return [
+        torch.empty_like(
+            s,
+            dtype=elementwise_dtypes(
+                s,
+                other_s,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+            )[0],
+        )
+        for s, other_s in zip(self, other)
+    ]
+    return [torch.empty_like(s) for s in self]
+
+
+@register_meta(
+    [
+        aten._foreach_div.List,
+    ]
+)
+def meta__foreach_div_list(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [
+        torch.empty_like(
+            s,
+            dtype=elementwise_dtypes(
+                s,
+                other_s,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+            )[0],
+        )
+        for s, other_s in zip(self, other)
+    ]
     return [torch.empty_like(s) for s in self]
 
 
@@ -3082,6 +3113,7 @@ def meta__foreach_binop__list(self, other, alpha=1):
 @register_meta(
     [
         aten._foreach_add.Tensor,
+        aten._foreach_mul.Tensor,
     ]
 )
 def meta__foreach_binop_tensor(self, other, alpha=1):
@@ -3099,6 +3131,7 @@ def meta__foreach_binop_tensor(self, other, alpha=1):
 @register_meta(
     [
         aten._foreach_add_.Tensor,
+        aten._foreach_mul_.Tensor,
     ]
 )
 def meta__foreach_binop__tensor(self, other, alpha=1):
@@ -3131,7 +3164,6 @@ def meta__foreach_binop__scalar(self, scalar=1):
 @register_meta(
     [
         aten._foreach_add.Scalar,
-        aten._foreach_div.Scalar,
         aten._foreach_mul.Scalar,
         aten._foreach_sub.Scalar,
     ]
@@ -3141,7 +3173,104 @@ def meta__foreach_binop_scalar(self, scalar=1):
         isinstance(self, List),
         lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
     )
-    return [torch.empty_like(s) for s in self]
+    return [
+        torch.empty_like(
+            s,
+            dtype=elementwise_dtypes(
+                s,
+                scalar,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+            )[0],
+        )
+        for s in self
+    ]
+
+
+@register_meta(
+    [
+        aten._foreach_div.Scalar,
+    ]
+)
+def meta__foreach_div_scalar(self, scalar=1):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
+    )
+    return [
+        torch.empty_like(
+            s,
+            dtype=elementwise_dtypes(
+                s,
+                scalar,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+            )[0],
+        )
+        for s in self
+    ]
+
+
+@register_meta(
+    [
+        aten._foreach_add.ScalarList,
+        aten._foreach_mul.ScalarList,
+        aten._foreach_sub.ScalarList,
+    ]
+)
+def meta__foreach_binop_scalarlist(self, scalars):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(scalars, List),
+        lambda: f"The second argument of must be List[], but got {type(scalars)}.",
+    )
+    torch._check(
+        len(scalars) == len(self),
+        lambda: f"The length of two arguments must match but got {len(self)} and {len(scalars)}.",
+    )
+    return [
+        torch.empty_like(
+            tensor,
+            dtype=elementwise_dtypes(
+                tensor,
+                scalar,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+            )[0],
+        )
+        for tensor, scalar in zip(self, scalars)
+    ]
+
+
+@register_meta(
+    [
+        aten._foreach_div.ScalarList,
+    ]
+)
+def meta__foreach_div_scalarlist(self, scalars):
+    torch._check(
+        isinstance(self, List),
+        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
+    )
+    torch._check(
+        isinstance(scalars, List),
+        lambda: f"The second argument of must be List[], but got {type(scalars)}.",
+    )
+    torch._check(
+        len(scalars) == len(self),
+        lambda: f"The length of two arguments must match but got {len(self)} and {len(scalars)}.",
+    )
+    return [
+        torch.empty_like(
+            tensor,
+            dtype=elementwise_dtypes(
+                tensor,
+                scalar,
+                type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+            )[0],
+        )
+        for tensor, scalar in zip(self, scalars)
+    ]
 
 
 @register_meta(
