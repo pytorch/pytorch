@@ -142,6 +142,8 @@ class _FSDPState(_State):
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         self._free_event_queue: Optional[_FreeEventQueue] = None
+        # Free event queue for unsharded grad reduce-scatter
+        self._free_event_queue_rs: Optional[_FreeEventQueue] = None
         # Defaults to true per PyTorch module convention
         self._is_training: bool = True
         # Defaults rate limiting to true; may be changed in `_init_core_state`

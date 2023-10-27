@@ -460,6 +460,9 @@ def _init_core_state(
     state.training_state = TrainingState.IDLE
     state._is_root = None
     state._free_event_queue = _FreeEventQueue(DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS)
+    # Free event queue for unsharded grad reduce-scatter; reusing the same max
+    # inflight as all gather
+    state._free_event_queue_rs = _FreeEventQueue(DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS)
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = exec_order_utils._ExecOrderData(
         state._debug_level,

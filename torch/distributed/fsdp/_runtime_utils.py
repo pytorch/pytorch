@@ -258,6 +258,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
+        fsdp_state._free_event_queue_rs = root_state._free_event_queue_rs
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
@@ -763,9 +764,25 @@ def _post_backward_hook(
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
             if handle.uses_sharded_strategy:
-                _reduce_grad(state, handle)
+                unsharded_grad_consumed_event = _reduce_grad(state, handle)
             else:
-                _reduce_grad_no_shard(state, handle)
+                unsharded_grad_consumed_event = _reduce_grad_no_shard(state, handle)
+
+        if state.limit_all_gathers:
+            # If limit_all_gather is on, we would implement a conjugate
+            # stream-stream wait system for backward.  Here the producer is
+            # backward compute, and consumer is reducer.
+            state._free_event_queue_rs.enqueue(
+                autograd_computed_grad,
+                unsharded_grad_consumed_event,
+            )
+            # Backward pass computation wait for the -2 reduce-scatter done event
+            tensor_free_event = state._free_event_queue_rs.dequeue_if_needed()
+            if tensor_free_event:
+                tensor, event = tensor_free_event
+                comp_stream = state._device_handle.current_stream()
+                comp_stream.wait_event(event)  # type: ignore[attr-defined]
+        else:
             # Since the unsharded gradient is produced in the computation
             # stream and consumed in the post-backward stream, inform the
             # caching allocator (before it goes out of scope)
@@ -819,7 +836,7 @@ def _should_free_in_backward(
 
 
 @no_type_check
-def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
+def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> torch.cuda.Event:
     """
     For sharded strategies, this runs gradient reduction, sharded gradient
     accumulation if needed, and the post-reduction callback.
@@ -836,6 +853,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
     # gradient.
     unsharded_grad = flat_param.grad.data
     flat_param.grad = None
+    unsharded_grad_consumed_event = state._device_handle.Event()
     padded_unsharded_grad, new_sharded_grad = _get_reduce_scatter_tensors(
         state, unsharded_grad
     )
@@ -846,6 +864,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
             padded_unsharded_grad,
             group=state.process_group,
         )
+        unsharded_grad_consumed_event.record()
         if uses_hybrid_sharded_strategy:
             state._all_reduce_stream.wait_stream(state._post_backward_stream)
             with state._device_handle.stream(state._all_reduce_stream):
@@ -865,9 +884,11 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> None:
         state._comm_hook(
             state._comm_hook_state, padded_unsharded_grad, new_sharded_grad
         )
+        unsharded_grad_consumed_event.record()
         # NOTE: HSDP variants do not support communication hook.
     grad_to_offload = _accumulate_sharded_grad(state, handle, new_sharded_grad)
     _post_reduce_grad_callback(state, handle, grad_to_offload)
+    return unsharded_grad_consumed_event
 
 
 @no_type_check
@@ -913,7 +934,7 @@ def _accumulate_sharded_grad(
 
 
 @no_type_check
-def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
+def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.cuda.Event:
     """
     For no-shard, this runs gradient reduction (which directly covers any
     gradient accumulation implicitly) and the post-reduction callback.
@@ -931,6 +952,9 @@ def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> None:
         _cast_grad_to_param_dtype(state, flat_param.grad, flat_param)
     grad_to_offload = flat_param.grad.data
     _post_reduce_grad_callback(state, handle, grad_to_offload)
+    unsharded_grad_consumed_event = state._device_handle.Event()
+    unsharded_grad_consumed_event.record()
+    return unsharded_grad_consumed_event
 
 
 @no_type_check
@@ -1111,6 +1135,11 @@ def _post_backward_final_callback(
     while tensor_free_event := root_state._free_event_queue.dequeue():
         tensor, _ = tensor_free_event
         _free_storage(tensor)
+
+    # Dequeue the unsharded grads that remain in queue so that they go out of
+    # scope and get freed
+    while tensor_free_event := root_state._free_event_queue_rs.dequeue():
+        pass
 
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False
