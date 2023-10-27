@@ -8562,12 +8562,12 @@ class ForeachRightmostArgType(enum.Enum):
 
 class ForeachSampleInput(SampleInput):
     ref_args: Any
-    ref_kwargs: Dict[Any, Any]
+    disable_fastpath: bool
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, disable_fastpath=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.ref_args = self.args
-        self.ref_kwargs = {k: self.kwargs[k] for k in self.kwargs if k != "disable_fastpath"}
+        self.disable_fastpath = disable_fastpath
 
 
 class foreach_inputs_sample_func:
@@ -8869,7 +8869,6 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
                 assert len(args) == 2, f"{len(args)=}"
                 sample = ForeachSampleInput(input, *args, **kwargs)
-                sample.ref_kwargs["values"] = None if rightmost_arg_type == ForeachRightmostArgType.TensorList else rightmost_arg
                 yield sample
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
                     args.pop()
