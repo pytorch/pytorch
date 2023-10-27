@@ -2843,24 +2843,44 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
-    def _get_example_tensor_lists(self):
-        return [
+    def _get_example_tensor_lists(self, include_list_of_lists=True, include_requires_grad=True):
+
+        def _make_tensor(*shape, include_requires_grad=include_requires_grad, requires_grad=True):
+            return torch.randn(
+                *shape,
+                requires_grad=(requires_grad if include_requires_grad else False)
+            )
+
+        # Purposefully introduce mixed requires_grad settings for the components
+        # when include_requires_grad=True.
+        example_lists = [
             # (B, *, D) with B=4
             [
-                torch.randn(2, 5),
-                torch.randn(3, 5),
-                torch.randn(4, 5),
-                torch.randn(6, 5)
+                _make_tensor(2, 5),
+                _make_tensor(3, 5, requires_grad=False),
+                _make_tensor(4, 5, requires_grad=False),
+                _make_tensor(6, 5)
             ],
             # (B, *, D_0, D_1) with B=5
             [
-                torch.randn(2, 5, 6),
-                torch.randn(3, 5, 6),
-                torch.randn(4, 5, 6),
-                torch.randn(5, 5, 6),
-                torch.randn(6, 5, 6),
+                _make_tensor(2, 5, 6),
+                _make_tensor(3, 5, 6),
+                _make_tensor(4, 5, 6, requires_grad=False),
+                _make_tensor(5, 5, 6),
+                _make_tensor(6, 5, 6),
             ],
         ]
+
+        if include_list_of_lists:
+            example_lists.append(
+                # (B, *, D) with B=3 in list form
+                [
+                    _make_tensor(2, 5, requires_grad=False).tolist(),
+                    _make_tensor(3, 5).tolist(),
+                    _make_tensor(4, 5).tolist(),
+                ])
+
+        return example_lists
 
     def test_tensor_attributes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -2975,30 +2995,69 @@ class TestNestedTensorSubclass(TestCase):
             self.assertIs(pinned, pinned.pin_memory())
             self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    def _validate_nt(self, nt, tensor_list, device, dtype, requires_grad):
+        # Validate a bunch of properties after NT construction.
+        device = torch.device(device)
+        first_t = torch.as_tensor(tensor_list[0])
+        expected_dim = first_t.dim() + 1
+        batch_size = len(tensor_list)
+        self.assertEqual(nt.dim(), expected_dim)
+        self.assertEqual(nt.device, device)
+        self.assertEqual(nt.dtype, dtype)
+        self.assertEqual(nt.layout, torch.jagged)
+        self.assertEqual(nt.requires_grad, requires_grad)
+        self.assertEqual(nt.values().device, device)
+        self.assertEqual(nt.offsets().device, device)
+        self.assertEqual(nt.shape[0], batch_size)
+        self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
+        self.assertEqual(nt.shape[2:], first_t.shape[1:])
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_jagged_layout_construction(self, device, dtype, requires_grad):
-        for tensor_list in self._get_example_tensor_lists():
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_layout_construction_nested_tensor(
+            self, device, dtype, requires_grad, components_require_grad):
+        for tensor_list in self._get_example_tensor_lists(
+                include_list_of_lists=True, include_requires_grad=components_require_grad):
             nt = torch.nested.nested_tensor(
                 tensor_list,
                 device=device,
                 dtype=dtype,
                 layout=torch.jagged,
                 requires_grad=requires_grad)
+            self._validate_nt(nt, tensor_list, device, dtype, requires_grad)
 
-            device = torch.device(device)
-            expected_dim = tensor_list[0].dim() + 1
-            batch_size = len(tensor_list)
-            self.assertEqual(nt.dim(), expected_dim)
-            self.assertEqual(nt.device, device)
-            self.assertEqual(nt.dtype, dtype)
-            self.assertEqual(nt.layout, torch.jagged)
-            self.assertEqual(nt.requires_grad, requires_grad)
-            self.assertEqual(nt.values().device, device)
-            self.assertEqual(nt.offsets().device, device)
-            self.assertEqual(nt.shape[0], batch_size)
-            self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
-            self.assertEqual(nt.shape[2:], tensor_list[0].shape[1:])
+            # Make sure grads -don't- flow back into original tensors for nested_tensor()
+            if requires_grad:
+                (nt * 2).backward(torch.ones_like(nt))
+            for t in tensor_list:
+                t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
+                self.assertTrue(t.grad is None)
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_layout_construction_as_nested_tensor(
+            self, device, dtype, components_require_grad):
+        # NB: as_nested_tensor(tensor_list) doesn't support lists of lists for tensor_list
+        for tensor_list in self._get_example_tensor_lists(
+                include_list_of_lists=False, include_requires_grad=components_require_grad):
+            nt = torch.nested.as_nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged)
+
+            # nt.requires_grad=True should be set if at least one component requires grad
+            self._validate_nt(nt, tensor_list, device, dtype, components_require_grad)
+
+            # Make sure grads flow back into original tensors for as_nested_tensor()
+            if components_require_grad:
+                (nt * 2).backward(torch.ones_like(nt))
+                for t in tensor_list:
+                    if t.requires_grad:
+                        self.assertEqual(t.grad, torch.ones_like(t) * 2)
+                    else:
+                        self.assertTrue(t.grad is None)
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
@@ -3010,7 +3069,7 @@ class TestNestedTensorSubclass(TestCase):
                 device="cpu",
                 pin_memory=True)
 
-            self.assertEqual(nt.device, torch.device('cpu'))
+            self._validate_nt(nt, tensor_list, "cpu", torch.float32, requires_grad=False)
             self.assertTrue(nt.is_pinned())
 
     @dtypes(torch.double, torch.half)
