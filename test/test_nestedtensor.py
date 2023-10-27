@@ -3044,6 +3044,18 @@ class TestNestedTensorSubclass(TestCase):
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
 
+    def test_embedding(self, device):
+        inputs = [
+            torch.randint(100, (L,), device=device, dtype=torch.int64)
+            for L in torch.randint(5, 50, (8,))
+        ]
+        x = torch.nested.nested_tensor(inputs, device=device, dtype=torch.int64, layout=torch.jagged)
+        emb = torch.nn.Embedding(100, 8, device=device)
+        y = emb(x)
+        ys = y.unbind()
+        for i, inp in enumerate(inputs):
+            self.assertEqual(emb(inp), ys[i])
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
