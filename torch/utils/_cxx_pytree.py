@@ -218,7 +218,7 @@ def register_pytree_node(
             _register_cxx_pytree_node=False,
         )
 
-    if not optree.is_structseq_class(cls):
+    if optree is not None and not optree.is_structseq_class(cls):
         optree.register_pytree_node(
             cls,
             flatten_func,
