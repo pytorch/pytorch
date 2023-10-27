@@ -588,7 +588,6 @@ class TestDistBackend(MultiProcessTestCase):
         self._barrier()
 
         self.run_test(test_name, pipe)
-        print("test hit here ", self.rank)
         self._barrier()
         dist.destroy_process_group()
         sys.exit(0)
