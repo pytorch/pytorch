@@ -3720,6 +3720,94 @@ TEST_F(VulkanAPITest, floor_divide_scalar_inplace) {
   test_floor_divide_scalar_inplace({3, 3, 12, 12}, 0.3, 0.08);
 }
 
+TEST_F(VulkanAPITest, floor_divide_zero_dim_tensor) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{5, 3, 4, 5};
+  float input_scale = 100.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  auto in_vk = in_cpu.vulkan();
+
+  auto other_cpu = at::zeros({}, at::device(at::kCPU).dtype(at::kFloat)) + 10.0f;
+  auto other_vk = other_cpu.vulkan();
+
+  auto out_cpu = at::floor_divide(in_cpu, other_cpu);
+  auto out_vk = at::floor_divide(in_vk, other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(out_cpu - out_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale
+              << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_tensor) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{6, 3, 5, 5};
+  float input_scale = 10.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  // "other" is at least 0.5 to avoid rounding error causes by very small
+  // values.
+  auto other_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.5;
+
+  auto in_vk = in_cpu.vulkan();
+  auto other_vk = other_cpu.vulkan();
+
+  auto out_cpu = at::floor_divide(in_cpu, other_cpu);
+  auto out_vk = at::floor_divide(in_vk, other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(out_cpu - out_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_tensor_inplace) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{5, 3, 5, 5};
+  float input_scale = 10.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  // "other" is at least 0.5 to avoid rounding error causes by very small
+  // values.
+  auto other_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.5;
+
+  auto in_vk = in_cpu.vulkan();
+  auto other_vk = other_cpu.vulkan();
+
+  in_cpu.floor_divide_(other_cpu);
+  in_vk.floor_divide_(other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(in_cpu - in_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, relu) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
