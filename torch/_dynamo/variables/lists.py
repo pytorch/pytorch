@@ -6,7 +6,6 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
-from torch._subclasses.fake_tensor import is_fake
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
