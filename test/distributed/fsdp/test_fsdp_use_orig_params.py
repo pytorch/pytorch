@@ -28,7 +28,7 @@ from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGI
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA, SM70OrLater
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,

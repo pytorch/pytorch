@@ -2279,8 +2279,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
 
         def forward_pre_hook_with_graph_break(module: torch.nn.Module, inp: Tuple):
+            x = inp[0] + 1
             torch._dynamo.graph_break()
-            return torch.sin(inp[0] + 1)
+            return torch.sin(x)
 
         mod = torch.nn.Linear(10, 10, bias=False)
         mod.register_forward_pre_hook(forward_pre_hook_with_graph_break)
@@ -2291,7 +2292,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_mod(x, y)
 
         self.assertEqual(ref, res)
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
