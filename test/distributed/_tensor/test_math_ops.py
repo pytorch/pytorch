@@ -36,7 +36,7 @@ class DistMathOpsTest(DTensorTestBase):
 
         full_sumed_tensor = tensor_to_sum.sum()
         dt_sum = mat1.sum().full_tensor()
-        self.assertEqual(dt_sum.to_local(), full_sumed_tensor)
+        self.assertEqual(dt_sum, full_sumed_tensor)
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
