@@ -234,7 +234,7 @@ COMMON_NVCC_FLAGS = [
 
 COMMON_HIP_FLAGS = [
     '-fPIC',
-    '-D__HIP_PLATFORM_HCC__=1',
+    '-D__HIP_PLATFORM_AMD__=1',
     '-DUSE_ROCM=1',
 ]
 
@@ -1434,7 +1434,7 @@ def _check_and_build_extension_h_precompiler_headers(
                 Path(path_dir).mkdir(parents=True, exist_ok=True)
             except OSError as exc:  # Guard against race condition
                 if exc.errno != errno.EEXIST:
-                    raise RuntimeError(f"Fail to create path {path_dir}")
+                    raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
     def write_pch_signature_to_file(file_path, pch_sign):
         _create_if_not_exist(os.path.dirname(file_path))
@@ -1446,10 +1446,10 @@ def _check_and_build_extension_h_precompiler_headers(
         try:
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}")
+            raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
     extra_cflags_str = listToString(extra_cflags)
-    extra_include_paths_str = listToString(extra_include_paths)
+    extra_include_paths_str = " ".join([f'-I{include}' for include in extra_include_paths])
 
     lib_include = os.path.join(_TORCH_PATH, 'include')
     torch_include_dirs = [
@@ -1928,6 +1928,8 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # (from `extra_compile_args`)
     if cflags is not None:
         for flag in cflags:
+            if 'TORCH_EXTENSION_NAME' in flag:
+                continue
             if 'arch' in flag:
                 return []
 
