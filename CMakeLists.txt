@@ -197,9 +197,6 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(
-    BUILD_NVFUSER "Build NVFUSER" ON
-    "USE_CUDA OR USE_ROCM" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -897,10 +894,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
@@ -1204,19 +1199,6 @@ if(BUILD_JNI)
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)
-endif()
-
-if(NOT USE_CUDA AND NOT USE_ROCM)
-  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
-endif()
-
-if(BUILD_NVFUSER)
-  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
-    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
-  else()
-    add_subdirectory(third_party/nvfuser nvfuser)
-  endif()
-  add_compile_definitions(BUILD_NVFUSER)
 endif()
 
 include(cmake/Summary.cmake)
