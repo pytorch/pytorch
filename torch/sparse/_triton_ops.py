@@ -698,8 +698,18 @@ class TensorAsKey:
     """
 
     def __init__(self, obj):
-        self._obj_ref = weakref.ref(obj)
-        self.key = (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride())
+        self._obj_ref = weakref.ref(obj.untyped_storage())
+        # Warning: TensorAsKey does not track negative nor conjugate
+        # bits of its input object because in the use case of wrapping
+        # compressed/plain indices of compressed sparse tensors (that
+        # are always integer tensors with non-negative items) these
+        # bits are never set. However, when extending the use of
+        # TensorAsKey to float or complex tensors, the values of these
+        # bits (see is_neg and is_conj methods) must be included in
+        # the key as well.
+        dtype = obj.dtype
+        assert not (dtype.is_floating_point or dtype.is_complex), dtype  # see warning above
+        self.key = (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), dtype)
         self._hash = hash(self.key)
 
     def __hash__(self):
@@ -717,7 +727,12 @@ class TensorAsKey:
     @property
     def obj(self):
         """Return object if alive, otherwise None."""
-        return self._obj_ref()
+        storage = self._obj_ref()
+        if storage is not None:
+            _, storage_offset, shape, strides, dtype = self.key
+            obj = torch.empty((), dtype=dtype, device=storage.device)
+            obj.set_(storage, storage_offset=storage_offset, size=shape, stride=strides)  # type: ignore[call-overload]
+            return obj
 
 
 @lru_cache(maxsize=128)

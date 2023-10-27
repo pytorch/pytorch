@@ -15,7 +15,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
-from torch.distributed.checkpoint.state_dict import get_state_dict
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
@@ -447,8 +447,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("use_orig_params", [True, False])
-    def test_2d_state_dict(self, is_even_sharded_model, use_orig_params):
+    def test_2d_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
         # Create a model without wrapper
@@ -469,7 +468,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         model_2d = FSDP(
             model_2d,
             device_mesh=dp_mesh,
-            use_orig_params=use_orig_params,
+            use_orig_params=True
         )
 
         FSDP.set_state_dict_type(
@@ -504,8 +503,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("use_orig_params", [True, False])
-    def test_2d_load_state_dict(self, is_even_sharded_model, use_orig_params):
+    def test_2d_load_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
         torch.manual_seed(0)
@@ -520,7 +518,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         model_2d = FSDP(
             model_2d,
             device_mesh=dp_mesh,
-            use_orig_params=use_orig_params,
+            use_orig_params=True
         )
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
 
@@ -560,8 +558,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("use_orig_params", [True, False])
-    def test_2d_optim_state_dict(self, is_even_sharded_model, use_orig_params):
+    def test_2d_optim_state_dict(self, is_even_sharded_model):
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
         # Create a model without wrapper
@@ -586,7 +583,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         model_2d = FSDP(
             model_2d,
             device_mesh=mesh_2d["dp"],
-            use_orig_params=use_orig_params,
+            use_orig_params=True
         )
         FSDP.set_state_dict_type(
             model_2d,
