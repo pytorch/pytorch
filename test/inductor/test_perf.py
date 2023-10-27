@@ -596,15 +596,23 @@ class NoopTests(TestCase):
 class InplacingTests(TestCase):
     def test_inplace_scatter(self):
         def f(a, b):
-            aten.index_put_(a, (b,), torch.tensor(1.0))
+            a = a.cos()
+            a[b] = 1
             return a
+
+        inp = (T(10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """26""")
+
+        def f(a, b):
+            out = aten.index_put(a, (b,), torch.tensor(1.0))
+            return a.copy_(out)
 
         inp = (T(10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """6""")
 
         def f(a, b):
-            aten._unsafe_index_put_(a, (b,), torch.tensor(1.0))
-            return a
+            out = aten._unsafe_index_put(a, (b,), torch.tensor(1.0))
+            return a.copy_(out)
 
         inp = (T(10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """6""")
