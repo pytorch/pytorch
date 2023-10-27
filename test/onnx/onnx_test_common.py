@@ -224,6 +224,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ]
         ] = None,
         skip_dynamic_shapes_check: bool = False,
+        model_type: str = None,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -251,11 +252,14 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         """
 
+        if model_type is None:
+            raise ValueError("model_type must be specified")
+
         # avoid mutable data structure
         if input_kwargs is None:
             input_kwargs = {}
 
-        if has_mutation:
+        if has_mutation and model_type != "torch.export.ExportedProgram":
             ref_model = _try_clone_model(model)
             ref_input_args, ref_input_kwargs = _try_clone_inputs(
                 input_args, input_kwargs
@@ -264,6 +268,18 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             ref_model = model
             ref_input_args = input_args
             ref_input_kwargs = input_kwargs
+
+        assert isinstance(ref_model, torch.nn.Module) or callable(
+            ref_model
+        ), "Model must be a torch.nn.Module or callable"
+        if model_type == "torch.export.ExportedProgram":
+            ref_model = torch.export.export(ref_model, args=ref_input_args)
+            if (
+                self.dynamic_shapes
+            ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
+                pytest.xfail(
+                    reason="torch.export.ExportedProgram does not support dynamic shapes"
+                )
 
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
