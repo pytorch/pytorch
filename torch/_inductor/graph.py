@@ -17,13 +17,8 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -922,6 +917,7 @@ class GraphLowering(torch.fx.Interpreter):
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
