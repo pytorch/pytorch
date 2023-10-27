@@ -669,6 +669,7 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
     save_cache_hook: Optional[Callable[[Any, Any], Any]]
+    inductor_meta = {} if inductor_meta is None else inductor_meta
 
     # on disk caching logic
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
