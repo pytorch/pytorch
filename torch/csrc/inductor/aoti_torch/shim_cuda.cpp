@@ -6,9 +6,9 @@
 #include <c10/cuda/CUDAStream.h>
 
 AOTITorchError aoti_torch_create_cuda_stream_guard(
-    CUDAStreamGuardHandle* ret_guard,
     void* stream,
-    int32_t device_index) {
+    int32_t device_index,
+    CUDAStreamGuardHandle* ret_guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::cuda::CUDAStreamGuard* guard =
         new at::cuda::CUDAStreamGuard(at::cuda::getStreamFromExternal(

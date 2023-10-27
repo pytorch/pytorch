@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
   SimpleGraphExecutorImpl(
@@ -21,5 +20,4 @@ struct TORCH_API SimpleGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan> execution_plan_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

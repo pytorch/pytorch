@@ -449,6 +449,9 @@ class Vectorized<ComplexFlt> {
     auto ln = (sum / sub).log(); // ln((i + z)/(i - z))
     return ln * imag_half; // i/2*ln()
   }
+  Vectorized<ComplexFlt> atanh() const {
+    return map(std::atanh);
+  }
 
   Vectorized<ComplexFlt> acos() const {
     // acos(x) = pi/2 - asin(x)
@@ -554,32 +557,6 @@ class Vectorized<ComplexFlt> {
     return map(at::native::sgn_impl);
   }
 
-  Vectorized<ComplexFlt> hypot(const Vectorized<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> nextafter(const Vectorized<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> igamma(const Vectorized<ComplexFlt>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> igammac(const Vectorized<ComplexFlt>& x) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> atan2(const Vectorized<ComplexFlt>& b) const {
-    TORCH_CHECK(false,"not supported for complex numbers");
-  }
-  Vectorized<ComplexFlt> erf() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
-  }
-  Vectorized<ComplexFlt> erfc() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
-  }
-
   Vectorized<ComplexFlt> operator<(const Vectorized<ComplexFlt>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
@@ -593,22 +570,6 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> operator>=(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> lt(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> le(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> gt(const Vectorized<ComplexFlt>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
-  Vectorized<ComplexFlt> ge(const Vectorized<ComplexFlt>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

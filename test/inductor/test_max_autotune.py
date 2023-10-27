@@ -7,8 +7,13 @@ from typing import List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
-from torch._inductor.autotune_process import BenchmarkRequest, TuningProcessPool
+from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    CUDA_VISIBLE_DEVICES,
+    TuningProcessPool,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -28,13 +33,22 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+
+
+def _get_path_without_sccache() -> str:
+    """
+    Get the PATH environment variable without sccache.
+    """
+    path_envs = os.environ.get("PATH", "").split(":")
+    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
+    return ":".join(path_envs)
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -51,7 +65,7 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @instantiate_parametrized_tests
-class TestDoBench(TestCase):
+class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -209,8 +223,8 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -246,8 +260,8 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -317,8 +331,8 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self, dynamic, max_autotune_gemm_backends
     ):
@@ -465,16 +479,63 @@ class TestDoBench(TestCase):
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
 
+    @config.patch(
+        benchmark_kernel=True,
+        fallback_random=True,
+        max_autotune_gemm=True,
+    )
+    @parametrize("device", ("cpu", "cuda"))
+    def test_matmul_dropout(self, device):
+        def fwd(a, b):
+            x = a @ b
+            x = torch.nn.functional.dropout(x, 0.1)
+            return x
+
+        def fn(a, b):
+            x = fwd(a, b).sum()
+            x.backward()
+            return a.grad
+
+        N = 128
+        a = torch.randn(N, N, device=device, requires_grad=True)
+        b = torch.randn(N, N, device=device)
+
+        opt_fn = torch.compile(fn)
+        reset_rng_state()
+        ref = fn(a, b)
+        reset_rng_state()
+        act = opt_fn(a, b)
+
+        if N <= 8:
+            print(f"ref\n{ref}\nact\n{act}")
+        torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
+
 
 class TestBenchmarkRequest(BenchmarkRequest):
-    def __init__(self, value: Optional[float] = None) -> None:
+    def __init__(
+        self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
+    ) -> None:
         self.value = value
+        self.multi_device = multi_device
+        self.parent_visible_devices = parent_visible_devices
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        if self.value is None:
-            raise Exception("Failed to run")
+        # Verify that the visible devices env var is set correctly. If multi-device
+        # auto-tuning is disabled, the visible devices should be unmanipulated from
+        # the parent process. If multi-device auto-tuning is enabled, the visible
+        # devices should be a _single_ valid device number. Note that we can't perform
+        # this validation directly from the test body because benchmarks execute in a
+        # separate process. If the check fails, however, the test will detect the
+        # failure by virtue of not receiving the expected result back.
+        visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+        if not self.multi_device:
+            assert visible_devices == self.parent_valid_devices
+        else:
+            valid_devices = self.parent_visible_devices.split(",")
+            assert visible_devices in valid_devices
+
         return self.value
 
 
@@ -487,14 +548,16 @@ class TestTritonTemplateCaller(TritonTemplateCaller):
 
 
 class TestTuningProcess(TestCase):
-    def test_tuning_pool(self):
-        # Use only one device:
+    def test_tuning_pool_crash(self):
+        # Use only one device/subprocess so we test the process restarts
+        # and is usable after a "crash".
         with config.patch({"autotune_multi_device": False}):
             tuning_pool = TuningProcessPool()
             tuning_pool.initialize()
 
-            # First cause the tuning process to crash.
-            bmreq = TestBenchmarkRequest(value=None)
+            # First force the tuning process to "crash" by setting a bogus
+            # string for the expected visible devices.
+            bmreq = TestBenchmarkRequest(3.14, False, "invalid")
             choice = TestTritonTemplateCaller(bmreq)
 
             timings = tuning_pool.benchmark([choice])
@@ -502,18 +565,49 @@ class TestTuningProcess(TestCase):
             self.assertEqual(timings[choice], float("inf"))
 
             # Then send another request and make sure the sub-process
-            # has restarted and is operational.
-            value = 3.14
-            choice.bmreq.value = value
+            # has restarted and is operational. 'valid_devices' expected
+            # to be None because autotune_multi_device is off.
+            choice.bmreq.parent_valid_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
 
             timings = tuning_pool.benchmark([choice])
             self.assertTrue(choice in timings)
-            self.assertEqual(timings[choice], value)
+            self.assertEqual(timings[choice], bmreq.value)
+
+            tuning_pool.terminate()
+
+    def test_tuning_pool_multiple_devices(self):
+        with config.patch({"autotune_multi_device": True}):
+            # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+            # is already set in the environment); use a subset of the available devices
+            # to ensure only the subset are visible to the sub-processes.
+            if CUDA_VISIBLE_DEVICES in os.environ:
+                visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+            else:
+                visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+
+            parent_visible_devices = ",".join(visible_devices[-2:])
+            os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
+
+            tuning_pool = TuningProcessPool()
+            tuning_pool.initialize()
+
+            choice1 = TestTritonTemplateCaller(
+                TestBenchmarkRequest(3.14, True, parent_visible_devices),
+            )
+            choice2 = TestTritonTemplateCaller(
+                TestBenchmarkRequest(2.718, True, parent_visible_devices),
+            )
+
+            timings = tuning_pool.benchmark([choice1, choice2])
+            self.assertEqual(timings[choice1], choice1.bmreq.value)
+            self.assertEqual(timings[choice2], choice2.bmreq.value)
 
             tuning_pool.terminate()
 
 
 if __name__ == "__main__":
+    from torch._inductor.utils import is_big_gpu
+
     # Set env to make it work in CI.
-    if HAS_CUDA:
+    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
         run_tests()

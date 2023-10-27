@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
+import unittest
 from typing import Any, Optional, Tuple
 
 import torch
@@ -20,13 +21,16 @@ from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.ao.quantization.quantize_pt2e import (
     _convert_to_reference_decomposed_fx,
     convert_pt2e,
+    prepare_pt2e,
     prepare_qat_pt2e,
 )
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantization import (
+    NodeSpec as ns,
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
@@ -122,6 +126,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         example_inputs: Tuple[Any, ...],
         has_relu: bool,
         has_bias: bool = True,
+        is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
     ):
         self._verify_symmetric_xnnpack_qat_graph_helper(
@@ -130,6 +135,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             is_per_channel=True,
             has_relu=has_relu,
             has_bias=has_bias,
+            is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
         )
         self._verify_symmetric_xnnpack_qat_graph_helper(
@@ -138,6 +144,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             is_per_channel=False,
             has_relu=has_relu,
             has_bias=has_bias,
+            is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
         )
 
@@ -148,6 +155,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         is_per_channel: bool,
         has_relu: bool,
         has_bias: bool = True,
+        is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
     ):
         """
@@ -189,10 +197,15 @@ class PT2EQATTestCase(QuantizationTestCase):
             relu_node = None
             getitem_node = output_fq_node.args[0]
         bn_node = getitem_node.args[0]
+        if is_cuda:
+            if torch.version.cuda is not None:
+                expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
+            elif torch.version.hip is not None:
+                expected_bn_op = torch.ops.aten.miopen_batch_norm.default
+        else:
+            expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
         self.assertEqual(getitem_node.target, operator.getitem)
-        self.assertEqual(
-            bn_node.target, torch.ops.aten._native_batch_norm_legit.default
-        )
+        self.assertEqual(bn_node.target, expected_bn_op)
 
         # Verify: conv / scale_factor.reshape [+ bias.reshape]
         if has_bias:
@@ -303,9 +316,21 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=True), example_inputs)
 
     def test_qat_conv_bn_fusion(self):
-        example_inputs = (torch.randn(1, 3, 5, 5),)
         m = TestHelperModules.ConvWithBNRelu(relu=False)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_fusion_cuda(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m,
+            example_inputs,
+            has_relu=False,
+            is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_fusion_literal_args(self):
@@ -366,6 +391,18 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_relu_fusion_cuda(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m,
+            example_inputs,
+            has_relu=True,
+            is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_relu_fusion_no_conv_bias(self):
@@ -493,6 +530,84 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
+    def test_qat_preserve_source_fn_stack(self):
+        """
+        Test whether `source_fn_stack` is preserved after QAT fusion.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(5, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+                self.backbone = TestHelperModules.ConvWithBNRelu(relu=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                x = self.backbone(x)
+                return x
+
+        # QAT prepare + convert
+        m = M()
+        example_inputs = (torch.randn(1, 5, 10, 10),)
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_global(get_symmetric_quantization_config(is_qat=True))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+
+        # Extract the conv and relu nodes (bn was folded into conv)
+        first_conv, first_relu, second_conv, second_relu = None, None, None, None
+        for n in m.graph.nodes:
+            if n.target == torch.ops.aten.relu.default:
+                if first_relu is None:
+                    assert first_conv is None, "bad test setup"
+                    first_relu = n
+                    first_conv = n.args[0]
+                else:
+                    assert second_conv is None, "bad test setup"
+                    second_relu = n
+                    second_conv = n.args[0]
+
+        # Extract the conv weight and bias nodes
+        def get_conv_weight_and_bias(conv_node: torch.fx.Node):
+            weight_dq_node = conv_node.args[1]
+            weight_q_node = weight_dq_node.args[0]
+            weight_node = weight_q_node.args[0]
+            bias_node = conv_node.args[2]
+            assert isinstance(weight_node, torch.fx.Node)
+            assert isinstance(bias_node, torch.fx.Node)
+            return (weight_node, bias_node)
+
+        first_conv_weight, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        second_conv_weight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+
+        # Assert that each set of conv, conv weight, and conv bias are in the same partition
+        def get_source_fn(node: torch.fx.Node):
+            # E.g. [('l__self___backbone1_conv', <class 'torch.nn.modules.conv.Conv2d'>)]
+            return node.meta["source_fn_stack"][0][0]
+
+        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_weight))
+        self.assertEqual(get_source_fn(first_conv), get_source_fn(first_conv_bias))
+        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_weight))
+        self.assertEqual(get_source_fn(second_conv), get_source_fn(second_conv_bias))
+
+        # Assert that different sets of convs and relus have different partitions
+        self.assertNotEqual(get_source_fn(first_conv), get_source_fn(first_relu))
+        self.assertNotEqual(get_source_fn(first_conv), get_source_fn(second_conv))
+        self.assertNotEqual(get_source_fn(second_conv), get_source_fn(second_relu))
+        self.assertNotEqual(get_source_fn(first_relu), get_source_fn(second_relu))
+
+        # Assert that "backbone" exists only in the second set of conv and relu's partition
+        self.assertTrue("backbone" not in get_source_fn(first_conv))
+        self.assertTrue("backbone" not in get_source_fn(first_relu))
+        self.assertTrue("backbone" in get_source_fn(second_conv))
+        self.assertTrue("backbone" in get_source_fn(second_relu))
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
@@ -515,3 +630,105 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()
             self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+
+class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
+    class TwoLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear1 = torch.nn.Linear(16, 8, bias=False)
+            self.linear2 = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            return self.linear2(self.linear1(x))
+
+    class QATPTQTestModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 3)
+            self.linears = TestQuantizeMixQATAndPTQ.TwoLinear()
+            self.my_linear = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            conv_out = self.conv(x)
+            permute_out = torch.permute(conv_out, (0, 2, 3, 1))
+            linear_out = self.linears(permute_out)
+            my_linear_out = self.my_linear(linear_out)
+            # Hardtanh doesnt get quantized via xnnpack quantizer in this test
+            # because it relies on the propagation rules
+            # Need to fix this
+            return torch.nn.functional.hardtanh(my_linear_out)
+
+    def _prepare_qat_linears(self, model):
+        for name, child in model.named_children():
+            if isinstance(child, (torch.nn.Linear, TestQuantizeMixQATAndPTQ.TwoLinear)):
+                if isinstance(child, torch.nn.Linear):
+                    in_channels = child.weight.size(1)
+                else:
+                    in_channels = child.linear1.weight.size(1)
+
+                example_input = (torch.rand((1, in_channels)),)
+                traced_child = capture_pre_autograd_graph(child, example_input)
+                quantizer = XNNPACKQuantizer()
+                quantization_config = get_symmetric_quantization_config(
+                    is_per_channel=True, is_qat=True
+                )
+                quantizer.set_global(quantization_config)
+                traced_child_prepared = prepare_qat_pt2e(traced_child, quantizer)
+                setattr(model, name, traced_child_prepared)
+            else:
+                self._prepare_qat_linears(child)
+
+    def _convert_qat_linears(self, model):
+        for name, child in model.named_children():
+            if isinstance(child, torch.fx.GraphModule):
+                torch.ao.quantization.move_exported_model_to_eval(child)
+                converted_child = convert_pt2e(child, fold_quantize=True)
+                setattr(model, name, converted_child)
+            else:
+                self._convert_qat_linears(child)
+
+    def test_mixing_qat_ptq(self):
+        example_inputs = (torch.randn(2, 3, 4, 4),)
+        model = TestQuantizeMixQATAndPTQ.QATPTQTestModule()
+
+        self._prepare_qat_linears(model)
+
+        after_prepare_result_pt2e = model(*example_inputs)
+        # must be fixed model.eval()
+        self._convert_qat_linears(model)
+        quant_result_pt2e = model(*example_inputs)
+
+        model_pt2e = capture_pre_autograd_graph(
+            model,
+            example_inputs,
+        )
+
+        quantizer = XNNPACKQuantizer()
+        quantizer.set_module_type(torch.nn.Linear, None)
+        quantization_config = get_symmetric_quantization_config()
+        quantizer.set_global(quantization_config)
+        model_pt2e = prepare_pt2e(model_pt2e, quantizer)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        model_pt2e = convert_pt2e(model_pt2e)
+        quant_result_pt2e = model_pt2e(*example_inputs)
+
+        exported_model = torch.export.export(model_pt2e, example_inputs)
+
+        node_occurrence = {
+            # conv2d: 1 for act, 1 for weight, 1 for output
+            # 3 x linear: 1 for act, 1 for output
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 9,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_channel.default
+            ): 3,
+            # There needs to be one for hardtanh
+        }
+        self.checkGraphModuleNodes(
+            exported_model.graph_module, expected_node_occurrence=node_occurrence
+        )

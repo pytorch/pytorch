@@ -91,7 +91,7 @@ class TORCH_CUDA_CU_API Fusion : public IrContainer {
   Fusion& operator=(const Fusion& other);
   Fusion& operator=(Fusion&& other) noexcept;
 
-  ~Fusion();
+  ~Fusion() override;
 
   friend void swap(Fusion& a, Fusion& b) noexcept;
 

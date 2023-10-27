@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
-import pytest
+
+import functools
+
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import torch._numpy as np
 from pytest import raises as assert_raises
@@ -17,14 +20,17 @@ from torch._numpy import (
     real_if_close,
 )
 from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+from torch.testing._internal.common_utils import run_tests, TestCase
+
+skip = functools.partial(skipif, True)
 
 
 def assert_all(x):
     assert_(np.all(x), x)
 
 
-@pytest.mark.xfail(reason="common_type not implemented")
-class TestCommonType:
+@xfail  # (reason="common_type not implemented")
+class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
         af16 = np.array([[1, 2], [3, 4]], dtype=np.float16)
@@ -40,8 +46,8 @@ class TestCommonType:
         assert_(common_type(acd) == np.cdouble)
 
 
-@pytest.mark.xfail(reason="not implemented")
-class TestMintypecode:
+@xfail  # (reason="not implemented")
+class TestMintypecode(TestCase):
     def test_default_1(self):
         for itype in "1bcsuwil":
             assert_equal(mintypecode(itype), "d")
@@ -90,8 +96,8 @@ class TestMintypecode:
         assert_equal(mintypecode("idD"), "D")
 
 
-@pytest.mark.xfail(reason="TODO: decide on if [1] is a scalar or not")
-class TestIsscalar:
+@xfail  # (reason="TODO: decide on if [1] is a scalar or not")
+class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))
         assert_(not np.isscalar([3]))
@@ -100,7 +106,7 @@ class TestIsscalar:
         assert_(np.isscalar(4.0))
 
 
-class TestReal:
+class TestReal(TestCase):
     def test_real(self):
         y = np.random.rand(
             10,
@@ -136,7 +142,7 @@ class TestReal:
         # assert_(not isinstance(out, np.ndarray))  # XXX: 0D tensor, not scalar
 
 
-class TestImag:
+class TestImag(TestCase):
     def test_real(self):
         y = np.random.rand(
             10,
@@ -172,7 +178,7 @@ class TestImag:
         # assert_(not isinstance(out, np.ndarray))  # XXX: 0D tensor, not scalar
 
 
-class TestIscomplex:
+class TestIscomplex(TestCase):
     def test_fail(self):
         z = np.array([-1, 0, 1])
         res = iscomplex(z)
@@ -184,7 +190,7 @@ class TestIscomplex:
         assert_array_equal(res, [1, 0, 0])
 
 
-class TestIsreal:
+class TestIsreal(TestCase):
     def test_pass(self):
         z = np.array([-1, 0, 1j])
         res = isreal(z)
@@ -201,7 +207,7 @@ class TestIsreal:
         assert res.all()
 
 
-class TestIscomplexobj:
+class TestIscomplexobj(TestCase):
     def test_basic(self):
         z = np.array([-1, 0, 1])
         assert_(not iscomplexobj(z))
@@ -217,7 +223,7 @@ class TestIscomplexobj:
         assert_(not iscomplexobj([3, 1, True]))
 
 
-class TestIsrealobj:
+class TestIsrealobj(TestCase):
     def test_basic(self):
         z = np.array([-1, 0, 1])
         assert_(isrealobj(z))
@@ -225,7 +231,7 @@ class TestIsrealobj:
         assert_(not isrealobj(z))
 
 
-class TestIsnan:
+class TestIsnan(TestCase):
     def test_goodvalues(self):
         z = np.array((-1.0, 0.0, 1.0))
         res = np.isnan(z) == 0
@@ -250,7 +256,7 @@ class TestIsnan:
         assert_all(np.isnan(np.array(0 + 0j) / 0.0) == 1)
 
 
-class TestIsfinite:
+class TestIsfinite(TestCase):
     # Fixme, wrong place, isfinite now ufunc
 
     def test_goodvalues(self):
@@ -277,7 +283,7 @@ class TestIsfinite:
         assert_all(np.isfinite(np.array(1 + 1j) / 0.0) == 0)
 
 
-class TestIsinf:
+class TestIsinf(TestCase):
     # Fixme, wrong place, isinf now ufunc
 
     def test_goodvalues(self):
@@ -309,7 +315,7 @@ class TestIsinf:
         assert_all(np.isinf(np.array((0.0,)) / 0.0) == 0)
 
 
-class TestIsposinf:
+class TestIsposinf(TestCase):
     def test_generic(self):
         vals = isposinf(np.array((-1.0, 0, 1)) / 0.0)
         assert_(vals[0] == 0)
@@ -317,7 +323,7 @@ class TestIsposinf:
         assert_(vals[2] == 1)
 
 
-class TestIsneginf:
+class TestIsneginf(TestCase):
     def test_generic(self):
         vals = isneginf(np.array((-1.0, 0, 1)) / 0.0)
         assert_(vals[0] == 1)
@@ -325,8 +331,8 @@ class TestIsneginf:
         assert_(vals[2] == 0)
 
 
-# @pytest.mark.xfail(reason="not implemented")
-class TestNanToNum:
+# @xfail  #(reason="not implemented")
+class TestNanToNum(TestCase):
     def test_generic(self):
         vals = nan_to_num(np.array((-1.0, 0, 1)) / 0.0)
         assert_all(vals[0] < -1e10) and assert_all(np.isfinite(vals[0]))
@@ -348,7 +354,7 @@ class TestNanToNum:
         assert_array_equal(vals, np.array([1], int))
         assert isinstance(vals, np.ndarray)
 
-    @pytest.mark.skip(reason="we return OD arrays not scalars")
+    @skip(reason="we return OD arrays not scalars")
     def test_integer(self):
         vals = nan_to_num(1)
         assert_all(vals == 1)
@@ -357,7 +363,7 @@ class TestNanToNum:
         assert_all(vals == 1)
         assert isinstance(vals, np.int_)
 
-    @pytest.mark.skip(reason="we return OD arrays not scalars")
+    @skip(reason="we return OD arrays not scalars")
     def test_float(self):
         vals = nan_to_num(1.0)
         assert_all(vals == 1.0)
@@ -366,7 +372,7 @@ class TestNanToNum:
         assert_all(vals == 1.1)
         assert_equal(type(vals), np.float_)
 
-    @pytest.mark.skip(reason="we return OD arrays not scalars")
+    @skip(reason="we return OD arrays not scalars")
     def test_complex_good(self):
         vals = nan_to_num(1 + 1j)
         assert_all(vals == 1 + 1j)
@@ -375,7 +381,7 @@ class TestNanToNum:
         assert_all(vals == 1 + 1j)
         assert_equal(type(vals), np.complex_)
 
-    @pytest.mark.skip(reason="we return OD arrays not scalars")
+    @skip(reason="we return OD arrays not scalars")
     def test_complex_bad(self):
         v = 1 + 1j
         v += np.array(0 + 1.0j) / 0.0
@@ -384,7 +390,7 @@ class TestNanToNum:
         assert_all(np.isfinite(vals))
         assert_equal(type(vals), np.complex_)
 
-    @pytest.mark.skip(reason="we return OD arrays not scalars")
+    @skip(reason="we return OD arrays not scalars")
     def test_complex_bad2(self):
         v = 1 + 1j
         v += np.array(-1 + 1.0j) / 0.0
@@ -408,7 +414,7 @@ class TestNanToNum:
         assert isinstance(vals, np.ndarray)
 
 
-class TestRealIfClose:
+class TestRealIfClose(TestCase):
     def test_basic(self):
         a = np.random.rand(10)
         b = real_if_close(a + 1e-15j)
@@ -420,8 +426,8 @@ class TestRealIfClose:
         assert_all(isrealobj(b))
 
 
-@pytest.mark.xfail(reason="not implemented")
-class TestArrayConversion:
+@xfail  # (reason="not implemented")
+class TestArrayConversion(TestCase):
     def test_asfarray(self):
         a = asfarray(np.array([1, 2, 3]))
         assert_equal(a.__class__, np.ndarray)
@@ -433,6 +439,4 @@ class TestArrayConversion:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

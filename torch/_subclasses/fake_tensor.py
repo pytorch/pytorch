@@ -8,7 +8,18 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -26,11 +37,6 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import (
-    DimConstraint,
-    DimDynamic,
-    free_symbols,
-)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -43,6 +49,11 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -208,6 +219,10 @@ def maybe_get_fake_mode(t):
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
     return None
 
 
@@ -315,8 +330,8 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -534,10 +549,12 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
         ):
             raise DynamicOutputShapeException(func)
 
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
         output_size = fake_mode.shape_env.create_unbacked_symint()
-        constrain_range(output_size, min=2, max=sys.maxsize - 1)
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+        _constrain_range_for_size(output_size)
         # TODO: consider a memo
     return repeats.new_empty(output_size)
 
@@ -567,8 +584,6 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
@@ -580,20 +595,56 @@ def nonzero(fake_mode, func, arg):
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
         maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            free_symbols,
+        )
+
         if not free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
             # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() >= 2:
+            if arg.numel() > 2:
                 maxval = int(arg.numel())
 
-        constrain_range(nnz, min=2, max=maxval)
+        _constrain_range_for_size(nnz, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
 
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+
+
+@register_op_impl(lambda func: func is torch.ops.aten.masked_select.default)
+def masked_select(fake_mode, func, self, mask):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    # see nonzero for commentary
+    maxval = sys.maxsize - 1
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        free_symbols,
+    )
+
+    if not free_symbols(arg.numel()):
+        if arg.numel() >= 2:
+            maxval = int(arg.numel())
+
+    _constrain_range_for_size(nnz, max=maxval)
+
+    return self.new_empty((nnz,))
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -698,6 +749,7 @@ def conv(fake_mode, func, *args, **kwargs):
         k = kwargs["weight"].ndim
         batch = kwargs["input"].shape[0]
 
+        # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
 
         if not has_hint(batch):
@@ -1054,7 +1106,8 @@ class FakeTensor(torch.Tensor):
             init_cuda_context()
 
         if (
-            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            device.type
+            in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
             device = torch.device(
@@ -1214,6 +1267,30 @@ class FakeTensor(torch.Tensor):
         assert common_device is not None, f"Could not find common device for {func}"
 
         return common_device, has_scalar_only_inputs
+
+    # We must handle tolist in a special way for FakeTensors here in the case
+    # where tolist is called from torch dispatch for tensor subclasses.
+    # Ordinarily, if a program calls .tolist compiling still works because there is
+    # special handling in dynamo, but for tensor subclasses if .tolist is called
+    # inside torch dispatch, the .tolist call may be directly on a FakeTensor.
+    # This would result in an error since wrapper subclasses don't have storage.
+    # To avoid this, we handle the FakeTensor case by (1) specializing on the size
+    # of the tensor to create the output Python list, and (2) creating unbacked
+    # symints for each element of the list.
+    def tolist(self):
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import is_symbolic
+
+        assert self.dim() == 1 and is_symbolic(self.shape[0])
+        shape_env = self.shape[0].node.shape_env
+        out = []
+        # Specialize on the length of the list
+        for _ in range(self.shape[0]):
+            s = shape_env.create_unbacked_symint()
+            # max value?
+            torch._constrain_as_size(s, min=2)
+            out.append(s)
+        return out
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -1531,13 +1608,14 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.impl.global_registry:
-            custom_op = torch._custom_op.impl.global_registry[func.name()]
-            if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
-                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
-                    return result
+        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+            func.name()
+        ).abstract_impl.kernel
+        if maybe_abstract_impl:
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_abstract_impl(*args, **kwargs)
+                return result
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
@@ -1766,8 +1844,8 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1862,7 +1940,7 @@ class FakeCopyMode(TorchFunctionMode):
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
-        if func == torch._C._TensorBase.clone:
+        if func == torch._C.TensorBase.clone:
             return func(
                 self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
             )

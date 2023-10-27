@@ -2,7 +2,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, Optional
+from typing import cast, NoReturn, Optional
 
 import torch._guards
 
@@ -16,7 +16,11 @@ if is_fbcode():
 else:
 
     def exportdb_error_message(case_name):
-        return ""
+        return (
+            "For more information about this error, see: "
+            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+            + case_name.replace("_", "-")
+        )
 
 
 import logging
@@ -117,7 +121,7 @@ class UserErrorType(Enum):
     DYNAMIC_CONTROL_FLOW = auto()
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
-    CONSTRAIN_VIOLATION = auto()
+    CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
 
@@ -134,6 +138,10 @@ class UserError(Unsupported):
         """
         if case_name is not None:
             assert isinstance(case_name, str)
+            if msg.endswith("."):
+                msg += " "
+            else:
+                msg += "\n"
             msg += exportdb_error_message(case_name)
         super().__init__(msg)
         self.error_type = error_type
@@ -157,7 +165,7 @@ exceptions_allowed_to_be_fallback = (
 )
 
 
-def unimplemented_with_warning(e, code, msg):
+def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
     # i.e., its very silent. This helper function is intended when an error is
@@ -171,12 +179,12 @@ def unimplemented_with_warning(e, code, msg):
     raise unimplemented(msg) from e
 
 
-def unimplemented(msg: str):
+def unimplemented(msg: str) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
     raise Unsupported(msg)
 
 
-def warning(msg: str):
+def warning(msg: str) -> None:
     counters["warnings"][msg] += 1
     assert msg != os.environ.get("BREAK", False)
 
@@ -194,14 +202,12 @@ class KeyErrorMsg:
         return self.__str__()
 
 
-def augment_exc_message(exc, msg="\n", export=False):
+def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
     import traceback
 
     real_stack = get_real_stack(exc)
     if real_stack is not None:
-        msg += (
-            f"\nfrom user code:\n {''.join(traceback.format_list(get_real_stack(exc)))}"
-        )
+        msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
@@ -242,7 +248,7 @@ def augment_exc_message(exc, msg="\n", export=False):
         exc.args = (new_msg,) + exc.args[1:]
 
 
-def get_real_stack(exc, frame=None) -> Optional[StackSummary]:
+def get_real_stack(exc: Exception, frame=None) -> Optional[StackSummary]:
     real_stack = getattr(exc, "real_stack", None)
     if real_stack is None:
         return None
@@ -284,7 +290,9 @@ def filter_stack(stack):
     return user_stack
 
 
-def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
+def format_error_msg_verbose(
+    exc: Exception, code, record_filename=None, frame=None
+) -> str:
     msg = (
         f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
     )
@@ -306,13 +314,13 @@ def format_error_msg_verbose(exc, code, record_filename=None, frame=None):
     return msg
 
 
-def format_error_msg(exc, code, record_filename=None, frame=None):
+def format_error_msg(exc: Exception, code, record_filename=None, frame=None) -> str:
     msg = os.linesep * 2
 
     if config.verbose:
         msg = format_error_msg_verbose(exc, code, record_filename, frame)
     else:
         msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{format_exc(limit=-1)}"
+ line {code.co_firstlineno} \ndue to: \n{format_exc()}"
 
     return msg
