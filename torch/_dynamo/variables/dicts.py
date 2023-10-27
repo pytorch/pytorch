@@ -296,6 +296,30 @@ class DefaultDictVariable(ConstDictVariable):
             return super().call_method(tx, name, args, kwargs)
 
 
+def _is_matching_transformers_cls(cls) -> bool:
+    if cls.__module__ != "transformers.modeling_outputs":
+        return False
+
+    try:
+        from transformers.file_utils import ModelOutput
+
+        return issubclass(cls, ModelOutput)
+    except ImportError:
+        return False
+
+
+def _is_matching_diffusers_cls(cls) -> bool:
+    if not cls.__module__.startswith("diffusers."):
+        return False
+
+    try:
+        from diffusers.utils import BaseOutput
+
+        return issubclass(cls, BaseOutput)
+    except ImportError:
+        return False
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -320,16 +344,18 @@ class DataClassVariable(ConstDictVariable):
         except ImportError:
             pass
 
-    @staticmethod
-    def is_matching_cls(cls):
         try:
-            from transformers.file_utils import ModelOutput
+            from diffusers.utils import BaseOutput
 
-            return issubclass(cls, ModelOutput)
+            for obj in BaseOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
         except ImportError:
             pass
 
-        return False
+    @staticmethod
+    def is_matching_cls(cls):
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -454,16 +480,7 @@ class CustomizedDictVariable(ConstDictVariable):
         #   assume self.create is AA to ModelOutput.__post_init__
         # for non-HF usecase:
         #   check __module__ string to avoid costy HF import
-        if cls.__module__ != "transformers.modeling_outputs":
-            return False
-        try:
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            pass
-
-        return False
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
