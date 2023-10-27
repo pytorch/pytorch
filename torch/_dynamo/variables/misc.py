@@ -13,7 +13,7 @@ import torch._numpy as tnp
 from .. import config, polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
     check_constant_args,
@@ -97,9 +97,8 @@ class SuperVariable(VariableTracker):
             return GetAttrVariable(self, name, **options)
         if source:
             options["source"] = source
-            return variables.ConstantVariable.create(value, **options).add_guard(
-                source.make_guard(GuardBuilder.CONSTANT_MATCH)
-            )
+            install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+            return variables.ConstantVariable.create(value, **options)
         return variables.ConstantVariable.create(value, **options)
 
     def call_method(

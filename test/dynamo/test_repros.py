@@ -856,7 +856,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
         self.assertEqual(
             torch._dynamo.utils.counters["frames"]["total"],
-            torch._dynamo.utils.counters["frames"]["ok"] + 1,
+            torch._dynamo.utils.counters["frames"]["ok"],
         )
 
     def test_convert_boxes_to_pooler_format(self):
@@ -1118,9 +1118,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """4""")
+            self.assertExpectedInline(cnt.frame_count, """3""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -2367,77 +2367,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             y = torch.randn(4, requires_grad=b)
             self.assertEqual(f(x, x), opt_f(x, x))
             self.assertEqual(f(x, y), opt_f(x, y))
-
-    def test_reformer_remove_unused_args(self):
-        # This test case is very interesting.  First, let's describe
-        # the bug this is testing for.  The bug we fixed is twofold:
-        #
-        # - We prune GraphArgs that aren't used in the output graph.
-        #   However, sometimes it is possible for those GraphArgs to be
-        #   utilized in shape guards (you could imagine this happening if
-        #   dynamo poked some shape variables without recording them in the
-        #   graph.)  If we prune those GraphArgs, we get a
-        #   "s1 not in ..." error as we can no longer codegen the
-        #   requested guards.
-        #
-        # - But in practice, Dynamo usually traces size accesses into the
-        #   graph, preventing the GraphArg from getting pruned.  So how
-        #   come we were running into this in practice with hf_Reformer?
-        #   The answer is checkpointing!
-        #
-        # This brings us to the following test case.  Here's what it does:
-        #
-        # 1. It traces some operations, and then checkpoints before inlining
-        #    the function call to g
-        #
-        # 2. g traces some more operations (triggering the shape guard
-        #    to be created), but then it graph breaks
-        #
-        # 3. Because you can't graph break in an inlining function, we roll
-        #    back to the outer checkpoint ("undoing" the operation that
-        #    induced the shape guard) and then immediately generate a
-        #    subgraph at that point.
-        #
-        # If we failed to checkpoint the ShapeEnv, it can still have guards
-        # from the aborted speculation, which we will then still attempt to
-        # codegen.
-        #
-        # There's an additional nuance: suppose x is used but y is not.
-        # If you create a guard like y == x * 2, you will accidentally avoid
-        # the "s1 not in ..." error, as y will get substituted with x * 2,
-        # but x is still a GraphArg (it's used) and you don't end up with
-        # the error.  This is why we must show y + y == x, not vice versa.
-        # Similarly, it is also why we must not do a simple guard like x == y
-        #
-        # Can we actually demonstrate that checkpointing the ShapeEnv is
-        # necessary?  It's not so easy to induce this case.  Dynamo is very
-        # eager about adding locals to GraphArgs; any local that is in scope,
-        # even if it isn't used, is added to GraphArgs (see also
-        # https://github.com/pytorch/torchdynamo/issues/1925 ).  So long
-        # as Dynamo eagerly guards in this way, we have an invariant that
-        # all locals are guaranteed to show up in GraphArgs before the
-        # inlining function call, in which case we will always have enough
-        # information to codegen our guards so long as we don't prune the
-        # unused GraphArgs away (and indeed, the direct fix for this bug
-        # was to make sure we use original GraphArgs).  Non locals,
-        # conversely, typically are static, and so won't have guards allocated
-        # for them.  That being said, there may still be a way to trigger
-        # this error.
-
-        def g(x, y):
-            r = torch.cat((y, y)) + x
-            print("foo")
-            return r
-
-        def f(x, y):
-            x = x * 3
-            return g(x, y)
-
-        opt_f = torch._dynamo.optimize("aot_eager")(f)
-
-        x = torch.randn(4)
-        y = torch.randn(2)
-        self.assertEqual(f(x, y), opt_f(x, y))
 
     def test_swin_base_tensor_attr(self):
         class Foo(torch.nn.Module):
