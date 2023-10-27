@@ -402,6 +402,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         assert K % Ks == 0
 
         c_indices, r_offsets, q_offsets, meta = indices_data[1:]
+        c_indices = c_indices.obj
         SPLIT_N = meta['SPLIT_N']
 
         if accumulators is None:
@@ -759,7 +760,8 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
         # crow_indices consitutes a part of a key in lru_cache as well
         # as of a value. To avoid infinite lifetime of such tensors,
         # the value will contain a clone of the tensor:
-        c_indices = crow_indices.clone()
+        # c_indices = crow_indices.clone()
+        c_indices = crow_indices_as_key
         # swizzle operation: mm elements with longer sums are computed first:
         nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
         nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
