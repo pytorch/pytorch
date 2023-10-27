@@ -18,6 +18,7 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     PreviouslyFailedInPR,
 )
 from tools.testing.target_determination.heuristics.profiling import Profiling
+from tools.testing.target_determination.heuristics.random_baseline import RandomBaseline
 
 # All currently running heuristics.
 # To add a heurstic in trial mode, specify the keywork argument `trial_mode=True`.
@@ -27,4 +28,5 @@ HEURISTICS: List[HeuristicInterface] = [
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(trial_mode=True),
     Profiling(trial_mode=True),
+    RandomBaseline(trial_mode=True),
 ]
