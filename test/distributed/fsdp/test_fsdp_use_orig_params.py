@@ -233,40 +233,40 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
     def _test_fsdp_compile(
         self, sharding_strategy: ShardingStrategy, skip_fsdp_guards: bool
     ):
-        torch._dynamo.config.skip_fsdp_guards = skip_fsdp_guards
-        fsdp_kwargs = {
-            "auto_wrap_policy": ModuleWrapPolicy(
-                {
-                    TransformerEncoderLayer,
-                    TransformerDecoderLayer,
-                }
-            ),
-            "use_orig_params": True,
-            "sharding_strategy": sharding_strategy,
-            "backward_prefetch": BackwardPrefetch.BACKWARD_PRE,
-            "cpu_offload": CPUOffload(False),
-        }
-        base_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
-            deterministic=True,
-        )
-        ref_model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
-        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
-        model = torch.compile(model)
-        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        for i in range(10):
-            losses = []
-            inp = ref_model.get_input(torch.device("cuda"))
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                _optim.zero_grad()
-                loss = _model(*inp).sum()
-                losses.append(loss)
-                loss.backward()
-                _optim.step()
-            self.assertEqual(losses[0], losses[1])
+        with torch._dynamo.config.patch({"skip_fsdp_guards": skip_fsdp_guards}):
+            fsdp_kwargs = {
+                "auto_wrap_policy": ModuleWrapPolicy(
+                    {
+                        TransformerEncoderLayer,
+                        TransformerDecoderLayer,
+                    }
+                ),
+                "use_orig_params": True,
+                "sharding_strategy": sharding_strategy,
+                "backward_prefetch": BackwardPrefetch.BACKWARD_PRE,
+                "cpu_offload": CPUOffload(False),
+            }
+            base_model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                deterministic=True,
+            )
+            ref_model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
+            ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+            model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
+            model = torch.compile(model)
+            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            for i in range(10):
+                losses = []
+                inp = ref_model.get_input(torch.device("cuda"))
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    _optim.zero_grad()
+                    loss = _model(*inp).sum()
+                    losses.append(loss)
+                    loss.backward()
+                    _optim.step()
+                self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
