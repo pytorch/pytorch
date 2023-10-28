@@ -1,9 +1,11 @@
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 #include <ATen/core/IListRef.h>
-#include <ATen/core/Tensor.h>
 #include <gtest/gtest.h>
 #include <algorithm>
-#include <iterator>
 
 using namespace c10;
 

@@ -114,8 +114,7 @@ public:
       output_ = rand(counter, key, n_rounds);
       incr();
     }
-    // NOLINTNEXTLINE(*-narrowing-conversions)
-    uint32_t ret = output_[STATE];
+    uint32_t ret = output_[static_cast<int>(STATE)];
     STATE = (STATE + 1) & 3;
     return ret;
   }
