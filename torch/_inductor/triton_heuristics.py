@@ -12,7 +12,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, List, Optional, Set, Tuple
 
 import torch
 
@@ -62,7 +62,6 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     PERSISTENT_REDUCTION = auto()
     TEMPLATE = auto()
-    USER_AUTOTUNE = auto()
 
 
 class AutotuneHint(Enum):
@@ -345,7 +344,7 @@ class CachingAutotuner(KernelInterface):
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid, **kwargs):
+    def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
         if launcher.n_spills > config.triton.spill_threshold:
             log.debug(
@@ -363,17 +362,16 @@ class CachingAutotuner(KernelInterface):
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
-            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
+            cloned_args = self.clone_args(*args)
             launcher(
                 *cloned_args,
-                **cloned_kwargs,
                 grid=grid,
                 stream=stream,
             )
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
+    def clone_args(self, *args):
         from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -387,15 +385,7 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
-        cloned_kwargs: Dict[str, Any] = {}
-        for name, arg in kwargs.items():
-            if name in self.mutated_arg_names:
-                assert isinstance(arg, torch.Tensor)
-                cloned_kwargs[name] = clone_preserve_strides(arg)
-            else:
-                cloned_kwargs[name] = arg
-
-        return cloned_args, cloned_kwargs
+        return cloned_args
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
@@ -461,14 +451,11 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if (
-            self.heuristic_type == HeuristicType.TEMPLATE
-            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
-        ):
+        if self.heuristic_type == HeuristicType.TEMPLATE:
             # skip triton template
             return launcher
 
-        cloned_args, _ = self.clone_args(*args)
+        cloned_args = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -1139,39 +1126,6 @@ def template(num_stages, num_warps, meta, filename=None):
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
-        filename=filename,
-    )
-
-
-def user_autotune(configs, meta, filename=None):
-    """
-    Compile a user defined triton kernel
-    """
-    defaults = inspect.signature(triton.Config).parameters
-    default_num_stages = defaults["num_stages"].default
-    default_num_warps = defaults["num_warps"].default
-
-    if len(configs) == 0:
-        configs = [
-            triton.Config(
-                {}, num_stages=default_num_stages, num_warps=default_num_warps
-            )
-        ]
-    else:
-        configs = [
-            triton.Config(
-                c.get("kwargs", {}),
-                num_stages=c.get("num_stages", default_num_stages),
-                num_warps=c.get("num_warps", default_num_warps),
-            )
-            for c in configs
-        ]
-
-    return cached_autotune(
-        None,
-        configs,
-        meta=meta,
-        heuristic_type=HeuristicType.USER_AUTOTUNE,
         filename=filename,
     )
 

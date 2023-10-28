@@ -778,7 +778,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count += 1
         return new_name
 
-    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
         original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -788,11 +788,16 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import user_autotune
+            from torch._inductor.triton_heuristics import template
             """,
             strip=True,
         )
         compile_wrapper.newline()
+
+        # TODO(oulgen): num_stages and num_warps are default values of
+        # triton.Config. Can we do better? Or ask the user to provide?
+        num_stages = 2
+        num_warps = 4
 
         from ..ir import Buffer
         from .common import SizeArg, TensorArg
@@ -800,6 +805,9 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
+            # Not a real argument
+            if key == "grid":
+                continue
             if (
                 key in kernel.__annotations__
                 and "constexpr" in kernel.__annotations__[key]
@@ -821,20 +829,12 @@ class WrapperCodeGen(CodeGen):
             "configs": [config_of(signature)],
             "kernel_name": name,
         }
-        configs = [
-            {
-                "kwargs": config.kwargs,
-                "num_warps": config.num_warps,
-                "num_stages": config.num_stages,
-            }
-            for config in configs
-        ]
         compile_wrapper.splice(
             f"""
-            @user_autotune(
-                configs={configs!r},
-                meta={triton_meta!r},
-                filename=__file__
+            @template(
+                num_stages={num_stages},
+                num_warps={num_warps},
+                meta={triton_meta!r}
             )
             @triton.jit
             """

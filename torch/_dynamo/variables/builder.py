@@ -362,14 +362,10 @@ class VariableBuilder:
         from torch.utils._triton import has_triton
 
         if has_triton():
-            from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
 
             class JITFunction:
-                pass
-
-            class Autotuner:
                 pass
 
         make_guards = self.make_guards
@@ -720,7 +716,7 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, (JITFunction, Autotuner)):
+        elif isinstance(value, JITFunction):
             return TritonKernelVariable(
                 value,
                 None,  # No kernel idx provided
