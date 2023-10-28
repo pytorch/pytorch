@@ -54,7 +54,7 @@ def load_state_dict(
         coordinator_rank (int):
             Rank to use to coordinate the checkpoint.
             rank0 is used by default.
-        no_dist (bool): If ``True``, distributed checkpoint will not save
+        no_dist (bool): If ``True``, distributed checkpoint will not load
             in SPMD style. (Default: ``False``)
 
     Returns:
