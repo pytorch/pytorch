@@ -121,7 +121,7 @@ SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
-def register_pytree_node(
+def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
@@ -175,7 +175,7 @@ def register_pytree_node(
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
 
-_register_pytree_node = register_pytree_node
+register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
