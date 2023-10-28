@@ -363,7 +363,6 @@ class VariableBuilder:
         from torch.utils._triton import has_triton
 
         if has_triton():
-            from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
 
