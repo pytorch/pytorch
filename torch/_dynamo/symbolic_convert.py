@@ -591,8 +591,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains
+            return v.parents_tracker not in recursive_parents
 
+        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -1431,19 +1432,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        # only copy if the new obj contains other mutables
-        new_rec_contains = obj.recursively_contains
-        if v.recursively_contains or v.mutable_local:
-            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
-
-            if v.mutable_local:
-                new_rec_contains.add(v.mutable_local)
-
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
-                recursively_contains=new_rec_contains,
                 regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
