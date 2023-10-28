@@ -680,12 +680,12 @@ class TestModule(TestCase):
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                 desired_outputs = m(*args, **kwargs)
                 # === Do backward pass. ===
-                ref_diff_outputs = tuple(t for t in torch.utils._pytree.tree_flatten(desired_outputs)[0] if _req_grad(t))
+                ref_diff_outputs = tuple(t for t in torch.utils._pytree.tree_leaves(desired_outputs) if _req_grad(t))
                 if training and len(ref_diff_outputs) > 0:
                     params = tuple(p for p in m.parameters())
                     ref_diff_inputs = tuple(
                         t
-                        for t in torch.utils._pytree.tree_flatten((args, kwargs, params))[0]
+                        for t in torch.utils._pytree.tree_leaves((args, kwargs, params))
                         if _req_grad(t)
                     )
                     ref_grad_outputs = tuple(
@@ -706,13 +706,13 @@ class TestModule(TestCase):
                     # See https://github.com/pytorch/pytorch/issues/107861
                     # When inductor tests are turned on, the setting of requires_grad will be lost
                     for t1, t2 in zip(
-                        torch.utils._pytree.tree_flatten(d_args)[0],
-                        torch.utils._pytree.tree_flatten(module_input.forward_input.args)[0],
+                        torch.utils._pytree.tree_leaves(d_args),
+                        torch.utils._pytree.tree_leaves(module_input.forward_input.args),
                     ):
                         t1.requires_grad_(t2.requires_grad)
                     for t1, t2 in zip(
-                        torch.utils._pytree.tree_flatten(d_kwargs)[0],
-                        torch.utils._pytree.tree_flatten(module_input.forward_input.kwargs)[0],
+                        torch.utils._pytree.tree_leaves(d_kwargs),
+                        torch.utils._pytree.tree_leaves(module_input.forward_input.kwargs),
                     ):
                         t1.requires_grad_(t2.requires_grad)
 
@@ -735,12 +735,12 @@ class TestModule(TestCase):
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)
 
                         # === Do backward pass. ===
-                        diff_outputs = tuple(t for t in torch.utils._pytree.tree_flatten(outputs)[0] if _req_grad(t))
+                        diff_outputs = tuple(t for t in torch.utils._pytree.tree_leaves(outputs) if _req_grad(t))
                         if training and len(diff_outputs) > 0:
                             params = tuple(p for p in m.parameters())
                             diff_inputs = tuple(
                                 t
-                                for t in torch.utils._pytree.tree_flatten((args, kwargs, params))[0]
+                                for t in torch.utils._pytree.tree_leaves((args, kwargs, params))
                                 if _req_grad(t)
                             )
                             grad_outputs = tuple(

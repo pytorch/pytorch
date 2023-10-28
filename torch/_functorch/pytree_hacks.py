@@ -4,11 +4,11 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_unflatten
 
 
 def tree_map_(fn_, pytree):
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = pytree.tree_leaves(pytree)
     [fn_(arg) for arg in flat_args]
     return pytree
 

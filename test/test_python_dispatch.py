@@ -459,8 +459,8 @@ class TestPythonRegistration(TestCase):
         if mutable_result is None:
             flat_mutable_result = []
         else:
-            flat_mutable_result, _ = pytree.tree_flatten(mutable_result)
-        flat_functional_result, _ = pytree.tree_flatten(functional_result)
+            flat_mutable_result = pytree.tree_leaves(mutable_result)
+        flat_functional_result = pytree.tree_leaves(functional_result)
         assert len(flat_functional_result) > len(flat_mutable_result)
         self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
 
@@ -2196,16 +2196,16 @@ class TestWrapperSubclassAliasing(TestCase):
 
         result_test = op(*args_subclass, **kwargs_subclass)
 
-        args_ref_flat, _ = pytree.tree_flatten((args, kwargs))
+        args_ref_flat = pytree.tree_leaves((args, kwargs))
         args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
 
-        args_test_flat, _ = pytree.tree_flatten((args_subclass, kwargs_subclass))
+        args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))
         args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
 
-        result_ref_flat, _ = pytree.tree_flatten(result_ref)
+        result_ref_flat = pytree.tree_leaves(result_ref)
         result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
 
-        result_test_flat, _ = pytree.tree_flatten(result_test)
+        result_test_flat = pytree.tree_leaves(result_test)
         result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):

@@ -427,8 +427,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args = pytree.tree_leaves(args)
+    flat_kwargs = pytree.tree_leaves(kwargs)
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
@@ -676,9 +676,9 @@ class TestDecomp(TestCase):
             if self.run_all:
                 # Execute recursively via DFS, to find the root of a possible error first
                 with self:
-                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                    decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
             else:
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
 
             # At this stage we should not be decomposing an in-place op
             # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
@@ -688,7 +688,7 @@ class TestDecomp(TestCase):
             # decomposition does not modify any of the inputs in-place. If it does
             # real_out should be differen than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
-            real_out, _ = tree_flatten(real_out_unflat)
+            real_out = pytree.tree_leaves(real_out_unflat)
 
             assert len(real_out) == len(decomp_out)
 
