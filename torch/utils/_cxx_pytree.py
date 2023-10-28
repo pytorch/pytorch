@@ -215,7 +215,7 @@ def register_pytree_node(
     if __register_python_pytree_node:
         from . import _pytree
 
-        _pytree.register_pytree_node(
+        _pytree._register_pytree_node(
             cls,
             flatten_func,
             unflatten_func,
