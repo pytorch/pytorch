@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -492,6 +493,11 @@ class AutogradFunctionVariable(VariableTracker):
             unimplemented(f"Unsupported method: {name}")
 
 
+@dataclasses.dataclass
+class SavedTensorBox:
+    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+
+
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
@@ -503,30 +509,42 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
-    def __init__(self, value, value_type=None, inference=False, proxy=None, **kwargs):
-        saved_tensors = kwargs.pop("_saved_tensors", [])
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        inference=False,
+        proxy=None,
+        saved_tensors=None,
+        **kwargs,
+    ):
         super().__init__(value=value, value_type=value_type, **kwargs)
-        self._saved_tensors = saved_tensors
         self.inference = inference
         self.proxy = proxy
+        self.saved_tensors = saved_tensors
 
     @staticmethod
     def create(tx):
-        out = tx.output.side_effects.track_object_new(
-            None,
-            torch.autograd.function.FunctionCtx,
-            functools.partial(AutogradFunctionContextVariable, inference=True),
-            {},
-        )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
+        out = tx.output.side_effects.track_object_new(
+            None,
+            torch.autograd.function.FunctionCtx,
+            functools.partial(
+                AutogradFunctionContextVariable,
+                inference=True,
+                proxy=proxy,
+                saved_tensors=SavedTensorBox(),
+            ),
+            {},
+        )
         proxy.node.meta["example_value"] = out.value
-
-        out.proxy = proxy
         return out
 
     def as_proxy(self):
+        if self.proxy is None:
+            unimplemented("proxy not set")
         return self.proxy
 
     def call_method(
@@ -538,19 +556,21 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
+        if self.saved_tensors is None:
+            unimplemented(
+                "save_for_backward only supported on a newly constructed FunctionCtx"
+            )
 
         if not self.inference:
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if not hasattr(self, "_saved_tensors"):
-            self._saved_tensors = []
         for arg in args:
             # as_proxy can return constant values or other non proxy values
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
-            self._saved_tensors.append(arg)
+            self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
@@ -558,8 +578,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             ).add_options(self)
-        if name == "saved_tensors":
-            return variables.TupleVariable(list(self._saved_tensors))
+        if name == "saved_tensors" and self.saved_tensors is not None:
+            return variables.TupleVariable(list(self.saved_tensors.tensors))
         return super().var_getattr(tx, name)
 
 
