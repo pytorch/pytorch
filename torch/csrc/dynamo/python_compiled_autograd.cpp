@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <iostream>
 #include <vector>
 
@@ -421,6 +422,20 @@ variable_list compiled_autograd(
 
       SwapSavedVariables saved(compiler_call, state);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      if (!call.post_acc_grad_hooks.empty()) {
+        // outputs
+        THPObjectPtr pyoutputs(THPVariable_WrapList(outputs));
+        for (const auto hook : call.post_acc_grad_hooks) {
+          check(PyObject_CallMethod(
+              py_compiler.get(), "post_acc_grad_hook", "Oi", pyoutputs.get(), hook));
+        }
+      }
+      if(typeid(*call.node) == typeid(torch::autograd::AccumulateGrad)) {
+        // The return of AccumulateGrad should be [], but we hack it to make hooks work.
+        // This restores it correctly.
+        outputs = variable_list();
+      }
+
       saved.debug_asserts();
       saved.before(call.node->next_edges());
       validate_outputs(

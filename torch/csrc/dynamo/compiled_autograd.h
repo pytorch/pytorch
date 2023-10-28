@@ -76,6 +76,7 @@ struct NodeCall {
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
+  std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
   bool needed = true;
 };
@@ -346,9 +347,6 @@ class CompiledNodeArgs {
     TORCH_CHECK(
         fn->retains_grad_hooks().empty(),
         "retains_grad_hooks not implemented for compiled autograd");
-    TORCH_CHECK(
-        fn->tensor_post_acc_grad_hooks() == nullptr,
-        "tensor_post_acc_grad_hooks not implemented for compiled autograd");
     for (auto& i : fn->tensor_pre_hooks()) {
       i->compiled_args(*this);
     }
@@ -358,9 +356,13 @@ class CompiledNodeArgs {
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
+    if (fn->tensor_post_acc_grad_hooks() != nullptr) {
+      fn->tensor_post_acc_grad_hooks()->compiled_args(*this);
+    }
     collect_size(_node_call.tensor_pre_hooks.size());
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
+    collect_size(_node_call.post_acc_grad_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
       collect_size(h.second); // index
     }
@@ -388,6 +390,12 @@ class CompiledNodeArgs {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
+  }
+
+  void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
   void collect_size(size_t s) {

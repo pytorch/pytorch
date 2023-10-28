@@ -558,7 +558,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
     def test_post_acc_grad_hook(self):
         for backend in ["eager", "aot_eager", "inductor"]:
-            for compiled_bwd in [False]:  # True NYI
+            for compiled_bwd in [False, True]:
                 torch._dynamo.reset()
 
                 def hook(p):

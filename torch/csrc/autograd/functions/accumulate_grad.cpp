@@ -83,6 +83,7 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor variable_copy = variable;
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
+  at::Tensor fake_variable_copy = variable_copy;
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
   // op is intentionally static
@@ -93,11 +94,8 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.after(variable_copy);
   saved.after(grad_copy);
 
-  TORCH_CHECK(
-      tensor_post_acc_grad_hooks() == nullptr,
-      "compiled_autograd does not support tensor_post_acc_grad_hooks");
-
-  return variable_list();
+  // A little hack - this is only here for the purpose of hooks. It will get cleared.
+  return variable_list({fake_variable_copy});
 }
 
 } // namespace autograd
