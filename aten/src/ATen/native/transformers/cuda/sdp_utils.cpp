@@ -356,7 +356,7 @@ inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
   }
   const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
   const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
-  const bool ok = supported && kernel_params.is_causal && shape_ok && layout_ok;
+  const bool ok = supported;// && kernel_params.is_causal && shape_ok && layout_ok;
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }

@@ -738,7 +738,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
-  TORCH_INTERNAL_ASSERT(is_causal);
+  // TORCH_INTERNAL_ASSERT(is_causal);
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
@@ -781,7 +781,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   //attention =
   //    attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
   std::cout << "got attention shape and stride before: " << attention.sizes() << " " << attention.strides() << std::endl;
-  attention = attention.transpose(1, 2);
+  // attention = attention.transpose(0, 2);
+  attention =
+    attention.reshape({batch_size, num_heads, max_seqlen_batch_q, head_dim}).transpose(1,2);
   std::cout << "got attention shape and stride after: " << attention.sizes() << " " << attention.strides() << std::endl;
   return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
