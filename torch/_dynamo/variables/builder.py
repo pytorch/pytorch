@@ -33,7 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-from .. import config, mutation_guard, replay_record, skipfiles
+from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
     is_allowed,
     is_builtin_callable,
@@ -87,6 +87,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
+    SetVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -108,7 +109,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    SetVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -369,6 +369,9 @@ class VariableBuilder:
             class JITFunction:
                 pass
 
+            class Autotuner:
+                pass
+
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
         if type_dispatch is not None:
@@ -473,11 +476,6 @@ class VariableBuilder:
             return BuiltinVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
-        elif is_allowed(value):
-            if is_user_defined_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return TorchVariable(value, source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -505,8 +503,11 @@ class VariableBuilder:
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)
-            return TypingVariable(value, source=self.source)
-        elif isinstance(value, np.generic):
+            return TypingVariable(
+                value,
+                source=self.source,
+            )
+        elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
@@ -526,30 +527,6 @@ class VariableBuilder:
             return CollectiveFunctionRewriteVariable(
                 new_fn, orig_fn=value, orig_source=old_source, source=new_source
             )
-        elif (
-            istype(value, (type, types.FunctionType))
-            and skipfiles.check(value, allow_torch=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
-        ):
-            if callable(value):
-                self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.install_guards(GuardBuilder.TYPE_MATCH)
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, allow_torch=True).reason,
-                source=self.source,
-            )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return UserFunctionVariable(value, source=self.source)
-        elif istype(value, (types.ModuleType, replay_record.DummyModule)):
-            self.install_guards(GuardBuilder.PYMODULE_MATCH)
-            return PythonModuleVariable(
-                value,
-                source=self.source,
-            )
         elif istype(value, torch.autograd.function.FunctionMeta):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return AutogradFunctionVariable(
@@ -557,11 +534,13 @@ class VariableBuilder:
                 source=self.source,
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            saved_tensors_source = AttrSource(self.source, "saved_tensors")
+            install_guard(
+                self.source.make_guard(GuardBuilder.TYPE_MATCH),
+                saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH),
+            )
             saved_tensors = [
-                VariableBuilder(
-                    self.tx, GetItemSource(AttrSource(self.source, "saved_tensors"), n)
-                )(v)
+                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
                 for n, v in enumerate(value.saved_tensors)
             ]
             return self.tx.output.side_effects.track_object_existing(
@@ -625,28 +604,6 @@ class VariableBuilder:
             and value in config.traceable_tensor_subclasses
         ):
             return TensorSubclassVariable(value, source=self.source)
-        elif isinstance(value, types.MethodType) and isinstance(
-            value.__self__, torch.nn.Module
-        ):
-            # don't let MethodTypes fall through to UserDefinedObject,
-            # which doesn't support 'CALL_FUNCTION'
-
-            # TODO(whc): Why do we limit this to methods on NNModules?
-            # I don't have a good reason for this, but it preserves the existing behavior
-            # for MBartForConditionalGeneration, which generates many graph breaks and OOMs otherwise.
-            # I suspect we probably want to relax this check and dig deeper there.
-
-            # In order to construct a MethodVariable in Dynamo, we start with an actual method obj from python,
-            # but need to separately wrap its underlying `__func__` and its `self` argument.  We wrap `self` here
-            # and then `__func__` gets wrapped inside UserMethodVariable.
-            self_obj = VariableBuilder(
-                self.tx, source=AttrSource(self.source, "__self__")
-            )(value.__self__)
-            assert self_obj and isinstance(
-                self_obj, VariableTracker
-            ), "Failed to produce a valid self obj"
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return UserMethodVariable(value.__func__, self_obj, source=self.source)
         elif (
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
@@ -661,12 +618,6 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif isinstance(value, types.GetSetDescriptorType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return GetSetDescriptorVariable(value)
-        elif isinstance(value, types.MethodWrapperType):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return MethodWrapperVariable(value)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
@@ -728,7 +679,7 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, JITFunction):
+        elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
@@ -736,11 +687,33 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif trace_rules.lookup(value) is not None:
+            return trace_rules.lookup(value).create_with_source(
+                value, source=self.source
+            )
         elif is_allowed(value):
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchVariable(
+                value,
+                source=self.source,
+            )
+        elif (
+            istype(value, (type, types.FunctionType))
+            and skipfiles.check(value, allow_torch=True)
+            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
+        ):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return SkipFilesVariable(
+                value,
+                skipfiles.check_verbose(value, allow_torch=True).reason,
+                source=self.source,
+            )
+        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return UserFunctionVariable(
                 value,
                 source=self.source,
             )
@@ -976,6 +949,10 @@ class VariableBuilder:
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
 
+        # We cannot already be tracking the tensor, which implies
+        # it would have already been wrapped
+        assert value not in self.tx.output.side_effects
+
         if (
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
@@ -1077,6 +1054,7 @@ class VariableBuilder:
                 else TensorWeakRef(value),
             )
         )
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1100,7 +1078,6 @@ class VariableBuilder:
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
         self.tx.output.add_symbol_bindings(grapharg)
-
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):

@@ -1,7 +1,7 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    hint_int, magic_methods, method_to_operator, free_symbols,
-    is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+    hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
 import torch
 import torch.fx as fx
