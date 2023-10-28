@@ -82,7 +82,7 @@ from .variables.ctx_manager import (
     GenericContextWrappingVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable
+from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
@@ -93,7 +93,6 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -1063,7 +1062,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(tos)
 
     def FOR_ITER(self, inst):
-        it = self.pop()
+        it = self.pop().realize()
         if isinstance(it, ListIteratorVariable):
             try:
                 val, next_iter = it.next_variables()
@@ -1393,7 +1392,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def MAP_ADD(self, inst):
         k, v = self.popn(2)
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         items = dict(obj.items)
@@ -1418,7 +1417,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def LIST_APPEND(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
         self.replace_all(
@@ -2513,7 +2512,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_FROM(self, inst):
         while True:
-            tos = self.stack[-1]
+            tos = self.stack[-1].realize()
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
