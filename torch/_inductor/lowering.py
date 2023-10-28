@@ -407,12 +407,14 @@ def make_pointwise(
             # The following is an iterative version of:
             # fn(*[load(index) for load in loaders])
             # to avoid blowing the Python stack.
+            # An invariant is that they must share all the same index.
+            # This invariant is currently true for Inductor.
             res = []
             for load in loaders:
-                while curr := load(index):
-                    if not callable(curr):
+                while load := load(index):
+                    if not callable(load):
                         break
-                res.append(curr)
+                res.append(load)
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*res)
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
