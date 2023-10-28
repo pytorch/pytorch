@@ -444,10 +444,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
+        class NO_SUCH_SUBOBJ:
+            pass
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
-            subobj = None
+            subobj = NO_SUCH_SUBOBJ
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
