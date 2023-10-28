@@ -406,7 +406,7 @@ class SetVariable(VariableTracker):
             )
             return result
         elif name == "__len__":
-            return ConstantVariable.create(len(self.items)).add_options(options)
+            return ConstantVariable.create(len(self.items))
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -423,7 +423,7 @@ class SetVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.items]
+        return list(self.items)
 
 
 class DataClassVariable(ConstDictVariable):
