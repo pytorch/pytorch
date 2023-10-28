@@ -2015,11 +2015,15 @@ where = _make_prim(
 #
 # Type conversions
 #
-def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+def _convert_element_type_meta(
+    a: Union[TensorLikeType, NumberType], dtype: torch.dtype
+) -> TensorLikeType:
     # Type checks
-    assert isinstance(a, TensorLike)
+    assert isinstance(a, (TensorLike, Number))
     assert isinstance(dtype, torch.dtype)
 
+    if isinstance(a, Number):
+        return TensorMeta(a, dtype=dtype)
     # dtype conversion preserves dense strides
     if torch._prims_common.is_non_overlapping_and_dense(a):
         strides = a.stride()
@@ -2029,7 +2033,12 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
     return TensorMeta(a, strides=strides, dtype=dtype)
 
 
-def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+def _convert_element_type_aten(
+    a: Union[Tensor, NumberType], dtype: torch.dtype
+) -> Tensor:
+    if isinstance(a, Number):
+        return torch.tensor(a, dtype=dtype)
+
     # Propagates requires grad when possible
     if not utils.is_grad_dtype(dtype):
         requires_grad = False
