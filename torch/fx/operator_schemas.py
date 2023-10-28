@@ -97,7 +97,7 @@ def _torchscript_schema_to_signature_impl(ts_schema : torch._C.FunctionSchema) -
 
     return inspect.Signature(parameters, return_annotation=return_type)
 
-SCHEMA_TO_SIGNATURE_CACHE : Dict[Tuple[str, str], inspect.Signature] = {}
+_SCHEMA_TO_SIGNATURE_CACHE : Dict[Tuple[str, str], inspect.Signature] = {}
 
 def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
     # Cached as it's called in the hot path of FakeTensor dispatch
