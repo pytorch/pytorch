@@ -606,11 +606,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
-        jagged_tensor = sys.modules.get("torchrec.sparse.jagged_tensor")
-        if jagged_tensor is None:
-            return False
-
-        return type(obj) is jagged_tensor.KeyedJaggedTensor
+        mod = sys.modules.get("torchrec.sparse.jagged_tensor")
+        return mod is not None and type(obj) is mod.KeyedJaggedTensor
 
     def __init__(self, value, **kwargs):
         from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
