@@ -252,7 +252,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 CUDAInitMode.CUDA_BEFORE,
                 deterministic=True,
             )
-            ref_model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
+            ref_model = FSDP(
+                copy.deepcopy(base_model), self.process_group, **fsdp_kwargs
+            )
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
             model = FSDP(copy.deepcopy(base_model), self.process_group, **fsdp_kwargs)
             model = torch.compile(model)
