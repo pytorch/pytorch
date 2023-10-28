@@ -3581,9 +3581,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_vmap_convert_element_type_supported(self):
-        torch.compile(lambda x: torch.vmap(lambda x: torch.sum(x) + 1e-4)(x), fullgraph=True)(torch.randn((3, 3)))
-        torch.compile(lambda x: torch.vmap(lambda x: torch.std(x) + 1e-4)(x), fullgraph=True)(torch.randn((3, 3)))
-        torch.compile(lambda x: torch.vmap(lambda x: torch.mean(x) + 1e-4)(x), fullgraph=True)(torch.randn((3, 3)))
+        torch.compile(
+            lambda x: torch.vmap(lambda x: torch.sum(x) + 1e-4)(x), fullgraph=True
+        )(torch.randn((3, 3)))
+        torch.compile(
+            lambda x: torch.vmap(lambda x: torch.std(x) + 1e-4)(x), fullgraph=True
+        )(torch.randn((3, 3)))
+        torch.compile(
+            lambda x: torch.vmap(lambda x: torch.mean(x) + 1e-4)(x), fullgraph=True
+        )(torch.randn((3, 3)))
 
 
 if __name__ == "__main__":
