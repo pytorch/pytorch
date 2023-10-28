@@ -45,6 +45,7 @@ from torch.testing._internal.autograd_function_db import (
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils import _pytree as pytree
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from torch._functorch.eager_transforms import _as_tuple, jvp

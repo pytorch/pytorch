@@ -26,6 +26,7 @@ from torch._export.passes.functionalize_side_effectful_ops_pass import (
 from functorch.experimental.control_flow import cond
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.infra.partitioner import Partition
+from torch.utils import _pytree as pytree
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:

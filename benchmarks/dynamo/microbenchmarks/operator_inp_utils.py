@@ -8,6 +8,7 @@ from typing import Any, Dict, Generator, Iterable, Tuple
 
 import torch
 from torch.testing import make_tensor
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 

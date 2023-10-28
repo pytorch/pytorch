@@ -7,6 +7,7 @@ from torch._decomp import core_aten_decompositions, decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (

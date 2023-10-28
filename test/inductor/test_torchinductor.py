@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary

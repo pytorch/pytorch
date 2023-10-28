@@ -9,6 +9,7 @@ import torch
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.utils import _pytree as pytree
 
 
 profile = functools.partial(

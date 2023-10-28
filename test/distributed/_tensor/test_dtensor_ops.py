@@ -25,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
 # rewrite common size variables to sth can be sharded evenly

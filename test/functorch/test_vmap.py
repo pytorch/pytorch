@@ -59,6 +59,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
+from torch.utils import _pytree as pytree
 
 FALLBACK_REGEX = 'There is a performance drop'
 

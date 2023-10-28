@@ -380,8 +380,8 @@ class TestModule(TestCase):
                 else:
                     grad_output = tuple(self._traverse_obj(o, lambda o: o.clone().detach_().normal_() if o.requires_grad else None)
                                         for o in default_output)
-                    flattened_default_output, _ = torch.utils._pytree.tree_flatten(default_output)
-                    flattened_grad_output, _ = torch.utils._pytree.tree_flatten(grad_output)
+                    flattened_default_output = torch.utils._pytree.tree_leaves(default_output)
+                    flattened_grad_output = torch.utils._pytree.tree_leaves(grad_output)
                     for o, g_o in zip(flattened_default_output, flattened_grad_output):
                         if (o.requires_grad):
                             o.backward(g_o, retain_graph=True)
@@ -407,8 +407,8 @@ class TestModule(TestCase):
                     if isinstance(out, torch.Tensor):
                         out.backward(g_out_copy, retain_graph=True)
                     else:
-                        flattened_out, _ = torch.utils._pytree.tree_flatten(out)
-                        flattened_g_out_copy, _ = torch.utils._pytree.tree_flatten(g_out_copy)
+                        flattened_out = torch.utils._pytree.tree_leaves(out)
+                        flattened_g_out_copy = torch.utils._pytree.tree_leaves(g_out_copy)
                         for o, g_o in zip(flattened_out, flattened_g_out_copy):
                             if o.requires_grad:
                                 o.backward(g_o, retain_graph=True)
@@ -466,7 +466,7 @@ class TestModule(TestCase):
 
                 with freeze_rng_state():
                     output = m(*new_input_args, **new_kwargs, **other_kwargs)
-                    output_flattened, _ = torch.utils._pytree.tree_flatten(output)
+                    output_flattened = torch.utils._pytree.tree_leaves(output)
                     return output_flattened
 
             # check total derivative
@@ -595,8 +595,8 @@ class TestModule(TestCase):
                 if isinstance(cpu_outputs, torch.Tensor):
                     check_backward(cpu_outputs, gpu_outputs)
                 else:
-                    flatten_cpu_outputs, _ = torch.utils._pytree.tree_flatten(cpu_outputs)
-                    flatten_gpu_outputs, _ = torch.utils._pytree.tree_flatten(gpu_outputs)
+                    flatten_cpu_outputs = torch.utils._pytree.tree_leaves(cpu_outputs)
+                    flatten_gpu_outputs = torch.utils._pytree.tree_leaves(gpu_outputs)
                     for cpu_output, gpu_output in zip(flatten_cpu_outputs, flatten_gpu_outputs):
                         if cpu_output.requires_grad:
                             check_backward(cpu_output, gpu_output)

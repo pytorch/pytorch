@@ -27,8 +27,8 @@ from typing import (
 )
 
 import torch
-from torch.utils._traceback import CapturedTraceback
 from torch.utils import _pytree as pytree
+from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
 

@@ -245,8 +245,8 @@ def torch_decomp_decompositions(func):
     return decomposition_table[func] in decomp_attrs
 
 
-def tree_flatten_only(ty: Type[T], pytree: PyTree):
-    flat_vals = pytree.tree_leaves(pytree)
+def tree_flatten_only(ty: Type[T], tree: PyTree):
+    flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
 

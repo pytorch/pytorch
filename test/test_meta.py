@@ -7,6 +7,7 @@ import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher

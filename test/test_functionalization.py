@@ -13,6 +13,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils import _pytree as pytree
 
 import unittest
 

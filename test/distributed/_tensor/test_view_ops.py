@@ -25,6 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     redistribute_profiler,
     with_comms,
 )
+from torch.utils import _pytree as pytree
 
 
 class TestViewOps(DTensorTestBase):

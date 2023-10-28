@@ -15,9 +15,9 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
-import torch.utils._pytree as pytree
 from torch._C import DispatchKeySet, DispatchKey
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
