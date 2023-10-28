@@ -934,7 +934,9 @@ def _accumulate_sharded_grad(
 
 
 @no_type_check
-def _reduce_grad_no_shard(state: _FSDPState, handle: FlatParamHandle) -> torch.cuda.Event:
+def _reduce_grad_no_shard(
+    state: _FSDPState, handle: FlatParamHandle
+) -> torch.cuda.Event:
     """
     For no-shard, this runs gradient reduction (which directly covers any
     gradient accumulation implicitly) and the post-reduction callback.
