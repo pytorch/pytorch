@@ -10,7 +10,7 @@ import torch.nn
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented, Unsupported
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import (
     AttrSource,
@@ -127,12 +127,11 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self)
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
-        install_guard(
+        return variables.ConstantVariable.create(result, **options).add_guard(
             NNModuleSource(AttrSource(self.source, name)).make_guard(
                 GuardBuilder.HASATTR
             )
         )
-        return variables.ConstantVariable.create(result, **options)
 
     def is_training(self, tx):
         mod = tx.output.get_submodule(self.module_key)
@@ -168,6 +167,7 @@ class NNModuleVariable(VariableTracker):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self)
+        guards = options.get("guards", set())
 
         if self.source:
             source = AttrSource(self.source, name)
@@ -220,12 +220,13 @@ class NNModuleVariable(VariableTracker):
             if istype(subobj, property):
                 return variables.UserFunctionVariable(
                     subobj.fget,
+                    guards=guards,
                     source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     subobj.__func__,
-                    variables.UserDefinedObjectVariable(type(base)),
+                    variables.UserDefinedObjectVariable(type(base), guards=guards),
                     **options,
                 )
             elif istype(subobj, staticmethod):
@@ -615,7 +616,7 @@ class NNModuleVariable(VariableTracker):
         ):
             # Inline the function
             fn = getattr(module, name).__func__
-            fn_source = AttrSource(AttrSource(self.source, name), "__func__")
+            fn_source = AttrSource(self.source, "__func__")
             options["source"] = fn_source
             return tx.inline_user_function_return(
                 variables.UserFunctionVariable(fn, **options),
@@ -758,7 +759,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 assert not args or kwargs
                 if tx.output.side_effects.has_pending_mutation(self):
                     unimplemented("Module.parameters() with pending mutation")
-                install_guard(
+                options["guards"].add(
                     self.source.make_guard(GuardBuilder.NN_MODULE_PARAM_NAMES)
                 )
                 items = []

@@ -1,12 +1,12 @@
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import identity, istype
+from ..utils import dict_values, identity, istype, odict_values
 
 
 class MutableLocalSource(Enum):
@@ -154,8 +154,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     @staticmethod
     def propagate(*vars: List[List["VariableTracker"]]):
-        # TODO(jansel): delete this function
-        return {}
+        """Combine the guards from many VariableTracker into **kwargs for a new instance"""
+        guards = set()
+
+        def visit(var):
+            if type(var) in (list, tuple, dict_values, odict_values):
+                for i in var:
+                    visit(i)
+            else:
+                assert isinstance(var, VariableTracker), typestr(var)
+                guards.update(var.guards)
+
+        visit(vars)
+        return {
+            "guards": guards,
+        }
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
@@ -233,8 +246,22 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
+    def add_guard(self, guard):
+        return self.clone(guards=set.union(self.guards, {guard}))
+
+    def add_guards(self, guards):
+        if guards is None:
+            return self
+        assert isinstance(guards, set)
+        return self.clone(guards=set.union(self.guards, guards))
+
     def add_options(self, options, *more):
-        return self
+        if more:
+            return self.add_options(options).add_options(*more)
+        if isinstance(options, VariableTracker):
+            return self.add_guards(options.guards)
+        assert isinstance(options, dict)
+        return self.add_guards(options.get("guards", set()))
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
@@ -262,6 +289,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         For unspecialized variables, convert to constant variable and return.
         """
         return self
+
+    def can_make_guard(self):
+        try:
+            self.make_guard(None)
+            return True
+        except NotImplementedError:
+            return False
 
     def make_guard(self, fn):
         if self.source:
@@ -353,10 +387,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to build the real VariableTracker"""
         return self
 
-    def recursive_realize(self):
-        """Realize all objects under this"""
-        return VariableTracker.apply(lambda x: x.realize(), self)
-
     def unwrap(self) -> "VariableTracker":
         """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
         return self
@@ -368,12 +398,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __init__(
         self,
         *,
+        guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
         user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
+        self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local
         self.user_code_variable_name = user_code_variable_name

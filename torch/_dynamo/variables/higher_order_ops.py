@@ -25,6 +25,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
+from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
@@ -81,6 +82,18 @@ def only_consist_of(var, types):
     return False
 
 
+def _assert_tensors_nonaliasing(inputs, outputs):
+    input_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
+    }
+    output_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
+    }
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
+
+
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
@@ -99,6 +112,9 @@ def validate_args_and_maybe_create_graph_inputs(
         assert isinstance(a, VariableTracker)
 
         if isinstance(a, ConstantVariable):
+            # Ensures that we recompile when the constant value changes
+            a.add_guard(GuardBuilder.CONSTANT_MATCH)
+
             if manually_set_subgraph_inputs:
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
@@ -248,6 +264,7 @@ def speculate_subgraph(
                         "HigherOrderOperator body's output must consist of tensors only"
                     )
 
+                tx.output.guards.update(output.guards)
                 # The output proxies might not belong to this SubgraphTracer
                 # (if they are free variables that were never lifted)
                 # so lift them here.
@@ -408,6 +425,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
+        tx.output.guards.update(args[0].guards)
 
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
@@ -715,7 +733,14 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
+
         example_res = lowered_module.original_module(*real_sub_args)
+
+        # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
+        # executorch modules promise not to alias inputs and outputs.
+        # Thus, output FakeTensors will correctly not alias input FakeTensors.
+        _assert_tensors_nonaliasing(real_sub_args, example_res)
+
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
@@ -1109,7 +1134,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         else:
             fn = TorchVariable(self.value)
         checkpoint = tx.copy_graphstate()
-        # TODO(jansel): BUG!!! we aren't copying on the line below, so the post-pre check below is pointless
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
 

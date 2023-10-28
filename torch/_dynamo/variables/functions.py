@@ -621,6 +621,12 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         self.original = original
 
+        self.guards.update(VariableTracker.propagate(func)["guards"])
+        for arg in args:
+            self.guards.update(VariableTracker.propagate(arg)["guards"])
+        for val in keywords.values():
+            self.guards.update(VariableTracker.propagate(val)["guards"])
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -652,11 +658,9 @@ class FunctoolsPartialVariable(VariableTracker):
 
 class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):
-        from triton.runtime.autotuner import Autotuner
+        super().__init__(**kwargs)
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
-
-        super().__init__(**kwargs)
 
         assert kernel is not None
 
@@ -666,19 +670,6 @@ class TritonKernelVariable(VariableTracker):
         assert kernel_idx is None or self.kernel_idx == kernel_idx
 
         self.grid = grid
-
-        if isinstance(kernel, Autotuner):
-            # We only support configs and keys arguments of triton.autotune
-            # Make sure other arguments are defaulted
-            defaults = inspect.signature(Autotuner).parameters
-            if (
-                defaults["warmup"].default != kernel.warmup
-                or defaults["rep"].default != kernel.rep
-                or defaults["prune_configs_by"].default != kernel.early_config_prune
-            ):
-                raise Unsupported(
-                    "Only configs and keys are supported for triton.autotune"
-                )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
