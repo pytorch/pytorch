@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     noncontiguous_like,
     TEST_WITH_ASAN,
+    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_UBSAN,
     IS_WINDOWS,
     IS_FBCODE,
@@ -651,6 +652,8 @@ class TestCommon(TestCase):
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
+        if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
+            self.skipTest("flaky")
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
         if len(supported_dtypes) == 0:
