@@ -1,5 +1,6 @@
 import sys
 from abc import abstractmethod
+from copy import copy
 from enum import Enum
 from functools import total_ordering
 from itertools import chain
@@ -190,22 +191,21 @@ class TestPrioritizations:
     def validate_test_priorities(self) -> None:
         # Union all TestRuns that contain include/exclude pairs
         all_tests = self.get_all_tests()
-        files = set()
-        includes = set()
-        excludes = set()
+        files = {}
         for test in all_tests:
-            files.add(test.test_file)
-            includes.update(test._included)
-            excludes.update(test._excluded)
+            if test.test_file not in files:
+                files[test.test_file] = copy(test)
+            else:
+                files[test.test_file] |= test
 
-        if includes != excludes:
+        for test in files.values():
             assert (
-                includes == excludes
-            ), "All includes should have been excluded elsewhere, and vice versa"
+                test.is_full_file()
+            ), f"All includes should have been excluded elsewhere, and vice versa. Test run `{test}` violates that"
 
         # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
-        assert (
-            self._original_tests == files
+        assert self._original_tests == set(
+            files.keys()
         ), "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
 
     def integrate_priorities(self, other: "TestPrioritizations") -> None:
@@ -258,7 +258,7 @@ class TestPrioritizations:
             _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
 
     def _get_test_relevance_group(self, test_name: str) -> Relevance:
-        """Returns the priority of a test."""
+        """Returns the highest rank any of this tests classes have been given."""
         query_test = TestRun(test_name)
         for relevance_group, tests in self._traverse_priorities():
             if any(test.contains(query_test) for test in tests):
@@ -267,7 +267,7 @@ class TestPrioritizations:
         raise ValueError(f"Test {test_name} not found in any relevance group")
 
     def _get_test_order(self, test_name: str) -> int:
-        """Returns the rank of the test specified by this heuristic."""
+        """Returns the highest rank of any tests classes of this test specified by this heuristic."""
         base_rank = 0
         query_test = TestRun(test_name)
 
@@ -280,6 +280,7 @@ class TestPrioritizations:
         raise ValueError(f"Test {test_name} not found in any relevance group")
 
     def _get_test_order_within_relevance_group(self, test_name: str) -> int:
+        """Returns the highest test order of any test class within the same relevance group."""
         query_test = TestRun(test_name)
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
