@@ -33,7 +33,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-from .. import config, mutation_guard, replay_record, skipfiles
+from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
 from ..allowed_functions import (
     is_allowed,
     is_builtin_callable,
@@ -87,6 +87,7 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
+    SetVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -108,7 +109,6 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    SetVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -364,10 +364,14 @@ class VariableBuilder:
         from torch.utils._triton import has_triton
 
         if has_triton():
+            from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
 
             class JITFunction:
+                pass
+
+            class Autotuner:
                 pass
 
         make_guards = self.make_guards
@@ -520,7 +524,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif isinstance(value, np.generic):
+        elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
         elif is_numpy(value):
@@ -725,13 +729,17 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, JITFunction):
+        elif isinstance(value, (JITFunction, Autotuner)):
             return TritonKernelVariable(
                 value,
                 None,  # No kernel idx provided
                 None,  # No grid provided
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif trace_rules.lookup(value) is not None:
+            return trace_rules.lookup(value).create_with_source(
+                value, source=self.source
             )
         elif is_allowed(value):
             if is_user_defined_allowed(value):
@@ -1011,6 +1019,10 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
+
+        # We cannot already be tracking the tensor, which implies
+        # it would have already been wrapped
+        assert value not in self.tx.output.side_effects
 
         if (
             source.guard_source().is_nn_module()
