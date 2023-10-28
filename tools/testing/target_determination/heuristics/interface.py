@@ -4,6 +4,8 @@ from enum import Enum
 from itertools import chain
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
+from tools.stats.upload_metrics import emit_metric
+
 StringTuple = Tuple[str, ...]
 
 
@@ -344,3 +346,67 @@ class HeuristicInterface:
 
     def __str__(self) -> str:
         return self.name
+
+
+class TargetDeterminatorInterface:
+
+    """
+    Interface for all Target Determinators.
+    """
+
+    description: str
+
+    @abstractmethod
+    def __init__(self, **kwargs: Any) -> None:
+        self._selected_tests: List[str] = []
+        self._ignored_tests: List[str] = []
+
+    @property
+    def selected_tests(self) -> List[str]:
+        return self._selected_tests
+
+    @selected_tests.setter
+    def selected_tests(self, tests: List[str]) -> None:
+        self._selected_tests = tests
+
+    @property
+    def ignored_tests(self) -> List[str]:
+        return self._ignored_tests
+
+    @ignored_tests.setter
+    def ignored_tests(self, tests: List[str]) -> None:
+        self._ignored_tests = tests
+
+    @abstractmethod
+    def create_metrics_dict_for_dry_run(
+        self, ground_truth_failures: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Returns the prioritizations for the given tests.
+
+        """
+        pass
+
+    @abstractmethod
+    def gen_selected_tests(self, tests: List[str]) -> List[str]:
+        """
+        Returns the prioritizations for the given tests.
+        Should also append to self.selected_tests and self.ignored_tests
+
+        """
+        pass
+
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+    def __str__(self) -> str:
+        return self.name
+
+    def emit_dry_run_metrics(self, ground_truth_failures: List[str]) -> None:
+        """
+        Emit metrics to rockset.
+        """
+
+        metrics_dict = self.create_metrics_dict_for_dry_run(ground_truth_failures)
+        emit_metric(f"{self.name}_td_stats", metrics_dict)

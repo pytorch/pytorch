@@ -22,6 +22,8 @@ import pkg_resources
 import torch
 import torch.distributed as dist
 from packaging import version
+
+from tools.testing.target_determination.heuristics import TD_STRATEGIES
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -1777,6 +1779,10 @@ def main():
 
                 print_to_stderr("Emiting td_test_failure_stats")
                 emit_metric("td_test_failure_stats", test_stats)
+
+    for td_strategy in TD_STRATEGIES:
+        td_strategy.gen_selected_tests(selected_tests)
+        td_strategy.emit_dry_run_metrics(all_failures)
 
     if len(all_failures):
         for _, err in all_failures:

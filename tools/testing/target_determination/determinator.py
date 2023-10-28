@@ -5,15 +5,18 @@ from tools.testing.target_determination.heuristics import (
     HEURISTICS,
     TestPrioritizations as TestPrioritizations,
 )
+from tools.testing.target_determination.heuristics.interface import HeuristicInterface
 
 
-def get_test_prioritizations(tests: List[str]) -> AggregatedHeuristics:
+def get_test_prioritizations(
+    tests: List[str], heuristics: List[HeuristicInterface] = HEURISTICS
+) -> AggregatedHeuristics:
     aggregated_results = AggregatedHeuristics(unranked_tests=tests)
     print(f"Received {len(tests)} tests to prioritize")
     for test in tests:
         print(f"  {test}")
 
-    for heuristic in HEURISTICS:
+    for heuristic in heuristics:
         new_rankings: TestPrioritizations = heuristic.get_test_priorities(tests)
         aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
