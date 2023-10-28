@@ -3514,6 +3514,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(AssertionError):
             opt_test(True, False, inp)
 
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
