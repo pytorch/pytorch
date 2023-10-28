@@ -4,7 +4,8 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
-from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
+from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, \
+    functionalize
 from torch._functorch.aot_autograd import create_joint, AOTConfig
 from torch._ops import HigherOrderOperator
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -22,14 +23,17 @@ from torch.utils._python_dispatch import (
 )
 from torch._dispatch.python import suspend_functionalization
 
+
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class ScanWrapper(HigherOrderOperator):
     def __call__(self, f, init, xs):
         return scan_wrapper(f, init, xs)
 
+
 scan = ScanWrapper("scan")
 scan_impl = HigherOrderOperator("scan_impl")
+
 
 def _maybe_run_with_interpreter(fn):
     maybe_interpreted_fn = fn
@@ -41,6 +45,7 @@ def _maybe_run_with_interpreter(fn):
 
         maybe_interpreted_fn = graph_with_interpreter
     return maybe_interpreted_fn
+
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
@@ -94,40 +99,40 @@ def create_fw_bw_graph(f, flat_init, flat_xs):
                         return maybe_unfunc_t.clone()
                 return t
 
-            #import pdb
-            #pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             example_init = [from_fun(init_element) for init_element in flat_init]
-            #example_xs = [from_fun(xs) for xs in _unstack_pytree(flat_xs)[0]]
-            #example_xs = [from_fun(xs[0, :]) for xs in flat_xs]
-            #example_xs = [from_fun(flat_xs[0])]
-            
-            #example_all_xs = [from_fun(xs[0:1, :]) for xs in flat_xs]
-            #example_all_xs = [from_fun(flat_xs[0][0:1, :])]
+            # example_xs = [from_fun(xs) for xs in _unstack_pytree(flat_xs)[0]]
+            # example_xs = [from_fun(xs[0, :]) for xs in flat_xs]
+            # example_xs = [from_fun(flat_xs[0])]
+
+            # example_all_xs = [from_fun(xs[0:1, :]) for xs in flat_xs]
+            # example_all_xs = [from_fun(flat_xs[0][0:1, :])]
             example_all_xs = [from_fun(xs[0:1, :]) for xs in flat_xs]
             example_xs = [xs[0, :] for xs in example_all_xs]
-            
+
             carry_length = len(example_init)
             leading_dim_size = example_xs[0].shape[0]
-            #import pdb
-            #pdb.set_trace()
-            #Expect BxF, BxF
+            # import pdb
+            # pdb.set_trace()
+            # Expect BxF, BxF
             flattened_out = f(*example_init, *example_xs)
-            #example_flat_carry_out, example_flat_ys = _stack_pytree([flattened_out[:carry_length]]*(leading_dim_size+1)), _stack_pytree([flattened_out[carry_length:]]*(leading_dim_size))
-            #example_flat_carry_out, example_flat_ys = _stack_pytree([flattened_out[:carry_length]]), _stack_pytree([flattened_out[carry_length:]])
+            # example_flat_carry_out, example_flat_ys = _stack_pytree([flattened_out[:carry_length]]*(leading_dim_size+1)), _stack_pytree([flattened_out[carry_length:]]*(leading_dim_size))
+            # example_flat_carry_out, example_flat_ys = _stack_pytree([flattened_out[:carry_length]]), _stack_pytree([flattened_out[carry_length:]])
             example_flat_carry_out, example_flat_ys = flattened_out[:carry_length], flattened_out[carry_length:]
-            #import pdb
-            #pdb.set_trace()
-            #example_flat_carry_out, example_flat_ys = pytree.tree_map(from_fun, example_flat_carry_out), pytree.tree_map(from_fun, example_flat_ys)
+            # import pdb
+            # pdb.set_trace()
+            # example_flat_carry_out, example_flat_ys = pytree.tree_map(from_fun, example_flat_carry_out), pytree.tree_map(from_fun, example_flat_ys)
             if any(not isinstance(out, torch.Tensor) for out in example_flat_ys if out is not None):
                 raise RuntimeError("Expect outputs of scan only contains tensors or None. "
                                    f"Got types {[type(out) for out in example_flat_ys]}.")
             if any(not isinstance(out, torch.Tensor) for out in example_flat_carry_out if out is not None):
                 raise RuntimeError("Expect output carry of scan only contains tensors or None. "
                                    f"Got types {[type(out) for out in example_flat_carry_out]}.")
-            #import pdb
-            #pdb.set_trace()
-            #example_grad_carry_out = [from_fun(out[leading_dim_size-1]) for out in example_flat_carry_out]
-            #example_grad_carry_out = [from_fun(out[0]) for out in example_flat_carry_out]
+            # import pdb
+            # pdb.set_trace()
+            # example_grad_carry_out = [from_fun(out[leading_dim_size-1]) for out in example_flat_carry_out]
+            # example_grad_carry_out = [from_fun(out[0]) for out in example_flat_carry_out]
             example_grad_carry_out = [from_fun(out) for out in example_flat_carry_out]
             example_grad_ys = [from_fun(out) for out in example_flat_ys]
 
@@ -135,47 +140,51 @@ def create_fw_bw_graph(f, flat_init, flat_xs):
             num_grad_ys_args = len(example_grad_ys)
             num_init_args = len(example_init)
 
-            #import pdb
-            #pdb.set_trace()
-            #Expects BxF, BxF
+            # import pdb
+            # pdb.set_trace()
+            # Expects BxF, BxF
             print('Expected: BxF, BxF')
             print((example_init[0].shape, example_xs[0].shape))
             fw_graph = make_fx(f)(*example_init, *example_xs)
-            
+
         # TODO: why is the bw graph not the same as the fw graph, but just receiving the grad_carry_out and grad_ys?
         def bw_f(*flat_args):
-            #import pdb
-            #pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             # the order of arguments are: grad_carry_out, grad_ys, init, xs,  all flattened
             grad_carry_out = flat_args[:num_grad_carry_out_args]
-            #import pdb
-            #pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             grad_ys = flat_args[num_grad_carry_out_args:num_grad_carry_out_args + num_grad_ys_args]
-            #grad_ys = [x[0, :] for x in flat_args[num_grad_carry_out_args:num_grad_carry_out_args + num_grad_ys_args]]
-            init = flat_args[num_grad_carry_out_args + num_grad_ys_args:num_grad_carry_out_args + num_grad_ys_args + num_init_args]
+            # grad_ys = [x[0, :] for x in flat_args[num_grad_carry_out_args:num_grad_carry_out_args + num_grad_ys_args]]
+            init = flat_args[
+                   num_grad_carry_out_args + num_grad_ys_args:num_grad_carry_out_args + num_grad_ys_args + num_init_args]
             xs = flat_args[num_grad_carry_out_args + num_grad_ys_args + num_init_args:]
-            #xs = [x[0, :] for x in xs]
-            #grad_ys = flat_args[1][:num_grad_ys_args]
-            #init = flat_args[1][num_grad_ys_args:num_grad_ys_args + num_init_args]
-            #xs = flat_args[1][num_grad_ys_args + num_init_args:]
-            #Expected BxF, 1xBxF
+            # xs = [x[0, :] for x in xs]
+            # grad_ys = flat_args[1][:num_grad_ys_args]
+            # init = flat_args[1][num_grad_ys_args:num_grad_ys_args + num_init_args]
+            # xs = flat_args[1][num_grad_ys_args + num_init_args:]
+            # Expected BxF, 1xBxF
             grad_args = list(grad_carry_out) + list(grad_ys)
-            #import pdb
-            #pdb.set_trace()
+
+            # import pdb
+            # pdb.set_trace()
 
             def fw_with_masks(*args):
-                #import pdb
-                #pdb.set_trace()
-                #Expects: BxF, BxF
+                # import pdb
+                # pdb.set_trace()
+                # Expects: BxF, BxF
                 flattened_out = f(*args)
-                return flattened_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in flattened_out]
+                return flattened_out, [True if isinstance(ret, torch.Tensor) and ret.requires_grad else False for ret in
+                                       flattened_out]
 
             joint = create_joint(fw_with_masks, aot_config=dummy_aot_config)
-            #import pdb
-            #pdb.set_trace()
-            _, grads = joint(list(init) + list(xs), [grad for grad in grad_args if grad is not None and grad.requires_grad])
-            #import pdb
-            #pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
+            _, grads = joint(list(init) + list(xs),
+                             [grad for grad in grad_args if grad is not None and grad.requires_grad])
+            # import pdb
+            # pdb.set_trace()
 
             # In order to keep map functional for backward graph,
             # we clone outputs that are aliasing inputs
@@ -185,21 +194,22 @@ def create_fw_bw_graph(f, flat_init, flat_xs):
                 if isinstance(t, torch.Tensor) and StorageWeakRef(t._typed_storage()) in input_storage:
                     return t.clone()
                 return t
+
             # flat list of grad_carry + grad_xs
             return pytree.tree_map(maybe_clone, grads)
 
-        #import pdb
-        #pdb.set_trace()
-        #Expects BxF, BxF, BxF, BxF
+        # import pdb
+        # pdb.set_trace()
+        # Expects BxF, BxF, BxF, BxF
         print('Expected: BxF, BxF, BxF, BxF')
         print((example_grad_carry_out[0].shape, example_grad_ys[0].shape, example_init[0].shape, example_xs[0].shape))
-        #bw_graph = make_fx(bw_f)(*example_grad_carry_out, *example_grad_ys, *example_init, *example_all_xs)
+        # bw_graph = make_fx(bw_f)(*example_grad_carry_out, *example_grad_ys, *example_init, *example_all_xs)
         bw_graph = make_fx(bw_f)(*example_grad_carry_out, *example_grad_ys, *example_init, *example_xs)
         return fw_graph, bw_graph
-        
-        
-        #bw_graph = make_fx(f)(*example_grad_carry_out, *example_grad_ys)
-        #return fw_graph, bw_graph
+
+        # bw_graph = make_fx(f)(*example_grad_carry_out, *example_grad_ys)
+        # return fw_graph, bw_graph
+
 
 def scan_wrapper(f, init, xs):
     r"""
@@ -209,7 +219,7 @@ def scan_wrapper(f, init, xs):
         `torch.cond` is currently a prototype feature in PyTorch. It uses the same interface as defined in https://jax.readthedocs.io/en/latest/_autosummary/jax.lax.scan.html,
         but the flags `length`, `reverse` and `unroll` are not implemented yet. Please look forward to a more version in a future version of PyTorch.
 
-    Args:    
+    Args:
         f (Callable): A callable to be scanned of type c -> a -> (c, b), meaning that f accepts two arguments where the first is a value of the loop carry and the second is a slice of xs along its leading axis, and that f returns a pair where the first element represents a new value for the loop carry and the second represents a slice of the output.
 
         init (torch.Tensor): The initial loop carry value of type c, which can be a scalar, array, or any pytree (nested Python tuple/list/dict) thereof, representing the initial loop carry value. This value must have the same structure as the first element of the pair returned by f.
@@ -227,18 +237,18 @@ def scan_wrapper(f, init, xs):
 
     Outputs:
         carry_out (torch.Tensor): The final loop carry when the function f has been scanned over the leading axis of xs
-        
+
         ys (torch.Tensor): The final output when the function f has been scanned over the leading axis of xs
 
     """
-    
+
     flat_init, init_spec = pytree.tree_flatten(init)
     if not all(isinstance(t, torch.Tensor) for t in flat_init):
         raise RuntimeError(f"Scanned init can only consist of tensors. Got init {flat_init}.")
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     if not all(isinstance(t, torch.Tensor) for t in flat_xs):
         raise RuntimeError(f"Scanned xs can only consist of tensors. Got xs {flat_xs}.")
-    
+
     # TODO: Introduce more shape checks
     # TODO: Is it necessary to restrict the shape of scanned or mapped elements?
     # for scan, the only requirement should be that f spits out a carry that
@@ -258,16 +268,16 @@ def scan_wrapper(f, init, xs):
     num_init_args = len(flat_init)
 
     def flat_fn(*flat_args):
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         # carry and init should have the same spec
         flat_init, flat_xs = flat_args[:num_init_args], flat_args[num_init_args:]
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         carry = pytree.tree_unflatten(flat_init, init_spec)
         xs = pytree.tree_unflatten(flat_xs, xs_spec)
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         unflattened_carry_out, unflattened_out = f(carry, xs)
         flat_carry_out, tmp_carry_out_spec = pytree.tree_flatten(unflattened_carry_out)
         flat_out, tmp_out_spec = pytree.tree_flatten(unflattened_out)
@@ -277,14 +287,15 @@ def scan_wrapper(f, init, xs):
         carry_out_spec = tmp_carry_out_spec
         out_spec = tmp_out_spec
         return *flat_carry_out, *flat_out
-    
-    #import pdb
-    #pdb.set_trace()
+
+    # import pdb
+    # pdb.set_trace()
     print((flat_init[0].shape, flat_xs[0].shape))
     flat_carry_out, flat_out = scan_impl(flat_fn, flat_init, flat_xs, reverse=False)  # (carry, ys)
-    #import pdb
-    #pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     return pytree.tree_unflatten(flat_carry_out, carry_out_spec), pytree.tree_unflatten(flat_out, out_spec)
+
 
 class ScanAutogradOp(torch.autograd.Function):
     # Note: The scan operation when executed forward produces
@@ -292,13 +303,13 @@ class ScanAutogradOp(torch.autograd.Function):
     #
     # When executed backward, the scan_impl is reused, but the inputs have a different meaning.
     # In particular, the init should be initialized as the carry gradient
-    # the xs should contain the list of gradients of ys, i.e., the output gradients. 
+    # the xs should contain the list of gradients of ys, i.e., the output gradients.
     # scan_impl(f, grad_carry, grad_ys, reverse=True) -> grad_init, grad_xs
-    # Essentially, the scan_impl then works its way back through time 
+    # Essentially, the scan_impl then works its way back through time
     # and computes the gradients for the init and the xs
-    # 
+    #
     # Example for a single iteration:
-    # In the forward pass: 
+    # In the forward pass:
     # init \in \RR^{1, 2}
     # xs \in \RR^{1, 1, 2}
     # fw_graph(f, init, xs) -> carry, ys
@@ -313,9 +324,9 @@ class ScanAutogradOp(torch.autograd.Function):
     # joint_graph(f, grad_carry, grad_ys, init, xs) -> grad_init, grad_xs
     # grad_init \in \RR^{1, 2}
     # grad_xs \in \RR^{1, 1, 2}
-    # 
+    #
     # Example for n iterations:
-    # In the forward pass: 
+    # In the forward pass:
     # init \in \RR^{1, 2}
     # xs \in \RR^{n, 1, 2}
     # fw_graph(f, init, xs) -> carry, ys
@@ -330,20 +341,23 @@ class ScanAutogradOp(torch.autograd.Function):
     # joint_graph(f, grad_carry, grad_ys, init, xs) -> grad_init, grad_xs
     # grad_init \in \RR^{1, 2}
     # grad_xs \in \RR^{n, 1, 2}
-    
+
     @staticmethod
     def forward(ctx, fw_graph, bw_graph, num_init_args, *flat_args):
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         ctx._bw_graph = bw_graph
         ctx._num_input_args = len(flat_args)
         ctx._num_init_args = num_init_args
         ctx._leading_dim_size = flat_args[:num_init_args][0].shape[0]
         with torch._C._AutoDispatchBelowAutograd():
+            # import pdb
+            # pdb.set_trace()
+            # print((flat_args[:num_init_args][0].shape, flat_args[num_init_args:][0].shape))
+            flat_carries, flat_out = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:],
+                                               reverse=False)
             #import pdb
             #pdb.set_trace()
-            #print((flat_args[:num_init_args][0].shape, flat_args[num_init_args:][0].shape))
-            flat_carries, flat_out = scan_impl(fw_graph, flat_args[:num_init_args], flat_args[num_init_args:], reverse=False)
             try:
                 leading_dim = flat_carries[0].shape[0]
                 '''if type(flat_carries[0]) == tuple or type(flat_carries[0]) == list:
@@ -358,38 +372,40 @@ class ScanAutogradOp(torch.autograd.Function):
                 print('Failed!')
                 import pdb
                 pdb.set_trace()
-                
+
             flat_carries = _unstack_pytree(flat_carries)
-            
+
             # needs to flat the carries nested list
             # second call to save_for_backward will override whatever that is saved earlier
             # therefore, need to save everything that is needed at once
             flat_carries = [carry_entry for carry in flat_carries for carry_entry in carry]
-            
-            flat_carries_chunk = flat_carries[:-len(flat_carries)//leading_dim]
-            flat_carries_out_chunk = flat_carries[-len(flat_carries)//leading_dim:]
-            
+
+            flat_carries_chunk = flat_carries[:-len(flat_carries) // leading_dim]
+            flat_carries_out_chunk = flat_carries[-len(flat_carries) // leading_dim:]
+
             # TODO: we don't need to actually store the init args, just need the xs args
             flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
             ctx.save_for_backward(*flat_args, *flat_carries_chunk)
             ctx._num_out_args = len(flat_out)
-            #import pdb
-            #pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
             return (*flat_carries_out_chunk, *flat_out)
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         flat_carries = ctx.saved_tensors[ctx._num_input_args:]
         fwd_args = ctx.saved_tensors[:ctx._num_input_args]
         # bring back the nested carries list by chunking up the list to equal lengthed nested lists
         # all carries should have length num_init_args
-        #From 30x2 into 10x3x2; 20x1x2
-        carries = [_stack_pytree(flat_carries[i*ctx._leading_dim_size:(i+1)*ctx._leading_dim_size]) for i in range(len(flat_carries)//ctx._leading_dim_size)]
-        #From 20x1x2 into 2 10x1x2
-        carries = [carries[i*ctx._num_init_args:(i+1)*ctx._num_init_args] for i in range(len(carries)//ctx._num_init_args)]
-        
+        # From 30x2 into 10x3x2; 20x1x2
+        carries = [_stack_pytree(flat_carries[i * ctx._leading_dim_size:(i + 1) * ctx._leading_dim_size]) for i in
+                   range(len(flat_carries) // ctx._leading_dim_size)]
+        # From 20x1x2 into 2 10x1x2
+        carries = [carries[i * ctx._num_init_args:(i + 1) * ctx._num_init_args] for i in
+                   range(len(carries) // ctx._num_init_args)]
+
         flat_xs = fwd_args[ctx._num_init_args:]
         # carry and init should have the same spec
         final_carry_grad = flat_grads[:ctx._num_init_args]
@@ -397,19 +413,21 @@ class ScanAutogradOp(torch.autograd.Function):
         # and should be empty
         ys_grad = flat_grads[ctx._num_init_args:ctx._num_init_args + ctx._num_out_args]
         with torch._C._AutoDispatchBelowAutograd():
-            #import pdb
-            #pdb.set_trace()
-            flat_carry_out_grads, flat_out_grads = scan_impl(ctx._bw_graph, final_carry_grad, (*ys_grad, carries, *flat_xs), reverse=True)
-            #import pdb
-            #pdb.set_trace()
-            #flat_carry_out_grads, flat_out_grads = scan_impl(ctx._bw_graph, final_carry_grad, *ys_grad, reverse=True)
+            # import pdb
+            # pdb.set_trace()
+            flat_carry_out_grads, flat_out_grads = scan_impl(ctx._bw_graph, final_carry_grad,
+                                                             (*ys_grad, carries, *flat_xs), reverse=True)
+            # import pdb
+            # pdb.set_trace()
+            # flat_carry_out_grads, flat_out_grads = scan_impl(ctx._bw_graph, final_carry_grad, *ys_grad, reverse=True)
             return None, None, None, *[grad[0] for grad in flat_carry_out_grads], *flat_out_grads
+
 
 def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-    
-    #import pdb
-    #pdb.set_trace()
+
+    # import pdb
+    # pdb.set_trace()
     xs = flat_xs
     leading_dim = xs[0].shape[0]
     num_init = len(flat_init)
@@ -418,14 +436,14 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
 
     with disable_proxy_modes_tracing():
         if not isinstance(body_graph, torch.fx.GraphModule):
-            #FW Expects BxF, BxF
-            #BW Expects BxF, BxF, BxF, BxF
+            # FW Expects BxF, BxF
+            # BW Expects BxF, BxF, BxF, BxF
             body_graph = make_fx(_maybe_run_with_interpreter(body_graph))(*flat_init, *flat_xs)
-        
-        #FW Expects BxF, BxF
-        #BW Expects BxF, BxF, BxF, BxF
-        #import pdb
-        #pdb.set_trace()
+
+        # FW Expects BxF, BxF
+        # BW Expects BxF, BxF, BxF, BxF
+        # import pdb
+        # pdb.set_trace()
         example_outs = body_graph(*flat_init, *flat_xs)
 
         # def expand_tensor_carry(t):
@@ -448,15 +466,15 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
 
         # example_outs, _ = pytree.tree_flatten(example_outs)
 
-    #The output of this operation is only a single carry, but all the outputs 
-    #import pdb
-    #pdb.set_trace()
-    #expanded_carries_out = [carry[-1, :] for carry in expanded_carries]
-    
+    # The output of this operation is only a single carry, but all the outputs
+    # import pdb
+    # pdb.set_trace()
+    # expanded_carries_out = [carry[-1, :] for carry in expanded_carries]
+
     expanded_outs_comb = (expanded_carries_out, expanded_outs)
 
-    #import pdb
-    #pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     next_name = None
     i = 0
     while not next_name:
@@ -466,18 +484,53 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
         else:
             next_name = candidate
 
-    #import pdb
-    #pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     proxy_mode.tracer.root.register_module(next_name, body_graph)
     #import pdb
     #pdb.set_trace()
+    #carry = torch.empty(expanded_outs_comb[0][0].shape, device=expanded_outs_comb[0][0].device)
+    #out = torch.empty(expanded_outs_comb[1][0].shape, device=expanded_outs_comb[1][0].device)
+    #node_args = (body_graph, flat_init, flat_xs, carry, out)
     node_args = (body_graph, flat_init, flat_xs)
     proxy_args = pytree.tree_map(partial(unwrap_proxy, proxy_mode), node_args)
     out_proxy = proxy_mode.tracer.create_proxy('call_function', func_overload, proxy_args, {"reverse": reverse},
                                                name="scan_impl")
+    
     #import pdb
     #pdb.set_trace()
+    
+    '''
+    (Pdb) qualified_op_name
+    'aten::_assert_async'
+    (Pdb) op
+    <built-in method _assert_async of PyCapsule object at 0x1473c0c75da0>
+    (Pdb) namespace_name
+    'aten'
+    (Pdb) op_name
+    '_assert_async'
+    (Pdb) overload_names
+    ['', 'msg']
+    overload = OpOverload(self, op_, op_dk_, schema, []])
+    torch.ops.scan_impl
+    qualified_op_name, op_name, op, overload_names
+    '''
+    
+    #import pdb
+    #pdb.set_trace()
+    #opoverloadpacket = torch._ops.OpOverloadPacket("torch.ops::scan_impl", "scan_impl", scan, [""])
+    #schema = torch._C._get_schema("torch.ops::scan_impl", "")
+    #opoverload = torch._ops.OpOverload(opoverloadpacket, scan, scan, schema, [])
+    op_, op_dk_, tags = torch._C._get_operation_overload("aten::_assert_async", "msg")
+    schema = torch._C._get_schema("aten::_assert_async", "msg")
+    opoverloadpacket = torch._ops.OpOverloadPacket("aten::_assert_async", "_assert_async", torch.ops.aten._assert_async, ['', 'msg'])
+    opoverload = torch._ops.OpOverload(opoverloadpacket, op_, op_dk_, schema, tags)
+    
+    out_proxy.node.meta['original_aten'] = opoverload
+    # import pdb
+    # pdb.set_trace()
     return track_tensor_tree(expanded_outs_comb, out_proxy, constant=None, tracer=proxy_mode.tracer)
+
 
 def _unstack_and_flatten_tensors_or_lists(flat_xs):
     '''
@@ -501,13 +554,13 @@ def _unstack_and_flatten_tensors_or_lists(flat_xs):
                  ]
     '''
     if not all(isinstance(xs, torch.Tensor) or isinstance(xs, tuple) or isinstance(xs, list) for xs in flat_xs):
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         raise RuntimeError(f"Leaves of xs must be Tensor or Tuple or List {flat_xs}")
-    if not all(len(xs)==len(flat_xs[0]) for xs in flat_xs):
-        #if not all(len(xs)==len(flat_xs[0]) for xs in flat_xs):
-        #import pdb
-        #pdb.set_trace()
+    if not all(len(xs) == len(flat_xs[0]) for xs in flat_xs):
+        # if not all(len(xs)==len(flat_xs[0]) for xs in flat_xs):
+        # import pdb
+        # pdb.set_trace()
         raise RuntimeError(f"Leaves of xs must have same leading dimension size {[len(xs) for xs in flat_xs]}")
 
     a = zip(*flat_xs)
@@ -523,7 +576,8 @@ def _unstack_and_flatten_tensors_or_lists(flat_xs):
         unstacked_results.append(flat_entry)
     return unstacked_results
 
-#TODO: this can function can be shared with the torch._higher_order_ops.map._unstack_pytree from main
+
+# TODO: this can function can be shared with the torch._higher_order_ops.map._unstack_pytree from main
 def _unstack_pytree(xs):
     flat_xs, inspec = pytree.tree_flatten(xs)
     if not all(isinstance(xs, torch.Tensor) for xs in flat_xs):
@@ -538,7 +592,8 @@ def _unstack_pytree(xs):
         pytrees.append(pytree.tree_unflatten(tuple, inspec))
     return pytrees
 
-#TODO: this can function can be shared with the torch._higher_order_ops.map._stack_pytree from main
+
+# TODO: this can function can be shared with the torch._higher_order_ops.map._stack_pytree from main
 def _stack_pytree(pytrees):
     flat_out = []
     out_spec = None
@@ -559,6 +614,7 @@ def _stack_pytree(pytrees):
             raise RuntimeError(f"Cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
 
+
 @scan_impl.py_impl(DispatchKey.CompositeExplicitAutograd)
 def scan_dense(f, flat_init, flat_xs, reverse=False):
     '''
@@ -568,22 +624,22 @@ def scan_dense(f, flat_init, flat_xs, reverse=False):
 
         When executing backward graph, f is the bwd_graph, and flat_init should be the initial output carry gradient,
         flat_xs should be a concatenated list of ys_grad (the output gradient), carries(the list of all the intermediate carries generated during
-        forward pass less the final output carry) and input xs. 
-        This list of carries are needed for computing the backward gradient at each iteration. 
+        forward pass less the final output carry) and input xs.
+        This list of carries are needed for computing the backward gradient at each iteration.
         When running bwd_graph with scan_dense, we should set reverse = True because the gradients are computed bottom up.
     '''
-    #import pdb
-    #pdb.set_trace()
+    # import pdb
+    # pdb.set_trace()
     carry = flat_init
     carry_length = len(carry)
     # each carry output is needed for calculating gradients backwards
     out_carries = []
     out_pytrees = []
     direction = -1 if reverse else 1
-    #print(flat_xs)
-    #print(flat_xs[0].shape)
-    #import pdb
-    #pdb.set_trace()
+    # print(flat_xs)
+    # print(flat_xs[0].shape)
+    # import pdb
+    # pdb.set_trace()
     for inp in _unstack_and_flatten_tensors_or_lists(flat_xs)[::direction]:
         # saves the initial carry input for each iteration
         out_carries.append(carry)
@@ -609,12 +665,18 @@ def scan_dense(f, flat_init, flat_xs, reverse=False):
     ys = _stack_pytree(out_pytrees[::direction])
     return _stack_pytree(out_carries[::direction]), ys
 
+
 @scan_impl.py_impl(DispatchKey.Autograd)
 def scan_autograd(f, flat_init, flat_xs, reverse=False):
     fw_graph, bw_graph = create_fw_bw_graph(f, flat_init, flat_xs)
     num_carry_out = len(flat_init)
+    #import pdb
+    #pdb.set_trace()
     flat_all_out = ScanAutogradOp.apply(fw_graph, bw_graph, num_carry_out, *flat_init, *flat_xs)
+    #import pdb
+    #pdb.set_trace()
     return flat_all_out[:num_carry_out], flat_all_out[num_carry_out:]
+
 
 @scan_impl.py_impl(ProxyTorchDispatchMode)
 def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, reverse=False):
@@ -626,12 +688,14 @@ def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, reverse=False):
         else:
             return scan_impl(f, flat_init, flat_xs, reverse=reverse)
 
+
 @scan_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(f, flat_init, flat_xs, reverse=False):
     return scan_dense(f, flat_init, flat_xs, reverse=reverse)
 
-#TODO: In the main branch this function is not needed anymore. 
-# Here, this is a duplicate of the function form functorch.experimental.control_flow._map 
+
+# TODO: In the main branch this function is not needed anymore.
+# Here, this is a duplicate of the function form functorch.experimental.control_flow._map
 def _has_potential_branch_input_mutation(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
@@ -668,8 +732,9 @@ def _has_potential_branch_input_mutation(branch, inputs):
 
     return _detect_input_mutation(gm)
 
-#TODO: In the main branch this function is not needed anymore. 
-# Here, this is a duplicate of the function form functorch.experimental.control_flow._map 
+
+# TODO: In the main branch this function is not needed anymore.
+# Here, this is a duplicate of the function form functorch.experimental.control_flow._map
 def _has_potential_branch_input_alias(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
@@ -700,6 +765,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                         out_storage = StorageWeakRef(out.meta['val']._typed_storage())
                         return out_storage in input_storages
                     return False
+
                 if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
                     return True
 
@@ -711,11 +777,13 @@ def _has_potential_branch_input_alias(branch, inputs):
 
     return _detect_input_alias(gm)
 
-#TODO: In the main branch this function is not needed anymore. 
-# Here, this is a duplicate of the function form functorch.experimental.control_flow._map 
+
+# TODO: In the main branch this function is not needed anymore.
+# Here, this is a duplicate of the function form functorch.experimental.control_flow._map
 @dataclass
 class UnsupportedAliasMutationException(RuntimeError):
     reason: str
+
 
 # Functions for the lowering
 # Cond uses functionalization as well in the main branch of Pytorch. Consolidate this while merging
@@ -744,28 +812,29 @@ def scan_func(f, init, xs, reverse=False):
         #         "torch._higher_order_ops.scan is aliasing the input!"
         #     )
 
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         example_outs = scan_impl(functional_map_fn, unwrapped_init, unwrapped_xs, reverse=reverse)
-        #import pdb
-        #pdb.set_trace()
-        #TODO: This may need adjustment for different scenarios of the carry, e.g. nested lists
+        # import pdb
+        # pdb.set_trace()
+        # TODO: This may need adjustment for different scenarios of the carry, e.g. nested lists
         expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
-        #flat_carries = _unstack_pytree(expanded_carries_out)
+        # flat_carries = _unstack_pytree(expanded_carries_out)
         flat_carries = [carry_entry for carry in expanded_carries_out for carry_entry in carry]
         # flat_carries_chunk = flat_carries[:-len(flat_carries)//leading_dim]
         # #flat_carries_out_chunk = flat_carries[-len(flat_carries)//leading_dim:]
         # flat_carries_chunk = [carry_entry for carry in flat_carries_chunk for carry_entry in carry]
         flat_carries_chunk = [carry_entry[-1, :] for carry_entry in flat_carries]
-        
+
         # expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
         # expanded_outs_comb = (expanded_carries_out[-1, :], expanded_outs)
         example_outs_new = (tuple(flat_carries_chunk), expanded_outs[0])
-        #import pdb
-        #pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         return _wrap_all_tensors_to_functional(example_outs, level=0)
 
-#TODO: This is just a replication from the map functionalization and needs to be adapted
+
+# TODO: This is just a replication from the map functionalization and needs to be adapted
 @scan_impl.py_impl(torch._C._functorch.TransformType.Functionalize)
 def scan_functionalize(f, init, xs, reverse=False):
     """

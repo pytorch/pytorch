@@ -1248,19 +1248,21 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     f"with original python type {str(args[2].python_type())}.",
                 )
             #Shape check
-            if args[1].size == () or args[2].size == ():
+            shape1 = args[1].get_real_value().size()
+            shape2 = args[2].get_real_value().size()
+            if shape1 == () or shape2 == ():
                 raise UserError(
                     UserErrorType.DYNAMIC_CONTROL_FLOW,
                     f"Expected init and xs to be tensors and not scalars "
-                    f"but got init shape: {str(args[1].size)} "
-                    f"and xs shape: {str(args[2].size)}.",
+                    f"but got init shape: {str(shape1)} "
+                    f"and xs shape: {str(shape2)}.",
                 )
-            if args[1].size != args[2].size[1:]:
+            if shape1 != shape2[1:]:
                 raise UserError(
                     UserErrorType.DYNAMIC_CONTROL_FLOW,
                     f"Expected init and xs to have the same shape except for the first dimension "
-                    f"but got init shape: {str(args[1].size)} "
-                    f"and xs shape: {str(args[2].size)}.",
+                    f"but got init shape: {str(shape1)} "
+                    f"and xs shape: {str(shape2)}.",
                 )
             '''
             if args[1].size[0] != 1:

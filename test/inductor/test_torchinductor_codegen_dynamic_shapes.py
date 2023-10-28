@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+from torch._higher_order_ops.scan import scan
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
@@ -48,6 +49,9 @@ def check_codegen(
     *,
     is_cpp_code: bool,
 ):
+    print('Is CPP: ' + str(is_cpp_code))
+    import pdb
+    pdb.set_trace()
     kwargs = kwargs or {}
 
     if is_cpp_code is False:
@@ -79,7 +83,11 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
+        #import pdb
+        #pdb.set_trace()
         code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
+        import pdb
+        pdb.set_trace()
         for_loop_found = False
         has_dynamic = False
         lines = code.split("\n")
@@ -94,7 +102,11 @@ def check_codegen(
         )
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
+        #import pdb
+        #pdb.set_trace()
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
+        import pdb
+        pdb.set_trace()
         triton_kernel_found = False
         lines = code.split("\n")
         for line in lines:
@@ -208,6 +220,7 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_dropout_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dropout_dynamic_shapes": TestFailure(("cuda"), is_skip=True),
     "test_dtype_mismatch_issue_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -321,6 +334,48 @@ if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
                 kwargs=kwargs,
                 is_cpp_code=False,
             )
+            
+        # def test_scan_triton_code_check(self: TestCase):
+        #     import pdb
+        #     pdb.set_trace()
+        #     torch._dynamo.reset()
+        #     called = False
+            
+        #     def f(carry, x):
+        #         return carry+1, x+carry
+
+        #     def compile_fx_wrapper(model_, example_inputs_):
+        #         nonlocal called
+        #         called = True
+        #         return compile_fx(model_, example_inputs_)
+
+        #     def run(*ex):
+        #         return scan(*ex)
+            
+        #     init = torch.rand(1, 2, device=torch.device('cuda'))
+        #     xs = torch.rand(10, 1, 2, device=torch.device('cuda'))
+        #     fc = torch.compile(f, backend='inductor', fullgraph=True)
+        #     example_inputs = [fc, init, xs]
+
+        #     import pdb
+        #     pdb.set_trace()
+        #     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
+        #     #carry_out, ys = run(*example_inputs)
+
+        #     code = run_and_get_triton_code(run, *example_inputs)
+        #     import pdb
+        #     pdb.set_trace()
+        #     triton_kernel_found = False
+        #     lines = code.split("\n")
+        #     for line in lines:
+        #         if "def triton" in line:
+        #             triton_kernel_found = True
+        #             continue
+        #     self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
+
+        #     assert called, "Ran graph without calling compile_fx"
+
+        #     torch._dynamo.reset()
 
     copy_tests(
         DynamicShapesCodegenCommonTemplate,

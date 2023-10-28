@@ -56,6 +56,15 @@ def op_count(gm):
             result += 1
     return result
 
+def _fake_scan(f, init, x):
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    carry = init
+    for xp in x_pytrees:
+        carry, out = f(carry, xp)
+        zs.append(out)
+    return carry, _stack_pytree(zs)
 
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
@@ -292,6 +301,23 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 "cond_false_0.cond_true_0",
             },
         )
+        
+    def test_roll_simple(self):
+        
+        x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=torch.device('cuda')).view(4, 2)
+        
+        def test_f(x):
+            return torch.roll(x, 1)
+        
+        roll_comp = torch.compile(test_f, backend='inductor', fullgraph=True)
+        out = roll_comp(x)
+        
+        import pdb
+        pdb.set_trace()
+        expected_carry_out, expected_ys = _fake_scan(f, init, xs)
+        self.assertEqual(expected_carry_out, carry_out)
+        self.assertEqual(expected_ys, ys)
+
         
     def test_red_simple(self):
         '''

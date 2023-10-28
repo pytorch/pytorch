@@ -172,6 +172,8 @@ class OptimizeIndexing:
             self.replace_indirect(k, ValueRanges(0, v))
 
         # avoid computing these values, pessimistically assume that they are unbounded
+        #import pdb
+        #pdb.set_trace()
         self.tensor_values_set = dominated_nodes(
             [
                 node
@@ -201,6 +203,7 @@ class OptimizeIndexing:
             if (
                 "masked_subblock" not in node.target
                 and "set_indirect" not in node.target
+                and "scan" not in node.target
             ):
                 self.interp_env[node] = torch._inductor.optimize_indexing.ValueRanges(
                     -math.inf, math.inf
@@ -267,25 +270,49 @@ class OptimizeIndexing:
             yield from graph.nodes
 
     def swap_submodules(self, submodules):
-        keys = list(submodules.keys())
-        for key in keys:
-            if key == "get_index":
-                submodules[key] = self.get_index
-            elif "masked_subblock" in key:
-                subblock = self.loop_body.subblocks[key]
-                submodules[key] = functools.partial(
-                    self.masked_subblock, subblock, self.interp_env
-                )
-            else:
-                assert "set_indirect" in key
-                idx = int(key[len("set_indirect") :])
-                var = self.loop_body.indirect_vars[idx]
-                indirect = functools.partial(self.set_indirect, var)
-                submodules[key] = indirect
+        try:
+            keys = list(submodules.keys())
+            for key in keys:
+                if key == "get_index":
+                    submodules[key] = self.get_index
+                elif "masked_subblock" in key:
+                    subblock = self.loop_body.subblocks[key]
+                    submodules[key] = functools.partial(
+                        self.masked_subblock, subblock, self.interp_env
+                    )
+                elif "scan" in key:
+                    #import pdb
+                    #pdb.set_trace()
+                    continue
+                    subblock = self.loop_body.subblocks[key]
+                    submodules[key] = functools.partial(
+                        self.scan_subblock, subblock, self.interp_env
+                    )
+                else:
+                    assert "set_indirect" in key
+                    idx = int(key[len("set_indirect") :])
+                    var = self.loop_body.indirect_vars[idx]
+                    indirect = functools.partial(self.set_indirect, var)
+                    submodules[key] = indirect
+        except:
+            print('Failed')
+            import pdb
+            pdb.set_trace()
 
         return submodules
 
     def masked_subblock(self, subblock, env, mask, value):
+        interp = InterpreterShim(subblock.graph, self.submodules)
+        interp.run(V.get_ops_handler(), initial_env=env)
+        output = [node for node in subblock.graph.nodes if node.target == "output"]
+        assert len(output) == 1
+        # dont bother unioning with value since the load from buffer will be
+        # pessimistically assumed to be inf anyway
+        return interp.env[output[0]]
+    
+    def scan_subblock(self, subblock, env, mask, value):
+        #import pdb
+        #pdb.set_trace()
         interp = InterpreterShim(subblock.graph, self.submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]

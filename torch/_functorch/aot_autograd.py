@@ -1235,9 +1235,16 @@ def create_joint(
 ) -> Any:
     def inner_fn(primals: List[Any], tangents: List[Any]):
         outs, tangent_mask = fn(*primals)
-        assert len(tangent_mask) == len(outs)
-        outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
-        assert len(outs_to_grad) == len(tangents)
+        #import pdb
+        #pdb.set_trace()
+        try:
+            assert len(tangent_mask) == len(outs)
+            outs_to_grad = [o for needs_tangent, o in zip(tangent_mask, outs) if needs_tangent]
+            assert len(outs_to_grad) == len(tangents)
+        except:
+            print('Failed!')
+            import pdb
+            pdb.set_trace()
 
         # Get the inputs that need gradients
         grad_primals = []
@@ -1286,10 +1293,11 @@ def create_joint(
                         grad_outputs=needed_tangents,
                         allow_unused=True,
                     )
+        #import pdb
+        #pdb.set_trace()
         backward_out_iter = iter(backward_out)
-        return outs, [
-            next(backward_out_iter) if i else None for i in inputs_needs_grads
-        ]
+        grad_li = [next(backward_out_iter) if i else None for i in inputs_needs_grads]
+        return outs, grad_li
 
     def inner_fn_with_anomaly(*args):
         with fx_traceback.preserve_node_meta(), warnings.catch_warnings():

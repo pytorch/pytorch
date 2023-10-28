@@ -18,6 +18,8 @@ from io import StringIO
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
+from torch._higher_order_ops.scan import scan
+
 import sympy
 
 import torch
@@ -293,11 +295,20 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
-        sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
-            for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
-        ]
+        try:
+            import pdb
+            pdb.set_trace()
+            sources = [
+                #origin.name if 'scan' in origin.name else origin.meta["original_aten"]._overloadpacket.__name__
+                origin.meta["original_aten"]._overloadpacket.__name__
+                for origin in all_origins
+                if origin.op == "call_function" and "original_aten" in origin.meta
+            ]
+        except:
+            print('Failed')
+            import pdb
+            pdb.set_trace()
+            sources = ["scan_impl"]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)

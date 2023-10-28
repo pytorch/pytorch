@@ -516,6 +516,8 @@ def wrap_key(f, tensors, tracer, pre_autograd: bool):
 ORIGINAL_ATEN = None
 @contextmanager
 def set_original_aten_op(func):
+    #import pdb
+    #pdb.set_trace()
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func

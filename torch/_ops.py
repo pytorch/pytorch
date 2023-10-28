@@ -355,6 +355,8 @@ def get_cached_ops():
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase):
     def __init__(self, overloadpacket, op, op_dk, schema, tags):
+        #import pdb
+        #pdb.set_trace()
         super().__init__()
         self._op = op
         self._op_dk = op_dk
@@ -619,6 +621,8 @@ class OpOverloadPacket:
             ) from None
 
         try:
+            #import pdb
+            #pdb.set_trace()
             # This is ok since we are guaranteed that an overload name for an aten op can't be 'default'
             use_key = "" if key == "default" else key
             # TODO: disallow access to overloads registered by JIT

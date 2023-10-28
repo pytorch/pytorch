@@ -777,7 +777,9 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
     
-    def scan(self, dtype, combine_fn, value, init):
+    def scan(self, dtype, combine_fn, value, init, dim, carry_out_ptr, out_ptr):
+        import pdb
+        pdb.set_trace()
         raise NotImplementedError()
 
     def __enter__(self):
@@ -815,6 +817,8 @@ class Kernel(CodeGen):
 
             @staticmethod
             def store(name, index, value, mode=None):
+                #import pdb
+                #pdb.set_trace()
                 self.store_buffer_names.add(name)
                 if mode is None:
                     self.cse.store_cache[name] = value
@@ -831,10 +835,11 @@ class Kernel(CodeGen):
                     name, dtype, src_dtype, reduction_type, index, value
                 )
                 
-            #TODO: this code is a replication from https://github.com/pytorch/pytorch/pull/109132 and needs to be adapted
             @staticmethod
-            def scan(dtype, combine_fn, value, init):
-                return self.scan(dtype, combine_fn, value, init)
+            def scan(dtype, f, init, xs, dim, carry_out_ptr, out_ptr, reverse):
+                #import pdb
+                #pdb.set_trace()
+                return self.scan(dtype, f, init, xs, dim, carry_out_ptr, out_ptr, reverse)
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

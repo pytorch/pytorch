@@ -67,8 +67,6 @@ class BackendCompilerFailed(TorchDynamoException):
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super().__init__(msg)
-        import pdb
-        pdb.set_trace()
         self.real_stack = []
         self.msg = msg
         self.category = None

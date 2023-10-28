@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import inspect
 from contextlib import contextmanager
 from torch.hub import tqdm
+import traceback
 
 __all__ = ['Interpreter', 'Transformer']
 
@@ -274,7 +275,12 @@ class Interpreter:
         assert not isinstance(target, str)
 
         # Execute the function and return the result
-        return target(*args, **kwargs)
+        try:
+            return target(*args, **kwargs)
+        except Exception:
+            print(traceback.format_exc())
+            import pdb
+            pdb.set_trace()
 
     @compatibility(is_backward_compatible=True)
     def call_method(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:

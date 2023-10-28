@@ -38,6 +38,8 @@ from .ir import (
     Reduction,
     SqueezeView,
     TensorBox,
+    FixedLayout,
+    InputBuffer,
     validate_ir,
     View,
 )
@@ -594,26 +596,94 @@ def register_foreach_pointwise(
 
 #Some use the 'device' parameter.
 @register_lowering(torch.ops.scan_impl, broadcast=False, type_promotion_kind=None)
-def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
+def scan(f, init: TensorBox, xs: TensorBox, reverse=False):    
     #import pdb
     #pdb.set_trace()
+    #This is how to collect and evaluate the sizes numerically
+    new_shape = {}
+    for d, sym_sh in enumerate(xs[0].get_size()):
+        #if not (d in dims and V.graph.sizevars.shape_env.evaluate_expr(sympy.Eq(s, 1))):
+        #new_shape.append(int(V.graph.sizevars.shape_env.evaluate_expr(sympy.N(sym_sh))))
+        new_shape[sym_sh] = int(V.graph.sizevars.shape_env.evaluate_expr(sympy.N(sym_sh)))
+    
+    #import pdb
+    #pdb.set_trace()
+    
     device = xs[0].get_device()
     dtype = xs[0].get_dtype()
-    size = xs[0].get_size()
+    init_size = init[0].get_size()
+    xs_size = xs[0].get_size()
     scan_ranges = [xs[0].get_size()[0]]
+    init_load = [init_el.make_loader() for init_el in init]
+    xs_load = [xs_el.make_loader() for xs_el in xs]
+    len_init = len(init)
+    
     #import pdb
     #pdb.set_trace()
-    inner_fn = init[0].make_loader()
-    inner_fn_xs = xs[0].make_loader()
-    result = ir.Scan.create(device, dtype, size, scan_ranges, inner_fn, inner_fn_xs, f, init, xs, reverse=reverse)
-    #In a sense we don't have a fallback kernel here, so if this lowering fails, then we need to raise an error
-    # result = None
-    # if result is None:
-    #     #return fallback_scan(f, init, xs, reverse=reverse)
-    #     return fallback_handler(torch.ops.scan_impl)(f, init, xs, reverse=reverse)
+    #TODO: The carry and the output need to be created before the lowering
+    carry_out_ptr = TensorBox.create(torch.empty(11, 1, 2, device=device).data)
+    out_ptr = TensorBox.create(torch.empty(10, 1, 2, device=device).data)
+    '''
+    carry_out_tmp = torch.empty(11, 1, 2)
+    out_tmp = torch.empty(10, 1, 2)
+    carry_out_ptr = TensorBox.create(InputBuffer(name='carry',
+                                                 layout=FixedLayout(
+                                                            device=device,
+                                                            dtype=dtype,
+                                                            size=list(carry_out_tmp.size()),
+                                                            stride=carry_out_tmp.stride(),)
+                                                 ))
+    
+                                                
+    out_ptr = TensorBox.create(InputBuffer(name='output',
+                                            layout=FixedLayout(
+                                                    device=device,
+                                                    dtype=dtype,
+                                                    size=list(out_tmp.size()),
+                                                    stride=out_tmp.stride(),)
+                                            ))
+    
+    '''
+    carry_out_load = carry_out_ptr#.make_loader()
+    out_load = out_ptr#.make_loader()
+    #carry_out = []
+    #out = []
+    
     #import pdb
     #pdb.set_trace()
-    return result
+    #TODO: reverse the the xs values if needed and afterwards reverse the carry and the ys result back 
+    
+    #import pdb
+    #pdb.set_trace()
+    #f = ops.mul
+    carry, ys = ir.Scan.create(device, dtype, len_init, f, 
+                               init, init_size, init_load, 
+                               xs, xs_size, xs_load, 
+                               carry_out_ptr.data_ptr(), carry_out_load,
+                               out_ptr.data_ptr(), out_load,
+                               #carry_out, carry_out,
+                               #out, out,
+                               reverse=reverse)
+    
+    ''''
+    #TODO: The reversing of the tensor needs to be done outside of the scan op
+    def inner_fn(_):
+        return ops.scan(dtype, f, init, xs)
+    
+    tb = TensorBox(Pointwise.create(
+                   device=device,
+                   dtype=dtype,
+                   inner_fn=inner_fn,
+                   ranges=[],
+                   ))
+    tb.realize()
+    '''
+    
+    #TODO this return does not quite work yet
+    #import pdb
+    #pdb.set_trace()
+    return [[carry], [ys]]
+    #return [init, xs]
 
 @register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):
@@ -864,6 +934,8 @@ def roll(a, shifts, dims=tuple()):
     We can't use the ref here because it is based on multiple calls to
     torch.cat() that this will result in terrible code.
     """
+    import pdb
+    pdb.set_trace()
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
         shifts = (shifts,)

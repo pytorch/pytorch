@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set
+from typing import Callable, Dict, Iterable, List, Set
 
 import sympy
 
@@ -35,6 +35,7 @@ from ..utils import (
 from ..virtualized import ops, V
 
 from .common import (
+    CSE,
     CSEVariable,
     DeferredLine,
     free_symbol_startswith,
@@ -695,6 +696,8 @@ class IterationRangesEntry(IterationRanges):
 class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = pexpr
+    
+    helper_functions: List[IndentedBuffer]
 
     def __init__(
         self,
@@ -723,6 +726,9 @@ class TritonKernel(Kernel):
         self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
         self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
         self.last_usage = set()
+        
+        # TODO: make this a dict keyed on the function IR?
+        self.helper_functions = []
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         is_rocm = torch.version.hip is not None and torch.cuda.is_available()
@@ -1396,11 +1402,61 @@ class TritonKernel(Kernel):
             self.suffix.writeline(
                 DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
             )
-            
+    
     #TODO: this code is a replication from https://github.com/pytorch/pytorch/pull/109132 and needs to be adapted
-    def scan(self, dtype, combine_fn, value, init):
+    def _lift_helper(self, fn, num_args) -> str:
+        # Lift IR function into a triton function in the global namespace
+        #import pdb
+        #pdb.set_trace()
+        
+        helper = IndentedBuffer()
+        helper.writeline("@triton.jit")
+            
+        if hasattr(fn, 'code'):
+            print('Function has code')
+            name = fn.code.split('(')[0].split('def ')[1]
+            helper.splice(fn.code.strip())
+            
+        else:
+            name = f"_triton_helper_fn{len(self.helper_functions)}"
+            
+            args = [f"arg{n}" for n in range(num_args)]
+            signature = ", ".join(args)
+            helper.writeline(f"def {name}({signature}):")
+
+            cse = CSE(prefix="", suffix="")
+            overrides = TritonOverrides(V.MockHandler())
+                
+            class CSEProxy:
+                def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
+                    def inner(*args, **kwargs):
+                        return cse.generate(
+                            helper,
+                            getattr(overrides, name)(*args, **kwargs),
+                        )
+
+                    return inner
+
+            with helper.indent(), V.set_ops_handler(CSEProxy()):
+                outputs = fn(*args)
+                helper.writeline(f"return {outputs}")
+
+        #import pdb
+        #pdb.set_trace()
+
+        self.helper_functions.append(helper)
+        return name
+             
+    #TODO: this code is a replication from https://github.com/pytorch/pytorch/pull/109132 and needs to be adapted
+    def scan(self, dtype, f, init_arg, xs_arg, xs_dim, carry_out_ptr, out_ptr, reverse):
+        
+        #TODO: Check if the dim size works to be a list
         import pdb
         pdb.set_trace()
+        
+        #TODO: Design the mask and the blocks such that the batch dimension is worked-through in parallel.
+        #E.g. parallelize over the batch dimension
+        
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -1408,61 +1464,77 @@ class TritonKernel(Kernel):
         if self._load_mask:
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
+        
+        import pdb
+        pdb.set_trace()
 
-        value = self.cse.generate(
-            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
+        #xs = self.cse.generate(
+        #    self.compute, f"tl.broadcast_to({xs_arg}, {self.dense_size_str()})"
+        #)
+        xs = xs_arg
+        
+        #init = self.cse.generate(
+        #    self.compute, f"tl.broadcast_to({init_arg}, {self.dense_size_str()})"
+        #)
+        init = init_arg
+        
+        #dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
+        #acc_type = triton_acc_type(dtype)
+        #cond = " & ".join(masks)
+
+        import pdb
+        pdb.set_trace()
+
+        combine_helper_fn = self._lift_helper(f, 2)
+
+        '''
+        masked_xs = self.cse.generate(
+            self.compute, f"tl.where({cond}, {xs}, {default_tensor})"
         )
-
-        default = init
-        default_tensor = self.cse.generate(
-            self.body,
-            f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+        masked_init = self.cse.generate(
+            self.compute, f"tl.where({cond}, {init}, {default_tensor})"
         )
-        dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
-        acc_type = triton_acc_type(dtype)
-        cond = " & ".join(masks)
+        '''
+        # result_var = self.cse.generate(
+        #     self.compute,
+        #     f"{combine_helper_fn}({init}, {xs})",
+        # )
+        
+        
+        import pdb
+        pdb.set_trace()
+        carry = self.cse.generate(self.compute, f"{init}",)
+        out = self.cse.generate(self.compute, f"{init}",)
+        self.compute.splice(f"tl.store(0x{carry_out_ptr})")
+        
+        t_loop = "t_loop"
+        loop_code = f"for {t_loop} in range({xs_dim[0]}):"
+        self.compute.splice(loop_code)
+        
+        with self.compute.indent():
+            if reverse:
+                xs_t = self.cse.generate(self.compute, f"tl.load({xs} + ({xs_dim[0]} - {t_loop}) * {xs_dim[1]} * {xs_dim[2]})",)
+            else:
+                xs_t = self.cse.generate(self.compute, f"tl.load({xs} + {t_loop} * {xs_dim[1]} * {xs_dim[2]})",)
+            self.compute.splice(f"{carry}, {out} = {combine_helper_fn}({carry}, {xs_t})")
+            if reverse:
+                self.compute.splice(f"tl.store(0x{carry_out_ptr} + ({t_loop}+1) * {xs_dim[1]} * {xs_dim[2]})")
+                self.compute.splice(f"tl.store(0x{out_ptr} + {t_loop} * {xs_dim[1]} * {xs_dim[2]})")
+            else:
+                self.compute.splice(f"tl.store(0x{carry_out_ptr} + ({xs_dim[0]} - {t_loop}+1) * {xs_dim[1]} * {xs_dim[2]})")
+                self.compute.splice(f"tl.store(0x{out_ptr} + ({xs_dim[0]} - {t_loop}) * {xs_dim[1]} * {xs_dim[2]})")
+        
+        #result_carry = self.cse.generate(self.compute, f"init_val",)
+        #result_out = self.cse.generate(self.compute, f"x",)
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
-
-        if self.persistent_reduction:
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-        else:
-            accumulator = self.cse.newvar()
-            reduced_size = self.dense_size_list()
-            reduced_size[-1] = "1"
-            reduced_size = f"[{', '.join(reduced_size)}]"
-
-            self.body.writeline(
-                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
-            )
-
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
-            partial_reduce = self.cse.generate(
-                self.compute,
-                self.reduction_resize(
-                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
-                ),
-            )
-            acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-            result_var = self.cse.generate(
-                self.compute, combine_fn(accumulator, partial_scan)
-            )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
-
-        result_var.mask_vars = masks  # type: ignore[attr-defined]
-        return result_var
+        print(self.body._lines)
+        print(self.compute._lines)
+        import pdb
+        pdb.set_trace()
+        #result_carry.mask_vars = masks  # type: ignore[attr-defined]
+        #result_out.mask_vars = masks  # type: ignore[attr-defined]
+        
+        return [carry_out_ptr, out_ptr]
 
     def codegen_body(self):
         """
@@ -1696,7 +1768,6 @@ class TritonKernel(Kernel):
                     filename=__file__,
                     meta={triton_meta!r}
                 )
-                @triton.jit
             """
         else:
             tile_hint = ""
@@ -1707,11 +1778,22 @@ class TritonKernel(Kernel):
                     tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
                 @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
-                @triton.jit
             """
         code.splice(heuristics_line)
+        
+        #import pdb
+        #pdb.set_trace()
+        for helper in self.helper_functions:
+            code.writeline("")
+            #code.splice(helper)
+            for line in helper._lines:
+                code.writeline(line.replace('@triton.jit', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
+        
+        code.writeline(f"")
+        code.writeline(f"@triton.jit")
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
+        
         with code.indent():
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():
@@ -1724,6 +1806,9 @@ class TritonKernel(Kernel):
         if name is not None:
             return code.getvalue()
 
+        print(code.getvalue())
+        import pdb
+        pdb.set_trace()
         return code.getvalue()
 
     def codegen_static_numels(self, code):
