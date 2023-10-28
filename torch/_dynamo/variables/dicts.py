@@ -372,7 +372,6 @@ class SetVariable(VariableTracker):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         # Somewhat duplicative of CommonListMethodsVariable - but better than to violate substitution
         # principles and end up with things like direct item access attempts on a set, or
         # getitem sources.
@@ -382,7 +381,6 @@ class SetVariable(VariableTracker):
             result = SetVariable(
                 self._add(item),
                 mutable_local=self.mutable_local,
-                **options,
             )
             tx.replace_all(self, result)
             return ConstantVariable.create(None)
@@ -393,17 +391,15 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(items, **options),
+                SetVariable(items),
             )
             return result
         elif name == "__len__":
-            return ConstantVariable.create(len(self.items)).add_options(options)
+            return ConstantVariable.create(len(self.items))
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(
-                self.items, args[0], tx, options, check_tensor_identity=True
-            )
+            return iter_contains(self.items, args[0], tx, check_tensor_identity=True)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -414,7 +410,7 @@ class SetVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.items]
+        return list(self.items)
 
 
 class DataClassVariable(ConstDictVariable):

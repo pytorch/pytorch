@@ -109,7 +109,7 @@ class SuperVariable(VariableTracker):
         inner_fn, source = self._resolved_getattr_and_source(self, name)
 
         if inner_fn is object.__init__:
-            return LambdaVariable(identity, **options)
+            return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew
@@ -724,20 +724,9 @@ class SkipFilesVariable(VariableTracker):
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict and (
-            len(args) == 0
-            or len(args) == 1
-            and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
-        ):
-            if len(args) == 0:
-                args = dict(kwargs) if kwargs else None
-            else:
-                args = args[0]
-
-            return BuiltinVariable.call_dict_helper(
-                tx,
-                collections.OrderedDict,
-                args,
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
             )
         elif (
             self.value is collections.defaultdict
