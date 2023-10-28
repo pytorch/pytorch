@@ -481,12 +481,9 @@ class DataClassVariable(ConstDictVariable):
 
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
+        # Only test if transformers is already imported
+        mod = sys.modules.get("transformers.file_utils")
+        return mod is not None and issubclass(cls, mod.ModelOutput)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -599,26 +596,20 @@ class DataClassVariable(ConstDictVariable):
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            # True if using default OrderedDict.__init__ and did not implement __post_init__
-            if (
-                issubclass(cls, collections.OrderedDict)
-                and cls.__init__ is collections.OrderedDict.__init__
-                and not hasattr(cls, "__post_init__")
-            ):
-                return True
-            # hack for HF usecase:
-            #   assume dataclass annotation for ModelOutput subclass
-            #   assume self.create is AA to ModelOutput.__post_init__
-            # for non-HF usecase:
-            #   check __module__ string to avoid costy HF import
-            if cls.__module__ != "transformers.modeling_outputs":
-                return False
-            from transformers.file_utils import ModelOutput
+        # True if using default OrderedDict.__init__ and did not implement __post_init__
+        if (
+            issubclass(cls, collections.OrderedDict)
+            and cls.__init__ is collections.OrderedDict.__init__
+            and not hasattr(cls, "__post_init__")
+        ):
+            return True
+        # hack for HF usecase:
+        #   assume dataclass annotation for ModelOutput subclass
+        #   assume self.create is AA to ModelOutput.__post_init__
 
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
+        # Only test if transformers is already imported
+        mod = sys.modules.get("transformers.file_utils")
+        return mod is not None and issubclass(cls, mod.ModelOutputs)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -718,6 +709,21 @@ class CustomizedDictVariable(ConstDictVariable):
         super().var_getattr(tx, name)
 
 
+@functools.lru_cache(None)
+def _install_PretrainedConfig_patch():
+    # We need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+
+
 class HFPretrainedConfigVariable(VariableTracker):
     """
     Hack for HuggingFace PretrainedConfig
@@ -725,12 +731,13 @@ class HFPretrainedConfigVariable(VariableTracker):
 
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            from transformers.configuration_utils import PretrainedConfig
+        mod = sys.modules.get("transformers.configuration_utils")
+        is_match = mod is not None and issubclass(cls, mod.PretrainedConfig)
 
-            return issubclass(cls, PretrainedConfig)
-        except ImportError:
-            return False
+        # Lazily install monkeypatch the first time we see it in dynamo
+        if is_match:
+            _install_PretrainedConfig_patch()
+        return is_match
 
     @classmethod
     def is_matching_object(cls, obj):
