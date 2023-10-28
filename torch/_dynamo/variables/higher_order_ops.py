@@ -82,6 +82,18 @@ def only_consist_of(var, types):
     return False
 
 
+def _assert_tensors_nonaliasing(inputs, outputs):
+    input_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
+    }
+    output_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
+    }
+    assert input_tensor_ids.isdisjoint(
+        output_tensor_ids
+    ), "inputs to function body cannot alias outputs"
+
+
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
@@ -619,7 +631,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
-        sample_shape = args[1].get_real_value().size()
+        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
                 "map() operator doesn't support scalar or zero-sized tensors during tracing."
@@ -669,9 +682,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r.new_empty(
-            [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
-        )
+        example_value = r.new_empty([sample_shape[0], *r.shape])
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
@@ -711,7 +722,14 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
+
         example_res = lowered_module.original_module(*real_sub_args)
+
+        # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
+        # executorch modules promise not to alias inputs and outputs.
+        # Thus, output FakeTensors will correctly not alias input FakeTensors.
+        _assert_tensors_nonaliasing(real_sub_args, example_res)
+
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args

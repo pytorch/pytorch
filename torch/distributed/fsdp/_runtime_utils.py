@@ -1154,7 +1154,7 @@ def _finalize_params(
     if hasattr(flat_param, "_post_backward_hook_handle"):
         pbhs_handle = flat_param._post_backward_hook_handle
         pbhs_handle.remove()
-        delattr(flat_param, "_post_backward_hook_handle")
+        del flat_param._post_backward_hook_handle
     if flat_param.requires_grad:
         if not state._sync_gradients:
             # Preserve the gradient accumulation state if not synchronizing
@@ -1410,15 +1410,8 @@ def _register_post_backward_hook(
     already_registered = hasattr(flat_param, "_post_backward_hook_handle")
     if already_registered or not flat_param.requires_grad:
         return
-    # Get the `AccumulateGrad` object
-    temp_flat_param = flat_param.expand_as(flat_param)
-    _p_assert(
-        temp_flat_param.grad_fn is not None,
-        "The `grad_fn` is needed to access the `AccumulateGrad` and "
-        "register the post-backward hook",
-    )
     hook = functools.partial(_post_backward_hook, state, handle)
-    hook_handle = temp_flat_param.register_post_accumulate_grad_hook(hook)
+    hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
     flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
 
 
@@ -1459,7 +1452,7 @@ def _register_post_backward_reshard_only_hook(
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_handle = hook_handle # type: ignore[attr-defined, assignment]
+    flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check
