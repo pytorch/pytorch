@@ -145,9 +145,7 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize(
-        "shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096")
-    )
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -172,12 +170,8 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    @parametrize(
-        "shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096")
-    )
-    def test_amax_along_with_fp8_quant(
-        self, float8_dtype: torch.dtype, shape: str
-    ):
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
+    def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -207,9 +201,7 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("amax_keep_dim", (True, False))
-    @parametrize(
-        "shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096")
-    )
+    @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_layernorm_fp8_quant(
         self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str
     ):
