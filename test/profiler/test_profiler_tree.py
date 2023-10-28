@@ -22,6 +22,7 @@ KEEP_ELLIPSES = 2
 KEEP_NAME_AND_ELLIPSES = 3
 
 PRUNE_FUNCTIONS = {
+    "torch/utils/_pytree/api/python.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
