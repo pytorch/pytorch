@@ -208,6 +208,9 @@ def register_pytree_node(
             )
         )
     """
+    if optree is None:
+        return
+
     # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
     # PyStructSequence types
     if not optree.is_structseq_class(cls):
