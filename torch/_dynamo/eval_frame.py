@@ -826,10 +826,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def run_node(self, n):
         self.current_node = n
-        r = super().run_node(n)
+        result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
-            r.node.meta["val"] = self.current_node.meta["val"]
-        return r
+            result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if self.current_node.op != "output":
+            result_proxy.node._rename(
+                getattr(self.current_node, "name", result_proxy.node.name)
+            )
+        return result_proxy
 
 
 class ExportResult(NamedTuple):
