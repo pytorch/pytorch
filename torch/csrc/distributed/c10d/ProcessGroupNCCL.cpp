@@ -3362,7 +3362,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       },
       dstRank,
       OpType::SEND,
-      "nccl:send");
+      c10::str("nccl:send ", rank_, "->", dstRank).c_str());
   return ret;
 }
 
@@ -3400,7 +3400,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       },
       srcRank,
       OpType::RECV,
-      "nccl:recv");
+      c10::str("nccl:recv ", rank_, "<-", srcRank).c_str());
   return ret;
 }
 #else
