@@ -479,7 +479,6 @@ class BaseSchedulerNode:
 
         def is_materialized(buf, snodes):
             users = self.scheduler.name_to_node[buf].users
-            assert users is not None
             buf_uses = {user.node for user in users}
             return len(buf_uses - set(snodes)) > 0
 
@@ -507,7 +506,6 @@ class BaseSchedulerNode:
             # a MultiOutputLayout
             if isinstance(buf.layout, MultiOutputLayout):
                 users = self.scheduler.name_to_node[buf.name].users
-                assert users is not None
                 buf_elems = sum(get_buf_elems(user.node.node) for user in users)
             else:
                 buf_elems = get_buf_elems(buf)
@@ -730,7 +728,7 @@ class SchedulerNode(BaseSchedulerNode):
             read_dep, dependencies.MemoryDep
         ):
             write_dep = next(iter(self.read_writes.writes))
-            assert isinstance(write_dep, dependencies.MemoryDep)
+            assert isinstance(write_dep, dependencies.MemoryDep), f"{type(write_dep)=}"
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
@@ -2042,7 +2040,7 @@ class Scheduler:
             scheduler_node.decide_inplace_update()
             scheduler_node.allocate()
         node = scheduler_node.node
-        assert isinstance(node, ir.ExternKernel)
+        assert isinstance(node, ir.ExternKernel), f"{type(node)=}"
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
