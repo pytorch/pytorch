@@ -1122,6 +1122,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
+            manually_set_subgraph_inputs=False,
             source_target=self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
@@ -1129,11 +1130,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             tracer=tracer,
         )
         post_guards = tx.output.guards
-        if body_lifted_freevars:
-            for freevar in body_lifted_freevars.keys():
-                if "saved_tensor_marked" not in freevar.node.meta:
-                    unimplemented("NYI - freevars in autograd function.")
-
         if always_restore:
             if post_guards - pre_guards:
                 unimplemented("NYI - New guards discovered in a restoring state")
@@ -1144,9 +1140,14 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
+        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
+        # all the arguments are lifted.
+        p_args = tuple(arg for arg in body_lifted_freevars.keys())
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
