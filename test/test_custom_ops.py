@@ -467,15 +467,15 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError()
 
     def test_unsupported_schemas(self):
-        with self.assertRaisesRegex(ValueError, "does not support non-functional"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a!) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "does not support view functions"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "no outputs"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(Tensor x) -> ()")(
                 foo
             )
@@ -1692,6 +1692,10 @@ def forward(self, x_1):
         actual = self.ns().foo.default.tags
         self.assertTrue(isinstance(actual, list))
         self.assertEqual(actual, list(tags))
+
+    def test_builtin_aten_ops_are_pt2_compliant(self):
+        for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     def test_define_bad_schema(self):
         lib = self.lib()
