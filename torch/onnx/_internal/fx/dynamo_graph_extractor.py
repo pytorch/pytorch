@@ -44,7 +44,7 @@ class _PyTreeExtensionContext:
                 class_type,
                 flatten_func,
                 unflatten_func,
-                __register_cxx_pytree_node=False,
+                _register_cxx_pytree_node=False,
             )
         return self
 

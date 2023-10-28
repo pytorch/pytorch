@@ -130,7 +130,7 @@ def _register_pytree_node(
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
-    __register_cxx_pytree_node: bool = True,
+    _register_cxx_pytree_node: bool = True,
 ) -> None:
     """
     Args:
@@ -178,7 +178,7 @@ def _register_pytree_node(
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
-    if __register_cxx_pytree_node:
+    if _register_cxx_pytree_node:
         try:
             from . import _cxx_pytree
         except ImportError:
@@ -190,7 +190,7 @@ def _register_pytree_node(
                 unflatten_fn,
                 to_dumpable_context=to_dumpable_context,
                 from_dumpable_context=from_dumpable_context,
-                __register_python_pytree_node=False,
+                _register_python_pytree_node=False,
             )
 
 
@@ -259,19 +259,19 @@ _register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     namedtuple,
@@ -279,13 +279,13 @@ _register_pytree_node(
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 _register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
-    __register_cxx_pytree_node=False,
+    _register_cxx_pytree_node=False,
 )
 
 
