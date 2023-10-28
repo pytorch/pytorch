@@ -1213,7 +1213,7 @@ def export(
                 torch.SymInt,
                 torch.SymFloat,
             )
-            if not isinstance(arg, prim_types) and not (arg is None):
+            if not isinstance(arg, prim_types) and (arg is not None):
                 if dataclasses.is_dataclass(arg):
                     raise RuntimeError(
                         "Dataclasses are supposed to be pytree nodes to be exportable. "
