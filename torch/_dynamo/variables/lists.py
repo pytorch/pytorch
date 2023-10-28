@@ -48,11 +48,10 @@ class BaseListVariable(VariableTracker):
     def __init__(
         self,
         items: List[VariableTracker],
-        recursively_contains=None,
         regen_guards=True,
         **kwargs,
     ):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+        super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
         # Sometimes, we know that we have passed in the guards from the items in the list
@@ -243,14 +242,10 @@ class CommonListMethodsVariable(BaseListVariable):
         if name == "append" and self.mutable_local:
             assert not kwargs
             (arg,) = args
-            new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
-            if arg.mutable_local is not None:
-                new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
                 type(self)(
                     self.items + [arg],
-                    recursively_contains=new_rec_contains,
                     regen_guards=False,
                     **options,
                 ),
@@ -678,8 +673,8 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
-    def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+    def __init__(self, items, index: int = 0, **kwargs):
+        super().__init__(**kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
@@ -696,7 +691,6 @@ class ListIteratorVariable(VariableTracker):
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
-            recursively_contains=self.recursively_contains,
             **VariableTracker.propagate([self]),
         )
 

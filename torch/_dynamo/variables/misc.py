@@ -167,16 +167,9 @@ class SuperVariable(VariableTracker):
 
             newval = collections.OrderedDict(self.objvar.items)
             newval[k] = args[1]
-
-            new_rec_contains = self.objvar.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self.objvar,
-                self.objvar.modifed(newval, new_rec_contains, **options),
+                self.objvar.modifed(newval, **options),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -504,11 +497,18 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
+    _nonvar_fields = {
+        "proxy",
+        "inference",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
+    def __init__(self, value, value_type=None, inference=False, proxy=None, **kwargs):
         saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
         self._saved_tensors = saved_tensors
         self.inference = inference
+        self.proxy = proxy
 
     @staticmethod
     def create(tx):
