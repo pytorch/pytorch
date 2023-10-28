@@ -392,6 +392,14 @@ def identity(x):
     return x
 
 
+def hashable(x):
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+
+
 def nothing(*args, **kwargs):
     pass
 
