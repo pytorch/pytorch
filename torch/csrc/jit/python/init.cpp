@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -752,61 +751,69 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_nvfuser_skip_node_kind",
-          // Args:
-          //     `op_name`: Symbol of op;
-          //     `flip`: flag indicating whether to flip the given op in the
-          //             skip list.
-          // Returns:
-          //     a bool flag indicating if `op_name` was already in the skip
-          //     list.
           [](const std::string& op_name, bool flip = true) {
-            return fuser::cuda::skipNode(op_name, flip);
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_skip_node_kind is deprecated and a no-op");
           })
-      .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
-      .def("_jit_nvfuser_can_be_enabled", &fuser::cuda::canBeEnabled)
+      .def(
+          "_jit_set_nvfuser_enabled",
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_enabled is deprecated and a no-op");
+          })
+      .def(
+          "_jit_nvfuser_can_be_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_can_be_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_single_node_mode",
-          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_single_node_mode",
-          []() { return fuser::cuda::getSingletonFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_single_node_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_horizontal_mode",
-          [](bool flag) { return fuser::cuda::setHorizontalFusion(flag); })
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_horizontal_mode",
-          []() { return fuser::cuda::getHorizontalFusion(); })
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_horizontal_mode is deprecated and a no-op");
+          })
       .def(
           "_jit_set_nvfuser_guard_mode",
-          [](bool profiling_flag) {
-            bool oldState = fuser::cuda::getCudaFusionGuardMode();
-            fuser::cuda::getCudaFusionGuardMode() = profiling_flag;
-            return oldState;
+          [](bool) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_guard_mode is deprecated and a no-op");
           })
-      .def("_jit_nvfuser_enabled", &fuser::cuda::isEnabled)
+      .def(
+          "_jit_nvfuser_enabled",
+          []() {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_enabled is deprecated and a no-op");
+          })
       .def(
           "_jit_nvfuser_set_comparison_callback",
-          [](bool run_fallback, py::function fn) {
-            // If set, then the callback will be run after each nvfuser fusion
-            // group is executed. Can be used for testing accuracy.
-            // If run_fallback == True, then a fallback will be run and
-            // unfused_outputs will be nonempty, showing the result if the
-            // fusion didn't take place. Otherwise, unfused_outputs will
-            // be empty
-            auto fn_ptr = std::make_shared<py::function>(fn);
-            auto callback_lambda = [fn_ptr](
-                                       const Stack& fused_outputs,
-                                       const Stack& unfused_outputs,
-                                       const std::string& graph_ir) {
-              py::gil_scoped_acquire acquire{};
-              (*fn_ptr)(fused_outputs, unfused_outputs, graph_ir);
-            };
-            setCudaFuserComparisonCallback({run_fallback, callback_lambda});
+          [](bool, py::function) {
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_clear_comparison_callback",
           []() {
-            setCudaFuserComparisonCallback({false, nullptr});
+            TORCH_WARN(
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_clear_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_set_profiling_mode",
@@ -1231,6 +1238,11 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
+          "expect_size",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_size(file, line);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();
@@ -1253,9 +1265,30 @@ void initJITBindings(PyObject* module) {
       .def(
           "__str__",
           [](c10::SymNode a) { return a->str(); })
-      .def("__repr__", [](c10::SymNode a) {
-        return a->str();
-      });
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "is_constant",
+          [](const c10::SymNode& node){
+            return node->is_constant();
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node) {
+            return node->is_symbolic();
+          })
+      .def(
+          "singleton_int",
+          [](const c10::SymNode& node) {
+            return node->singleton_int();
+          })
+      .def(
+          "singleton_coeff",
+          [](const c10::SymNode& node) {
+            return node->singleton_coeff();
+          });
+
   // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1421,6 +1454,7 @@ void initJITBindings(PyObject* module) {
             PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
         if (res) {
           int64_t i = static_cast<int64_t>(PyLong_AsLongLong(res));
+          Py_DECREF(res);
           if (i > 0) {
             return i;
           }
@@ -1594,7 +1628,10 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto& unsortedOps = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+          if (unsortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
           // Depending on the order of registration, aten or jit ops may be
           // registered first. This sorting is helpful in cases where

@@ -17,6 +17,7 @@ import torch
 from . import _dtypes_impl, _util
 from ._normalizations import (
     ArrayLike,
+    ArrayLikeOrScalar,
     CastingModes,
     DTypeLike,
     NDArray,
@@ -338,9 +339,9 @@ def logspace(
 
 
 def arange(
-    start: Optional[ArrayLike] = None,
-    stop: Optional[ArrayLike] = None,
-    step: Optional[ArrayLike] = 1,
+    start: Optional[ArrayLikeOrScalar] = None,
+    stop: Optional[ArrayLikeOrScalar] = None,
+    step: Optional[ArrayLikeOrScalar] = 1,
     dtype: Optional[DTypeLike] = None,
     *,
     like: NotImplementedType = None,
@@ -358,22 +359,23 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes().int_dtype
-    # XXX: default values do not get normalized
-    start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
+        dtype = (
+            _dtypes_impl.default_dtypes().float_dtype
+            if any(_dtypes_impl.is_float_or_fp_tensor(x) for x in (start, stop, step))
+            else _dtypes_impl.default_dtypes().int_dtype
+        )
+    work_dtype = torch.float64 if dtype.is_complex else dtype
 
-    dummy = torch.empty(1, dtype=dtype)
-    target_dtype = _dtypes_impl.result_type_impl(start, stop, step, dummy)
-
-    # work around RuntimeError: "arange_cpu" not implemented for 'ComplexFloat'
-    work_dtype = torch.float64 if target_dtype.is_complex else target_dtype
+    # RuntimeError: "lt_cpu" not implemented for 'ComplexFloat'. Fall back to eager.
+    if any(_dtypes_impl.is_complex_or_complex_tensor(x) for x in (start, stop, step)):
+        raise NotImplementedError
 
     if (step > 0 and start > stop) or (step < 0 and start < stop):
         # empty range
-        return torch.empty(0, dtype=target_dtype)
+        return torch.empty(0, dtype=dtype)
 
     result = torch.arange(start, stop, step, dtype=work_dtype)
-    result = _util.cast_if_needed(result, target_dtype)
+    result = _util.cast_if_needed(result, dtype)
     return result
 
 
@@ -495,7 +497,7 @@ def zeros_like(
 
 
 def _xy_helper_corrcoef(x_tensor, y_tensor=None, rowvar=True):
-    """Prepate inputs for cov and corrcoef."""
+    """Prepare inputs for cov and corrcoef."""
 
     # https://github.com/numpy/numpy/blob/v1.24.0/numpy/lib/function_base.py#L2636
     if y_tensor is not None:
@@ -584,6 +586,12 @@ def _conv_corr_impl(a, v, mode):
 
     padding = v.shape[0] - 1 if mode == "full" else mode
 
+    if padding == "same" and v.shape[0] % 2 == 0:
+        # UserWarning: Using padding='same' with even kernel lengths and odd
+        # dilation may require a zero-padded copy of the input be created
+        # (Triggered internally at pytorch/aten/src/ATen/native/Convolution.cpp:1010.)
+        raise NotImplementedError("mode='same' and even-length weights")
+
     # NumPy only accepts 1D arrays; PyTorch requires 2D inputs and 3D weights
     aa = a[None, :]
     vv = v[None, None, :]
@@ -626,8 +634,8 @@ def bincount(x: ArrayLike, /, weights: Optional[ArrayLike] = None, minlength=0):
 
 def where(
     condition: ArrayLike,
-    x: Optional[ArrayLike] = None,
-    y: Optional[ArrayLike] = None,
+    x: Optional[ArrayLikeOrScalar] = None,
+    y: Optional[ArrayLikeOrScalar] = None,
     /,
 ):
     if (x is None) != (y is None):
@@ -842,10 +850,6 @@ def array_equiv(a1: ArrayLike, a2: ArrayLike):
     return _tensor_equal(a1_t, a2_t)
 
 
-def mintypecode():
-    raise NotImplementedError
-
-
 def nan_to_num(
     x: ArrayLike, copy: NotImplementedType = True, nan=0.0, posinf=None, neginf=None
 ):
@@ -856,14 +860,6 @@ def nan_to_num(
         return re + 1j * im
     else:
         return torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
-
-
-def asfarray():
-    raise NotImplementedError
-
-
-def block(*args, **kwds):
-    raise NotImplementedError
 
 
 # ### put/take_along_axis ###
@@ -886,7 +882,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.gather(arr, axis, indices)
+    return torch.take_along_dim(arr, indices, axis)
 
 
 def put(
@@ -901,7 +897,7 @@ def put(
     if ind.numel() > v.numel():
         ratio = (ind.numel() + v.numel() - 1) // v.numel()
         v = v.unsqueeze(0).expand((ratio,) + v.shape)
-    # Trim unnecessary elements, regarldess if v was expanded or not. Note
+    # Trim unnecessary elements, regardless if v was expanded or not. Note
     # np.put() trims v to match ind by default too.
     if ind.numel() < v.numel():
         v = v.flatten()
@@ -956,19 +952,9 @@ def unique(
     (ar,), axis = _util.axis_none_flatten(ar, axis=axis)
     axis = _util.normalize_axis_index(axis, ar.ndim)
 
-    is_half = ar.dtype == torch.float16
-    if is_half:
-        ar = ar.to(torch.float32)
-
     result = torch.unique(
         ar, return_inverse=return_inverse, return_counts=return_counts, dim=axis
     )
-
-    if is_half:
-        if isinstance(result, tuple):
-            result = (result[0].to(torch.float16),) + result[1:]
-        else:
-            result = result.to(torch.float16)
 
     return result
 
@@ -994,8 +980,7 @@ def clip(
     return torch.clamp(a, min, max)
 
 
-def repeat(a: ArrayLike, repeats: ArrayLike, axis=None):
-    # XXX: scalar repeats; ArrayLikeOrScalar ?
+def repeat(a: ArrayLike, repeats: ArrayLikeOrScalar, axis=None):
     return torch.repeat_interleave(a, repeats, axis)
 
 
@@ -1236,7 +1221,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
     # Move working axis to the end of the shape
     a = torch.moveaxis(a, axisa, -1)
     b = torch.moveaxis(b, axisb, -1)
-    msg = "incompatible dimensions for cross product\n" "(dimension must be 2 or 3)"
+    msg = "incompatible dimensions for cross product\n(dimension must be 2 or 3)"
     if a.shape[-1] not in (2, 3) or b.shape[-1] not in (2, 3):
         raise ValueError(msg)
 
@@ -1350,6 +1335,16 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
         # set the global state to handle the optimize=... argument, restore on exit
         if opt_einsum.is_available():
             old_strategy = torch.backends.opt_einsum.strategy
+            old_enabled = torch.backends.opt_einsum.enabled
+
+            # torch.einsum calls opt_einsum.contract_path, which runs into
+            # https://github.com/dgasmith/opt_einsum/issues/219
+            # for strategy={True, False}
+            if optimize is True:
+                optimize = "auto"
+            elif optimize is False:
+                torch.backends.opt_einsum.enabled = False
+
             torch.backends.opt_einsum.strategy = optimize
 
         if sublist_format:
@@ -1369,6 +1364,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     finally:
         if opt_einsum.is_available():
             torch.backends.opt_einsum.strategy = old_strategy
+            torch.backends.opt_einsum.enabled = old_enabled
 
     result = maybe_copy_to(out, result)
     return wrap_tensors(result)
@@ -1378,6 +1374,8 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
 
 
 def _sort_helper(tensor, axis, kind, order):
+    if tensor.dtype.is_complex:
+        raise NotImplementedError(f"sorting {tensor.dtype} is not supported")
     (tensor,), axis = _util.axis_none_flatten(tensor, axis=axis)
     axis = _util.normalize_axis_index(axis, tensor.ndim)
 
@@ -1387,8 +1385,6 @@ def _sort_helper(tensor, axis, kind, order):
 
 
 def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
-    if a.dtype.is_complex:
-        return NotImplemented
     # `order` keyword arg is only relevant for structured dtypes; so not supported here.
     a, axis, stable = _sort_helper(a, axis, kind, order)
     result = torch.sort(a, dim=axis, stable=stable)
@@ -1396,8 +1392,6 @@ def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
-    if a.dtype.is_complex:
-        return NotImplemented
     a, axis, stable = _sort_helper(a, axis, kind, order)
     return torch.argsort(a, dim=axis, stable=stable)
 
@@ -1406,7 +1400,7 @@ def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
     if a.dtype.is_complex:
-        return NotImplemented
+        raise NotImplementedError(f"searchsorted with dtype={a.dtype}")
 
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
@@ -1491,7 +1485,7 @@ def reshape(a: ArrayLike, newshape, order: NotImplementedType = "C"):
 
 
 def transpose(a: ArrayLike, axes=None):
-    # numpy allows both .tranpose(sh) and .transpose(*sh)
+    # numpy allows both .transpose(sh) and .transpose(*sh)
     # also older code uses axes being a list
     if axes in [(), None, (None,)]:
         axes = tuple(reversed(range(a.ndim)))
@@ -1563,9 +1557,7 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
     if n == 0:
         # no spacing argument - use 1 in all axes
         dx = [1.0] * len_axes
-    elif n == 1 and (
-        type(varargs[0]) in _dtypes_impl.SCALAR_TYPES or varargs[0].ndim == 0
-    ):
+    elif n == 1 and (_dtypes_impl.is_scalar(varargs[0]) or varargs[0].ndim == 0):
         # single scalar or 0D tensor for all axes (np.ndim(varargs[0]) == 0)
         dx = varargs * len_axes
     elif n == len_axes:
@@ -1626,7 +1618,7 @@ def gradient(f: ArrayLike, *varargs, axis=None, edge_order=1):
         out = torch.empty_like(f, dtype=otype)
 
         # spacing for the current axis (NB: np.ndim(ax_dx) == 0)
-        uniform_spacing = type(ax_dx) in _dtypes_impl.SCALAR_TYPES or ax_dx.ndim == 0
+        uniform_spacing = _dtypes_impl.is_scalar(ax_dx) or ax_dx.ndim == 0
 
         # Numerical differentiation: 2nd order interior
         slice1[axis] = slice(1, -1)

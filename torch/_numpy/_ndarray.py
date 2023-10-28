@@ -344,6 +344,9 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
+    def __iter__(self):
+        return (ndarray(x) for x in self.tensor.__iter__())
+
     def __str__(self):
         return (
             str(self.tensor)
@@ -367,10 +370,10 @@ class ndarray:
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
-        except Exception:
+        except Exception as exc:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
-            )
+            ) from exc
 
     def __bool__(self):
         return bool(self.tensor)
@@ -452,7 +455,7 @@ class ndarray:
         index = _util.ndarrays_to_tensors(index)
         index = _upcast_int_indices(index)
 
-        if type(value) not in _dtypes_impl.SCALAR_TYPES:
+        if not _dtypes_impl.is_scalar(value):
             value = normalize_array_like(value)
             value = _util.cast_if_needed(value, self.tensor.dtype)
 
@@ -469,7 +472,7 @@ class ndarray:
 
 
 def _tolist(obj):
-    """Recusrively convert tensors into lists."""
+    """Recursively convert tensors into lists."""
     a1 = []
     for elem in obj:
         if isinstance(elem, (list, tuple)):
@@ -510,7 +513,7 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     if isinstance(obj, ndarray):
         obj = obj.tensor
 
-    # is a specific dtype requrested?
+    # is a specific dtype requested?
     torch_dtype = None
     if dtype is not None:
         torch_dtype = _dtypes.dtype(dtype).torch_dtype

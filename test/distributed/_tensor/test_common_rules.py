@@ -2,22 +2,18 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch._C import parse_schema
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.op_schema import OpSchema
 
-from torch.distributed._tensor.ops.common_rules import (
-    einop_rule,
-    pointwise_rule,
-    reduction_rule,
-)
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.distributed._tensor.ops.common_rules import einop_rule, pointwise_rule
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
+aten = torch.ops.aten
 
 
 class CommonRulesTest(DTensorTestBase):
@@ -29,14 +25,18 @@ class CommonRulesTest(DTensorTestBase):
 
     def _gen_tensor_meta(self, shape):
         empty_tensor = torch.empty(shape)
-        return _extract_tensor_metadata(empty_tensor)
+        return TensorMeta(
+            empty_tensor.shape,
+            empty_tensor.stride(),
+            empty_tensor.dtype,
+        )
 
     @with_comms
     def test_einop_basic_propagation(self):
         # plain einsum, mm
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        mm_call = aten.mm.default
         # propagate col-wise sharding
         mat1, mat2 = [-1, -1], [-1, 0]
 
@@ -49,7 +49,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -64,7 +64,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -79,7 +79,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -89,9 +89,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_einop_pointwise_propagation(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = parse_schema(
-            "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
-        )
+        add_call = aten.add.Tensor
         # addition
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 8]))
         mat1 = [0, -1]
@@ -99,7 +97,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat1, [], tensor_meta=mat1_tensor_meta
         )
         output_sharding = einop_rule(
-            "ij,ij->ij", OpSchema(func_schema, (mat1_spec, mat1_spec), {})
+            "ij,ij->ij", OpSchema(add_call, (mat1_spec, mat1_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -117,7 +115,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, [-1], [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "ijk,k->ijk", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "ijk,k->ijk", OpSchema(add_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -133,7 +131,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, [-1, -1], [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "ijk,1k->ijk", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "ijk,1k->ijk", OpSchema(add_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -147,7 +145,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        mm_call = aten.mm.default
 
         mat1, mat2 = [0, -1], [-1, 1]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
@@ -159,7 +157,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -172,7 +170,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        mm_func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        mm_call = aten.mm.default
 
         mat1, mat2 = [0, -1], [-1, -1]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
@@ -186,7 +184,7 @@ class CommonRulesTest(DTensorTestBase):
         # if not turn on linearity, partial sum is not eligible to propagate, we return
         # suggestion to reshard inputs with no partial sum (i.e. all_reduce one input)
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(mm_func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         self.assertIsNone(output_sharding.output_spec)
         suggestions = output_sharding.schema_suggestions
@@ -198,7 +196,7 @@ class CommonRulesTest(DTensorTestBase):
         # on converting placements to partial
         output_sharding = einop_rule(
             "mk,kn->mn",
-            OpSchema(mm_func_schema, (mat1_spec, mat2_spec), {}),
+            OpSchema(mm_call, (mat1_spec, mat2_spec), {}),
             linearity=True,
         )
         self.assertIsNone(output_sharding.output_spec)
@@ -210,9 +208,7 @@ class CommonRulesTest(DTensorTestBase):
 
         # einop prop with linearity on point-wise, should give back suggestion
         # on converting placements to partial
-        add_func_schema = parse_schema(
-            "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
-        )
+        add_call = aten.add.Tensor
         mat1, mat2 = [0, -1], [0, -1]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 6]))
         mat2_tensor_meta = self._gen_tensor_meta(torch.Size([8, 6]))
@@ -225,7 +221,7 @@ class CommonRulesTest(DTensorTestBase):
 
         output_sharding = einop_rule(
             "ij,ij->ij",
-            OpSchema(add_func_schema, (mat1_spec, mat2_spec), {}),
+            OpSchema(add_call, (mat1_spec, mat2_spec), {}),
             linearity=True,
         )
         self.assertIsNone(output_sharding.output_spec)
@@ -241,7 +237,7 @@ class CommonRulesTest(DTensorTestBase):
         mesh_shape = torch.arange(self.world_size)
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = parse_schema("aten::mm(Tensor self, Tensor mat2) -> Tensor")
+        mm_call = aten.mm.default
         mat1, mat2 = [0, -1], [0, -1]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 12]))
         mat2_tensor_meta = self._gen_tensor_meta(torch.Size([12, 4]))
@@ -252,7 +248,7 @@ class CommonRulesTest(DTensorTestBase):
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
         output_sharding = einop_rule(
-            "mk,kn->mn", OpSchema(func_schema, (mat1_spec, mat2_spec), {})
+            "mk,kn->mn", OpSchema(mm_call, (mat1_spec, mat2_spec), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNone(output_spec)
@@ -271,9 +267,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = parse_schema(
-            "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
-        )
+        add_call = aten.add.Tensor
         mat1, mat2 = [0, -1], [1, -1]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
         mat2_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
@@ -285,15 +279,13 @@ class CommonRulesTest(DTensorTestBase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "sharded two different ways:"):
-            einop_rule("ij,ij->ij", OpSchema(func_schema, (mat1_spec, mat2_spec), {}))
+            einop_rule("ij,ij->ij", OpSchema(add_call, (mat1_spec, mat2_spec), {}))
 
     @with_comms
     def test_pointwise_rules_broadcasting(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = parse_schema(
-            "where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"
-        )
+        where_call = aten.where.self
         inp1, inp2, inp3 = [0], [], [-1, -1]
         inp1_tensor_meta = self._gen_tensor_meta(torch.Size([8]))
         inp2_tensor_meta = self._gen_tensor_meta(torch.Size([]))
@@ -309,7 +301,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         # propagate point-wise sharding with broadcasting
         output_sharding = pointwise_rule(
-            OpSchema(func_schema, (condition, self_tensor, other_tensor), {})
+            OpSchema(where_call, (condition, self_tensor, other_tensor), {})
         )
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
@@ -319,9 +311,7 @@ class CommonRulesTest(DTensorTestBase):
     def test_pointwise_rules_suggestion(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        func_schema = parse_schema(
-            "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor"
-        )
+        lerp_call = aten.lerp.Scalar
         # propagate point-wise sharding
         inp1, inp2 = [-1, -1], [-1, 0]
         mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
@@ -334,7 +324,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         # adding a positional argument -1 to arg schema
         output_sharding = pointwise_rule(
-            OpSchema(func_schema, (mat1_spec, mat2_spec, -1), {})
+            OpSchema(lerp_call, (mat1_spec, mat2_spec, -1), {})
         )
         self.assertIsNone(output_sharding.output_spec)
         self.assertIsNotNone(output_sharding.schema_suggestions)
@@ -353,9 +343,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = parse_schema(
-            "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"
-        )
+        add_call = aten.add.Tensor
 
         # basic case to test implicit broadcasting shape alignment
         mat1, mat2 = [-1, 0], [0]
@@ -367,9 +355,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(func_schema, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNotNone(output_spec)
         self.assertEqual(output_spec.dim_map, [-1, 0])
@@ -384,9 +370,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(func_schema, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNone(output_spec)
         self.assertIsNotNone(output_sharding.schema_suggestions)
@@ -405,9 +389,7 @@ class CommonRulesTest(DTensorTestBase):
         )
         mesh = DeviceMesh(self.device_type, mesh_shape)
 
-        func_schema = parse_schema(
-            "aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)"
-        )
+        add_call = aten.add_.Tensor
 
         # more advanced case that needs reshard one input to align sharding
         mat1, mat2 = [0, -1, 1], [-1, -1, 0]
@@ -419,9 +401,7 @@ class CommonRulesTest(DTensorTestBase):
         mat2_spec = DTensorSpec.from_dim_map(
             mesh, mat2, [], tensor_meta=mat2_tensor_meta
         )
-        output_sharding = pointwise_rule(
-            OpSchema(func_schema, (mat1_spec, mat2_spec), {})
-        )
+        output_sharding = pointwise_rule(OpSchema(add_call, (mat1_spec, mat2_spec), {}))
         output_spec = output_sharding.output_spec
         self.assertIsNone(output_spec)
         self.assertIsNotNone(output_sharding.schema_suggestions)
@@ -431,51 +411,6 @@ class CommonRulesTest(DTensorTestBase):
         schema_suggestion = output_sharding.schema_suggestions[0]
         self.assertEqual(schema_suggestion.args_schema[0].dim_map, mat1)
         self.assertEqual(schema_suggestion.args_schema[1].dim_map, mat1)
-
-    @with_comms
-    def test_reduction_rule(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        func_schema = parse_schema(
-            "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor"
-        )
-        # reduction on a 2d mat
-        mat1 = [0, -1]
-        mat1_tensor_meta = self._gen_tensor_meta(torch.Size([8, 4]))
-        mat1_spec = DTensorSpec.from_dim_map(
-            mesh, mat1, [], tensor_meta=mat1_tensor_meta
-        )
-        # reduction on dim 0
-        output_sharding_0 = reduction_rule(
-            OpSchema(func_schema, (mat1_spec, 0), {}),
-            dims=[0],
-            reduction_linear=True,
-        )
-        self.assertIsNotNone(output_sharding_0.output_spec)
-        self.assertEqual(output_sharding_0.output_spec.dim_map, [-1])
-        # pending sum on dim 0
-        self.assertEqual(output_sharding_0.output_spec.sums, [0])
-
-        # reduction on dim 1
-        output_sharding_1 = reduction_rule(
-            OpSchema(func_schema, (mat1_spec, 1), {}),
-            dims=[1],
-            reduction_linear=True,
-        )
-        self.assertIsNotNone(output_sharding_1.output_spec)
-        self.assertEqual(output_sharding_1.output_spec.dim_map, [0])
-        self.assertEqual(output_sharding_1.output_spec.sums, [])
-
-        # full reduction if not specify dim
-        output_sharding_all_dim = reduction_rule(
-            OpSchema(func_schema, (mat1_spec,), {}),
-            dims=[0, 1],
-            reduction_linear=True,
-        )
-        self.assertIsNotNone(output_sharding_all_dim.output_spec)
-        self.assertEqual(output_sharding_all_dim.output_spec.dim_map, [])
-        # pending sum on mesh
-        self.assertEqual(output_sharding_all_dim.output_spec.sums, [0])
 
 
 if __name__ == "__main__":

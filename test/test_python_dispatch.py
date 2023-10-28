@@ -4,7 +4,7 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.library import Library, impl, fallthrough_kernel
-from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
@@ -18,6 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
 import torch.utils._pytree as pytree
+from torch._C import DispatchKeySet, DispatchKey
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_methods_invocations import op_db
@@ -694,7 +695,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch._C._TensorBase):
+            class A(torch._C.TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -714,7 +715,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
     def test_invalid_ret(self) -> None:
         # test invalid return gets reasonable error message
-        class A(torch._C._TensorBase):
+        class A(torch._C.TensorBase):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -1032,6 +1033,29 @@ def forward(self, x_a_1, x_b_1, y_1):
         x = SubTensorSuccess(3)
         x_copy = deepcopy(x)
         self.assertIs(type(x_copy), type(x))
+
+    def test_wrapper_subclass_extra_dispatch_keys(self) -> None:
+        class ExtraKeysTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                # NB: only the non-kwarg overload of _make_wrapper_subclass supports
+                #     extra dispatch keys. We probably want to unify the two APIs
+                #     in the future.
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(), elem.stride(), elem.storage_offset(),
+                    torch.contiguous_format,
+                    elem.dtype, elem.layout,
+                    elem.device, False, False, None, False, False,
+                    DispatchKeySet(DispatchKey.NestedTensor))
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                pass
+
+        x = ExtraKeysTensor(torch.randn(3))
+        self.assertTrue(torch._C._dispatch_keys(x).has(DispatchKey.NestedTensor))
+        self.assertFalse(torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor))
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
@@ -2224,6 +2248,22 @@ class TestWrapperSubclassAliasing(TestCase):
         args = (sample.input, *sample.args)
         kwargs = sample.kwargs
         self._test_wrapper_subclass_aliasing(op, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_conv2d(self, device):
+        args = (torch.randn(4, 4, 4, 4), torch.randn(4, 4, 4, 4))
+        kwargs = {}
+        # conv2d has a default arg 'int[2] strides=0',
+        # which torchscript expands into 'int[2] strides=[0, 0]'
+        # Make sure that _return_and_correct_aliasing can handle this case
+        # (I'm using inference_mode to make sure conv2d doesn't decompose and goes to torch_dispatch)
+        with torch.inference_mode():
+            self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_out_op(self, device):
+        # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
+        args = (torch.ones(4), torch.ones(4))
+        kwargs = {'out': torch.empty(4)}
+        self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 

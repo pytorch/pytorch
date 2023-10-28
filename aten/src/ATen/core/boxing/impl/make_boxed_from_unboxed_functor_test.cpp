@@ -787,7 +787,7 @@ struct ConcatKernel final : OperatorKernel {
   explicit ConcatKernel(std::string prefix): prefix_(std::move(prefix)) {}
 
   std::string operator()(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-    return prefix_ + a + b + c10::guts::to_string(c);
+    return prefix_ + a + b + std::to_string(c);
   }
 
   std::string prefix_;

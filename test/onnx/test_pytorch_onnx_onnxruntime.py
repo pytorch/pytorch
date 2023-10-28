@@ -1881,15 +1881,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(prev_default)
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
@@ -1905,23 +1901,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
-
         # 1. x,y are int, and output is float.
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
-        torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
@@ -6465,6 +6458,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
 
+        class DiagonalModelWithNegativeDims(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=0, dim1=-2, dim2=-1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(
+            DiagonalModelWithNegativeDims(),
+            x,
+            additional_test_inputs=[another_x],
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
+
         class DiagonalModelOffsetOverrun(torch.nn.Module):
             def forward(self, x):
                 return torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5)
@@ -6510,6 +6518,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_zeros_with_dtype(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(50, 64)
+
+            def forward(self, x):
+                inp = x.new_zeros(x.shape)
+                return self.emb(inp)
+
+        model = MyModel()
+        x = torch.Tensor([[2, 5, 6], [3, 2, 5]]).to(torch.int64)
+        self.run_test(model, x, input_names=["x"], dynamic_axes={"x": [0, 1]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_ones(self):
@@ -7640,6 +7663,25 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.zeros(4, requires_grad=True)
         z = torch.randn(5, requires_grad=True)
         self.run_test(Meshgrid(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_indexing(self):
+        class Meshgrid(torch.nn.Module):
+            def __init__(self, indexing):
+                super().__init__()
+                self.indexing = indexing
+
+            def forward(self, x, y, z):
+                output1, output2, output3 = torch.meshgrid(
+                    x, y, z, indexing=self.indexing
+                )
+                return output1, output2, output3
+
+        x = torch.randn(5, requires_grad=True)
+        y = torch.zeros(6, requires_grad=True)
+        z = torch.randn(7, requires_grad=True)
+        for indexing in ("xy", "ij"):
+            self.run_test(Meshgrid(indexing), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid_scalar(self):
@@ -13015,7 +13057,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
@@ -13046,7 +13088,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13079,7 +13121,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13105,6 +13147,38 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test(
             (3, 4, 8, 8), offset=-384, max_val=12
         )
+        self.run_test(model, input)
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_linear_relu_fused(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.linear = torch.nn.Linear(4, 2)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.ao.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.linear(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.fuse_modules(model.eval(), [["linear", "relu"]])
+        model = torch.ao.quantization.prepare_qat(model.train())
+        # Set fixed weight and bias to avoid flaky test.
+        model.linear.weight = torch.nn.Parameter(
+            _construct_tensor_for_quantization_test((2, 4), max_val=2)
+        )
+        model.linear.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
+        model = torch.ao.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -13542,4 +13616,5 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
 
 if __name__ == "__main__":
+    common_utils.TestCase._default_dtype_check_enabled = True
     common_utils.run_tests()

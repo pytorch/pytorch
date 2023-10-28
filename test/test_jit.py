@@ -142,6 +142,7 @@ import typing
 import unittest
 import warnings
 import zipfile
+import tracemalloc
 
 
 def canonical(graph):
@@ -12813,7 +12814,7 @@ dedent """
         x = torch.rand(3, 4)
         self.assertEqual(some_func(x), x)
 
-    def test_file_format_serialization(self):
+    def _make_filereader_test_file(self):
         filename = tempfile.mktemp()
         writer = torch._C.PyTorchFileWriter(filename)
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
@@ -12824,6 +12825,10 @@ dedent """
         serialized_offsets = pickle.dumps(offsets)
         writer.write_record("meta", serialized_offsets, len(serialized_offsets))
         writer.write_end_of_file()
+        return filename, buffers, serialized_offsets
+
+    def test_file_format_serialization(self):
+        filename, buffers, serialized_offsets = self._make_filereader_test_file()
 
         reader = torch._C.PyTorchFileReader(filename)
         serialized_offsets_read = reader.get_record("meta")
@@ -12832,6 +12837,29 @@ dedent """
         for i, offset in enumerate(parsed_serialized_offsets):
             data = reader.get_record(str(offset))
             assert(data == buffers[i])
+
+    def test_file_reader_no_memory_leak(self):
+        num_iters = 10000
+        filename, _, _ = self._make_filereader_test_file()
+
+        # Load from filename
+        tracemalloc.start()
+        for i in range(num_iters):
+            torch._C.PyTorchFileReader(filename)
+        _, peak_from_string = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        # Load from stream
+        tracemalloc.start()
+        with open(filename, 'rb') as f:
+            for i in range(num_iters):
+                f.seek(0)
+                torch._C.PyTorchFileReader(f)
+        _, peak_from_file = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        # Check if the peak sizes at most differ by an empirically obtained factor
+        assert peak_from_file < peak_from_string * 500
 
     # for each type, the input type annotation and corresponding return type annotation
     def type_input_return_pairs(self):
@@ -16259,6 +16287,7 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
     import jit.test_module_interface
     suite = unittest.findTestCases(jit.test_module_interface)

@@ -3,6 +3,7 @@ import contextlib
 import copy
 import itertools
 import math
+import platform
 import sys
 import unittest
 from typing import Callable
@@ -12,6 +13,7 @@ import numpy as np
 import sympy
 import torch
 from torch._C import FileCheck
+from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
@@ -459,7 +461,7 @@ class CPUReproTests(TestCase):
         }
         self._test_lstm_packed(params_dict)
 
-    def test_lstm_packed_change_input_sizes(self):
+    def test_lstm_packed_change_input_sizes_cpu(self):
         params_dict = {
             "unbatched": [False],
             "input_size": [2],
@@ -1194,7 +1196,8 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
@@ -1261,8 +1264,17 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        self.common(fn, (value, mask))
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        # fp16 inputs are not supported for C++ wrappers on CPU yet
+                        if cpp_wrapper_flag and dtype == torch.float16:
+                            with self.assertRaisesRegex(
+                                BackendCompilerFailed,
+                                "Unsupported input dtype torch.float16",
+                            ):
+                                self.common(fn, (value, mask))
+                            assert metrics.generated_cpp_vec_kernel_count == 0
+                        else:
+                            self.common(fn, (value, mask))
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
@@ -1356,6 +1368,28 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_scatter_using_atomic_add(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.randn(5, 29, 13),
+            2,
+            torch.tensor([[[3, 5, 7, 9]]]),
+            torch.randn(1, 1, 10),
+        )
+
+        fn_opt = torch.compile()(fn)
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            code = run_and_get_cpp_code(fn_opt, *inps)
+            FileCheck().check("atomic_add").run(code)
+
+            self.assertEqual(
+                fn(*inps),
+                fn_opt(*inps),
+            )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -1377,8 +1411,17 @@ class CPUReproTests(TestCase):
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
                         metrics.reset()
-                        self.common(fn, (x,))
-                        assert metrics.generated_cpp_vec_kernel_count == 1
+                        # fp16 inputs are not supported for C++ wrappers on CPU yet
+                        if cpp_wrapper_flag and dtype == torch.float16:
+                            with self.assertRaisesRegex(
+                                BackendCompilerFailed,
+                                "Unsupported input dtype torch.float16",
+                            ):
+                                self.common(fn, (x,))
+                            assert metrics.generated_cpp_vec_kernel_count == 0
+                        else:
+                            self.common(fn, (x,))
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2224,8 +2267,10 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        # def and use
+        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -2443,6 +2488,51 @@ class CPUReproTests(TestCase):
         x = torch.randn(8, 64, 56, 56)
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_no_default_contiguous_input(self):
+        mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
+        temp = torch.randn(1, 16, 1, 1)
+        v = torch.as_strided(temp, [1, 16], [0, 1], 0)
+        self.assertTrue(v.is_contiguous())
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            mod = mod.to(torch.bfloat16)
+            v = v.to(torch.bfloat16)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_reshape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x.view(4, 4, 4)
+
+        mod = M().eval()
+        v = torch.randn(4, 16)
+        with torch.no_grad():
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                mod,
+                (v,),
+            )
+            assert metrics.generated_kernel_count == 0
 
 
 if __name__ == "__main__":

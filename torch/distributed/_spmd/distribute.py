@@ -22,10 +22,10 @@ from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
-from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -120,14 +120,10 @@ def _dispatch_with_local_tensors(
 
     def redistribute(arg: Any) -> Any:
         tensor_shape, mesh, current_placement, target_placement = specs[arg]
-        tensor_meta = TensorMetadata(
+        tensor_meta = TensorMeta(
             tensor_shape,
-            dtype=arg.dtype,
-            requires_grad=arg.requires_grad,
             stride=arg.stride(),
-            memory_format=torch.contiguous_format,
-            is_quantized=arg.is_quantized,
-            qparams={},
+            dtype=arg.dtype,
         )
         current_spec = DTensorSpec(
             mesh, tuple(current_placement), tensor_meta=tensor_meta

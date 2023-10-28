@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import math
-import unittest
 
 import torch
 
@@ -348,7 +348,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             list(torch._dynamo.utils.counters["graph_break"].values()), [1]
         )
 
-    @unittest.expectedFailure
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod
@@ -562,6 +561,144 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         test()
         opt_test = torch._dynamo.optimize("eager")(test)
         opt_test()
+
+    def test_tensor_subclass_intermediary_input(self):
+        class FooTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, data, config, scale):
+                self = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    config[0],
+                    strides=config[1],
+                    storage_offset=config[2],
+                    dtype=config[3],
+                    layout=config[4],
+                    requires_grad=config[5],
+                    device=data.device,
+                )
+                self._data = data
+                self._config = config
+                self._scale = scale
+                return self
+
+            def __repr__(self):
+                return "FooTensor"
+
+            def __tensor_flatten__(self):
+                return ("_data",), (
+                    self._config,
+                    self._scale,
+                )
+
+            @staticmethod
+            def __tensor_unflatten__(tensors, metadatas):
+                return FooTensor(tensors["_data"], metadatas[0], metadatas[1])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                # handling clone and view is so dynamo fakefication passes, it's not
+                # intended to be handling user code
+                if func == torch.ops.aten.clone.default:
+                    return FooTensor(
+                        args[0]._data.clone(), args[0]._config, args[0]._scale
+                    )
+                elif func == torch.ops.aten.view.default:
+                    new_data = args[0]._data.view(*args[1:])
+                    return FooTensor(new_data, args[0]._config, args[0]._scale)
+
+                raise NotImplementedError()
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        class foo_autograd_fn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # access some data from `x`, where `x` is a tensor subclass
+                x2 = x._data + 1.0
+                # create and return a tensor subclass from within a torch.autograd.Function
+                x3 = FooTensor(x2, x._config, x._scale)
+                return x3._data
+
+            @staticmethod
+            def backward(ctx, g):
+                return g
+
+        x_ref = torch.randn(4, 4).requires_grad_(True)
+        x = copy.deepcopy(x_ref)
+        scale = torch.tensor(1.0)
+        # Weird that this is needed, but not having this breaks a lot of things
+        torch._dynamo.allow_in_graph(FooTensor)
+
+        def foo(x, scale):
+            config = (
+                x.size(),
+                x.stride(),
+                x.storage_offset(),
+                x.dtype,
+                x.layout,
+                x.requires_grad,
+            )
+            x = FooTensor(x, config, scale)
+            x = foo_autograd_fn.apply(x)
+            return x
+
+        y_ref = foo(x_ref, scale)
+        y_ref.sum().backward()
+
+        foo_opt = torch.compile(foo, backend="eager")
+        y = foo_opt(x, scale)
+        y.sum().backward()
+
+        self.assertEqual(y, y_ref)
+        self.assertEqual(x.grad, x_ref.grad)
+
+    def test_smuggle_symint_issue_111031(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x.size(0)
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out * ctx.x0
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_smuggle_tensor_and_complex_structures(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x0 = x
+                ctx.x1 = [1, 2, 3]
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x0mul = grad_out * ctx.x0
+                for i in ctx.x1:
+                    x0mul = (x0mul * i) + x0mul
+                return x0mul
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def foo(x):
+            return Foo.apply(x)
+
+        foo(torch.randn(2, requires_grad=True))
+        self.assertEqual(cnts.frame_count, 1)
 
 
 if __name__ == "__main__":

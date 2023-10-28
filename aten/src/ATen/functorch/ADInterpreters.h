@@ -14,7 +14,7 @@ struct TORCH_API GradInterpreterPtr {
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool prevGradMode() const {
-    return c10::get<GradInterpreterMeta>(base_->meta()).prevGradMode_;
+    return std::get<GradInterpreterMeta>(base_->meta()).prevGradMode_;
   }
   Tensor lift(const Tensor& tensor) const;
  private:
@@ -28,7 +28,7 @@ struct TORCH_API JvpInterpreterPtr {
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool prevFwdGradMode() const {
-    return c10::get<JvpInterpreterMeta>(base_->meta()).prevFwdGradMode_;
+    return std::get<JvpInterpreterMeta>(base_->meta()).prevFwdGradMode_;
   }
   Tensor lift(const Tensor& tensor) const;
  private:

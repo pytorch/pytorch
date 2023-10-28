@@ -101,7 +101,11 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder(
     c10::optional<std::string> attrs) {
   auto JTMB = triple ? makeJTMBFromTriple(*triple, cpu, attrs)
                      : makeJTMBFromHost(cpu, attrs);
+#if LLVM_VERSION_MAJOR >= 18
+  JTMB.setCodeGenOptLevel(llvm::CodeGenOptLevel::Default);
+#else
   JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
+#endif
   JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
   return JTMB;
 }

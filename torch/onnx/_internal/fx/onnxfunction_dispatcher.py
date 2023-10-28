@@ -380,7 +380,7 @@ class OnnxFunctionDispatcher:
         )
 
         # If the ATen/Custom operators are not registered, the group will be None.
-        # And non-registerd ATen/Custom operators will trigger error in the next step.
+        # And non-registered ATen/Custom operators will trigger error in the next step.
         function_group: Optional[List[registration.ONNXFunction]] = None
 
         function_group = self.onnx_registry.get_op_functions(

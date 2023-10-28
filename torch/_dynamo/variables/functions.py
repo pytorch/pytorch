@@ -8,7 +8,7 @@ import torch
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import (
     AttrSource,
     ConstantSource,
@@ -362,6 +362,12 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    _nonvar_fields = {
+        "closure_scope",
+        "f_globals",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
     def __init__(
         self,
         fn_name,
@@ -551,7 +557,9 @@ def _traceable_collectives_source(fn):
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        base=AttrSource(
+            base=GlobalSource(global_name="__import_torch"), member="distributed"
+        ),
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
@@ -601,3 +609,141 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
             )
         return super().call_function(tx, args, kwargs)
+
+
+class FunctoolsPartialVariable(VariableTracker):
+    def __init__(self, func, args, keywords, original=None, **kwargs):
+        super().__init__(**kwargs)
+        self.func = func
+        assert isinstance(args, list)
+        self.args = args
+        assert isinstance(keywords, dict)
+        self.keywords = keywords
+        self.original = original
+
+        self.guards.update(VariableTracker.propagate(func)["guards"])
+        for arg in args:
+            self.guards.update(VariableTracker.propagate(arg)["guards"])
+        for val in keywords.values():
+            self.guards.update(VariableTracker.propagate(val)["guards"])
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate([self])
+        merged_args = self.args + args
+        merged_kwargs = {**self.keywords, **kwargs}
+
+        return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
+            options
+        )
+
+    def as_python_constant(self):
+        if self.original:
+            return self.original
+        else:
+
+            def get_val(v):
+                if isinstance(v, variables.UserDefinedObjectVariable):
+                    return v.value
+                else:
+                    return v.as_python_constant()
+
+            return functools.partial(
+                self.func.fn,
+                *[get_val(arg) for arg in self.args],
+                **{k: get_val(v) for k, v in self.keywords.items()},
+            )
+
+
+class TritonKernelVariable(VariableTracker):
+    def __init__(self, kernel, kernel_idx, grid, **kwargs):
+        super().__init__(**kwargs)
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        assert kernel is not None
+
+        self.kernel = kernel
+        self.kernel_idx = kernel_side_table.add_kernel(kernel)
+
+        assert kernel_idx is None or self.kernel_idx == kernel_idx
+
+        self.grid = grid
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .dicts import ConstDictVariable
+        from .lists import BaseListVariable
+
+        grid = self.grid
+
+        if grid is None:
+            raise Unsupported("Triton kernels should always be called with a grid")
+
+        # Both for grid's meta as well as for the kernel, we need combined
+        # args and kwargs normalized
+        normalized_args = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
+        meta = ConstDictVariable(normalized_args, dict)
+
+        # If the grid is a function, then lets execute it and convert it to
+        # a list
+        if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
+            # Populate the special "meta" argument to call the grid function
+            grid = grid.call_function(tx, [meta], {})
+
+        # Now, the grid must be a list either originally or through above
+        # modification
+        if isinstance(grid, BaseListVariable):
+            grid = grid.as_proxy()
+        else:
+            unimplemented(f"grid for the triton kernel is {type(grid)}")
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+
+        # Combine args and kwargs and pass as a dict so that if user defined triton
+        # kernel uses variables as 'grid' or 'kernel', it does not conflict with
+        # parameters of the wrapper function
+        tx.output.create_proxy(
+            "call_function",
+            triton_kernel_wrapper_mutation,
+            (),
+            {
+                "kernel_idx": self.kernel_idx,
+                "grid": grid,
+                "kwargs": meta.as_proxy(),
+            },
+        )
+
+        return variables.ConstantVariable(
+            None,
+            **VariableTracker.propagate(self, args, kwargs.values()),
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__getitem__":
+            # __getitem__ should only be called if we don't already have a grid
+            # Only grid needs to be passed
+            if self.grid is not None or len(args) != 1:
+                raise Unsupported(
+                    "Triton kernels should be called with only a single grid"
+                )
+
+            return TritonKernelVariable(
+                kernel=self.kernel,
+                kernel_idx=self.kernel_idx,
+                grid=args[0],
+                **VariableTracker.propagate(self),
+            )
+
+        # Bail out to parent's implementation
+        return super().call_method(tx, name, args, kwargs)

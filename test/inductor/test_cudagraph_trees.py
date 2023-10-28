@@ -787,13 +787,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_empty_storage(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
-                return (x + x + x), torch.zeros([0], device="cuda")
+                return (
+                    (x + x + x),
+                    torch.zeros([0], device="cuda"),
+                    torch.zeros([100], device="cuda")[0:0],
+                )
 
             inp = torch.rand([4], device="cuda")
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1275,6 +1279,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._inductor.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_storage_access_error(self):
+            x = torch.rand([4], device="cuda")
+            torch._C._set_storage_access_error_msg(x, "custom error msg")
+
+            with self.assertRaisesRegex(Exception, "custom error msg"):
+                device = x.untyped_storage()
 
 
 if __name__ == "__main__":

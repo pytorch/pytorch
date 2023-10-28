@@ -35,7 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 # TODO: Move both of them to Windows AMI
-python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0
+python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==2.13.0
 
 # Install Z3 optional dependency for Windows builds.
 python -m pip install z3-solver

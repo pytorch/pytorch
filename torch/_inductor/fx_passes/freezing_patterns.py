@@ -8,8 +8,8 @@ from .. import config
 from ..pattern_matcher import (
     _return_true,
     CallFunction,
+    fwd_only,
     Ignored,
-    inference_graph,
     init_once_fakemode,
     KeywordArg,
     Match,
@@ -123,8 +123,10 @@ def addmm_patterns_init():
         weights = [
             match.kwargs["w1"],
             match.kwargs["w2"],
-            match.kwargs["w3"],
         ]
+        if "w3" in match.kwargs:
+            weights.append(match.kwargs["w3"])
+
         return all(
             w.op == "get_attr" and w.meta["val"].shape == weights[0].meta["val"].shape
             for w in weights
@@ -142,10 +144,28 @@ def addmm_patterns_init():
         matmul_fuse_pattern,
         matmul_replacement,
         [val(), val(), val(), val()],
-        inference_graph,
+        fwd_only,
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3"),
+    )
+
+    def matmul_fuse_pattern_two(inp, w1, w2):
+        return (inp @ w1, inp @ w2)
+
+    def matmul_replacement_two(inp, w1, w2):
+        cat_t = torch.cat((w1, w2), dim=1)
+        mm = inp @ cat_t
+        return mm.chunk(2, dim=1)
+
+    register_replacement(
+        matmul_fuse_pattern_two,
+        matmul_replacement_two,
+        [val(), val(), val()],
+        fwd_only,
+        pass_patterns[0],
+        extra_check=check_concat_weights,
+        exclusive_arg_names=("w1", "w2"),
     )
 
     def addmm_fuse_pattern_second(inp, w1, w2, w3, b1, b2, b3):
@@ -164,7 +184,7 @@ def addmm_patterns_init():
         addmm_fuse_pattern_second,
         addmm_fuse_replacement_second,
         [val() for _ in range(7)],
-        inference_graph,
+        fwd_only,
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
