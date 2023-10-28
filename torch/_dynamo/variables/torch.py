@@ -192,10 +192,10 @@ class TorchCtxManagerClassVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return TorchCtxManagerClassVariable(
             value,
             source=source,
-            guards={source.make_guard(GuardBuilder.FUNCTION_MATCH)},
         )
 
     def __init__(self, value, **kwargs):
