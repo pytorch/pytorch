@@ -274,7 +274,7 @@ def speculate_subgraph(
     except Unsupported as ex:
         f_name = f"{type(f).__name__}"
         if isinstance(f, UserFunctionVariable):
-            f_name = f.unwrap().get_name()
+            f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
             f"to trace function `{f_name}` into a single graph. This means "
