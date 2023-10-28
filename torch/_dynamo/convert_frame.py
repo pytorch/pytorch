@@ -264,6 +264,9 @@ def convert_frame_assert(
     def _convert_frame_assert(
         frame: types.FrameType, cache_entry, hooks: Hooks, frame_state
     ):
+        # breakpoint()
+        # print(f"frame.f_func: {frame.f_func}")
+
         increment_frame()
 
         code = frame.f_code

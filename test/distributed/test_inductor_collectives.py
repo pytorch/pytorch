@@ -451,6 +451,200 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs, **trs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    def test_implicit_scheduler(self):
+        pass
+
+
+class AsyncTensor(torch.Tensor):
+    def __new__(cls, fake_tensor):
+        r = torch.Tensor._make_wrapper_subclass(
+            cls,
+            fake_tensor.size(),
+            dtype=fake_tensor.dtype,
+            device=fake_tensor.device,
+            layout=fake_tensor.layout,
+            requires_grad=fake_tensor.requires_grad,
+        )
+        r._materialized_tensor = None
+        r._handle = None
+        return r
+
+    # NOTE: Any non-PyTorch reads or mutations in eager region will need to access one of these APIs: `.data_ptr` / `.storage` / `.data`.
+    # We materialize the tensor before executing those calls, so that non-PyTorch reads or mutations in eager region still work normally.
+
+    def data_ptr(self):
+        AsyncTensor.wait_until_materialized([self])
+        return self._materialized_tensor.data_ptr
+
+    def storage(self):
+        AsyncTensor.wait_until_materialized([self])
+        return self._materialized_tensor.storage
+
+    # TODO: implement `.data = X`
+    @property
+    def data(self):
+        AsyncTensor.wait_until_materialized([self])
+        return self._materialized_tensor.data
+
+    def __repr__(self):
+        # NOTE: `print(tensor)` goes through this
+        AsyncTensor.wait_until_materialized([self])
+        return self._materialized_tensor.__repr__()
+
+    def handle(self):
+        handle = self._handle()
+        assert handle is not None
+        return handle
+
+    def set_handle(self, handle):
+        self._handle = weakref.ref(handle)
+
+    # NOTE: Any PyTorch reads or mutations in eager region will go through __torch_dispatch__, so we materialize the tensor here.
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # TODO: handle tuple / list / etc.
+        # TODO: do the same for kwargs
+        AsyncTensor.wait_until_materialized(args)
+        return func(*args, **kwargs)
+
+    @staticmethod
+    def check_materialized(async_tensors):
+        return all(
+            (isinstance(t, AsyncTensor) and t._materialized_tensor is not None)
+            or (isinstance(t, torch.Tensor))
+            for t in async_tensors
+        )
+
+    @staticmethod
+    def wait_until_materialized(scheduler, async_tensors):
+        for async_tensor in async_tensors:
+            if not AsyncTensor.check_materialized([async_tensor]):
+                # NOTE: recursively schedule the deps first
+                AsyncTensor.wait_until_materialized(scheduler, [async_tensor.handle().args])
+                scheduler.schedule_immediately(async_tensor.handle())
+
+
+class AsyncFuncHandle:
+    def __init__(self, compiled_fn, fx_graph, args, outs_async):
+        self.cuda_event = torch.cuda.Event()
+        self.compiled_fn: Callable = compiled_fn
+        self.fx_graph: torch.fx.Graph = fx_graph
+        # Dependency graph is built implicitly as we run the program
+        self.args = args
+        self.outs_async = outs_async
+        self.outs = None
+        self.is_scheduled = False
+
+    def schedule(self):
+        # make sure to schedule only once
+        if self.is_scheduled:
+            return
+        AsyncTensor.wait_until_materialized(self.args)
+        self.outs = self.compiled_fn(self.args)
+        self.cuda_event.record()
+        self.is_scheduled = True
+
+    def wait_for_completion(self):
+        self.cuda_event.synchronize()
+
+    def is_completed(self):
+        return self.cuda_event.query()
+
+
+# TODO: how to implement segment-boundary graph splitting in Dynamo?
+# - we should figure out how to detect segment-boundary in Dynamo. Before that, how to know when we are entering / exiting a Python function.
+#   - Yanbo told me that check_verbose() in skipfiles.py will be used on all Python functions.
+#   - for module methods called by forward, File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/symbolic_convert.py", line 2270, in check_inlineable
+#     `result = skipfiles.check_verbose(func, allow_torch=True)` will cover them
+#   - for module forward method, this will cover it:
+#     File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/eval_frame.py", line 184, in _initialize
+#     `if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(`
+#     or, File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/eval_frame.py", line 531, in catch_errors
+#     `skipfiles.check(frame.f_code)`
+#   - How to make the schedule exhaustive, while provide an elegant way to say "everything else"? How to do this both for forward methods and backward weight grad compute / allreduce / opt update?
+- forward methods (do it via module hooks?)
+- weight grad compute (within compiled autograd - maybe pass a schedule into compiled autograd API?)
+- allreduce (via acc grad hook)
+- opt update (via another hook)
+#   - Can we start by creating a set of APIs that work for eager mode, and then trace through it?
+#     - module method hook (swap out module method with the scheduler maybe_run) + some weight_grad_hook (can we have it? how?)?
+
+# TODO: how to implement get_fx_graphs(segment)?
+
+
+class AsyncScheduler:
+    # NOTE: singleton of this class is a global object, it exists during the entire training process
+    def __init__(self, schedule: List[Any]):
+        """
+        NOTE:
+        - handles in work_list live across iterations, but
+        """
+        # Lives only within the same loop-slice (i.e. we schedule all remaining graphs at end of each iteration)
+        self._fx_graph_to_handle_map = {}
+        self._schedule = schedule
+        self._next_segment_index = 0
+
+    # NOTE: this function runs in compile_and_call_fx_graph(), after we obtain the compiled_fn from Inductor
+    def record_compiled_fn(self, fx_graph, compiled_fn):
+        cur_handle = AsyncFuncHandle(compiled_fn, fx_graph, args=None, outs_async=None)
+        self._fx_graph_to_handle_map[fx_graph] = cur_handle
+
+    # NOTE: this function substitutes `compile_fn` in Dynamo output_graph.py->compile_and_call_fx_graph(), and is called upon entry of each Inductor graph at runtime
+    # `compile_fn = functools.partial(scheduler.maybe_run, fx_graph, compiled_fn)`
+    def maybe_run(self, fx_graph, compiled_fn, args):
+        # Create the handle and the async tensors
+        with FakeTensorMode():
+            outs_fake = fx_graph(args)
+        # NOTE: important to make sure the same async tensor is used in downstream user code
+        # as well as materialized when handle is finally run.
+        outs_async = [AsyncTensor(out_fake, handle=None) for out_fake in outs_fake]
+        cur_handle = self._fx_graph_to_handle_map[fx_graph]
+        cur_handle.args = args
+        cur_handle.outs_async = outs_async
+        for out_async in outs_async:
+            out_async.set_handle(cur_handle)
+
+        # First, schedule all FX graphs from all segments that are before the incoming graph in the schedule.
+        all_preceding_graph_handles = []
+        reached_current_segment = False
+        while self._next_segment_index < len(self._schedule):
+            segment = self._schedule[self._next_segment_index]
+            for g in get_fx_graphs(segment):
+                if g == fx_graph:
+                    reached_current_segment = True
+                    break
+                all_preceding_graph_handles.append(
+                    self._fx_graph_to_handle_map.get(g, None)
+                )
+            self._next_segment_index += 1
+            if reached_current_segment:
+                break
+
+        all_preceding_graph_handles_are_scheduled = True
+        for handle in all_preceding_graph_handles:
+            if handle is not None:
+                handle.schedule()
+            else:
+                # Some preceding graph is not recorded yet
+                all_preceding_graph_handles_are_scheduled = False
+                break
+
+        # Then, if all preceding FX graph handles are scheduled, then we schedule the incoming graph; otherwise, we don’t schedule the incoming graph.
+        if all_preceding_graph_handles_are_scheduled:
+            cur_handle.schedule()
+
+        # TODO: at end of loop slice, we need to schedule all remaining unscheduled handles
+
+        return outs_async
+
+    def schedule_immediately(self, handle):
+        handle.schedule()
+
+    def schedule_remaining_graphs(self):
+        # TODO: schedule all remaining graphs at end of each iteration
+        pass
+
+
 
 @requires_nccl()
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):

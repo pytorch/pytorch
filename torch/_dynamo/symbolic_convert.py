@@ -2245,6 +2245,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
+        # breakpoint()
+
         if func.has_self():
             unimplemented("inline with __self__")
 
