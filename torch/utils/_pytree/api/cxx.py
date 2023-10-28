@@ -93,7 +93,7 @@ def register_pytree_node(
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     namespace: str = "torch",
-    __register_python_pytree_node: bool = True,
+    _register_python_pytree_node: bool = True,
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
 
@@ -212,7 +212,7 @@ def register_pytree_node(
             namespace=namespace,
         )
 
-    if __register_python_pytree_node:
+    if _register_python_pytree_node:
         from . import python
 
         python._register_pytree_node(
@@ -221,7 +221,7 @@ def register_pytree_node(
             unflatten_func,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
-            __register_cxx_pytree_node=False,
+            _register_cxx_pytree_node=False,
         )
 
 
