@@ -1,3 +1,4 @@
+from copy import copy
 from functools import total_ordering
 from typing import Iterable, List, Optional, Set, Tuple, Union
 
@@ -6,6 +7,11 @@ class TestRun:
     """
     TestRun defines the set of tests that should be run together in a single pytest invocation.
     It'll either be a whole test file or a subset of a test file.
+
+    This class assumes that we won't always know the full set of TestClasses in a test file.
+    So it's designed to include or exclude explicitly requested TestClasses, while having accepting
+    that there will be an ambiguous set of "unknown" test classes that are not expliclty called out.
+    Those manifest as tests that haven't been explicitly excluded.
     """
 
     test_file: str
@@ -48,6 +54,9 @@ class TestRun:
         # which means there is nothing to run. It's the zero.
         return not self.test_file
 
+    def is_full_file(self) -> bool:
+        return not self._included and not self._excluded
+
     def included(self) -> Set[str]:
         return self._included.copy()
 
@@ -66,10 +75,10 @@ class TestRun:
         if self.test_file != test.test_file:
             return False
 
-        if not self._included and not self._excluded:
+        if self.is_full_file():
             return True  # self contains all tests
 
-        if not test._included and not test._excluded:
+        if test.is_full_file():
             return False  # test contains all tests, but self doesn't
 
         # Does self exclude a subset of what test excldes?
@@ -83,6 +92,9 @@ class TestRun:
         # Getting to here means that test includes and self excludes
         # Does self exclude anything test includes? If not, we're good
         return not self._excluded.intersection(test._included)
+
+    def __copy__(self) -> "TestRun":
+        return TestRun(self.test_file, excluded=self._excluded, included=self._included)
 
     def __bool__(self) -> bool:
         return not self.is_empty()
@@ -112,9 +124,6 @@ class TestRun:
         ret = ret and self._excluded == other._excluded
         return ret
 
-    def is_full_file(self) -> bool:
-        return not self._included and not self._excluded
-
     def __ior__(  # noqa: PYI034 Method returns `self`
         self, other: "TestRun"
     ) -> "TestRun":
@@ -134,7 +143,7 @@ class TestRun:
         if self.is_empty():
             return other
         if other.is_empty():
-            return self
+            return copy(self)
 
         # If not, ensure we have the same file
         assert (
@@ -178,19 +187,19 @@ class TestRun:
     def __sub__(self, other: "TestRun") -> "TestRun":
         """
         To subtract test runs means to run all the tests in the first run except for what the second run specifies.
-
-        It is currently an error if the subtraction will result in no tests being run.
         """
 
         # Is any file empty?
         if self.is_empty():
             return TestRun.empty()
         if other.is_empty():
-            return self
+            return copy(self)
 
-        # Are you trying to subtract files that don't even exist in this one?
+        # Are you trying to subtract tests that don't even exist in this test run?
         if self.test_file != other.test_file:
-            return self
+            return copy(self)
+
+        # You're subtracting everything?
         if other.is_full_file():
             return TestRun.empty()
 
