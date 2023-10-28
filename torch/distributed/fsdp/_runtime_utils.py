@@ -878,7 +878,7 @@ def _reduce_grad(state: _FSDPState, handle: FlatParamHandle) -> torch.cuda.Event
                     state, handle, new_sharded_grad
                 )
                 _post_reduce_grad_callback(state, handle, grad_to_offload)
-                return
+                return unsharded_grad_consumed_event
         _div_if_needed(new_sharded_grad, state._gradient_postdivide_factor)
     else:
         state._comm_hook(
