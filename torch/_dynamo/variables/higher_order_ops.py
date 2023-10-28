@@ -206,11 +206,6 @@ def speculate_subgraph(
         )
 
     try:
-        f, sub_args, sub_kwargs = VariableTracker.apply(
-            # ensure guards on args get installed in parent subgraph
-            lambda x: x.realize(),
-            (f, sub_args, sub_kwargs),
-        )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
                 sub_args, subtracer, tx, manually_set_subgraph_inputs
@@ -407,9 +402,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
         from .builder import wrap_fx_proxy
-
-        args = VariableTracker.apply(lambda x: x.realize(), args)
-        kwargs = VariableTracker.apply(lambda x: x.realize(), kwargs)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -636,11 +628,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        assert type(args[0].realize()) in (
-            UserFunctionVariable,
-            NestedUserFunctionVariable,
-        )
-        assert type(args[1].realize()) is TensorVariable
+        assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
+        assert type(args[1]) is TensorVariable
 
         sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
 

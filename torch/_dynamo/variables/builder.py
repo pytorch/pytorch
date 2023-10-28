@@ -103,7 +103,6 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
-from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListVariable,
@@ -440,10 +439,9 @@ class VariableBuilder:
                     return key
 
             result = {
-                k: LazyVariableTracker.create(
-                    value[k],
-                    source=GetItemSource(self.get_source(), index_source(k)),
-                ).add_guards(guards)
+                k: VariableBuilder(
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
+                )(value[k]).add_guards(guards)
                 for k in value.keys()
             }
 

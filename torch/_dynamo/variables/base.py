@@ -115,26 +115,15 @@ def is_side_effect_safe(m: MutableLocalBase):
     return m.scope == scope_id
 
 
-class VariableTrackerMeta(type):
+# metaclass to call post_init
+class HasPostInit(type):
     def __call__(cls, *args, **kwargs):
-        """Call __post_init__"""
         obj = type.__call__(cls, *args, **kwargs)
         obj.__post_init__(*args, **kwargs)
         return obj
 
-    def __instancecheck__(cls, instance) -> bool:
-        """Make isinstance work with LazyVariableTracker"""
-        if type.__instancecheck__(
-            variables.LazyVariableTracker, instance
-        ) and cls not in (
-            VariableTracker,
-            variables.LazyVariableTracker,
-        ):
-            instance = instance.realize()
-        return type.__instancecheck__(cls, instance)
 
-
-class VariableTracker(metaclass=VariableTrackerMeta):
+class VariableTracker(metaclass=HasPostInit):
     """
     Base class for tracked locals and stack values
 
@@ -202,30 +191,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
         if isinstance(value, VariableTracker):
             if not skip_fn(value):
-
-                def update_object_dict(v):
-                    changed = False
-                    rv = dict(v.__dict__)
-                    for key in rv.keys():
-                        if key not in v._nonvar_fields:
-                            prior = rv[key]
-                            rv[key] = cls.apply(fn, prior, cache, skip_fn)
-                            changed = changed or prior is not rv[key]
-                    if changed:
-                        return v.clone(**rv)
-                    return v
-
-                value = value.unwrap()
-                was_realized = value.is_realized()
-                result = fn(update_object_dict(value))
-                if not was_realized and value.is_realized():
-                    # running fn() resulted in value getting realized,
-                    # which means we missed updating the contents of result
-                    result = update_object_dict(result.unwrap())
+                updated_dict = dict(value.__dict__)
+                for key in updated_dict.keys():
+                    if key not in value._nonvar_fields:
+                        updated_dict[key] = cls.apply(
+                            fn, updated_dict[key], cache, skip_fn
+                        )
+                result = fn(value.clone(**updated_dict))
             else:
                 result = fn(value)
-                if result is not None:
-                    result = result.unwrap()
+
         elif istype(value, list):
             result = [cls.apply(fn, v, cache, skip_fn) for v in value]
         elif istype(value, tuple):
@@ -301,6 +276,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         if self.source:
             return self.source.make_guard(fn)
         raise NotImplementedError()
+
+    def replace_guards(self, guards, *fns):
+        name = self.source.name()
+        new_guards = {g for g in (guards or []) if g.name != name}
+        new_guards.update(self.source.make_guard(fn) for fn in fns)
+        return new_guards
 
     def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
@@ -382,18 +363,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return self
         new_vt = self.clone(user_code_variable_name=new_name)
         return tx.replace_all(self, new_vt)
-
-    def realize(self) -> "VariableTracker":
-        """Used by LazyVariableTracker to build the real VariableTracker"""
-        return self
-
-    def unwrap(self) -> "VariableTracker":
-        """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
-        return self
-
-    def is_realized(self):
-        """Used by LazyVariableTracker to indicate an unrealized node"""
-        return True
 
     def __init__(
         self,
