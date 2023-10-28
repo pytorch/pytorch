@@ -247,6 +247,14 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
+  const char* get_in_spec() const {
+    return in_spec_.c_str();
+  }
+
+  const char* get_out_spec() const {
+    return out_spec_.c_str();
+  }
+
   void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
     constants_map_ = std::move(constants_map);
     if (!constants_map_) {
@@ -313,6 +321,8 @@ class AOTInductorModelBase {
   std::vector<ParamInfo> inputs_info_;
   std::vector<ParamInfo> outputs_info_;
   std::vector<ConstInfo> constants_info_;
+  std::string in_spec_;
+  std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
   std::vector<AtenTensorHandle> constants_;
