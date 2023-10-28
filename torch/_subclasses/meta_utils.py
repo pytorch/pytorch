@@ -81,6 +81,43 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
     return go(m1, m2)
 
 
+# TODO: [NOTE] Dynamic dims of wrapper subclasses
+# The current implementation assumes that the outer and inner tensors have the same shape,
+# but this is not always the case. TwoTensor has multiple inner tensors but they
+# both have the same number of inner dimensions, and the # of inner dimensions is
+# equal to the number of outer dimensions. To handle other cases, we currently pick the first dynamic
+# dimension in the list returned by get_flattened_tensors(), but this approach feels wrong and based of
+# list(attrs) ordering. We need to come up with a better solution, such as defining a contract that
+# specifies the number of dimensions between the outer and inner tensors.
+def get_outer_dynamic_constraint_dims(
+    t,
+    dynamic_dims: "Union[Optional[DimList[DimDynamic]], SubclassDynamicDims]" = None,
+    constraint_dims: "Union[Optional[DimList[DimConstraint]], SubclassConstraintDims]" = None,
+):
+    if is_traceable_wrapper_subclass(t) and isinstance(
+        dynamic_dims, SubclassDynamicDims
+    ):
+        assert isinstance(
+            constraint_dims, SubclassConstraintDims
+        ), "constraint_dims must be a SubclassConstraintDims"
+        # We will add the outer dynamic_dims here, later on the inner will be checked
+        temp_dynamic_dims = dynamic_dims.outer
+        temp_constraint_dims = constraint_dims.outer
+    else:
+        # Appease MYPY
+        if isinstance(dynamic_dims, list):
+            temp_dynamic_dims = dynamic_dims
+        else:
+            temp_dynamic_dims = None
+
+        if isinstance(constraint_dims, list):
+            temp_constraint_dims = constraint_dims
+        else:
+            temp_constraint_dims = None
+
+    return temp_dynamic_dims, temp_constraint_dims
+
+
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -386,11 +423,18 @@ class MetaConverter:
                                 # want to guard on the base's metadata here.
                                 return t._view_func_unsafe(base)
                             else:
+                                # See [NOTE] Dynamic dims of wrapper subclasses
+                                (
+                                    temp_dynamic_dims,
+                                    temp_constraint_dims,
+                                ) = get_outer_dynamic_constraint_dims(
+                                    t, dynamic_dims, constraint_dims
+                                )
                                 (
                                     sizes,
                                     strides,
                                     storage_offset,
-                                ) = sym_sizes_strides_storage_offset(t, source, dynamic_dims, constraint_dims)
+                                ) = sym_sizes_strides_storage_offset(t, source, temp_dynamic_dims, temp_constraint_dims)
                                 return base.as_strided(sizes, strides, storage_offset)
 
                         if safe_is_leaf(t):
@@ -434,33 +478,13 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     if not t.is_nested:
-                        # Nested tensor subclasses have special logic for
-                        # creating symbolic size/strides/storage_offset
-                        # TODO: This sucks.. so outer and inner can have different shapes
-                        # the test only has 1 inner tensor with num_inner_dims == num_outer_dims
-                        # we can arbitrarily pick the first dynamic_dim in the list returned by
-                        # get_flattened_tensors() but this feels all wrong
-                        # I think we need to make some contract between at least the # of dims between 1 of the
-                        if is_traceable_wrapper_subclass(t) and isinstance(
-                            dynamic_dims, SubclassDynamicDims
-                        ):
-                            assert isinstance(
-                                constraint_dims, SubclassConstraintDims
-                            ), "constraint_dims must be a SubclassConstraintDims"
-                            # We will add the outer dynamic_dims here, later on the inner will be checked
-                            temp_dynamic_dims = dynamic_dims.outer
-                            temp_constraint_dims = constraint_dims.outer
-                        else:
-                            # Appease MYPY
-                            if isinstance(dynamic_dims, list):
-                                temp_dynamic_dims = dynamic_dims
-                            else:
-                                temp_dynamic_dims = None
-
-                            if isinstance(constraint_dims, list):
-                                temp_constraint_dims = constraint_dims
-                            else:
-                                temp_constraint_dims = None
+                        # See [NOTE] Dynamic dims of wrapper subclasses
+                        (
+                            temp_dynamic_dims,
+                            temp_constraint_dims,
+                        ) = get_outer_dynamic_constraint_dims(
+                            t, dynamic_dims, constraint_dims
+                        )
                         (
                             sizes,
                             strides,
