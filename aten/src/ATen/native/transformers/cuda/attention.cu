@@ -682,6 +682,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -734,6 +735,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
     bool is_causal,
     bool training,
     c10::optional<double> scale) {
+  std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   TORCH_INTERNAL_ASSERT(is_causal);
@@ -765,6 +767,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       head_dim/*int64_t d*/,
                       softmax_scale/*float scaling_factor*/,
                       training/* bool */,
+		      is_causal/* bool */,
                       dropout_p/*double dropout_probability*/,
                       query/* Tensor q*/,
                       key/* Tensor k*/,
@@ -792,6 +795,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
+  std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
@@ -849,6 +853,7 @@ _flash_attention_forward(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  std::cout << "is_causal: " << is_causal << std::endl;
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();

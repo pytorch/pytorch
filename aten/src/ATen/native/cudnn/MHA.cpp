@@ -1008,6 +1008,7 @@ run_cudnn_LLM_fprop(int64_t b,
                     int64_t d,
                     float scaling_factor,
                     bool return_softmaxstats,
+		    bool is_causal,
                     double dropout_probability,
                     const Tensor& q,
                     const Tensor& k,
@@ -1088,7 +1089,7 @@ run_cudnn_LLM_fprop(int64_t b,
     auto scaled_dot_product_flash_attention_options = fe::graph::Scaled_dot_product_flash_attention_attributes()
                                                           .set_name("flash_attention")
                                                           .set_is_inference(return_softmaxstats == false)
-                                                          .set_causal_mask(true)
+                                                          .set_causal_mask(is_causal)
                                                           .set_attn_scale(attn_scale)
                                                           .set_dropout(dropout_probability, seed, offset);
     // Optional bias in flash attention is only supported 8.9.3 onwards
