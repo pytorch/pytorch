@@ -114,7 +114,7 @@ def main():
             f"source activate {env_path}",
             shell=True,
             capture_output=True,
-            check=True,
+            check=False,
         )
         if base_source.returncode:
             raise OSError(
@@ -148,7 +148,7 @@ def main():
                 f"conda env config vars set {' '.join(env_spec.environment_variables)}",
                 shell=True,
                 capture_output=True,
-                check=True,
+                check=False,
             )
             if env_set.returncode:
                 raise OSError(
