@@ -5,18 +5,7 @@ from tools.testing.target_determination.heuristics import (
     HEURISTICS,
     TestPrioritizations as TestPrioritizations,
 )
-from tools.testing.target_determination.heuristics.interface import (
-    HeuristicInterface,
-    TargetDeterminatorInterface,
-)
-from tools.testing.target_determination.heuristics.test_eliminators.remove_unranked_from_heuristics import (
-    RemoveUnrankedUsingHeuristics,
-)
-
-# TD Methods to test
-TD_STRATEGIES: List[TargetDeterminatorInterface] = [
-    RemoveUnrankedUsingHeuristics(heuristics=HEURISTICS)
-]
+from tools.testing.target_determination.heuristics.interface import HeuristicInterface
 
 
 def get_test_prioritizations(
