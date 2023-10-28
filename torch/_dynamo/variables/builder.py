@@ -369,9 +369,6 @@ class VariableBuilder:
             class JITFunction:
                 pass
 
-            class Autotuner:
-                pass
-
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
         if type_dispatch is not None:
@@ -679,7 +676,7 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, (JITFunction, Autotuner)):
+        elif isinstance(value, JITFunction):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
