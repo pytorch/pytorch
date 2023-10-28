@@ -9,7 +9,7 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -312,7 +312,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = device_mesh or mesh_resources.get_current_mesh()
+        device_mesh = device_mesh or _mesh_resources.get_current_mesh()
         device_type = device_mesh.device_type
 
         # convert the local tensor to desired device base on device mesh's device_type
@@ -464,7 +464,7 @@ def distribute_tensor(
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
 
     # get default device mesh if there's nothing specified
-    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
@@ -579,7 +579,7 @@ def distribute_module(
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
-    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
