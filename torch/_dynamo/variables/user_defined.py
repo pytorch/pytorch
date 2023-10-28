@@ -207,9 +207,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", "type_tracker", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value",
+        "value_type",
+        "type_tracker",
+        *UserDefinedVariable._nonvar_fields,
+    }
 
-    def __init__(self, value, value_type=None, type_tracker = None, **kwargs):
+    def __init__(self, value, value_type=None, type_tracker=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
