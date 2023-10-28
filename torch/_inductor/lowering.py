@@ -404,21 +404,20 @@ def make_pointwise(
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
+            # The following is an iterative version of:
+            # fn(*[load(index) for load in loaders])
+            # to avoid blowing the Python stack.
+            res = []
+            for load in loaders:
+                while curr := load(index):
+                    if not callable(curr):
+                        break
+                res.append(curr)
             if dtype == torch.bool and override_fn_when_input_bool is not None:
-                return override_fn_when_input_bool(*[load(index) for load in loaders])
+                return override_fn_when_input_bool(*res)
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
+                return override_fn_when_cuda_float64(*res)
             else:
-                # The following is an iterative version of:
-                # fn(*[load(index) for load in loaders])
-                # to avoid blowing the Python stack.
-                res = []
-                for load in loaders:
-                    while curr := load(index):
-                        if not callable(curr):
-                            break
-                    res.append(curr)
-
                 return fn(*res)
 
         if not override_device:
