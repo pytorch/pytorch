@@ -361,9 +361,6 @@ class FusionTests(TestCase):
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
 
-    @unittest.skipif(
-        torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 0)
-    )
     def test_reduction_pointwise_multi_level_reduction(self):
         hidden_size = 4096
 
