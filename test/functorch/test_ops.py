@@ -1821,8 +1821,8 @@ class TestOperators(TestCase):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
 
-        def get_flat_differentiable(pytree):
-            flattened = pytree.tree_leaves(pytree)
+        def get_flat_differentiable(tree):
+            flattened = pytree.tree_leaves(tree)
             return tuple(i for i in flattened if is_differentiable(i))
 
         def get_differentiable_linked(list1, list2):

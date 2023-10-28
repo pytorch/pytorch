@@ -2066,7 +2066,7 @@ class TestFakeTensor(TestCase):
 
 
                 for fake_out, real_out in zip(
-                    pytree.tree_leaves(res_fake), pytree.tree_leaves(res)[0]
+                    pytree.tree_leaves(res_fake), pytree.tree_leaves(res)
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
