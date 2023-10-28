@@ -447,6 +447,15 @@ variable_list compiled_autograd(
         }
         outputs = THPVariable_UnpackList(pyoutputs);
       }
+      if (!call.post_acc_grad_hooks.empty()) {
+        std::cout<<"Firing post_acc_grad_hook" << std::endl;
+        THPObjectPtr pyinputs(THPVariable_WrapList(inputs));
+        for (const auto hook : call.post_acc_grad_hooks) {
+          pyinputs = check(PyObject_CallMethod(
+              py_compiler.get(), "post_acc_grad_hook", "Oi", pyinputs.get(), hook));
+        }
+        inputs = THPVariable_UnpackList(pyinputs);
+      }
       for (const auto i : c10::irange(outputs.size())) {
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);

@@ -719,8 +719,6 @@ def _post_backward_hook(
     # if gpu_id == 0:
     # log.warning("RUNNING POST BWD HOOK")
     # print(id(state), "Running post backward!", state.training_state, handle.flat_param._post_backward_called, id(handle))
-    # if state.training_state == TrainingState.IDLE:
-    # return
     """
     Reduce-scatters the gradient of ``handle`` 's ``FlatParameter``.
 
@@ -739,16 +737,16 @@ def _post_backward_hook(
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
     ):
-        # _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
+        _assert_in_training_states(state, [TrainingState.FORWARD_BACKWARD])
         # For multiple applications of reentrant AC across submodules sharing
         # the same `FlatParameter`, the post-backward hook may run multiple
         # times in one backward, in which case we permit the state to already
         # be in `BACKWARD_POST`.
-        # _p_assert(
-        #     handle._training_state
-        #     in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
-        #     f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
-        # )
+        _p_assert(
+            handle._training_state
+            in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.BACKWARD_POST),
+            f"Expects `BACKWARD_PRE` or `BACKWARD_POST` state but got {handle._training_state}",
+        )
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
         if flat_param.grad is None:

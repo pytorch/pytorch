@@ -226,7 +226,7 @@ void PyFunctionTensorPostAccGradHooks::compiled_args(CompiledNodeArgs& args) {
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     std::cout << "POST GRAD ACC HOOK COMPILED_ARG" <<std::endl;
-    args.add_post_hook(c10::SafePyObject(value, getPyInterpreter()));
+    args.add_post_acc_grad_hook(c10::SafePyObject(value, getPyInterpreter()));
   }
 }
 

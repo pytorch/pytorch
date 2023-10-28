@@ -77,6 +77,7 @@ struct NodeCall {
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
+  std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
   bool needed = true;
 };
@@ -367,6 +368,7 @@ class CompiledNodeArgs {
     collect_size(_node_call.tensor_pre_hooks.size());
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
+    collect_size(_node_call.post_acc_grad_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
       collect_size(h.second); // index
     }
@@ -394,6 +396,13 @@ class CompiledNodeArgs {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_hooks.emplace_back(fn_id);
+  }
+
+  void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
+    std::cout << "Adding post_acc_grad_hooks" << std::endl;
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
   }
 
   void collect_size(size_t s) {
