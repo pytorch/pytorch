@@ -162,13 +162,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
-            if isinstance(self, variables.UserDefinedClassVariable):
+            is_nn_module = issubclass(self.value, torch.nn.Module)
+            if not is_nn_module:
                 options = {**options, "type_tracker": self}
             var = tx.output.side_effects.track_object_new(
                 self.source,
                 self.value,
                 variables.UnspecializedNNModuleVariable
-                if issubclass(self.value, torch.nn.Module)
+                if is_nn_module
                 else UserDefinedObjectVariable,
                 options,
             )
