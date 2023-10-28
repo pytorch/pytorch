@@ -11,7 +11,6 @@ from tools.testing.target_determination.heuristics.historical_edited_files impor
 from tools.testing.target_determination.heuristics.interface import (
     AggregatedHeuristics as AggregatedHeuristics,
     HeuristicInterface as HeuristicInterface,
-    TargetDeterminatorInterface,
     TestPrioritizations as TestPrioritizations,
 )
 
@@ -19,9 +18,6 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
     PreviouslyFailedInPR,
 )
 from tools.testing.target_determination.heuristics.profiling import Profiling
-from tools.testing.target_determination.heuristics.test_eliminators.remove_unranked_from_heuristics import (
-    RemoveUnrankedUsingHeuristics,
-)
 
 # All currently running heuristics.
 # To add a heurstic in trial mode, specify the keywork argument `trial_mode=True`.
@@ -31,9 +27,4 @@ HEURISTICS: List[HeuristicInterface] = [
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(trial_mode=True),
     Profiling(trial_mode=True),
-]
-
-# TD Methods to test
-TD_STRATEGIES: List[TargetDeterminatorInterface] = [
-    RemoveUnrankedUsingHeuristics(heuristics=HEURISTICS)
 ]

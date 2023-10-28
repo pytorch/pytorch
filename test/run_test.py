@@ -23,7 +23,6 @@ import torch
 import torch.distributed as dist
 from packaging import version
 
-from tools.testing.target_determination.heuristics import TD_STRATEGIES
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -47,6 +46,7 @@ from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
+    TD_STRATEGIES,
 )
 from tools.testing.test_selections import (
     calculate_shards,
