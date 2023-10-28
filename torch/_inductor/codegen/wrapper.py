@@ -327,6 +327,7 @@ class WrapperCodeGen(CodeGen):
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
         self.user_defined_kernel_count = 0
+        self.unbacked_symbol_decls = set()
 
         self.write_header()
         self.write_prefix()
@@ -777,7 +778,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count += 1
         return new_name
 
-    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
         original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -787,16 +788,11 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import template
+            from torch._inductor.triton_heuristics import user_autotune
             """,
             strip=True,
         )
         compile_wrapper.newline()
-
-        # TODO(oulgen): num_stages and num_warps are default values of
-        # triton.Config. Can we do better? Or ask the user to provide?
-        num_stages = 2
-        num_warps = 4
 
         from ..ir import Buffer
         from .common import SizeArg, TensorArg
@@ -804,9 +800,6 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
-            # Not a real argument
-            if key == "grid":
-                continue
             if (
                 key in kernel.__annotations__
                 and "constexpr" in kernel.__annotations__[key]
@@ -828,12 +821,20 @@ class WrapperCodeGen(CodeGen):
             "configs": [config_of(signature)],
             "kernel_name": name,
         }
+        configs = [
+            {
+                "kwargs": config.kwargs,
+                "num_warps": config.num_warps,
+                "num_stages": config.num_stages,
+            }
+            for config in configs
+        ]
         compile_wrapper.splice(
             f"""
-            @template(
-                num_stages={num_stages},
-                num_warps={num_warps},
-                meta={triton_meta!r}
+            @user_autotune(
+                configs={configs!r},
+                meta={triton_meta!r},
+                filename=__file__
             )
             @triton.jit
             """
@@ -1105,6 +1106,15 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
+
+    def codegen_unbacked_symbol_decl(self, symbol):
+        name = str(symbol)
+        if name in self.unbacked_symbol_decls:
+            return name
+        else:
+            # When in CppWrapperCodeGen, we should only generate the declaration once
+            self.unbacked_symbol_decls.add(name)
+            return self.declare + name
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
@@ -1437,6 +1447,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 )
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
+
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
