@@ -589,28 +589,34 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config()  # type: ignore[attr-defined]
         self.inductor_code_hash = get_inductor_code_hash()
 
-    def debug_str(self):
+    def debug_str(self) -> str:
         """
         Get a printable string describing in more detail all the attributes
         comprising this object. Useful for debugging when one graph hashes
         to a different value than another.
         """
+
+        def get_str(obj) -> str:
+            if isinstance(obj, torch.Tensor):
+                return str(extract_tensor_metadata(obj))
+            elif isinstance(obj, bytes):
+                return "<bytes>"
+            else:
+                return str(obj)
+
         lines = []
         for attr, obj in vars(self).items():
             if isinstance(obj, list):
                 for ii in range(len(obj)):
                     h = FxGraphCachePickler.get_hash(obj[ii])
-                    lines.append(f"[{h}] {attr}[{ii}]: {obj[ii]}")
+                    lines.append(f"[{h}] {attr}[{ii}]: {get_str(obj[ii])}")
             elif isinstance(obj, dict):
                 for k, v in obj.items():
                     h = FxGraphCachePickler.get_hash(v)
-                    lines.append(f"[{h}] {attr}[{k}]: {v}")
-            elif isinstance(obj, bytes):
-                h = FxGraphCachePickler.get_hash(obj)
-                lines.append(f"[{h}] {attr}")
+                    lines.append(f"[{h}] {attr}[{k}]: {get_str(v)}")
             else:
                 h = FxGraphCachePickler.get_hash(obj)
-                lines.append(f"[{h}] {attr}: {obj}")
+                lines.append(f"[{h}] {attr}: {get_str(obj)}")
         return "\n".join(lines)
 
 
