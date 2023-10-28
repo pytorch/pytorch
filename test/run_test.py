@@ -46,8 +46,9 @@ from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
-    TD_STRATEGIES,
 )
+
+from tools.testing.target_determination.heuristics.test_eliminators import TD_STRATEGIES
 from tools.testing.test_selections import (
     calculate_shards,
     get_test_case_configs,
