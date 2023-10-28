@@ -1052,6 +1052,7 @@ class BuiltinVariable(VariableTracker):
     def call_getattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
     ):
+        from .. import trace_rules
         from . import (
             ConstantVariable,
             GetAttrVariable,
@@ -1147,6 +1148,8 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):

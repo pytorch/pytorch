@@ -562,7 +562,8 @@ class DataClassVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        keys = tuple(x.vt for x in keys)
+        # All the keys are just wrapped strings
+        keys = tuple(x.vt.as_python_constant() for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
@@ -692,7 +693,8 @@ class CustomizedDictVariable(ConstDictVariable):
         keys = tuple(self.items.keys())
         for key in keys:
             codegen(self.items[key])
-        keys = tuple(x.vt for x in keys)
+        # All the keys are just wrapped strings
+        keys = tuple(x.vt.as_python_constant() for x in keys)
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
