@@ -8,7 +8,17 @@ import time
 import warnings
 from itertools import count
 
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -23,7 +33,7 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
-from torch._functorch.aot_autograd import make_boxed_func
+from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
@@ -132,6 +142,35 @@ def _warn_tf32_disabled():
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
         )
+
+
+def _unlift_graph(mod, gm, graph_signature):
+    state_dict = {}
+    for name, param in mod.named_parameters(remove_duplicate=False):
+        state_dict[name] = param
+    for name, param in mod.named_buffers(remove_duplicate=False):
+        state_dict[name] = param
+
+    from torch._export.exported_program import (
+        _construct_inp_pos_to_param_buffer_name,
+        _unlift,
+    )
+
+    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
+        gm,
+        graph_signature,
+        state_dict,
+    )
+    unlifted_gm = _unlift(
+        gm,
+        inp_pos_to_param_buffer_name,
+        pytree.LeafSpec(),
+        None,
+        state_dict,
+        graph_signature.buffers_to_mutate,
+        set(graph_signature.user_outputs),
+    )
+    return unlifted_gm
 
 
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
@@ -303,7 +342,7 @@ def compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
-    if dynamo_utils.count_calls(gm.graph) == 0:
+    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         return make_boxed_func(gm.forward)
 
     if config.save_args:
@@ -354,6 +393,12 @@ def compile_fx_inner(
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        context.output_strides.extend(compiled_graph.output_strides)
 
     if aot_mode:
         return compiled_graph
@@ -553,20 +598,19 @@ def fx_codegen_and_compile(
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            context = torch._guards.TracingContext.get()
-            if context is not None and context.output_strides is not None:
-                # Return the output strides to the caller via TracingContext
-                assert len(context.output_strides) == 0
-                assert graph.graph_outputs is not None
+            output_strides: List[Optional[Tuple[int, ...]]] = []
+            if graph.graph_outputs is not None:
+                # We'll put the output strides in the compiled graph so we
+                # can later return them to the caller via TracingContext
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
-                        context.output_strides.append(
+                        output_strides.append(
                             tuple(  # type: ignore[arg-type]
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
                     else:
-                        context.output_strides.append(None)
+                        output_strides.append(None)
 
             compiled_fn = graph.compile_to_fn()
 
@@ -586,6 +630,7 @@ def fx_codegen_and_compile(
                 mutated_inputs=graph.mutated_inputs,
                 mutated_input_idxs=set(graph.mutated_input_idxs),
                 constants=graph.constants,
+                output_strides=output_strides,
             )
     return compiled_graph
 
@@ -1038,11 +1083,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        if not config.from_export:
-            # Since handle_dynamo_export_graph will trigger compile_fx again,
-            # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-            # If we come from export, the graph is already in aten IR, so pre-grad passes is no-op.
-            model_ = pre_grad_passes(model_, example_inputs_)
+        model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1181,9 +1222,13 @@ def compile_fx(
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
 
-    if config.from_export and V.aot_compilation is True:
+    if V.aot_compilation is True:
+        gm, graph_signature = aot_export_module(
+            model_, example_inputs_, trace_joint=False, decompositions=decompositions
+        )
+        unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(model_, example_inputs_)
+            return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

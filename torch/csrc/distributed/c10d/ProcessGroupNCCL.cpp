@@ -801,7 +801,8 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
   return true;
@@ -938,7 +939,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      size_); // worldSize
 
 #ifdef USE_NCCL_WITH_UCC
   static c10::once_flag initialize_ucc_lib_flag;
@@ -1956,7 +1958,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     PreProcess pre,
     PostProcess post,
     OpType opType,
-    const char* profilingTitle) {
+    const char* profilingTitle,
+    bool avoidRecordStreams) {
+  // Environment setting by the user may add onto collective call's option
+  avoidRecordStreams |= avoidRecordStreams_;
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
   errorIfCapturingNonCapturableNCCL(capture_status);
@@ -2007,7 +2012,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
-  if (avoidRecordStreams_) {
+  if (avoidRecordStreams) {
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>(inputs);
   }
@@ -2050,7 +2055,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       // operations where `inputs' and `outputs' are not the same.
       //
       // See [Sync Streams].
-      if (!avoidRecordStreams_) {
+      if (!avoidRecordStreams) {
         if (!inputs[i].is_sparse()) {
           c10::cuda::CUDACachingAllocator::recordStream(
               inputs[i].storage().data_ptr(), ncclStream);
@@ -2109,7 +2114,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
-  work->avoidRecordStreams_ = avoidRecordStreams_;
+  work->avoidRecordStreams_ = avoidRecordStreams;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
   // Record size info for debug. We only record the size on the first device as
@@ -2320,7 +2325,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& outputs,
     Fn fn,
     OpType opType,
-    const char* profilingTitle) {
+    const char* profilingTitle,
+    bool avoidRecordStreams) {
   return collective(
       inputs,
       outputs,
@@ -2330,7 +2336,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       [](std::vector<at::cuda::CUDAStream>&,
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       opType,
-      profilingTitle);
+      profilingTitle,
+      avoidRecordStreams);
 }
 
 template <typename Fn>
@@ -2473,7 +2480,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensors, opts);
@@ -2498,7 +2506,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
       tensors[0].scalar_type(), // dType
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return allreduce_impl(tensors, opts);
@@ -2511,7 +2520,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
 
   // @lint-ignore CLANGTIDY
   auto tensor = tensors.back();
-
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -2524,7 +2532,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
   return collective(
@@ -2583,7 +2592,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_broadcast_oop(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   return collective(
       inputTensors,
@@ -2624,7 +2634,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   int dev_in_group = 0;
   // avoidRecordStreams_ note: collective() will stash tensors.
@@ -2687,7 +2698,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_oop(
       tensor.numel(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   int dev_in_group{0};
   return collective(
@@ -2741,10 +2753,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
         "all_gather", // colName
         tensor.numel(), // inSize
         tensor.numel() * // outSize
-            this->getSize(), // dType
-        tensor.scalar_type(),
+            this->getSize(),
+        tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSize
+        std::vector<int64_t>(), // outSplitSize
+        this->getSize()); // worldSize
 
     return collective(
         inputTensors,
@@ -2884,7 +2897,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
         tensor.numel(), // outSize
         tensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSizes
+        std::vector<int64_t>(), // outSplitSizes
+        this->getSize()); // worldSize
 
     return collective(
         inputFlattened,
@@ -2990,7 +3004,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
 
   // @lint-ignore CLANGTIDY
   const auto& tensor = outputTensor;
-
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
@@ -2999,12 +3012,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       outputTensor, // outputTensor
       rank_, // rank
       "_reduce_scatter_base", // colName
-      tensor.numel() * // inSize
-          this->getSize(),
+      inputTensor.numel(), // inSize
       tensor.numel(), // outSize
       tensor.scalar_type(), // dtype
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   auto inputs = std::vector<at::Tensor>{inputTensor};
   auto outputs = std::vector<at::Tensor>{outputTensor};
@@ -3045,7 +3058,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
             stream.stream());
       },
       OpType::_REDUCE_SCATTER_BASE,
-      "nccl:_reduce_scatter_base");
+      "nccl:_reduce_scatter_base",
+      avoidRecordStreams);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
@@ -3090,7 +3104,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       0, // outSize
       at::kByte, // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
 
   std::vector<at::Device> devices;
 
@@ -3170,7 +3185,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         std::vector<int64_t>(), // inSplitSizes
-        std::vector<int64_t>()); // outSplitSizes
+        std::vector<int64_t>(), // outSplitSizes
+        this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -3211,7 +3227,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         outputTensor.numel(), // outSize
         inputTensor.scalar_type(), // dType
         inputSplitSizes, // inSplitSizes
-        outputSplitSizes); // outSplitSizes
+        outputSplitSizes, // outSplitSizes
+        this->getSize()); // worldSize
 
     // avoidRecordStreams_ note: collective() will stash inputTensors and
     // outputTensors.
@@ -3257,6 +3274,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
+  std::vector<int64_t> inSplitSizes;
+  std::vector<int64_t> outSplitSizes;
+  int64_t total_numel = 0;
+
   auto device = outputTensors[0].device();
   for (const auto r : c10::irange(outputTensors.size())) {
     check_gpu_single_tensor(outputTensors[r]);
@@ -3265,7 +3286,26 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
         device == outputTensors[r].device() &&
             device == inputTensors[r].device(),
         "Tensors must be on the same device")
+    inSplitSizes.push_back(inputTensors[r].numel());
+    outSplitSizes.push_back(outputTensors[r].numel());
+    total_numel += inputTensors[r].numel();
   }
+
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      inputTensors, // inputTensors
+      outputTensors, // outputTensors
+      rank_, // rank
+      "all_to_all", // colName
+      total_numel, // inSize
+      total_numel, // outSize
+      inputTensors.front().scalar_type(), // dType
+      inSplitSizes, // inSplitSizes
+      outSplitSizes, // outSplitSizes
+      this->getSize()); // worldSize
+
   std::vector<at::Tensor> inputTensor0 = {inputTensors[0]};
   std::vector<at::Tensor> outputTensor0 = {outputTensors[0]};
   return collective(
@@ -3290,7 +3330,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
       },
       [](std::vector<at::cuda::CUDAStream>&,
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-      OpType::ALLTOALL);
+      OpType::ALLTOALL,
+      "nccl:all_to_all");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
@@ -3298,6 +3339,24 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
     int dstRank,
     int /* unused */) {
   check_gpu_tensors_different_devices(tensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      tensors, // inputTensors
+      tensors, // outputTensors
+      dstRank, // rank
+      "send", // colName
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
+
   auto ret = pointToPoint(
       tensors,
       [&](at::Tensor& input,
@@ -3309,7 +3368,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
       },
       dstRank,
       OpType::SEND,
-      "nccl:send");
+      c10::str("nccl:send ", rank_, "->", dstRank).c_str());
   return ret;
 }
 
@@ -3318,6 +3377,24 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
     int srcRank,
     int /* unused */) {
   check_gpu_tensors_different_devices(tensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      tensors, // inputTensors
+      tensors, // outputTensors
+      srcRank, // rank
+      "recv", // colName
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      this->getSize()); // worldSize
+
   auto ret = pointToPoint(
       tensors,
       [&](at::Tensor& output,
@@ -3329,7 +3406,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
       },
       srcRank,
       OpType::RECV,
-      "nccl:recv");
+      c10::str("nccl:recv ", rank_, "<-", srcRank).c_str());
   return ret;
 }
 #else
@@ -3475,7 +3552,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
       tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSize
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash inputTensors and
   // outputs, which == outputTensors[0] on the root rank where it matters.
@@ -3561,7 +3639,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
       tensor.numel() * this->getSize(), // outSize
       tensor.scalar_type(), // dType
       std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSize
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash outputTensors and
   // inputs, which == inputTensors[0] on the root rank where it matters.
@@ -3612,6 +3691,23 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
         "output tensor size must be equal to world_size times input tensor size");
   }
 
+  // @lint-ignore CLANGTIDY
+  const auto& tensor = output_tensor;
+  RECORD_PARAM_COMMS_DATA(
+      static_cast<int>(
+          this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
+      this->getID(),
+      input_tensor, // inputTensors
+      output_tensor, // outputTensors
+      rank_, // rank
+      "_allgather_base", // colName
+      input_tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSize
+      this->getSize()); // worldSize
+
   // just a wrapper to fit the collective interface
   auto inputs = std::vector<at::Tensor>{input_tensor};
   auto outputs = std::vector<at::Tensor>{output_tensor};
@@ -3647,7 +3743,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
             stream.stream());
       },
       OpType::_ALLGATHER_BASE,
-      "nccl:_all_gather_base");
+      "nccl:_all_gather_base",
+      avoidRecordStreams);
 }
 
 #ifdef USE_NCCL_WITH_UCC
