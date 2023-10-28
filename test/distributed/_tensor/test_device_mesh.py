@@ -10,9 +10,9 @@ from torch.distributed._tensor._collective_utils import (
     mesh_scatter,
 )
 from torch.distributed._tensor.device_mesh import (
+    _mesh_resources,
     DeviceMesh,
     init_device_mesh,
-    mesh_resources,
 )
 from torch.distributed._tensor.placement_types import Shard
 
@@ -277,8 +277,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
-        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
@@ -288,15 +288,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
 
     @with_comms
     def test_get_parent_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh), None)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
