@@ -605,6 +605,9 @@ class FxGraphHashDetails:
                 for k, v in obj.items():
                     h = FxGraphCachePickler.get_hash(v)
                     lines.append(f"[{h}] {attr}[{k}]: {v}")
+            elif isinstance(obj, bytes):
+                h = FxGraphCachePickler.get_hash(obj)
+                lines.append(f"[{h}] {attr}")
             else:
                 h = FxGraphCachePickler.get_hash(obj)
                 lines.append(f"[{h}] {attr}: {obj}")
