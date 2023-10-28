@@ -609,7 +609,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
         # Only test if transformers is already imported
         mod = sys.modules.get("transformers.file_utils")
-        return mod is not None and issubclass(cls, mod.ModelOutputs)
+        return mod is not None and issubclass(cls, mod.ModelOutput)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -711,6 +711,8 @@ class CustomizedDictVariable(ConstDictVariable):
 
 @functools.lru_cache(None)
 def _install_PretrainedConfig_patch():
+    import transformers
+
     # We need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
 
