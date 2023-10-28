@@ -519,7 +519,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
+            dict(self.tensor_weakref_to_sizes_strides),
         )
         self.timestamp += 1
         return state
