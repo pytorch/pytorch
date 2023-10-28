@@ -93,10 +93,17 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
   NSArray* devices = [MTLCopyAllDevices() autorelease];
   for (unsigned long i = 0; i < [devices count]; i++) {
     id<MTLDevice> device = devices[i];
-    if (![device isLowPower]) { // exclude Intel GPUs
-      _mtl_device = [device retain];
-      break;
+    if ([device isLowPower]) { // exclude Intel GPUs
+      continue;
     }
+    if (![device supportsFamily:MTLGPUFamilyMac2]) {
+      // Exclude devices that does not support Metal 2.0
+      // Virtualised MPS device on MacOS 12.6 should fail this check
+      TORCH_WARN("Skipping device ", [[device name] UTF8String], " that does not support Metal 2.0");
+      continue;
+    }
+    _mtl_device = [device retain];
+    break;
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
 }
