@@ -828,6 +828,7 @@ class CompiledFxGraph:
     mutated_inputs: Set[str] = field(default_factory=set)
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
+    output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
     # This is a string representation of an expression we serialize
     # with the object so the guards can be evaluated in a different
     # context in order to verify the validity of serving a cached
@@ -841,7 +842,7 @@ class CompiledFxGraph:
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
-        example_inputs: List[torch.Tensor],
+        output_strides: List[Optional[Tuple[int, ...]]],
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -852,6 +853,7 @@ class CompiledFxGraph:
         self.mutated_inputs = graph.mutated_inputs
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
+        self.output_strides = output_strides
         self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
@@ -1182,7 +1184,9 @@ def cpp_wrapper_flags() -> str:
 
 
 def optimization_flags() -> str:
-    base_flags = "-O3 -DNDEBUG -ffast-math -fno-finite-math-only"
+    base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
+    base_flags += " -ffast-math -fno-finite-math-only"
+
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
         # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
@@ -1391,9 +1395,10 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
-    # Unconditionally import c10 to use TORCH_CHECK - See PyTorch #108690
-    libs += ["c10"]
-    lpaths += [cpp_extension.TORCH_LIB_PATH]
+    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
+    if not config.is_fbcode():
+        libs += ["c10"]
+        lpaths += [cpp_extension.TORCH_LIB_PATH]
 
     # third party libs
     if config.is_fbcode():
