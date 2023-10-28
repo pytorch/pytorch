@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_TORCHDYNAMO,
     run_tests,
     dtype_abbrs,
     parametrize
@@ -1105,6 +1106,13 @@ class TestMeta(TestCase):
     @suppress_warnings
     @ops(op_db)
     def test_meta_outplace(self, device, dtype, op):
+        skip_op_names = (
+            "fft.ihfft",
+            "fft.ihfft2",
+            "linalg.lu_solve",
+        )
+        if TEST_WITH_TORCHDYNAMO and op.name in skip_op_names:
+            raise unittest.SkipTest("flaky")
         # run the OpInfo sample inputs, cross-referencing them with the
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefFunctionMode

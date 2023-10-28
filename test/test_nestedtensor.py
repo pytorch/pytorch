@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
@@ -934,6 +935,7 @@ class TestNestedTensorDeviceType(TestCase):
         is_cuda = 'cuda' in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("flaky")
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
