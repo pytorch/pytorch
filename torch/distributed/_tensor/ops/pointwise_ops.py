@@ -14,16 +14,20 @@ from torch.distributed._tensor.op_schema import (
     StrategyType,
 )
 
-from torch.distributed._tensor.ops.common_rules import linear_pointwise_rule
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
     register_op_strategy,
-    register_prop_rule,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Shard
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 aten = torch.ops.aten
@@ -394,7 +398,9 @@ pointwise_ops = [
 ]
 
 
-def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def pointwise_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+) -> StrategyType:
     max_shards_strategy_index = -1
     max_shards = -1
     # handle broadcasting
@@ -445,6 +451,11 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
+            elif isinstance(placement, _Partial) and not linearity:
+                # clear the partial placemnet if op does not support linearity
+                # by default we just replicate the partial, need to see if this
+                # is optimal for all cases
+                out_placements.append(Replicate())
             else:
                 out_placements.append(placement)
 
@@ -452,12 +463,6 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         redistribute_costs: List[List[float]] = []
         for idx, input_arg in enumerate(op_schema.args_schema):
             if isinstance(input_arg, OpStrategy):
-                if idx == max_shards_strategy_index:
-                    # the current input arg is the one we want to follow
-                    input_specs.append(spec_to_follow)
-                    redistribute_costs.append([0] * len(input_arg.strategies))
-                    continue
-
                 # every arg follow the out_placements, but need to handle broadcasting
                 input_arg_spec = input_arg.strategies[0].output_spec
                 input_arg_dims_map = infer_broadcast_dims_map(
@@ -491,8 +496,19 @@ def pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy
 
 
+def linear_pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    """
+    Linear pointwise operators can propagate pending reductions.
+    For example, c = add(a, b); if a is pending sum, then c will be
+    pending sum as well without any communication overhead.
+    """
+    return pointwise_strategy(mesh, op_schema, linearity=True)
+
+
 for op in linear_pointwise_ops:
-    register_prop_rule(op)(linear_pointwise_rule)
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        linear_pointwise_strategy
+    )
 
 
 for op in pointwise_ops:

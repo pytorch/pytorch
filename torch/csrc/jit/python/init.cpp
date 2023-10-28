@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
@@ -1629,7 +1628,10 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           const auto& unsortedOps = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+          if (unsortedOps.empty()) {
+            // No such operator
+            return py::make_tuple(py::none(), py::none());
+          }
 
           // Depending on the order of registration, aten or jit ops may be
           // registered first. This sorting is helpful in cases where
