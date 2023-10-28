@@ -5,7 +5,7 @@ import itertools
 
 import torch
 
-from torch.distributed._tensor import distribute_tensor
+from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -113,6 +113,30 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertIsNotNone(dist_x.grad)
                 dist_x_grad = dist_x.grad.redistribute(device_mesh, [Replicate()])
                 self.assertEqual(dist_x_grad.to_local(), x.grad)
+
+    @with_comms
+    def test_full_shard_math_ops(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(*mesh_shape),
+        )
+        global_tensor = torch.ones(4, 4)
+        double_shard_tensor = distribute_tensor(
+            global_tensor, mesh, [Shard(0), Shard(0)]
+        )
+        fully_shard_tensor = distribute_tensor(
+            global_tensor, mesh, [Shard(0), Shard(1)]
+        )
+
+        # for op in [torch.add, torch.sub, torch.mul, torch.div]:
+        for op in [torch.add, torch.sub, torch.mul, torch.div]:
+            expect_rs = op(global_tensor, 2)
+            actual_rs = op(double_shard_tensor, 2).redistribute(
+                mesh, [Replicate(), Replicate()]
+            )
+            actual_local_res = actual_rs.to_local()
+            self.assertEqual(actual_local_res, expect_rs)
 
 
 if __name__ == "__main__":
