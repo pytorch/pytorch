@@ -33,7 +33,7 @@ if not (torch._running_with_deploy() and torch.compiled_with_cxx11_abi()):
     from optree import PyTreeSpec  # direct import for type annotations
 else:
     optree = None  # type: ignore[assignment]
-    from ._pytree import TreeSpec as PyTreeSpec  # type: ignore[assignment]
+    from .python import TreeSpec as PyTreeSpec  # type: ignore[assignment]
 
 
 __all__ = [
