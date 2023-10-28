@@ -409,7 +409,17 @@ def make_pointwise(
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
-                return fn(*[load(index) for load in loaders])
+                # The following is an iterative version of:
+                # fn(*[load(index) for load in loaders])
+                # to avoid blowing the Python stack.
+                res = []
+                for load in loaders:
+                    while curr := load(index):
+                        if not callable(curr):
+                            break
+                    res.append(curr)
+
+                return fn(*res)
 
         if not override_device:
             device = None
