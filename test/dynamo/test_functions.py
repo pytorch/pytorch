@@ -2013,6 +2013,7 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
+    @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_autotune(self, grad, backend):
