@@ -21,7 +21,7 @@ try:
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
         _get_previously_failing_tests,
     )
-    from tools.testing.test_run import TestRun
+    from tools.testing.test_run import TestRun, TestRuns
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
@@ -166,7 +166,9 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_unranked_tests=expected_unranked_relevance,
         )
 
-    def test_merging_file_heuristic_after_class_heuristic_with_different_probabilities(self) -> None:
+    def test_merging_file_heuristic_after_class_heuristic_with_different_probabilities(
+        self,
+    ) -> None:
         tests = ["test1", "test2", "test3", "test4", "test5"]
         heuristic1 = TestPrioritizations(
             tests_being_ranked=tests,
@@ -203,7 +205,9 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_unranked_tests=expected_aggregated_unranked_relevance,
         )
 
-    def test_merging_file_heuristic_after_class_heuristic_with_same_probability(self) -> None:
+    def test_merging_file_heuristic_after_class_heuristic_with_same_probability(
+        self,
+    ) -> None:
         tests = ["test1", "test2", "test3", "test4", "test5"]
         heuristic1 = TestPrioritizations(
             tests_being_ranked=tests,
@@ -214,8 +218,7 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             probable_relevance=["test3", "test2"],
         )
 
-        expected_aggregated_high_relevance = tuple(
-        )
+        expected_aggregated_high_relevance: TestRuns = tuple()
         expected_aggregated_probable_relevance = (
             TestRun("test2::TestFooClass"),
             TestRun("test3"),
