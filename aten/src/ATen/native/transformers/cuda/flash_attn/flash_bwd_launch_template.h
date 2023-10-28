@@ -149,6 +149,9 @@ void run_mha_bwd_hdim32(Flash_bwd_params &params, cudaStream_t stream, const boo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 2 * ((3 * 128 + 2 * 128) * Headdim + 2 * 128 * 128)) { // 104 KB
             if constexpr(!Is_dropout) {  // We can afford more registers to keep V in registers
@@ -170,6 +173,9 @@ void run_mha_bwd_hdim64(Flash_bwd_params &params, cudaStream_t stream, const boo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // Changing AtomLayoutMdQ from 2 to 4 takes the same time
@@ -213,6 +219,9 @@ void run_mha_bwd_hdim96(Flash_bwd_params &params, cudaStream_t stream, const boo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // if (params.h == params.h_k) {
@@ -240,6 +249,9 @@ void run_mha_bwd_hdim128(Flash_bwd_params &params, cudaStream_t stream, const bo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     // printf("max_smem_per_block = %d\n", max_smem_per_block);
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         // if (params.h == params.h_k) {
@@ -276,6 +288,9 @@ void run_mha_bwd_hdim160(Flash_bwd_params &params, cudaStream_t stream, const bo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 116 * 1024) {
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 4, 4, false, false, T>, Is_dropout>(params, stream, configure);
@@ -293,6 +308,9 @@ void run_mha_bwd_hdim192(Flash_bwd_params &params, cudaStream_t stream, const bo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 136 * 1024) {
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T>, Is_dropout>(params, stream, configure);
@@ -318,6 +336,9 @@ void run_mha_bwd_hdim256(Flash_bwd_params &params, cudaStream_t stream, const bo
     int max_smem_per_block;
     cudaError status_ = cudaDeviceGetAttribute(
         &max_smem_per_block, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
+    if (status_ != cudaSuccess) {
+      C10_CUDA_CHECK(status_);
+    }
     BOOL_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 176 * 1024) {  // H100
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T>, Is_dropout>(params, stream, configure);
