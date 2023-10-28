@@ -150,7 +150,9 @@ class ReadWrites:
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
-    op_counts: typing.Counter[str] = dataclasses.field(default_factory=collections.Counter)
+    op_counts: typing.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
