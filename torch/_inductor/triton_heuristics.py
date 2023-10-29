@@ -338,7 +338,7 @@ class CachingAutotuner(KernelInterface):
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
         launcher.store_cubin = config.triton.store_cubin
-        # store this global varible to avoid the high overhead of reading it when calling run
+        # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
