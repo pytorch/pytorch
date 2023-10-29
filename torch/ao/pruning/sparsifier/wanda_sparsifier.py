@@ -11,6 +11,7 @@ from torch.ao.quantization.quantize import _remove_qconfig
 
 __all__ = ["WandaSparsifier"]
 
+
 class WandaSparsifier(BaseSparsifier):
     r"""Wanda sparsifier
 
