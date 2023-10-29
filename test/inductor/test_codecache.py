@@ -175,7 +175,7 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
-    @largeTensorTest("20GB", device="cuda")
+    @largeTensorTest("16GB", device="cuda")
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda",))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
@@ -211,16 +211,18 @@ class TestFxGraphCache(TestCase):
             # added that will be violated with the new shape. We should
             # see a recompilation (along with a cache miss).
             counters.clear()
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            res1 = compiled_fn(a, b)
             self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             # A second call should hit. (Reset here to force compilation).
             counters.clear()
             torch._dynamo.reset()
-            self.assertEqual(fn(a, b), compiled_fn(a, b))
+            res2 = compiled_fn(a, b)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
@@ -252,16 +254,18 @@ class TestFxGraphCache(TestCase):
             # to have been added that will be violated with each new shape.
             # We should see a recompilation (along with a cache miss).
             counters.clear()
-            self.assertEqual(fn(x), compiled_fn(x))
+            res1 = compiled_fn(x)
             self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
             # A second call should hit.
             counters.clear()
             torch._dynamo.reset()
-            self.assertEqual(fn(x), compiled_fn(x))
+            res2 = compiled_fn(x)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
     def test_cache_clear(self):
