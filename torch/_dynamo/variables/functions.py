@@ -788,6 +788,11 @@ class TritonKernelVariable(VariableTracker):
                 grid=args[0],
                 **VariableTracker.propagate(self),
             )
+        elif name == "run":
+            if "grid" not in kwargs:
+                raise Unsupported("Triton kernel requires to be called with a grid")
+            grid = kwargs.pop("grid")
+            return self.clone(grid=grid).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
