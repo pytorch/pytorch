@@ -1905,7 +1905,7 @@ def forward(self, x_1, output_1):
             n_elements = output.numel()
 
             grid = (x.numel(),)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
 
             return output
 
