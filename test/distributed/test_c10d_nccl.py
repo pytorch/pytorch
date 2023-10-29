@@ -2584,7 +2584,7 @@ class WorkHookTest(MultiProcessTestCase):
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank)
         tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        # intentionall using async ops.
+        # intentionally using async ops.
         pg.allreduce(tensor)
         pg.allgather(tensor_list, tensor)
         pg.allreduce(tensor)
@@ -2936,7 +2936,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         target += torch.arange(60, dtype=half, device=device).chunk(5)
         target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
 
-        # The tensors to pass to broadcast are idential to the target
+        # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
             tensors = [tensor.clone() for tensor in target]

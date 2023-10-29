@@ -40,7 +40,7 @@ def _stuck_function(rank, mp_queue):
         time.sleep(5)
 
 
-# timer is not supported on macos or windowns
+# timer is not supported on macos or windows
 if not (IS_WINDOWS or IS_MACOS):
     class LocalTimerExample(TestCase):
         """

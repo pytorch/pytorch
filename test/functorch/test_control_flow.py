@@ -1047,7 +1047,7 @@ def forward(self, arg0_1):
                         c += int(schema.is_mutable)
             return c
         self.assertEqual(count_mutable(fgm), 0)
-        # One for forward, one for recompuation logic in backward
+        # One for forward, one for recomputation logic in backward
         self.assertEqual(count_mutable(gm), 2)
 
     def test_map_functionalized(self):
@@ -1250,7 +1250,7 @@ def forward(self, arg0_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
-        # The symbols in make_fx's shape_env should not be speciliazed.
+        # The symbols in make_fx's shape_env should not be specialized.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
         self.assertExpectedInline(gm.code.strip(), """\
