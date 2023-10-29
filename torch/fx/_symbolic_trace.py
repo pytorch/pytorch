@@ -320,10 +320,6 @@ class Tracer(TracerBase):
 
             The value ``a`` converted into the appropriate ``Argument``
         """
-        # The base tracer is used to construct Graphs when there is no associated
-        # module hierarchy, so it can never create parameter references.
-        # The default tracer adds the ability to refer to parameters when
-        # tracing modules.
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
