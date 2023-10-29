@@ -120,7 +120,7 @@ const Tensor& resize_mps_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
     at::native::fill_resize_deterministic_(self, old_storage_nbytes);
   }
   return self;

@@ -685,26 +685,6 @@ PyObject* THPModule_deterministicAlgorithmsWarnOnly(
   Py_RETURN_FALSE;
 }
 
-PyObject* THPModule_setDeterministicFillUninitializedMemory(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  THPUtils_assert(
-      PyBool_Check(arg), "expected a bool, but got %s", THPUtils_typename(arg));
-  at::globalContext().setDeterministicFillUninitializedMemory(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THPModule_deterministicFillUninitializedMemory(
-    PyObject* _unused,
-    PyObject* noargs) {
-  if (at::globalContext().deterministicFillUninitializedMemory())
-    Py_RETURN_TRUE;
-  else
-    Py_RETURN_FALSE;
-}
-
 PyObject* THPModule_setWarnAlways(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1137,14 +1117,6 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_set_deterministic_algorithms",
      castPyCFunctionWithKeywords(THPModule_setDeterministicAlgorithms),
      METH_VARARGS | METH_KEYWORDS,
-     nullptr},
-    {"_get_deterministic_fill_uninitialized_memory",
-     THPModule_deterministicFillUninitializedMemory,
-     METH_NOARGS,
-     nullptr},
-    {"_set_deterministic_fill_uninitialized_memory",
-     THPModule_setDeterministicFillUninitializedMemory,
-     METH_O,
      nullptr},
     {"_get_warnAlways", THPModule_warnAlways, METH_NOARGS, nullptr},
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
