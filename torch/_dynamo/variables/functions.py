@@ -362,6 +362,12 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    _nonvar_fields = {
+        "closure_scope",
+        "f_globals",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
     def __init__(
         self,
         fn_name,
@@ -721,6 +727,17 @@ class TritonKernelVariable(VariableTracker):
             else:
                 unimplemented(f"grid for the triton kernel is {type(grid)}")
 
+        for i in range(len(grids)):
+            if not isinstance(grids[i], tuple):
+                raise Unsupported("Only tuple grids are supported")
+            # inductor expects all grids to be 3-tuple so lets make it
+            if len(grids[i]) == 1:
+                grids[i] = (grids[i][0], 1, 1)
+            elif len(grids[i]) == 2:
+                grids[i] = (grids[i][0], grids[i][1], 1)
+            elif len(grids[i]) > 3:
+                raise Unsupported("Grid can have at most rank 3")
+
         assert len(grids) != 0
         if len(set(grids)) == 1:
             # If there's only one unique grid, lets simplify
@@ -775,8 +792,7 @@ class TritonKernelVariable(VariableTracker):
             if "grid" not in kwargs:
                 raise Unsupported("Triton kernel requires to be called with a grid")
             grid = kwargs.pop("grid")
-            self.grid = grid
-            return self.call_function(tx, args, kwargs)
+            return self.clone(grid=grid).call_function(tx, args, kwargs)
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
