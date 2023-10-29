@@ -305,7 +305,8 @@ class Tracer(TracerBase):
         #. Given a Proxy object, return a reference to the underlying IR ``Node``
         #. Given a non-Proxy Tensor object, emit IR for various cases:
 
-            * For a Parameter, emit a ``get_attr`` node referring to that Parameter
+            * For a Parameter, emit a ``get_attr`` node referring to that Parameter,
+              if not exist, create a new ``get_attr`` node and add it to the graph.
             * For a non-Parameter Tensor, store the Tensor away in a special
               attribute referring to that attribute.
 
