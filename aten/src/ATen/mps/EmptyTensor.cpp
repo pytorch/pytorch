@@ -64,7 +64,7 @@ TensorBase empty_mps(
     auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
     tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
     // See Note [Enabling Deterministic Operations]
-    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
       at::native::fill_empty_deterministic_(tensor);
     }
     return tensor;
@@ -107,7 +107,7 @@ TensorBase empty_strided_mps(
     Tensor result = at::detail::empty_strided_generic(
         size, stride, allocator, mps_dks, dtype);
     // See Note [Enabling Deterministic Operations]
-    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
       at::native::fill_empty_deterministic_(result);
     }
     return result;
