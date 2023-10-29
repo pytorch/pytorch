@@ -175,7 +175,7 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
-    @largeTensorTest("9GB", device="cuda")
+    @largeTensorTest("20GB", device="cuda")
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda",))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
