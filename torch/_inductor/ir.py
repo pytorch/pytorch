@@ -3542,7 +3542,8 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
+        # FIXME: separate invocation for cpp arg strs?
+        return [V.graph.wrapper_code.val_to_arg_str(x) for x in self.constant_args]
 
     def codegen_args(self):
         args = []
@@ -3568,6 +3569,9 @@ class ExternKernel(InputsKernel):
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
 
+    def is_legacy_abi_kernel(self):
+        return False
+
     def codegen_kwargs(self):
         if not self.kwargs:
             return []
@@ -3581,7 +3585,16 @@ class ExternKernel(InputsKernel):
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                # FIXME is there a better way to obtain the type?
+                if hasattr(self, "kwargs_default_value"):
+                    type_ = self.kwargs_default_value.get(arg_name).get("type")
+                else:
+                    type_ = None
+                kwargs.extend(
+                    V.graph.wrapper_code.val_to_cpp_arg_str(
+                        type_, v, self.is_legacy_abi_kernel()
+                    )
+                )
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -4166,6 +4179,13 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
+    def is_legacy_abi_kernel(self):
+        legacy_kernels = [
+            "_scaled_dot_product_flash_attention",
+            "repeat_interleave_Tensor",
+        ]
+        return any(s in str(self.kernel) for s in legacy_kernels)
+
     def get_arg_default_value(self, pos):
         assert hasattr(
             self, "args_default_value"
@@ -4173,7 +4193,7 @@ class FallbackKernel(ExternKernelAlloc):
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
-        return self.args_default_value[pos]["value"]
+        return self.args_default_value[pos]
 
     def codegen_args(self):
         @dataclasses.dataclass
@@ -4185,21 +4205,34 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-        if (
-            V.graph.cpp_wrapper
-            and hasattr(self, "args_default_value")
-            and not config.is_fbcode()
-        ):
-            n_args = len(args)
-            n_pos_args = len(self.args_default_value)
-            # Some positional args are not provided, need to use their default value in cpp wrapper
-            if n_args < n_pos_args:
-                pos_args = [
-                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
-                ]
-                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
-                args.extend(pos_args)
+        if not V.graph.cpp_wrapper:
+            args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+        else:
+            args = list(
+                itertools.chain.from_iterable(
+                    V.graph.wrapper_code.val_to_cpp_arg_str(
+                        param.real_type, x, self.is_legacy_abi_kernel()
+                    )
+                    for param, x in zip(self.op_overload._schema.arguments, args)
+                )
+            )
+            if hasattr(self, "args_default_value") and not config.is_fbcode():
+                n_args = len(args)
+                n_pos_args = len(self.args_default_value)
+                # Some positional args are not provided, need to use their default value in cpp wrapper
+                if n_args < n_pos_args:
+                    pos_args = [
+                        self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                    ]
+                    pos_args = list(
+                        itertools.chain.from_iterable(
+                            V.graph.wrapper_code.val_to_cpp_arg_str(
+                                x["type"], x["value"], self.is_legacy_abi_kernel()
+                            )
+                            for x in pos_args
+                        )
+                    )
+                    args.extend(pos_args)
 
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)

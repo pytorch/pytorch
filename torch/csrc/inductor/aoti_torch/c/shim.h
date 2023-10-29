@@ -186,6 +186,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle self,
     AtenTensorHandle mat2,
     AtenTensorHandle bias,
+    bool out_dtype_opt,
     int32_t out_dtype,
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,

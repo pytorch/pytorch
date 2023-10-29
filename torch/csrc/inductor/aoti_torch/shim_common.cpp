@@ -41,6 +41,17 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
+
+template <class T>
+c10::optional<T> pointer_to_optional(T* ptr) {
+  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
+}
+
+template <class T>
+c10::optional<T> value_to_optional(bool has_value, T val) {
+  return has_value ? c10::make_optional(val) : c10::nullopt;
+}
+
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -291,6 +302,7 @@ AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle self,
     AtenTensorHandle mat2,
     AtenTensorHandle bias,
+    bool out_dtype_opt,
     int32_t out_dtype,
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,
@@ -309,11 +321,12 @@ AOTITorchError aoti_torch__scaled_mm(
     auto [r0, r1] = at::_scaled_mm(
         *self_tensor,
         *mat2_tensor,
-        *bias_tensor,
-        static_cast<c10::ScalarType>(out_dtype),
-        *scale_a_tensor,
-        *scale_b_tensor,
-        scale_result_tensor ? c10::make_optional(*scale_result_tensor) : c10::nullopt);
+        pointer_to_optional(bias_tensor),
+        value_to_optional(
+            out_dtype_opt, static_cast<c10::ScalarType>(out_dtype)),
+        pointer_to_optional(scale_a_tensor),
+        pointer_to_optional(scale_b_tensor),
+        pointer_to_optional(scale_result_tensor));
     at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
     *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
     at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
