@@ -1191,11 +1191,6 @@ def foreach(meta, num_warps, filename=None):
 
 def grid(*numels):
     """Helper function to compute triton grids"""
-    if len(numels) == 1 and isinstance(numels[0], tuple):
-        # when passed as a single tuple, calling convention order is not
-        # followed, so we need to reverse to match calling conversion order
-        numels = numels[0][::-1]
-
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
     elif len(numels) == 2:
