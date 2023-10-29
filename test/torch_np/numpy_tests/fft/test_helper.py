@@ -5,10 +5,20 @@
 Copied from fftpack.helper by Pearu Peterson, October 2005
 
 """
-import torch._numpy as np
-from torch._numpy import fft, pi
-from torch._numpy.testing import assert_array_almost_equal
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import fft, pi
+    from numpy.testing import assert_array_almost_equal
+else:
+    import torch._numpy as np
+    from torch._numpy import fft, pi
+    from torch._numpy.testing import assert_array_almost_equal
 
 
 class TestFFTShift(TestCase):
@@ -73,7 +83,10 @@ class TestFFTShift(TestCase):
 
     def test_equal_to_original(self):
         """Test that the new (>=v1.15) implementation (see #10073) is equal to the original (<=v1.14)"""
-        from torch._numpy import arange, asarray, concatenate, take
+        if TEST_WITH_TORCHDYNAMO:
+            from numpy import arange, asarray, concatenate, take
+        else:
+            from torch._numpy import arange, asarray, concatenate, take
 
         def original_fftshift(x, axes=None):
             """How fftshift was implemented in v1.14"""
