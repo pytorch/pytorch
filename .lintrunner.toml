@@ -268,7 +268,6 @@ exclude_patterns = [
     '**/cuda/*pp',
     'third_party/**/*',
     'torch/csrc/api/**',
-    'torch/csrc/autograd/functions/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
     'torch/csrc/cuda/**',
