@@ -14,15 +14,13 @@ collection support for PyTorch APIs.
 
 
 from .api import (
-    _broadcast_to_and_flatten,
-    _register_pytree_node,
     Context,
     DumpableContext,
     FlattenFunc,
     FromDumpableContextFn,
     LeafSpec,
     PyTree,
-    SUPPORTED_NODES,
+    register_pytree_node,
     ToDumpableContextFn,
     tree_all,
     tree_all_only,
@@ -43,6 +41,7 @@ from .api import (
     UnflattenFunc,
 )
 from .api.python import (  # used by third-party packages
+    _broadcast_to_and_flatten,
     _dict_flatten,
     _dict_unflatten,
     _is_leaf,
@@ -52,8 +51,10 @@ from .api.python import (  # used by third-party packages
     _namedtuple_unflatten,
     _odict_flatten,
     _odict_unflatten,
+    _register_pytree_node,
     _tuple_flatten,
     _tuple_unflatten,
+    SUPPORTED_NODES,
 )
 
 
@@ -67,8 +68,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
-    "_register_pytree_node",
-    "SUPPORTED_NODES",
+    "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
     "tree_leaves",
@@ -81,7 +81,6 @@ __all__ = [
     "tree_any",
     "tree_all_only",
     "tree_any_only",
-    "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",

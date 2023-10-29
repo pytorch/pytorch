@@ -13,10 +13,8 @@ collection support for PyTorch APIs.
 """
 
 from .python import (
-    _broadcast_to_and_flatten,
-    _register_pytree_node,
     LeafSpec,
-    SUPPORTED_NODES,
+    register_pytree_node,
     tree_all,
     tree_all_only,
     tree_any,
@@ -55,8 +53,7 @@ __all__ = [
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
-    "_register_pytree_node",
-    "SUPPORTED_NODES",
+    "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
     "tree_leaves",
@@ -69,7 +66,6 @@ __all__ = [
     "tree_any",
     "tree_all_only",
     "tree_any_only",
-    "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",

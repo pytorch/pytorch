@@ -53,7 +53,6 @@ from .typing import (
 __all__ = [
     "TreeSpec",
     "LeafSpec",
-    "_register_pytree_node",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
@@ -67,7 +66,6 @@ __all__ = [
     "tree_any",
     "tree_all_only",
     "tree_any_only",
-    "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
