@@ -404,9 +404,9 @@ def make_pointwise(
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
-            # The following is an iterative version of:
+            # The following reduces the Python stack frame usage of
             # fn(*[load(index) for load in loaders])
-            # to avoid blowing the Python stack.
+            # as list comprehensions create a new frame prior to CPython 3.12.
             # An invariant is that they must share all the same index.
             # This invariant is currently true for Inductor.
             res = []
