@@ -1,8 +1,11 @@
 import math
+import os
 import torch
 import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
+
+TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
 
 
 def check(cond, msg):
@@ -402,7 +405,6 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         assert K % Ks == 0
 
         c_indices, r_offsets, q_offsets, meta = indices_data[1:]
-        c_indices = c_indices.obj
         SPLIT_N = meta['SPLIT_N']
 
         if accumulators is None:
@@ -584,7 +586,7 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
     GROUP_SIZE = GROUP_SIZE or 4
 
     assert TILE_M <= Ms, dict(TILE_M=TILE_M, Ms=Ms)
-    assert TILE_N <= Ns, dict(TILE_B=TILE_N, Ns=Ns)
+    assert TILE_N <= Ns, dict(TILE_N=TILE_N, Ns=Ns)
     assert Ms <= M, dict(M=M, Ms=Ms)
     assert Ns <= N, dict(N=N, Ns=Ns)
     assert Ks <= K, dict(K=K, Ks=Ks)
@@ -699,18 +701,29 @@ class TensorAsKey:
     """
 
     def __init__(self, obj):
-        self._obj_ref = weakref.ref(obj.untyped_storage())
-        # Warning: TensorAsKey does not track negative nor conjugate
-        # bits of its input object because in the use case of wrapping
-        # compressed/plain indices of compressed sparse tensors (that
-        # are always integer tensors with non-negative items) these
-        # bits are never set. However, when extending the use of
-        # TensorAsKey to float or complex tensors, the values of these
-        # bits (see is_neg and is_conj methods) must be included in
-        # the key as well.
-        dtype = obj.dtype
-        assert not (dtype.is_floating_point or dtype.is_complex), dtype  # see warning above
-        self.key = (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), dtype)
+
+        def get_tensor_key(obj):
+            # Warning: TensorAsKey does not track negative nor
+            # conjugate bits of its input object because in the use
+            # case of wrapping compressed/plain indices of compressed
+            # sparse tensors (that are always integer tensors with
+            # non-negative items) these bits are never set. However,
+            # when extending the use of TensorAsKey to float or
+            # complex tensors, the values of these bits (see is_neg
+            # and is_conj methods) must be included in the key as
+            # well.
+            assert not (obj.dtype.is_floating_point or obj.dtype.is_complex), obj.dtype
+            return (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), obj.dtype)
+
+        self._obj_ref = weakref.ref(obj)
+        if obj.layout is torch.strided:
+            self.key = get_tensor_key(obj)
+        elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            self.key = (get_tensor_key(obj.crow_indices()), get_tensor_key(obj.col_indices()))
+        elif obj.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            self.key = (get_tensor_key(obj.ccol_indices()), get_tensor_key(obj.row_indices()))
+        else:
+            raise NotImplementedError(obj.layout)
         self._hash = hash(self.key)
 
     def __hash__(self):
@@ -728,17 +741,14 @@ class TensorAsKey:
     @property
     def obj(self):
         """Return object if alive, otherwise None."""
-        storage = self._obj_ref()
-        if storage is not None:
-            _, storage_offset, shape, strides, dtype = self.key
-            obj = torch.empty((), dtype=dtype, device=storage.device)
-            obj.set_(storage, storage_offset=storage_offset, size=shape, stride=strides)  # type: ignore[call-overload]
-            return obj
+        return self._obj_ref()
 
 
-@lru_cache(maxsize=128)
-def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, crow_indices_as_key, col_indices_as_key):
-    crow_indices, col_indices = crow_indices_as_key.obj, col_indices_as_key.obj
+@lru_cache(maxsize=TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE)
+def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key):
+    bsr = compressed_sparse_tensor_as_key.obj
+    assert bsr is not None
+    crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     device = crow_indices.device
     indices_dtype = torch.int32
 
@@ -757,11 +767,7 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
         non_zero_row_indices = crow_indices_diff.nonzero()
         a = non_zero_row_indices * (Ms * N)
         r_offsets = (a + b).view(-1)
-        # crow_indices consitutes a part of a key in lru_cache as well
-        # as of a value. To avoid infinite lifetime of such tensors,
-        # the value will contain a clone of the tensor:
-        # c_indices = crow_indices.clone()
-        c_indices = crow_indices_as_key
+        c_indices = crow_indices
         # swizzle operation: mm elements with longer sums are computed first:
         nnz_per_row = crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N)
         nnz_per_row, indices = nnz_per_row.sort(descending=True, stable=True)
@@ -833,10 +839,8 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
     if 'allow_tf32' not in meta_input:
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
     SPLIT_N = meta['SPLIT_N']
-    crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     indices_data = _bsr_scatter_mm_indices_data(
-        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N,
-        TensorAsKey(crow_indices), TensorAsKey(col_indices))
+        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, TensorAsKey(bsr))
 
     if indices_format == 'bsr_strided_mm_compressed':
         meta.update(is_compressed=True)
@@ -1664,7 +1668,7 @@ if has_triton():
 
     @triton.jit
     def _scatter_mm6_kernel(
-            nbatches: tl.constexpr, Ms: tl.constexpr, Ks: tl.constexpr, N: tl.constexpr,
+            nbatches, Ms, Ks: tl.constexpr, N,
             blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
             others_ptr, others_stride_B, others_stride_K, others_stride_N,
             accumulators_ptr, accumulators_stride_B, accumulators_stride_M, accumulators_stride_N,

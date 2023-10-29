@@ -3801,15 +3801,16 @@ class TestSparseCompressedTritonKernels(TestCase):
         t = torch.tensor([1, 2, 3, 4], dtype=torch.int64, device=device)
         key = TensorAsKey(t)
         self.assertTrue(key == TensorAsKey(t))
-        self.assertEqual(key.obj, t, **assertEqualOptions)
+        self.assertTrue(key.obj is t)
 
         t2 = t[:]
         key2 = TensorAsKey(t2)
         self.assertTrue(key == key2)
         self.assertEqual(key2.obj, t, **assertEqualOptions)
+        # deleting object leads to dead key
         del t2
-        # t2 can be restored from the key object:
-        self.assertEqual(key2.obj, t, **assertEqualOptions)
+        self.assertTrue(key2.obj is None)
+        self.assertTrue(key.obj is t)
 
         # key with different storage offset and shape:
         self.assertFalse(key == TensorAsKey(t[1:]))
@@ -3828,14 +3829,20 @@ class TestSparseCompressedTritonKernels(TestCase):
         key3 = TensorAsKey(t3)
         d[key3] = 123
         self.assertTrue(d.get(key3) == 123)
-        self.assertTrue(d.get(TensorAsKey(t3[:])) == 123)
+        t3_ = t3[:]
+        self.assertTrue(d.get(TensorAsKey(t3_)) == 123)
         self.assertTrue(d.get(TensorAsKey(t3.clone())) is None)
 
-        d[TensorAsKey(t3[:])] = 567
+        d[TensorAsKey(t3_)] = 567
         self.assertTrue(d.get(key3) == 567)
 
-        # when object dies, the corresponding key is still valid:
+        # t3 and t3_ reference the same data, so, the key becomes dead
+        # (that is, its .obj property returns None) until all
+        # references are deleted:
         del t3
+        self.assertTrue(key3.obj is not None)
+        self.assertTrue(d.get(key3) == 567)
+        del t3_
         self.assertTrue(key3.obj is None)
         self.assertTrue(d.get(key3) == 567)
 
