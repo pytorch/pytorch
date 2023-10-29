@@ -13,18 +13,7 @@ collection support for PyTorch APIs.
 """
 
 import functools
-from typing import (
-    Any,
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    overload,
-    Tuple,
-    Type,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Type, Union
 
 import torch
 
@@ -35,6 +24,18 @@ else:
     optree = None  # type: ignore[assignment]
     from .python import TreeSpec as PyTreeSpec  # type: ignore[assignment]
 
+from .typing import (
+    Context,
+    DumpableContext,
+    FlattenFunc,
+    FromDumpableContextFn,
+    PyTree,
+    R,
+    S,
+    T,
+    ToDumpableContextFn,
+    UnflattenFunc,
+)
 
 __all__ = [
     "PyTree",
@@ -67,20 +68,8 @@ __all__ = [
 ]
 
 
-T = TypeVar("T")
-S = TypeVar("S")
-R = TypeVar("R")
-
-
-Context = Optional[Any]
-PyTree = Any
 TreeSpec = PyTreeSpec
-FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
-UnflattenFunc = Callable[[Iterable, Context], PyTree]
 OpTreeUnflattenFunc = Callable[[Context, Iterable], PyTree]
-DumpableContext = Any  # Any json dumpable text
-ToDumpableContextFn = Callable[[Context], DumpableContext]
-FromDumpableContextFn = Callable[[DumpableContext], Context]
 
 
 def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
