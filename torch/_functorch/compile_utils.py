@@ -2,6 +2,7 @@
 import torch
 import torch.fx as fx
 from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 

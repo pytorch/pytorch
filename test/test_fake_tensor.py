@@ -225,8 +225,8 @@ class FakeTensorTest(TestCase):
             out_fake = fn()
 
         for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
-            if not isinstance(a, FakeTensor):
-                self.assertTrue(not isinstance(b, FakeTensor))
+            if not isinstance(a, torch.Tensor):
+                self.assertTrue(not isinstance(b, torch.Tensor))
                 continue
 
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
