@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Typ
 
 import torch
 
-if not (torch._running_with_deploy() and torch.compiled_with_cxx11_abi()):
+if not torch._running_with_deploy():
     import optree
     from optree import PyTreeSpec  # direct import for type annotations
 else:
