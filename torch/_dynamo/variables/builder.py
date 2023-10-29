@@ -1848,7 +1848,7 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
+        elif is_allowed(value) or isinstance(value, (torch.device, torch.dtype)):
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)
