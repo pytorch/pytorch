@@ -1623,38 +1623,37 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_jit_resolve_packet",
+      [](const char* op_name, py::args args, py::kwargs kwargs) {
+        try {
+          auto symbol = Symbol::fromQualString(op_name);
+          const auto overloads = getAllSortedOperatorsFor(symbol);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
+          std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
+          auto result = overload->schema().overload_name();
+          if (result == "") {
+            result = "default";
+          }
+          return result;
+        } catch (const c10::Error& e) {
+          auto msg = torch::get_cpp_stacktraces_enabled()
+              ? e.what()
+              : e.what_without_backtrace();
+          throw std::runtime_error(msg);
+        }
+      });
+
+  m.def(
       "_jit_get_operation",
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& unsortedOps = getAllOperatorsFor(symbol);
-          if (unsortedOps.empty()) {
+          const auto sortedOps = getAllSortedOperatorsFor(symbol);
+          if (sortedOps.empty()) {
             // No such operator
             return py::make_tuple(py::none(), py::none());
           }
 
-          // Depending on the order of registration, aten or jit ops may be
-          // registered first. This sorting is helpful in cases where
-          // deterministic (i.e. not dependent on build config) behavior is
-          // desired; e.g. torch.ops.aten.* uses this function, and tries to
-          // find the "first" op that matches input args. Without the sorting,
-          // the "first" op may change depending on registration order.
-          std::vector<std::shared_ptr<Operator>> sortedOps;
-          sortedOps.reserve(unsortedOps.size());
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return op->isC10Op();
-              });
-          std::copy_if(
-              unsortedOps.begin(),
-              unsortedOps.end(),
-              std::back_inserter(sortedOps),
-              [](const std::shared_ptr<Operator>& op) {
-                return !op->isC10Op();
-              });
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
