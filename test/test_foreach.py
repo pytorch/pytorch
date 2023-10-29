@@ -411,6 +411,8 @@ class TestForeach(TestCase):
         tensors2.append(torch.tensor([1], device=device))
         with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
             foreach_op(tensors1, tensors2)
+        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
+            foreach_op(tensors2, tensors1)
 
         # Corresponding tensors with different sizes that aren't compatible with broadcast
         # If sizes are different then foreach chooses slow path, thus error messages are expected
