@@ -363,10 +363,14 @@ class VariableBuilder:
         from torch.utils._triton import has_triton
 
         if has_triton():
+            from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
 
             class JITFunction:
+                pass
+
+            class Autotuner:
                 pass
 
         # Handle exact type() match
@@ -676,7 +680,7 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, JITFunction):
+        elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
