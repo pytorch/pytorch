@@ -42,6 +42,18 @@ from .api import (
     treespec_pprint as treespec_pprint,
     UnflattenFunc as UnflattenFunc,
 )
+from .api.python import (  # used by third-party packages
+    _dict_flatten,
+    _dict_unflatten,
+    _list_flatten,
+    _list_unflatten,
+    _namedtuple_flatten,
+    _namedtuple_unflatten,
+    _odict_flatten,
+    _odict_unflatten,
+    _tuple_flatten,
+    _tuple_unflatten,
+)
 
 
 __all__ = [
