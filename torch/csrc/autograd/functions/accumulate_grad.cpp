@@ -91,11 +91,14 @@ variable_list AccumulateGrad::apply_with_saved(
                        .findSchemaOrThrow("inductor::accumulate_grad_", "")
                        .typed<void(const at::Tensor&, const at::Tensor&)>();
   op.call(variable_copy, grads[0]);
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    (*hook)(variable_copy);
+  }
   saved.after(variable_copy);
   saved.after(grad_copy);
 
-  // A little hack - this is only here for the purpose of hooks. It will get cleared.
-  return variable_list({fake_variable_copy});
+  return variable_list();
 }
 
 } // namespace autograd

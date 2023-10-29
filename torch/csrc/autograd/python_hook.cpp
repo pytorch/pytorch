@@ -227,7 +227,8 @@ auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
       returned_none, "Tensor post accumulate grad hooks should return None.");
 }
 
-void PyFunctionTensorPostAccGradHooks::compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) {
+void PyFunctionTensorPostAccGradHooks::compiled_args(
+    torch::dynamo::autograd::CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
