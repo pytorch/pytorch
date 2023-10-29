@@ -499,21 +499,12 @@ class WrapperCodeGen(CodeGen):
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
         assert len(grid) != 0
         if len(grid) == 1:
-            grid = f"grid({grid[0]})"
+            grid = f"{grid[0]}"
         else:
-            grid_wrapper = IndentedBuffer()
-            grid_wrapper.writeline(f"def grid_wrapper_for_{kernel_name}(meta):")
-            assert len(grid) == len(configs)
-            with grid_wrapper.indent():
-                for i, (grid_val, conf) in enumerate(zip(grid, configs)):
-                    guards = [
-                        f"meta['{name}'] == {val}" for name, val in conf.kwargs.items()
-                    ]
-                    guards = " and ".join(guards)
-                    grid_wrapper.writeline(f"if {guards}: return grid({grid[i]})(meta)")
+            from torch._higher_order_ops.triton_kernel_wrap import grid_fn_code
 
-            self.header.splice(grid_wrapper.getvalue(), strip=True)
-            grid = f"grid_wrapper_for_{kernel_name}"
+            grid, code = grid_fn_code(kernel_name, configs, grid)
+            self.header.splice(code, strip=True)
 
         stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
         self.writeline(

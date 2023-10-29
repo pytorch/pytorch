@@ -76,24 +76,28 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 
+def grid_fn_code(name, configs, grids):
+    assert len(grids) == len(configs)
+    fn_name = f"grid_wrapper_for_{name}"
+    grid_fn_str = f"def {fn_name}(meta):"
+    for grid, config in zip(grids, configs):
+        guards = [f"meta['{name}'] == {val}" for name, val in config.kwargs.items()]
+        guards = " and ".join(guards)
+        grid_fn_str += f"\n\tif {guards}: return {grid}"
+    return fn_name, grid_fn_str
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
     kernel = kernel_side_table.get_kernel(kernel_idx)
-    assert len(grid) != 0
+
     if len(grid) == 1:
         grid_fn = grid[0]
     else:
-
-        def grid_fn(meta):
-            configs = kernel.configs
-            assert len(grid) == len(configs)
-            for i, (grid_val, config) in enumerate(zip(grid, configs)):
-                guards = [
-                    f"meta['{name}'] == {val}" for name, val in config.kwargs.items()
-                ]
-                guards = " and ".join(guards)
-                if eval(guards):
-                    return grid[i]
+        fn_name, code = grid_fn_code(kernel.fn.__name__, kernel.configs, grid)
+        namespace: Dict[str, Any] = {}
+        exec(code, namespace)
+        grid_fn = namespace[fn_name]
 
     kernel[grid_fn](**kwargs)
 
