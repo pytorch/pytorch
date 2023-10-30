@@ -16,7 +16,7 @@ namespace aot_inductor {
 template <typename T>
 class MiniArrayRef final {
  public:
-  using iterator = const T*;
+  using iterator = T*;
   using const_iterator = const T*;
   using size_type = size_t;
   using value_type = T;
@@ -25,7 +25,7 @@ class MiniArrayRef final {
 
  private:
   /// The start of the array, in an external buffer.
-  const T* Data;
+  T* Data;
 
   /// The number of elements.
   size_type Length;
@@ -42,19 +42,17 @@ class MiniArrayRef final {
   constexpr MiniArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an MiniArrayRef from a pointer and length.
-  constexpr MiniArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {}
+  constexpr MiniArrayRef(T* data, size_t length) : Data(data), Length(length) {}
 
   /// Construct an MiniArrayRef from a range.
-  constexpr MiniArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {}
+  constexpr MiniArrayRef(T* begin, T* end) : Data(begin), Length(end - begin) {}
 
   template <
       typename Container,
       typename = std::enable_if_t<std::is_same<
           std::remove_const_t<decltype(std::declval<Container>().data())>,
           T*>::value>>
-  /* implicit */ MiniArrayRef(const Container& container)
+  /* implicit */ MiniArrayRef(Container& container)
       : Data(container.data()), Length(container.size()) {}
 
   /// Construct an MiniArrayRef from a std::vector.
@@ -71,13 +69,12 @@ class MiniArrayRef final {
 
   /// Construct an MiniArrayRef from a std::array
   template <size_t N>
-  /* implicit */ constexpr MiniArrayRef(const std::array<T, N>& Arr)
+  /* implicit */ constexpr MiniArrayRef(std::array<T, N>& Arr)
       : Data(Arr.data()), Length(N) {}
 
   /// Construct an MiniArrayRef from a C array.
   template <size_t N>
-  /* implicit */ constexpr MiniArrayRef(const T (&Arr)[N])
-      : Data(Arr), Length(N) {}
+  /* implicit */ constexpr MiniArrayRef(T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   /// Construct an MiniArrayRef from a std::initializer_list.
   /* implicit */ constexpr MiniArrayRef(const std::initializer_list<T>& Vec)
@@ -118,7 +115,7 @@ class MiniArrayRef final {
     return Length == 0;
   }
 
-  constexpr const T* data() const {
+  constexpr T* data() const {
     return Data;
   }
 
@@ -165,8 +162,8 @@ class ArrayRefTensor {
  public:
   explicit ArrayRefTensor(
       MiniArrayRef<T> arr,
-      MiniIntArrayRef sizes,
-      MiniIntArrayRef strides,
+      MiniArrayRef<const int64_t> sizes,
+      MiniArrayRef<const int64_t> strides,
       int32_t dtype,
       int32_t device_type,
       int32_t device_idx)
@@ -224,11 +221,7 @@ class ArrayRefTensor {
     return device_idx_;
   }
 
-  T* data() {
-    return const_cast<T*>(arrayRef_.data());
-  }
-
-  const T* data() const {
+  T* data() const {
     return arrayRef_.data();
   }
 
@@ -240,8 +233,8 @@ class ArrayRefTensor {
   MiniArrayRef<T> arrayRef_;
   // We expect generated code to have statically available sizes &
   // strides for us.
-  MiniIntArrayRef sizes_;
-  MiniIntArrayRef strides_;
+  MiniArrayRef<const int64_t> sizes_;
+  MiniArrayRef<const int64_t> strides_;
   int32_t dtype_;
   int32_t device_type_;
   int32_t device_idx_;
@@ -290,8 +283,8 @@ inline ArrayRefTensor<T, N> reinterpret_tensor_wrapper(
   return ArrayRefTensor<T, N>(
       MiniArrayRef<T>(
           self.data() + storage_offset, self.numel() - storage_offset),
-      MiniIntArrayRef(sizes_ptr, ndim),
-      MiniIntArrayRef(strides_ptr, ndim),
+      MiniArrayRef<const int64_t>(sizes_ptr, ndim),
+      MiniArrayRef<const int64_t>(strides_ptr, ndim),
       self.dtype(),
       self.device_type(),
       self.device_idx());
