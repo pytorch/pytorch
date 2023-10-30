@@ -19,6 +19,13 @@ from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
+# Note: [Adding a new supported class the keys of ConstDictVarialble]
+# You'll need to add it to:
+# - `is_hashable_python_var` in this file
+# - `is_hashable` in this file
+# - `const_repr` in util.py, and perhaps modify DICT_KEYS in guards.py
+
+
 def is_hashable_python_var(x):
     from torch import Tensor
 
@@ -99,8 +106,8 @@ class ConstDictVariable(VariableTracker):
                 return False
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
-    def __init__(self, items, user_cls=dict, recursively_contains=None, **kwargs):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+    def __init__(self, items, user_cls=dict, **kwargs):
+        super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -114,7 +121,11 @@ class ConstDictVariable(VariableTracker):
             for x, v in items.items()
         )
         self.items = {make_hashable(x): v for x, v in items.items()}
-        self.guards.update(VariableTracker.propagate([x.vt for x in self.items.keys()], self.items.values())["guards"])
+        self.guards.update(
+            VariableTracker.propagate(
+                [x.vt for x in self.items.keys()], self.items.values()
+            )["guards"]
+        )
         self.user_cls = user_cls
 
     def as_proxy(self):
@@ -198,15 +209,9 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
-            new_rec_contains = self.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self,
-                self.modifed(newval, new_rec_contains, **options),
+                self.modifed(newval, **options),
             )
         elif (
             name in ("pop", "get")
@@ -219,7 +224,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "pop" and arg_hashable and self.mutable_local:
             newval = collections.OrderedDict(val)
             result = newval.pop(Hashable(args[0]))
-            tx.replace_all(self, self.modifed(newval, None, **options))
+            tx.replace_all(self, self.modifed(newval, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -229,12 +234,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            new_rec_contains = self.recursively_contains.union(
-                args[0].recursively_contains
-            )
-            result = self.modifed(
-                newval, recursively_contains=new_rec_contains, **options
-            )
+            result = self.modifed(newval, **options)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -251,19 +251,12 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, recursively_contains, **options):
+    def modifed(self, items, **options):
         """a copy of self with different items"""
-        return self.clone(
-            items=items, recursively_contains=recursively_contains, **options
-        )
+        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
         return [x.vt for x in self.items.keys()]
-
-    @staticmethod
-    def _make_const_key(k):
-        Hashable = ConstDictVariable._HashableTracker
-        return Hashable(variables.ConstantVariable.create(k))
 
 
 class DefaultDictVariable(ConstDictVariable):
@@ -308,14 +301,7 @@ class DefaultDictVariable(ConstDictVariable):
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
-                    new_rec_contains = self.recursively_contains.union(
-                        default_var.recursively_contains
-                    )
-                    if default_var.mutable_local is not None:
-                        new_rec_contains.add(default_var.mutable_local)
-                    tx.replace_all(
-                        self, self.modifed(new_val, new_rec_contains, **options)
-                    )
+                    tx.replace_all(self, self.modifed(new_val, **options))
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -341,11 +327,10 @@ class SetVariable(VariableTracker):
     def __init__(
         self,
         items: List[VariableTracker],
-        recursively_contains=None,
         regen_guards=True,
         **kwargs,
     ):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+        super().__init__(**kwargs)
         # Note - Set is still backed by a list, because we want set behavior over the contents,
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -527,7 +512,7 @@ class DataClassVariable(ConstDictVariable):
         items = collections.OrderedDict()
         for key in keys:
             val = bound.arguments[key]
-            key = ConstDictVariable._make_const_key(key)
+            key = ConstantVariable.create(key)
             if isinstance(val, VariableTracker):
                 items[key] = val
             else:
@@ -558,6 +543,7 @@ class DataClassVariable(ConstDictVariable):
                     tx=builder.tx, source=AttrSource(builder.source, key)
                 )(val)
                 if val is not None or cls.include_none:
+                    key = ConstantVariable.create(key)
                     items[key] = var
                 else:
                     excluded.append(var)
@@ -679,7 +665,7 @@ class CustomizedDictVariable(ConstDictVariable):
         items = collections.OrderedDict()
         for key in raw_items.keys():
             val = raw_items[key]
-            key = ConstDictVariable._make_const_key(key)
+            key = ConstantVariable.create(key)
             if isinstance(val, VariableTracker):
                 items[key] = val
             elif variables.ConstantVariable.is_literal(val):

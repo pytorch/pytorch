@@ -995,11 +995,11 @@ def const_repr(x, *, local) -> str:
     elif is_builtin_callable(x):
         return x.__name__
     else:
-        return str(x)
+        return f"{x!r}"
 
 
 def dict_const_keys_repr(const_keys, *, local) -> str:
-    keys_str = ','.join(const_repr(s, local=local) for s in const_keys)
+    keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
     return "{" + keys_str + "}"
 
 
