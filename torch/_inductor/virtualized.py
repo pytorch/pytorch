@@ -79,7 +79,7 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size, add_asserts=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -254,10 +254,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, add_asserts=True):
+    def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, add_asserts)
+        return _ops.indirect_indexing(index, size, check)
 
 
 ops = OpsWrapper()
