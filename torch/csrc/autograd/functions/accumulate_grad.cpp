@@ -87,7 +87,6 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor variable_copy = variable;
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
-  at::Tensor fake_variable_copy = variable_copy;
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
   // op is intentionally static
