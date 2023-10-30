@@ -75,12 +75,50 @@ def get_py_torch_functions(
 # the stubs to read on the human eye.
 
 DEVICE_PARAM = "device: Device = None"
-FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
-)
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
-# this could be more precise w.r.t list contents etc. How to do Ellipsis?
-INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
+# NOTE: specifying indices for Tensor.__getitem__
+# We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
+#
+# key: (
+#     None
+#     | slice
+#     | ellipsis
+#     | SupportsIndex
+#     | _ArrayLikeInt_co
+#     | tuple[None | slice | ellipsis | _ArrayLikeInt_co | SupportsIndex, ...]
+# )
+#
+# where:
+#
+# _ArrayLikeInt_co = _DualArrayLike[
+#     dtype[Union[bool_, integer[Any]]],
+#     Union[bool, int],
+# ]
+#
+# and
+#
+# _DualArrayLike = Union[
+#     _SupportsArray[_DType],
+#     _NestedSequence[_SupportsArray[_DType]],
+#     _T,
+#     _NestedSequence[_T],
+# ]
+#
+# Moreover, _NestedSequence is a Protocol that matches arbitrary nesting of list/tuple.
+# We can substitute and simplify:
+# _SupportsArray -> Tensor
+# _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
+# which leaves us with key: T | tuple[T, ...], where T is:
+# T = (
+#     None | bool | int | slice | ellipsis | SupportsIndex
+#     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
+# )
+
+# NOTE: ellipsis is equal to type[Ellipsis] in stub files.
+_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
+INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
 blocklist = [
     "__init_subclass__",
@@ -698,6 +736,19 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -932,12 +983,12 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                "def size(self) -> Size: ...",
+                "def size(self, dim: None = None) -> Size: ...",
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int, ...]: ...",
-                "def stride(self, _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
@@ -1190,6 +1241,8 @@ def gen_pyi(
             "double",
             "float16",
             "bfloat16",
+            "float8_e4m3fn",
+            "float8_e5m2",
             "half",
             "uint8",
             "int8",
@@ -1201,6 +1254,7 @@ def gen_pyi(
             "long",
             "complex32",
             "complex64",
+            "chalf",
             "cfloat",
             "complex128",
             "cdouble",

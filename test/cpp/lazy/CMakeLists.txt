@@ -33,17 +33,11 @@ target_link_libraries(test_lazy PRIVATE ${LAZY_TEST_DEPENDENCIES})
 target_include_directories(test_lazy PRIVATE ${ATen_CPU_INCLUDE})
 
 if(USE_CUDA)
-  target_link_libraries(test_lazy PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
-
   target_compile_definitions(test_lazy PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_lazy PRIVATE
     ${ROCM_HIPRTC_LIB}
-    ${PYTORCH_HIP_HCC_LIBRARIES}
+    ${PYTORCH_HIP_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
 
   target_compile_definitions(test_lazy PRIVATE USE_ROCM)

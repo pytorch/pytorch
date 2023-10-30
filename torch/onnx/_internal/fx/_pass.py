@@ -296,7 +296,7 @@ class Transform(abc.ABC):
         return module
 
 
-class AnalysisResult(abc.ABC):
+class AnalysisResult(abc.ABC):  # noqa: B024
     ...
 
 

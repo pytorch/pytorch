@@ -70,7 +70,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   // right (but ideally, this would just be precomputed in FunctionSchema
   // itself).  (NB: minus one in the loop is because we're testing if the
   // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = arguments.size();
+  int64_t kwarg_only_start = static_cast<int64_t>(arguments.size());
   for (; kwarg_only_start > 0; kwarg_only_start--) {
     const auto& arg = schema.arguments()[kwarg_only_start - 1];
     if (!arg.kwarg_only()) {
@@ -79,7 +79,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   }
 
   // Find the first positional argument that isn't defaulted
-  auto is_default = [&](int64_t idx) -> bool {
+  auto is_default = [&](size_t idx) -> bool {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
       return false;
@@ -102,7 +102,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto args =
       py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
 
-  auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
+  auto schemaAwareToPyObject = [&](size_t idx) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
       const auto& t = arg.real_type();
@@ -271,7 +271,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   c10::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status;
+  c10::impl::PyInterpreterStatus status{};
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -627,7 +627,7 @@ static PyObject* THPVariable_make_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(data),
+      data,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -722,7 +722,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
         0,
         at::DataPtr{nullptr, r.device(7)},
         /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizeable=*/true};
+        /*resizable=*/true};
 
     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
@@ -758,7 +758,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(tensor),
+      tensor,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -1064,15 +1064,14 @@ PyObject* THPVariable_get_names(PyObject* self, void* unused) {
   // The long-term plan is to return a list of (python) torch.Dimname.
   // However, for now, return a list of string.
   const auto& tensor = THPVariable_Unpack(self);
-  size_t size = tensor.dim();
+  auto size = tensor.dim();
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple)
     throw python_error();
 
   const auto dimnames = tensor.names();
   for (const auto i : c10::irange(size)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* str;
+    PyObject* str = nullptr;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
       // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
       // deallocated, it'll decrement the refcount on Py_None, which is bad.
@@ -1667,6 +1666,7 @@ PyTypeObject THPVariableMetaType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
@@ -1691,7 +1691,7 @@ PyTypeObject THPVariableMetaType = {
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,
-        0) "torch._C._TensorBase", /* tp_name */
+        0) "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
@@ -1712,6 +1712,7 @@ PyTypeObject THPVariableType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
@@ -1744,7 +1745,7 @@ PyObject* THPVariable_pynew(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       type != &THPVariableType,
-      "Cannot directly construct _TensorBase; subclass it and then construct that");
+      "Cannot directly construct TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
@@ -2194,6 +2195,7 @@ bool THPVariable_initModule(PyObject* module) {
   if (PyType_Ready(&THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
+  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);

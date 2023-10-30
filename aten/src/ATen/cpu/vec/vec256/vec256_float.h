@@ -10,8 +10,7 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -149,6 +148,9 @@ public:
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf8_u10(values));
   }
+  Vectorized<float> atanh() const {
+    return Vectorized<float>(Sleef_atanhf8_u10(values));
+  }
   Vectorized<float> atan2(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_atan2f8_u10(values, b));
   }
@@ -244,6 +246,9 @@ public:
   }
   Vectorized<float> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
@@ -557,4 +562,4 @@ inline void transpose_mxn<float, 8, 8>(
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

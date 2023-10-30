@@ -1,5 +1,6 @@
 from functools import lru_cache
-from typing import Callable, cast, Dict
+from itertools import chain
+from typing import Callable, Dict, List, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -13,9 +14,12 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     OutputSpecType,
     PlacementStrategy,
+    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
+
+aten = torch.ops.aten
 
 
 class ShardingPropagator:
@@ -25,25 +29,35 @@ class ShardingPropagator:
             OpOverload,
             Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
+        # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
+        self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
-        self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
+        self,
+        op_overload: OpOverload,
+        rule_func: Callable[[OpSchema], OutputSharding],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a sharding propagation rule for an operator.
         """
         self.op_to_rules[op_overload] = rule_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
     def register_op_strategy(
         self,
         op_overload: OpOverload,
         strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a sharding strategy generator for an operator.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
     def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
         """
@@ -53,9 +67,9 @@ class ShardingPropagator:
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
-            torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
-            torch.ops.aten.is_same_size.default,
+            aten._local_scalar_dense.default,
+            aten.equal.default,
+            aten.is_same_size.default,
         ]
         if op_schema.op in skip_prop_list:
             return None
@@ -74,7 +88,7 @@ class ShardingPropagator:
 
         elif isinstance(fake_out, (tuple, list)):
             tensor_meta_list = []
-            for i, fake_out_item in enumerate(fake_out):
+            for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
                         TensorMeta(
@@ -111,10 +125,17 @@ class ShardingPropagator:
                         spec.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
-        output_sharding = self.propagate_op_sharding(op_info.schema)
+        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
+        # because SymInts are not hashable.
+        # This is generally ok because this only happens during tracing in torch.compile,
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        if op_info.schema.has_symints:
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        else:
+            output_sharding = self.propagate_op_sharding(op_info.schema)
         op_info.output_sharding = output_sharding
 
-    def propagate_op_sharding(self, op_schema: OpSchema) -> OutputSharding:
+    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
         """
@@ -130,28 +151,28 @@ class ShardingPropagator:
 
         if op_schema.op in self.op_strategy_funcs:
             # generate op strategy for the op.
-            input_spec = cast(DTensorSpec, op_schema.args_schema[0])
-            mesh = input_spec.mesh
+            mesh = op_schema.args_spec[0].mesh
 
             # swap the args spec with args strategies
-            args_sharding_strategy = [
-                spec_to_strategy(i) for i in op_schema.args_schema
-            ]
+            args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
+
+            kwargs_op_strategy = {
+                k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
+            }
 
             # construct a new OpSchema on args for strategy based propagation
             # TODO: op schema should contain flat sharding by default later
             strategy_schema: OpSchema = OpSchema(
                 op=op_schema.op,
-                args_schema=tuple(args_sharding_strategy),
-                kwargs_schema=op_schema.kwargs_schema,
+                args_schema=tuple(args_op_strategy),
+                kwargs_schema=kwargs_op_strategy,
             )
 
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
 
             assert isinstance(op_strategy, OpStrategy)
-            # we take the first strategy for now
-            # TODO: add a min cost selection logic
-            output_strategy = op_strategy.strategies[0]
+            output_strategy = self._select_strategy(op_strategy)
+
             needs_redistribute = False
             expected_input_specs = []
             for idx, input_spec in enumerate(op_schema.args_spec):
@@ -161,7 +182,7 @@ class ShardingPropagator:
                     else output_strategy.input_specs[idx]
                 )
                 expected_input_specs.append(desired_spec)
-                if input_spec != desired_spec:
+                if input_spec.placements != desired_spec.placements:
                     needs_redistribute = True
 
             suggestion_schema = None
@@ -170,8 +191,20 @@ class ShardingPropagator:
                 reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                 suggestion_schema = [reshard_schema]
 
+            if op_schema.return_type_tuple_tensors():
+                # for ops return multiple tensors, make output spec return same spec
+                # returned from the op strategy
+                output_spec: OutputSpecType = tuple(
+                    [
+                        output_strategy.output_spec
+                        for _ in range(len(op_schema.op._schema.returns))
+                    ]
+                )
+            else:
+                output_spec = output_strategy.output_spec
+
             output_sharding = OutputSharding(
-                output_strategy.output_spec,
+                output_spec,
                 suggestion_schema,
                 needs_redistribute=needs_redistribute,
             )
@@ -232,3 +265,19 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
+
+    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
+        if len(strategy.strategies) == 1:
+            # short cut with only one possible strategy
+            return strategy.strategies[0]
+
+        strategy_costs: List[float] = []
+        for strtg in strategy.strategies:
+            assert (
+                strtg.redistribute_cost is not None
+            ), "must set redistribute cost each strategy!"
+            redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
+            strategy_costs.append(redistribute_cost)
+
+        # for eager execution, we just select the one with the minimal redistribute cost
+        return strategy.strategies[strategy_costs.index(min(strategy_costs))]

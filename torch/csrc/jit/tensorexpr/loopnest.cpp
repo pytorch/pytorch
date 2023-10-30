@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
 #include <algorithm>
+#include <iostream>
 #include <stdexcept>
 #include <typeinfo>
 #include <unordered_map>

@@ -24,7 +24,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -36,6 +36,13 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
     TrainingState,
 )
+from torch.distributed.fsdp._flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
+    FlatParameter,
+    FlatParamHandle,
+    HandleShardingStrategy,
+)
+from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -47,13 +54,8 @@ from torch.distributed.fsdp.api import (
     StateDictConfig,
     StateDictType,
 )
-from torch.distributed.fsdp.flat_param import (
-    _FSDP_USE_FULL_PREC_IN_EVAL,
-    FlatParameter,
-    FlatParamHandle,
-    HandleShardingStrategy,
-)
 from torch.distributed.fsdp.wrap import _Policy
+from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -201,7 +203,7 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
-    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh is not None:
         raise RuntimeError(
             f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
@@ -506,6 +508,28 @@ def _init_prefetching_state(
     return state
 
 
+@no_type_check
+def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
+    # TODO: we need to add additional check once we support FSDP + PiPPy.
+    # This check is currently sufficient, since we only support FSDP + TP.
+    if device_mesh:
+        state._enable_extension = (
+            _mesh_resources.get_parent_mesh(state._device_mesh) is not None
+        )
+
+        if state._enable_extension:
+            try:
+                _set_fsdp_extensions(DTensorExtensions())
+            except BaseException as e:
+                warnings.warn(
+                    "PyTorch doesn't have TensorFlattener extension point available"
+                    "2D parallelism won't work with FSDP"
+                    f"exception: {e}"
+                )
+    return state
+
+
+@no_type_check
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
@@ -513,6 +537,7 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
+
     return state
 
 

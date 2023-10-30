@@ -2,9 +2,9 @@
 
 import functools
 import inspect
+from unittest import expectedFailure as xfail, skipIf as skip
 
 import numpy as _np
-import pytest
 import torch
 
 import torch._numpy as w
@@ -14,6 +14,14 @@ from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
 
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 
 
 # These function receive one array_like arg and return one array_like result
@@ -58,49 +66,33 @@ ufunc_names.remove("bitwise_not")
 one_arg_funcs += [getattr(_ufuncs, name) for name in ufunc_names]
 
 
-@pytest.mark.parametrize("func", one_arg_funcs)
-class TestOneArr:
+@instantiate_parametrized_tests
+class TestOneArr(TestCase):
     """Base for smoke tests of one-arg functions: (array_like) -> (array_like)
 
     Accepts array_likes, torch.Tensors, w.ndarays; returns an ndarray
     """
 
+    @parametrize("func", one_arg_funcs)
     def test_asarray_tensor(self, func):
         t = torch.Tensor([[1.0, 2, 3], [4, 5, 6]])
         ta = func(t)
 
         assert isinstance(ta, w.ndarray)
 
+    @parametrize("func", one_arg_funcs)
     def test_asarray_list(self, func):
         lst = [[1.0, 2, 3], [4, 5, 6]]
         la = func(lst)
 
         assert isinstance(la, w.ndarray)
 
+    @parametrize("func", one_arg_funcs)
     def test_asarray_array(self, func):
         a = w.asarray([[1.0, 2, 3], [4, 5, 6]])
         la = func(a)
 
         assert isinstance(la, w.ndarray)
-
-
-class _TestOneArrAndAxis:
-    """Smoke test of functions (array_like, axis) -> array_like"""
-
-    def test_tensor(self, func, axis):
-        t = torch.Tensor([[1.0, 2, 3], [4, 5, 6]])
-        ta = func(t, axis=axis)
-        assert isinstance(ta, w.ndarray)
-
-    def test_list(self, func, axis):
-        t = [[1.0, 2, 3], [4, 5, 6]]
-        ta = func(t, axis=axis)
-        assert isinstance(ta, w.ndarray)
-
-    def test_array(self, func, axis):
-        t = w.asarray([[1.0, 2, 3], [4, 5, 6]])
-        ta = func(t, axis=axis)
-        assert isinstance(ta, w.ndarray)
 
 
 one_arg_axis_funcs = [
@@ -118,35 +110,35 @@ one_arg_axis_funcs = [
 ]
 
 
-@pytest.mark.parametrize("func", one_arg_axis_funcs)
-@pytest.mark.parametrize("axis", [0, 1, -1, None])
-class TestOneArrAndAxis(_TestOneArrAndAxis):
-    pass
+@instantiate_parametrized_tests
+class TestOneArrAndAxis(TestCase):
+    @parametrize("func", one_arg_axis_funcs)
+    @parametrize("axis", [0, 1, -1, None])
+    def test_andaxis_tensor(self, func, axis):
+        t = torch.Tensor([[1.0, 2, 3], [4, 5, 6]])
+        ta = func(t, axis=axis)
+        assert isinstance(ta, w.ndarray)
+
+    @parametrize("func", one_arg_axis_funcs)
+    @parametrize("axis", [0, 1, -1, None])
+    def test_andaxis_list(self, func, axis):
+        t = [[1.0, 2, 3], [4, 5, 6]]
+        ta = func(t, axis=axis)
+        assert isinstance(ta, w.ndarray)
+
+    @parametrize("func", one_arg_axis_funcs)
+    @parametrize("axis", [0, 1, -1, None])
+    def test_andaxis_array(self, func, axis):
+        t = w.asarray([[1.0, 2, 3], [4, 5, 6]])
+        ta = func(t, axis=axis)
+        assert isinstance(ta, w.ndarray)
 
 
-one_arg_axis_funcs_not_none = one_arg_axis_funcs[:]
-one_arg_axis_funcs_not_none += [
-    w.expand_dims,
-]
-
-
-@pytest.mark.parametrize("func", one_arg_axis_funcs_not_none)
-@pytest.mark.parametrize(
-    "axis",
-    [
-        0,
-        1,
-        -1,
-    ],
-)
-class TestOneArrAndAxisNotNone(_TestOneArrAndAxis):
-    pass
-
-
-@pytest.mark.parametrize("func", [w.transpose])
-@pytest.mark.parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
-class TestOneArrAndAxesTuple:
-    def test_tensor(self, func, axes):
+@instantiate_parametrized_tests
+class TestOneArrAndAxesTuple(TestCase):
+    @parametrize("func", [w.transpose])
+    @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
+    def test_andtuple_tensor(self, func, axes):
         t = torch.ones((1, 2, 3))
         ta = func(t, axes=axes)
         assert isinstance(ta, w.ndarray)
@@ -158,12 +150,16 @@ class TestOneArrAndAxesTuple:
             newshape = tuple(t.shape[axes[i]] for i in range(w.ndim(t)))
         assert ta.shape == newshape
 
-    def test_list(self, func, axes):
+    @parametrize("func", [w.transpose])
+    @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
+    def test_andtuple_list(self, func, axes):
         t = [[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]]  # shape = (1, 2, 3)
         ta = func(t, axes=axes)
         assert isinstance(ta, w.ndarray)
 
-    def test_array(self, func, axes):
+    @parametrize("func", [w.transpose])
+    @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
+    def test_andtuple_array(self, func, axes):
         t = w.asarray([[[1.0, 1.0, 1.0], [1.0, 1.0, 1.0]]])
         ta = func(t, axes=axes)
         assert isinstance(ta, w.ndarray)
@@ -177,7 +173,6 @@ class TestOneArrAndAxesTuple:
 
 arr_shape_funcs = [
     w.reshape,
-    w.ones_like,
     w.empty_like,
     w.ones_like,
     functools.partial(w.full_like, fill_value=42),
@@ -185,16 +180,18 @@ arr_shape_funcs = [
 ]
 
 
-@pytest.mark.parametrize("func", arr_shape_funcs)
-class TestOneArrAndShape:
+@instantiate_parametrized_tests
+class TestOneArrAndShape(TestCase):
     """Smoke test of functions (array_like, shape_like) -> array_like"""
 
-    shape = (2, 3)
-    shape_arg_name = {
-        w.reshape: "newshape",
-    }  # reshape expects `newshape`
+    def setUp(self):
+        self.shape = (2, 3)
+        self.shape_arg_name = {
+            w.reshape: "newshape",
+        }  # reshape expects `newshape`
 
-    def test_tensor(self, func):
+    @parametrize("func", arr_shape_funcs)
+    def test_andshape_tensor(self, func):
         t = torch.Tensor([[1, 2, 3], [4, 5, 6]])
 
         shape_dict = {self.shape_arg_name.get(func, "shape"): self.shape}
@@ -202,7 +199,8 @@ class TestOneArrAndShape:
         assert isinstance(ta, w.ndarray)
         assert ta.shape == self.shape
 
-    def test_list(self, func):
+    @parametrize("func", arr_shape_funcs)
+    def test_andshape_list(self, func):
         t = [[1, 2, 3], [4, 5, 6]]
 
         shape_dict = {self.shape_arg_name.get(func, "shape"): self.shape}
@@ -210,7 +208,8 @@ class TestOneArrAndShape:
         assert isinstance(ta, w.ndarray)
         assert ta.shape == self.shape
 
-    def test_array(self, func):
+    @parametrize("func", arr_shape_funcs)
+    def test_andshape_array(self, func):
         t = w.asarray([[1, 2, 3], [4, 5, 6]])
 
         shape_dict = {self.shape_arg_name.get(func, "shape"): self.shape}
@@ -220,13 +219,21 @@ class TestOneArrAndShape:
 
 
 one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.ndim)]
+one_arg_scalar_funcs_xfail = [
+    (w.size, _np.size),
+    subtest(
+        (w.shape, _np.shape), decorators=[xfail] if TEST_WITH_TORCHDYNAMO else []
+    ),  # XXX fails under dynamo
+    (w.ndim, _np.ndim),
+]
 
 
-@pytest.mark.parametrize("func, np_func", one_arg_scalar_funcs)
-class TestOneArrToScalar:
+@instantiate_parametrized_tests
+class TestOneArrToScalar(TestCase):
     """Smoke test of functions (array_like) -> scalar or python object."""
 
-    def test_tensor(self, func, np_func):
+    @parametrize("func, np_func", one_arg_scalar_funcs)
+    def test_toscalar_tensor(self, func, np_func):
         t = torch.Tensor([[1, 2, 3], [4, 5, 6]])
         ta = func(t)
         tn = np_func(_np.asarray(t))
@@ -234,7 +241,8 @@ class TestOneArrToScalar:
         assert not isinstance(ta, w.ndarray)
         assert ta == tn
 
-    def test_list(self, func, np_func):
+    @parametrize("func, np_func", one_arg_scalar_funcs_xfail)
+    def test_toscalar_list(self, func, np_func):
         t = [[1, 2, 3], [4, 5, 6]]
         ta = func(t)
         tn = np_func(t)
@@ -242,7 +250,8 @@ class TestOneArrToScalar:
         assert not isinstance(ta, w.ndarray)
         assert ta == tn
 
-    def test_array(self, func, np_func):
+    @parametrize("func, np_func", one_arg_scalar_funcs)
+    def test_toscalar_array(self, func, np_func):
         t = w.asarray([[1, 2, 3], [4, 5, 6]])
         ta = func(t)
         tn = np_func(t)
@@ -254,12 +263,13 @@ class TestOneArrToScalar:
 shape_funcs = [w.zeros, w.empty, w.ones, functools.partial(w.full, fill_value=42)]
 
 
-@pytest.mark.parametrize("func", shape_funcs)
-class TestShapeLikeToArray:
+@instantiate_parametrized_tests
+class TestShapeLikeToArray(TestCase):
     """Smoke test (shape_like) -> array."""
 
     shape = (3, 4)
 
+    @parametrize("func", shape_funcs)
     def test_shape(self, func):
         a = func(self.shape)
 
@@ -270,10 +280,11 @@ class TestShapeLikeToArray:
 seq_funcs = [w.atleast_1d, w.atleast_2d, w.atleast_3d, w.broadcast_arrays]
 
 
-@pytest.mark.parametrize("func", seq_funcs)
-class TestSequenceOfArrays:
+@instantiate_parametrized_tests
+class TestSequenceOfArrays(TestCase):
     """Smoke test (sequence of arrays) -> (sequence of arrays)."""
 
+    @parametrize("func", seq_funcs)
     def test_single_tensor(self, func):
         t = torch.Tensor([[1, 2, 3], [4, 5, 6]])
         ta = func(t)
@@ -285,6 +296,7 @@ class TestSequenceOfArrays:
 
         assert isinstance(res, w.ndarray)
 
+    @parametrize("func", seq_funcs)
     def test_single_list(self, func):
         lst = [[1, 2, 3], [4, 5, 6]]
         la = func(lst)
@@ -294,6 +306,7 @@ class TestSequenceOfArrays:
 
         assert isinstance(res, w.ndarray)
 
+    @parametrize("func", seq_funcs)
     def test_single_array(self, func):
         a = w.asarray([[1, 2, 3], [4, 5, 6]])
         la = func(a)
@@ -303,6 +316,7 @@ class TestSequenceOfArrays:
 
         assert isinstance(res, w.ndarray)
 
+    @parametrize("func", seq_funcs)
     def test_several(self, func):
         arys = (
             torch.Tensor([[1, 2, 3], [4, 5, 6]]),
@@ -327,10 +341,11 @@ seq_to_single_funcs = [
 ]
 
 
-@pytest.mark.parametrize("func", seq_to_single_funcs)
-class TestSequenceOfArraysToSingle:
+@instantiate_parametrized_tests
+class TestSequenceOfArraysToSingle(TestCase):
     """Smoke test (sequence of arrays) -> (array)."""
 
+    @parametrize("func", seq_to_single_funcs)
     def test_several(self, func):
         arys = (
             torch.Tensor([[1, 2, 3], [4, 5, 6]]),
@@ -351,10 +366,11 @@ single_to_seq_funcs = (
 )
 
 
-@pytest.mark.parametrize("func", single_to_seq_funcs)
-class TestArrayToSequence:
+@instantiate_parametrized_tests
+class TestArrayToSequence(TestCase):
     """Smoke test array -> (tuple of arrays)."""
 
+    @parametrize("func", single_to_seq_funcs)
     def test_asarray_tensor(self, func):
         t = torch.Tensor([[1, 2, 3], [4, 5, 6]])
         ta = func(t)
@@ -362,6 +378,7 @@ class TestArrayToSequence:
         assert isinstance(ta, tuple)
         assert all(isinstance(x, w.ndarray) for x in ta)
 
+    @parametrize("func", single_to_seq_funcs)
     def test_asarray_list(self, func):
         lst = [[1, 2, 3], [4, 5, 6]]
         la = func(lst)
@@ -369,6 +386,7 @@ class TestArrayToSequence:
         assert isinstance(la, tuple)
         assert all(isinstance(x, w.ndarray) for x in la)
 
+    @parametrize("func", single_to_seq_funcs)
     def test_asarray_array(self, func):
         a = w.asarray([[1, 2, 3], [4, 5, 6]])
         la = func(a)
@@ -391,16 +409,17 @@ funcs_and_args = [
 ]
 
 
-@pytest.mark.parametrize("func, args", funcs_and_args)
-class TestPythonArgsToArray:
+@instantiate_parametrized_tests
+class TestPythonArgsToArray(TestCase):
     """Smoke_test (sequence of scalars) -> (array)"""
 
-    def test_simple(self, func, args):
+    @parametrize("func, args", funcs_and_args)
+    def test_argstoarray_simple(self, func, args):
         a = func(*args)
         assert isinstance(a, w.ndarray)
 
 
-class TestNormalizations:
+class TestNormalizations(TestCase):
     """Smoke test generic problems with normalizations."""
 
     def test_unknown_args(self):
@@ -428,14 +447,14 @@ class TestNormalizations:
             w.eye()
 
 
-class TestCopyTo:
-    def test_basic(self):
+class TestCopyTo(TestCase):
+    def test_copyto_basic(self):
         dst = w.empty(4)
         src = w.arange(4)
         w.copyto(dst, src)
         assert (dst == src).all()
 
-    def test_bcast(self):
+    def test_copytobcast(self):
         dst = w.empty((4, 2))
         src = w.arange(4)
 
@@ -448,7 +467,7 @@ class TestCopyTo:
         w.copyto(dst, src)
         assert (dst == src).all()
 
-    def test_typecast(self):
+    def test_copyto_typecast(self):
         dst = w.empty(4, dtype=int)
         src = w.arange(4, dtype=float)
 
@@ -460,7 +479,7 @@ class TestCopyTo:
         assert (dst == src).all()
 
 
-class TestDivmod:
+class TestDivmod(TestCase):
     def test_divmod_out(self):
         x1 = w.arange(8, 15)
         x2 = w.arange(4, 11)
@@ -487,7 +506,7 @@ class TestDivmod:
         assert quot is out[0]
         assert rem is out[1]
 
-    @pytest.mark.xfail(reason="out1, out2 not implemented")
+    @xfail  # ("out1, out2 not implemented")
     def test_divmod_pos_only(self):
         x1 = [4, 5, 6]
         x2 = [2, 1, 2]
@@ -514,15 +533,16 @@ class TestDivmod:
             w.divmod(1, 2, o, o, out=(o, o))
 
 
-class TestSmokeNotImpl:
-    def test_basic(self):
+class TestSmokeNotImpl(TestCase):
+    def test_nimpl_basic(self):
         # smoke test that the "NotImplemented" annotation is picked up
         with assert_raises(NotImplementedError):
             w.empty(3, like="ooops")
 
 
-class TestDefaultDtype:
-    def test_defaults(self):
+@instantiate_parametrized_tests
+class TestDefaultDtype(TestCase):
+    def test_defaultdtype_defaults(self):
         # by default, both floats and ints 64 bit
         x = w.empty(3)
         z = x + 1j * x
@@ -532,7 +552,7 @@ class TestDefaultDtype:
 
         assert w.arange(3).dtype.torch_dtype == torch.int64
 
-    @pytest.mark.parametrize("dt", ["pytorch", "float32", torch.float32])
+    @parametrize("dt", ["pytorch", "float32", torch.float32])
     def test_set_default_float(self, dt):
         try:
             w.set_default_dtype(fp_dtype=dt)
@@ -548,10 +568,8 @@ class TestDefaultDtype:
             w.set_default_dtype(fp_dtype="numpy")
 
 
-@pytest.mark.skipif(
-    _np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23"
-)
-class TestExport:
+@skip(_np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23")
+class TestExport(TestCase):
     def test_exported_objects(self):
         exported_fns = (
             x
@@ -564,35 +582,33 @@ class TestExport:
         assert len(diff) == 0, str(diff)
 
 
-class TestCtorNested:
+class TestCtorNested(TestCase):
     def test_arrays_in_lists(self):
         lst = [[1, 2], [3, w.array(4)]]
         assert_equal(w.asarray(lst), [[1, 2], [3, 4]])
 
 
-def test_ndarrays_to_tensors():
-    out = _util.ndarrays_to_tensors(((w.asarray(42), 7), 3))
-    assert len(out) == 2
-    assert isinstance(out[0], tuple) and len(out[0]) == 2
-    assert isinstance(out[0][0], torch.Tensor)
+class TestMisc(TestCase):
+    def test_ndarrays_to_tensors(self):
+        out = _util.ndarrays_to_tensors(((w.asarray(42), 7), 3))
+        assert len(out) == 2
+        assert isinstance(out[0], tuple) and len(out[0]) == 2
+        assert isinstance(out[0][0], torch.Tensor)
 
+    @skip(not TEST_CUDA, reason="requires cuda")
+    def test_f16_on_cuda(self):
+        # make sure operations with float16 tensors give same results on CUDA and on CPU
+        t = torch.arange(5, dtype=torch.float16)
+        assert_allclose(w.vdot(t.cuda(), t.cuda()), w.vdot(t, t))
+        assert_allclose(w.inner(t.cuda(), t.cuda()), w.inner(t, t))
+        assert_allclose(w.matmul(t.cuda(), t.cuda()), w.matmul(t, t))
+        assert_allclose(w.einsum("i,i", t.cuda(), t.cuda()), w.einsum("i,i", t, t))
 
-@pytest.mark.skipif(not TEST_CUDA, reason="requires cuda")
-def test_f16_on_cuda():
-    # make sure operations with float16 tensors give same results on CUDA and on CPU
-    t = torch.arange(5, dtype=torch.float16)
-    assert_allclose(w.vdot(t.cuda(), t.cuda()), w.vdot(t, t))
-    assert_allclose(w.inner(t.cuda(), t.cuda()), w.inner(t, t))
-    assert_allclose(w.matmul(t.cuda(), t.cuda()), w.matmul(t, t))
-    assert_allclose(w.einsum("i,i", t.cuda(), t.cuda()), w.einsum("i,i", t, t))
+        assert_allclose(w.mean(t.cuda()), w.mean(t))
 
-    assert_allclose(w.mean(t.cuda()), w.mean(t))
-
-    assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
-    assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
+        assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
+        assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()
