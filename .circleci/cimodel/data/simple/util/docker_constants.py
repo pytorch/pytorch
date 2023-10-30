@@ -32,4 +32,4 @@ def gen_mobile_docker(specifier):
 
 DOCKER_IMAGE_ASAN, DOCKER_REQUIREMENT_ASAN = gen_mobile_docker("asan")
 
-DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK = gen_mobile_docker("android-ndk-r19c")
+DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK = gen_mobile_docker("android-ndk-r21e")
