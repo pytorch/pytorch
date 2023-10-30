@@ -983,7 +983,9 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule_impl(
   // right now. We really want generalized index_add kernel in PyTorch
   auto batch_size = get_bdim_size3(self, self_bdim, other, other_bdim, index, index_bdim);
   std::vector<Tensor> results;
-  results.reserve(batch_size);
+  if (!inplace) {
+    results.reserve(batch_size);
+  }
   for (const auto i : c10::irange(0, batch_size)) {
     const auto& self_slice = self_bdim.has_value() ?
       self.select(*self_bdim, i) : self;
