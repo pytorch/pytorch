@@ -235,6 +235,150 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_unranked_tests=expected_aggregated_unranked_relevance,
         )
 
+    def test_get_test_stats_with_whole_tests(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        expected_test3_stats = {
+            "test_name": "test3",
+            "test_filters": "",
+            "without_heuristics": {
+                "relevance_group": "UNRANKED",
+                "order_within_relevance_group": 2,
+                "num_tests_in_relevance_group": 5,
+                "order_overall": 2,
+                "heuristic_name": "baseline",
+            },
+            "heuristics": [
+                {
+                    "relevance_group": "HIGH",
+                    "order_within_relevance_group": 0,
+                    "num_tests_in_relevance_group": 2,
+                    "order_overall": 0,
+                    "heuristic_name": HEURISTICS[0].name,
+                    "trial_mode": False,
+                },
+                {
+                    "relevance_group": "UNRANKED",
+                    "order_within_relevance_group": 2,
+                    "num_tests_in_relevance_group": 4,
+                    "order_overall": 3,
+                    "heuristic_name": HEURISTICS[1].name,
+                    "trial_mode": False,
+                },
+            ],
+            "num_heuristics_prioritized_by": 1,
+            "aggregated": {
+                "relevance_group": "HIGH",
+                "order_within_relevance_group": 0,
+                "num_tests_in_relevance_group": 2,
+                "order_overall": 0,
+            },
+            "aggregated_trial": {
+                "relevance_group": "HIGH",
+                "order_within_relevance_group": 0,
+                "num_tests_in_relevance_group": 2,
+                "order_overall": 0,
+            },
+            "highest_ranking_heuristic": HEURISTICS[0].name,
+        }
+
+        test3_stats = aggregator.get_test_stats(TestRun("test3"))
+
+        self.assertDictEqual(test3_stats, expected_test3_stats)
+
+    def test_get_test_stats_only_contains_allowed_types(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5::classA"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        stats3 = aggregator.get_test_stats(TestRun("test3"))
+        stats5 = aggregator.get_test_stats(TestRun("test5::classA"))
+
+        def assert_valid_dict(dict_contents: Dict[str, Any]) -> None:
+            for key, value in dict_contents.items():
+                self.assertTrue(isinstance(key, str))
+                self.assertTrue(
+                    isinstance(value, (str, float, int, list, dict)),
+                    f"{value} is not a str, float, or dict",
+                )
+                if isinstance(value, dict):
+                    assert_valid_dict(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        assert_valid_dict(item)
+
+        assert_valid_dict(stats3)
+        assert_valid_dict(stats5)
+
+    def test_get_test_stats_gets_rank_for_test_classes(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5::classA"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        statsInclusive = aggregator.get_test_stats(
+            TestRun("test5", included=["classA"])
+        )
+        statsExclusive = aggregator.get_test_stats(
+            TestRun("test5", excluded=["classA"])
+        )
+
+        print("h")
+        # Validate the heuristic level stats are correct
+        self.assertEqual(
+            statsInclusive["heuristics"][1]["order_within_relevance_group"], 0
+        )
+        self.assertEqual(
+            statsInclusive["heuristics"][1]["num_tests_in_relevance_group"], 1
+        )
+        self.assertEqual(statsInclusive["heuristics"][1]["order_overall"], 0)
+        self.assertEqual(statsInclusive["heuristics"][1]["relevance_group"], "PROBABLE")
+        self.assertEqual(statsInclusive["aggregated"]["order_overall"], 2)
+
+        self.assertEqual(
+            statsExclusive["heuristics"][1]["order_within_relevance_group"], 4
+        )
+        self.assertEqual(
+            statsExclusive["heuristics"][1]["num_tests_in_relevance_group"], 5
+        )
+        self.assertEqual(statsExclusive["heuristics"][1]["order_overall"], 5)
+        self.assertEqual(statsExclusive["heuristics"][1]["relevance_group"], "UNRANKED")
+        self.assertEqual(statsExclusive["aggregated"]["order_overall"], 5)
+
 
 if __name__ == "__main__":
     unittest.main()
