@@ -6563,7 +6563,7 @@ def fn():
             y = b.shape[0]
             return -x * -y * a * b
 
-        torch._dynamo.testing.standard_test(self, int_neg, 2)
+        torch._dynamo.testing.standard_test(self, int_neg, 2, expected_ops=2)
 
     def test_hash_getitem_slice(self):
         s = GetItemSource(LocalSource("foo"), slice(None, -1, None))
