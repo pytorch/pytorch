@@ -329,10 +329,15 @@ class LeafSpec(TreeSpec):
         return "*"
 
 
+# All leaves are equivalent, so represent with a single object to save on
+# object construction time
+_LEAF_SPEC = LeafSpec()
+
+
 def _tree_flatten_helper(pytree: PyTree, out_leaves: List[Any]) -> TreeSpec:
     if _is_leaf(pytree):
         out_leaves.append(pytree)
-        return LeafSpec()
+        return _LEAF_SPEC
 
     node_type = _get_node_type(pytree)
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
