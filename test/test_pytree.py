@@ -543,6 +543,7 @@ TreeSpec(tuple, None, [*,
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: DummyType(*xs),
+            type_fqn="test_pytree_custom_type_serialize.DummyType",
             to_dumpable_context=lambda context: "moo",
             from_dumpable_context=lambda dumpable_context: None,
         )
@@ -567,6 +568,7 @@ TreeSpec(tuple, None, [*,
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
                 lambda xs, _: DummyType(*xs),
+                type_fqn="test_pytree_serialize_register_bad.DummyType",
                 to_dumpable_context=lambda context: "moo",
             )
 
@@ -580,6 +582,7 @@ TreeSpec(tuple, None, [*,
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: DummyType(*xs),
+            type_fqn="test_pytree_serialize_serialize_bad.DummyType",
             to_dumpable_context=lambda context: DummyType,
             from_dumpable_context=lambda dumpable_context: None,
         )
@@ -710,6 +713,7 @@ class TestCxxPytree(TestCase):
             GlobalDummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: GlobalDummyType(*xs),
+            type_fqn="GlobalDummyType",
         )
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
@@ -725,6 +729,7 @@ class TestCxxPytree(TestCase):
             LocalDummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
             lambda xs, _: LocalDummyType(*xs),
+            type_fqn="LocalDummyType",
         )
         spec = cxx_pytree.tree_structure(LocalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)

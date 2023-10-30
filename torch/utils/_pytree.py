@@ -97,6 +97,7 @@ def _register_pytree_node(
     to_str_fn: Optional[ToStrFunc] = None,
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
     *,
+    type_fqn: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
@@ -108,6 +109,8 @@ def _register_pytree_node(
             flattened pytree.
         unflatten_fn: A callable that takes a flattened version of the pytree,
             additional context, and returns an unflattedn pytree.
+        type_fqn: A keyword argument used to specify the fully qualified
+            name used when serializing the tree spec.
         to_dumpable_context: An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable
             representation. This is used for json serialization, which is being
@@ -136,12 +139,12 @@ def _register_pytree_node(
             "be None or registered."
         )
 
-    type_fqn = f"{typ.__module__}.{typ.__name__}"
-    serialize_node_def = _SerializeNodeDef(
-        typ, type_fqn, to_dumpable_context, from_dumpable_context
-    )
-    SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+    if type_fqn is not None:
+        serialize_node_def = _SerializeNodeDef(
+            typ, type_fqn, to_dumpable_context, from_dumpable_context
+        )
+        SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
+        SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -206,16 +209,19 @@ _register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
+    type_fqn="builtins.dict",
 )
 _register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
+    type_fqn="builtins.list",
 )
 _register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
+    type_fqn="builtins.tuple",
 )
 _register_pytree_node(
     namedtuple,
@@ -223,11 +229,13 @@ _register_pytree_node(
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
+    type_fqn="collections.namedtuple",
 )
 _register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
+    type_fqn="collections.OrderedDict",
 )
 
 
@@ -599,6 +607,8 @@ def _treespec_to_json(spec: TreeSpec) -> _TreeSpecSchema:
     if spec.type not in SUPPORTED_SERIALIZED_TYPES:
         raise NotImplementedError(
             f"Serializing {spec.type} in pytree is not registered."
+            "You can register using torch.utils._pytree._register_pytree_node "
+            "with a specified FQN through the `type_fqn` kwarg."
         )
 
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[spec.type]
