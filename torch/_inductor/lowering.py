@@ -5,13 +5,17 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
 
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
@@ -24,7 +28,7 @@ from torch._prims_common import (
     is_integer_dtype,
     Number,
 )
-from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
@@ -259,7 +263,7 @@ def _register_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        args: Union[List[Any], Tuple[Any, ...]] = list(args)
+        args: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]] = list(args)
         unpacked = False
         # TODO maybe we need to use pytrees here
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
@@ -319,19 +323,19 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for a, b in itertools.zip_longest(
+    for x, y in itertools.zip_longest(
         reversed(a), reversed(b), fillvalue=sympy.Integer(1)
     ):
-        if b == 1:
-            output.append(a)
-        elif a == 1:
-            output.append(b)
+        if y == 1:
+            output.append(x)
+        elif x == 1:
+            output.append(y)
         else:
-            V.graph.sizevars.guard_equals(a, b)
-            if len(sympy.expand(b).free_symbols) < len(sympy.expand(a).free_symbols):
-                output.append(b)  # prefer shorter formula
+            V.graph.sizevars.guard_equals(x, y)
+            if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
+                output.append(y)  # prefer shorter formula
             else:
-                output.append(a)
+                output.append(x)
     return tuple(reversed(output))
 
 
@@ -539,6 +543,10 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
 
 @register_lowering(aten.view.dtype, type_promotion_kind=None)
 def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    if dtype.is_complex or x.get_dtype().is_complex:
+        return TensorBox.create(
+            ir.ComplexView.create(torch.ops.aten.view.dtype, x, dtype)
+        )
     return to_dtype_bitcast(x, dtype, copy=True)
 
 
@@ -1598,17 +1606,20 @@ def _warn_complex_not_supported():
 
 # There are some types (CPU) which we accept as input but not as
 # output.
-def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_input_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
+        # Complex views are supported with IR ComplexView
+        if parent and parent.target == torch.ops.aten.view.dtype:
+            return False
         _warn_complex_not_supported()
         return True
     return False
 
 
-def unsupported_output_tensor(t: torch._subclasses.FakeTensor):
+def unsupported_output_tensor(t: torch._subclasses.FakeTensor, parent=None):
     "Do not support writing tensor but can read from it"
-    if unsupported_input_tensor(t):
+    if unsupported_input_tensor(t, parent):
         return True
     return t.is_cpu and config.disable_cpp_codegen
 
@@ -1622,7 +1633,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.lift_fresh_copy.default:
         return False
 
-    def check_skip_condition(node, is_output):
+    def check_skip_condition(node, parent, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
 
@@ -1634,20 +1645,20 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
                 continue
 
             if is_output:
-                if unsupported_output_tensor(meta):
+                if unsupported_output_tensor(meta, parent):
                     return True
             else:
-                if unsupported_input_tensor(meta):
+                if unsupported_input_tensor(meta, parent):
                     return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, is_output=False):
+        if check_skip_condition(arg, node, is_output=False):
             return True
 
-    return check_skip_condition(node, is_output=True)
+    return check_skip_condition(node, node, is_output=True)
 
 
 def make_fallback(op, layout_constraint=None, warn=True):
@@ -1997,10 +2008,69 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
-make_fallback(aten._scaled_dot_product_flash_attention_backward)
+
+
+def sdpa_constraint(fx_node, *args, **kwargs):
+    # sdpa requires dense last dimension
+    def apply_constraint(arg, fx_arg):
+        if not isinstance(arg, ir.IRNode):
+            return arg
+
+        meta_val = fx_arg.meta["val"]
+        if not meta_val.is_cuda:
+            return arg
+
+        stride_order = ir.get_stride_order(meta_val.stride())
+        if stride_order and stride_order[-1] != 0:
+            # contiguous stride order
+            stride_order = list(reversed(range(len(arg.get_size()))))
+
+        ALIGNMENT = 16
+
+        def is_aligned(x):
+            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+
+        assert isinstance(arg, TensorBox)
+        unaligned_input_shape = isinstance(arg.data, ir.SliceView) and not is_aligned(
+            arg
+        )
+        aligned_input_view = unaligned_input_shape and is_aligned(arg.unwrap_view())
+
+        # input is padded, requiring_stride_order will unwrap the view and unpad.
+        # Would be nice to be able to require certain padding from inductor ir, nyi
+        if aligned_input_view:
+            return arg
+
+        return ir.ExternKernel.require_stride_order(arg, stride_order)
+
+    args = tuple(
+        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+    )
+    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    return args, kwargs
+
+
+make_fallback(
+    aten._scaled_dot_product_efficient_attention.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_efficient_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention.default,
+    sdpa_constraint,
+    warn=False,
+)
+make_fallback(
+    aten._scaled_dot_product_flash_attention_backward.default,
+    sdpa_constraint,
+    warn=False,
+)
+
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -2685,6 +2755,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
+    add_asserts,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -2735,7 +2806,7 @@ def index_output_size_and_inner_fn(
                     ops.indirect_indexing(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
-                        check=check,
+                        add_asserts=add_asserts,
                     )
                 )
         new_index = [
@@ -2747,7 +2818,7 @@ def index_output_size_and_inner_fn(
     return output_size, fn
 
 
-def index_impl(x, indices, check):
+def index_impl(x, indices, add_asserts):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -2774,6 +2845,7 @@ def index_impl(x, indices, check):
         indices_loaders,
         indexed_size,
         x_loader,
+        add_asserts=add_asserts,
     )
 
     return Pointwise.create(
@@ -2787,7 +2859,7 @@ def index_impl(x, indices, check):
 @register_lowering(aten.index, type_promotion_kind=None)
 def index(x, indices):
     try:
-        return index_impl(x, indices, check=True)
+        return index_impl(x, indices, add_asserts=True)
     except NotImplementedError:
         # Fallback to ATen for boolean indexing
         x.realize()
@@ -2796,7 +2868,7 @@ def index(x, indices):
 
 @register_lowering(aten._unsafe_index, type_promotion_kind=None)
 def _unsafe_index(x, indices):
-    return index_impl(x, indices, check=False)
+    return index_impl(x, indices, add_asserts=False)
 
 
 # All the indexing decompositions are written in terms of index, index_put, and index_put_
@@ -2814,7 +2886,7 @@ def index_put(x, indices, values, accumulate=False):
 
 @register_lowering(aten._unsafe_index_put)
 def _unsafe_index_put(x, indices, values, accumulate=False):
-    return index_put_impl_(clone(x), indices, values, accumulate, check=False)
+    return index_put_impl_(clone(x), indices, values, accumulate, add_asserts=False)
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -2836,10 +2908,15 @@ def index_put_fallback(self, indices, values, accumulate):
 
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=True)
+    return index_put_impl_(self, indices, values, accumulate, add_asserts=True)
 
 
-def index_put_impl_(self, indices, values, accumulate, check):
+@register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
+def _unsafe_index_put_(self, indices, values, accumulate=False):
+    return index_put_impl_(self, indices, values, accumulate, add_asserts=False)
+
+
+def index_put_impl_(self, indices, values, accumulate, add_asserts):
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
@@ -2904,6 +2981,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         indices_loaders,
         indexed_size,
         None,
+        add_asserts=add_asserts,
     )
 
     values = expand(values, expected_vals_size)
@@ -3165,7 +3243,7 @@ def upsample_nearestnd(
         x = ops.index_expr(x, torch.float32)
         x = ops.mul(x, ops.constant(scale, torch.float32))
         x = ops.to_dtype(x, torch.int32)
-        return ops.indirect_indexing(x, size, check=False)
+        return ops.indirect_indexing(x, size, add_asserts=False)
 
     def fn(idx):
         x = idx[-n:]
@@ -3294,8 +3372,8 @@ def upsample_bicubic2d_default(
             _0 = ops.constant(0, torch.int32)
             iHm1 = ops.constant(iH - 1, torch.int32)
             iWm1 = ops.constant(iW - 1, torch.int32)
-            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, check=False)
-            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, check=False)
+            iy = ops.indirect_indexing(clamp(fy, _0, iHm1), iH, add_asserts=False)
+            ix = ops.indirect_indexing(clamp(fx, _0, iWm1), iW, add_asserts=False)
             return x_loader([n, c, iy, ix])
 
         iy = ops.to_dtype(in_y, get_int_dtype(iH + 1))
@@ -3332,7 +3410,7 @@ def reflection_pad2d(x, padding):
         x = ops.index_expr(x, torch.int32)
         x = ops.sub(x, ops.index_expr(offset, torch.int32))
         x = ops.sub(size, ops.abs(ops.sub(size, ops.abs(x))))
-        return ops.indirect_indexing(x, size_num, check=False)
+        return ops.indirect_indexing(x, size_num, add_asserts=False)
 
     def fn(idx):
         *b, x, y = idx
@@ -3792,12 +3870,12 @@ def max_pool2d_with_indices_backward(
                     ops.indirect_indexing(
                         ops.minimum(ph, ops.sub(phend, ops.constant(1, torch.int32))),
                         indices_size[-2],
-                        check=False,
+                        add_asserts=False,
                     ),
                     ops.indirect_indexing(
                         ops.minimum(pw, ops.sub(pwend, ops.constant(1, torch.int32))),
                         indices_size[-1],
-                        check=False,
+                        add_asserts=False,
                     ),
                 ]
 
@@ -4243,14 +4321,14 @@ def avg_pool2d_backward(
                                     ph, ops.sub(phend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_height,
-                                check=False,
+                                add_asserts=False,
                             ),
                             ops.indirect_indexing(
                                 ops.minimum(
                                     pw, ops.sub(pwend, ops.constant(1, torch.int32))
                                 ),
                                 pooled_width,
-                                check=False,
+                                add_asserts=False,
                             ),
                         ]
                     ),
@@ -4973,6 +5051,20 @@ def accumulate_grad_(variable, new_grad):
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
     return variable
+
+
+@register_lowering(triton_kernel_wrapper_mutation)
+def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
+
+
+@register_lowering(triton_kernel_wrapper_functional)
+def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
+    kwargs = {
+        key: (clone(x) if key in tensors_to_clone else x) for key, x in kwargs.items()
+    }
+    return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
 
 
 try:

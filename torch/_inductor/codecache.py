@@ -659,6 +659,7 @@ class CompiledFxGraph:
     mutated_inputs: Set[str] = field(default_factory=set)
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
+    output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
 
     _boxed_call: Optional[bool] = None
 
@@ -759,6 +760,10 @@ def install_gcc_via_conda() -> str:
 
 def is_gcc() -> bool:
     return bool(re.search(r"(gcc|g\+\+)", cpp_compiler()))
+
+
+def is_clang() -> bool:
+    return bool(re.search(r"(clang|clang\+\+)", cpp_compiler()))
 
 
 @functools.lru_cache(None)
@@ -939,6 +944,9 @@ def valid_vec_isa_list() -> List[VecISA]:
 
 
 def pick_vec_isa() -> VecISA:
+    if config.is_fbcode():
+        return VecAVX2()
+
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
@@ -972,7 +980,10 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
-    return "-std=c++17 -Wno-unused-variable -Wno-unknown-pragmas"
+    flags = ["-std=c++17", "-Wno-unused-variable", "-Wno-unknown-pragmas"]
+    if is_clang():
+        flags.append("-Werror=ignored-optimization-argument")
+    return " ".join(flags)
 
 
 def cpp_wrapper_flags() -> str:
@@ -980,7 +991,9 @@ def cpp_wrapper_flags() -> str:
 
 
 def optimization_flags() -> str:
-    base_flags = "-O3 -DNDEBUG -ffast-math -fno-finite-math-only"
+    base_flags = "-O0 -g" if config.aot_inductor.debug_compile else "-O3 -DNDEBUG"
+    base_flags += " -ffast-math -fno-finite-math-only"
+
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
         # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
@@ -1064,7 +1077,7 @@ def get_include_and_linking_paths(
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
-) -> Tuple[Any, str, str, str, str]:
+) -> Tuple[List[str], str, str, str, str]:
     if (
         config.is_fbcode()
         and "CUDA_HOME" not in os.environ
@@ -1088,10 +1101,12 @@ def get_include_and_linking_paths(
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
+
         libs = []
+
         # No need to manually specify libraries in fbcode.
         if not config.is_fbcode():
-            libs += ["c10", "torch", "torch_cpu"]
+            libs += ["torch", "torch_cpu"]
             libs += ["gomp"]
             if not aot_mode:
                 libs += ["torch_python"]
@@ -1187,17 +1202,21 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
+    # Unconditionally import c10 for non-fbcode to use TORCH_CHECK - See PyTorch #108690
+    if not config.is_fbcode():
+        libs += ["c10"]
+        lpaths += [cpp_extension.TORCH_LIB_PATH]
+
     # third party libs
     if config.is_fbcode():
         ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
-        ipaths.append(build_paths.gcc_include())
+        ipaths.append(build_paths.cc_include())
         ipaths.append(build_paths.libgcc())
         ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.gcc_install_tools_include())
         ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
