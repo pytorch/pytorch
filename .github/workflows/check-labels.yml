@@ -48,6 +48,7 @@ jobs:
         id: requirements
         run: |
           pip install -r .github/requirements-gha-cache.txt --user
+          pip install PyGithub
 
       - name: Check labels
         env:
