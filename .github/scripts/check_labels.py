@@ -8,6 +8,7 @@ from github_utils import gh_delete_comment, gh_post_pr_comment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from label_utils import has_required_labels, is_label_err_comment, LABEL_ERR_MSG, gh_add_labels
 from trymerge import GitHubPR
+import re
 
 
 def delete_all_label_err_comments(pr: "GitHubPR") -> None:
@@ -48,22 +49,21 @@ def check_docathon_label(pr: "GitHubPR") -> None:
         return
 
     # Check for the docathon label
-    if not re.search(r'#\d{1,6}', pull_request_body): # search for six digit issue number
+    if not re.search(r'#\d{1,6}', pull_request_body):  # search for six digit issue number
         print("The pull request does not mention an issue.")
         return
     issue_number = int(re.findall(r'#(\d{1,6})', pull_request_body)[0])
     issue_labels = pr.get_labels(issue_number)
-    docathon_label_present = any(label == 'docathon-h2-2023' for label in issue_labels) # the label updated for each docathon
+    docathon_label_present = any(label == 'docathon-h2-2023' for label in issue_labels)  # the label updated for each docathon
 
     # If the issue has a docathon label, add all labels from the issue to the PR.
     if not docathon_label_present:
         print("The 'docathon-h2-2023' label is not present in the issue.")
         return
-    issue_label_names = [label.name for label in issue_labels]
+    issue_label_names = [label for label in issue_labels]
     labels_to_add = [label for label in issue_label_names if label not in pull_request_labels]
-    
     if labels_to_add:
-        gh_add_labels(pr.org, pr.repo, pr.pr_num, labels_to_add)
+        gh_add_labels(pr.org, pr.project, pr.pr_num, labels_to_add)
     else:
         print("The pull request already has the same labels.")
         return
