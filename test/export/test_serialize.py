@@ -1,6 +1,6 @@
 """
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
-with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+with test_sym_bool)
 """
 # Owner(s): ["module: dynamo"]
 import io
