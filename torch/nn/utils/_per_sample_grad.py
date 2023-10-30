@@ -3,7 +3,7 @@ import functools
 import torch
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 # dependency on `functional_call` means that this can't be exposed in utils
@@ -62,7 +62,7 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
             return og_tensor
 
     def compute_batch_size(*args, **kwargs):
-        args_and_kwargs = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
+        args_and_kwargs = pytree.tree_leaves(args) + pytree.tree_leaves(kwargs)
         batch_size = None
         for arg in args_and_kwargs:
             if not isinstance(arg, torch.Tensor):

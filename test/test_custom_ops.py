@@ -467,15 +467,15 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError()
 
     def test_unsupported_schemas(self):
-        with self.assertRaisesRegex(ValueError, "does not support non-functional"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a!) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "does not support view functions"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "no outputs"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(Tensor x) -> ()")(
                 foo
             )
@@ -1696,6 +1696,17 @@ def forward(self, x_1):
     def test_builtin_aten_ops_are_pt2_compliant(self):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
+    def test_resolve_packet(self):
+        x = torch.randn(3)
+        result = torch._C._jit_resolve_packet("aten::sum", x)
+        self.assertEqual(result, "default")
+
+        result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
+        self.assertEqual(result, "dim_IntList")
+
+        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+            result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
 
     def test_define_bad_schema(self):
         lib = self.lib()

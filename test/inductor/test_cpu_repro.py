@@ -2551,6 +2551,19 @@ class CPUReproTests(TestCase):
             # 2 generated kernels (one for var_mean, the other for result)
             assert metrics.generated_cpp_vec_kernel_count == 2
 
+    def test_int_div_vec(self):
+        def fn(x, y, mode):
+            return torch.div(x, y, rounding_mode=mode)
+
+        x = torch.randint(1, 100, (32, 32))
+        y = torch.randint(1, 100, (32, 32))
+        for mode in [None, "trunc", "floor"]:
+            with torch.no_grad():
+                metrics.reset()
+                self.common(fn, (x, y, mode))
+                # TODO: support vectorization for int truncdiv
+                assert metrics.generated_cpp_vec_kernel_count == 0
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

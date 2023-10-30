@@ -154,7 +154,12 @@ def get_symmetric_quantization_config(
         ),
     )
 
-    bias_quantization_spec = None
+    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
+        PlaceholderObserver
+    )
+    bias_quantization_spec = QuantizationSpec(
+        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
+    )
     if is_dynamic:
         quantization_config = QuantizationConfig(
             act_quantization_spec,
