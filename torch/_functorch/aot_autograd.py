@@ -594,6 +594,9 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # Whether we need to emit a set_grad_enabled mutation in the epilogue
+    set_grad_enabled: Optional[bool] = None
+
     def __post_init__(self):
         mutated_inp_indices = [
             i for i, m in enumerate(self.input_info) if m.mutates_metadata or m.mutates_data
@@ -1392,6 +1395,18 @@ from a multi-output view call")
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
+        set_grad_enabled = None
+        if ctx := torch._guards.TracingContext.get():
+            prior_grad_enabled = ctx.global_context.global_state['grad_enabled']
+            if torch.is_grad_enabled() != prior_grad_enabled:
+                set_grad_enabled = torch.is_grad_enabled()
+                aot_graphs_log.info(
+                    "grad_mode mutation encountered in graph. Will emit mutation epilogue, to set grad_mode=%s",
+                    set_grad_enabled
+                )
+        else:
+            aot_graphs_log.info("Unable to determine if grad_mode was mutated due to lack of TracingContext")
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -1402,6 +1417,7 @@ from a multi-output view call")
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
+            set_grad_enabled=set_grad_enabled,
         )
         return metadata
 
@@ -3164,7 +3180,8 @@ def create_runtime_wrapper(
                     t._dynamo_weak_dynamic_indices |= o.dynamic_dims
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
-
+        if runtime_metadata.set_grad_enabled is not None:
+            torch.set_grad_enabled(runtime_metadata.set_grad_enabled)
         return ret_outs
     return runtime_wrapper
 
@@ -4715,7 +4732,6 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-
     params = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),

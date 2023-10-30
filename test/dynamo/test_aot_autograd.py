@@ -940,6 +940,25 @@ SeqNr|OrigAten|SrcFn
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
 
+    def test_aot_grad_mode_mutation(self):
+        for compiler in ["aot_eager", "inductor"]:
+
+            def f(x):
+                y = x.clone()
+                torch.set_grad_enabled(False)
+                return y.clone()
+
+            f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
+
+            x = torch.randn(3, requires_grad=True)
+            torch.set_grad_enabled(True)
+            y_ref = f(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            y = f_compiled(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            self.assertEqual(y_ref, y)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
