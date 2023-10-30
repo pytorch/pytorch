@@ -2561,7 +2561,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 metrics.reset()
                 self.common(fn, (x, y, mode))
-                # TODO: support vectorization for int truncdiv
+                # TODO: support vectorization for int div
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
 
