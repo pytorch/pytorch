@@ -2236,10 +2236,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipFuncAttributeSharedSizeBytes", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         (
-            "CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES",
-            ("hipFuncAttributeMaxDynamicSharedMemorySize", CONV_TYPE, API_RUNTIME),
-        ),
-        (
             "CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES",
             ("hipFuncAttributeConstSizeBytes", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
@@ -2920,7 +2916,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cuEventQuery", ("hipEventQuery", CONV_EVENT, API_DRIVER)),
         ("cuEventRecord", ("hipEventRecord", CONV_EVENT, API_DRIVER)),
         ("cuEventSynchronize", ("hipEventSynchronize", CONV_EVENT, API_DRIVER)),
-        ("cuFuncSetAttribute", ("hipFuncSetAttribute", CONV_EVENT, API_DRIVER)),
         (
             "cuFuncGetAttribute",
             ("hipFuncGetAttribute", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
@@ -8580,6 +8575,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMiscFunctions.h", ("c10/hip/HIPMiscFunctions.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
         ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
+        ("c10/cuda/CUDAAllocatorConfig.h", ("c10/hip/HIPAllocatorConfig.h", API_C10)),
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
         ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
         ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
@@ -8612,6 +8608,9 @@ C10_MAPPINGS = collections.OrderedDict(
         ("setCurrentCUDAStream", ("setCurrentHIPStream", API_C10)),
         ("cuda::CUDACachingAllocator", ("hip::HIPCachingAllocator", API_C10)),
         ("CUDACachingAllocator", ("HIPCachingAllocator", API_C10)),
+        ("cuda::CUDAAllocatorConfig", ("hip::HIPAllocatorConfig", API_C10)),
+        ("CUDAAllocatorConfig", ("HIPAllocatorConfig", API_C10)),
+        ("pinned_use_cuda_host_register", ("pinned_use_hip_host_register", API_C10)),
         ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
         ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),

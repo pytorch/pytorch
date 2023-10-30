@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import copy
 from collections.abc import Sequence
 from functools import partial
 import warnings
@@ -19,6 +20,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
+    integral_types_and,
 )
 
 from torch.testing._internal.common_utils import (
@@ -71,6 +73,7 @@ from torch._subclasses.fake_utils import outputs_alias_inputs
 
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
@@ -659,6 +662,13 @@ class TestCommon(TestCase):
             else list(supported_dtypes)[0]
         )
 
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
+
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result
@@ -779,6 +789,14 @@ class TestCommon(TestCase):
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
+
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
+
         for sample in samples:
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -1429,6 +1447,18 @@ class TestCommon(TestCase):
 
         self.fail(msg)
 
+    # Validates that each OpInfo that sets promotes_int_to_float=True does as it says
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops((op for op in op_db if op.promotes_int_to_float), allowed_dtypes=integral_types_and(torch.bool))
+    def test_promotes_int_to_float(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            output = op(sample.input, *sample.args, **sample.kwargs)
+            if not output.dtype.is_floating_point:
+                self.fail(
+                    f"The OpInfo sets `promotes_int_to_float=True`, but {dtype} was promoted to {output.dtype}."
+                )
+
 
 class TestCompositeCompliance(TestCase):
     # Checks if the operator (if it is composite) is written to support most
@@ -1600,7 +1630,6 @@ class TestMathBits(TestCase):
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cfloat,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_conj_view(self, device, dtype, op):
         if not op.test_conjugated_samples:
             self.skipTest("Operation doesn't support conjugated inputs.")
@@ -1623,7 +1652,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.double,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1643,7 +1671,6 @@ class TestMathBits(TestCase):
         )
 
     @ops(ops_and_refs, allowed_dtypes=(torch.cdouble,))
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_neg_conj_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
@@ -1775,6 +1802,7 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
+        '_refs.floor_divide',
         '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
@@ -1933,7 +1961,6 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1988,7 +2015,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("_segment_reduce", "lengths"),
     xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
     xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip('nn.functional.ctc_loss'),
@@ -2169,6 +2195,15 @@ class TestFakeTensor(TestCase):
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
+
+    @ops([op for op in op_db if op.is_factory_function])
+    def test_strided_layout(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            kwargs = sample.kwargs.copy()
+            kwargs['layout'] = torch.strided
+            strided_result = op(sample.input, *sample.args, **kwargs)
+            self.assertEqual(strided_result.layout, torch.strided)
 
 
 instantiate_device_type_tests(TestCommon, globals())

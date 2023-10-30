@@ -3423,9 +3423,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                     sample_input = error_input.sample_input
                     args = (sample_input.input,) + tuple(sample_input.args)
                     kwargs = sample_input.kwargs
-                    for args, in_dims, _ in generate_vmap_inputs(args, {}):
+                    for batched_args, in_dims, _ in generate_vmap_inputs(args, {}):
                         with self.assertRaises(Exception):
-                            vmap(op, in_dims)(*args, **kwargs)
+                            vmap(op, in_dims)(*batched_args, **kwargs)
 
             # Sample inputs check
             sample_inputs_op = {
@@ -3455,16 +3455,16 @@ class TestVmapOperatorsOpInfo(TestCase):
                     continue
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
-                for args, in_dims, _ in generate_vmap_inputs(
+                for batched_args, in_dims, _ in generate_vmap_inputs(
                         args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
                     for func in aliases:
-                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only, postprocess_fn)
+                        self.vmap_outplace_test(func, batched_args, kwargs, in_dims, check_shape_only, postprocess_fn)
                     if op.name in skip_inplace:
                         continue
                     if not is_valid_inplace_sample_input(sample_input, op, op.inplace_variant):
                         continue
                     for func in inplace_aliases:
-                        self.vmap_inplace_test(func, args, kwargs, in_dims, postprocess_fn)
+                        self.vmap_inplace_test(func, batched_args, kwargs, in_dims, postprocess_fn)
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
@@ -3512,7 +3512,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.mm', 'reduce'),  # sparse
         xfail("NumpyCubeNotComposableAutogradFunction"),  # Not composable autograd.Function
         skip('_softmax_backward_data'),
-        skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('linalg.eigh', ''),  # not always return the same result for the same input, see test_linalg_eigh for manual test
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
@@ -3751,27 +3751,19 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
-        xfail('_upsample_bilinear2d_aa'),
         xfail('argsort'),  # aten::argsort.stable hit the vmap fallback which is currently disabled
         xfail('searchsorted'),  # aten::searchsorted.Scalar hit the vmap fallback which is currently disabled
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
         inplace_failures = (
-            'abs',
-            'acos',
-            'acosh',
             'addbmm',
             'addcdiv',
             'addcmul',
             'addmm',
             'addmv',
             'addr',
-            'asin',
-            'asinh',
             'atan2',
-            'atan',
-            'atanh',
             'baddbmm',
             'clamp',
             'conj_physical',
@@ -3846,7 +3838,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         assert len(opinfos) > 0
 
         for op in opinfos:
-            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=False,
+            self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
     def test_slogdet(self, device):
@@ -4203,11 +4195,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         gout = torch.randn(2, 2, device=device)
         args = (leaf, gout)
 
-        for args, in_dims, _, in generate_vmap_inputs(args, {}):
+        for batched_args, in_dims, _, in generate_vmap_inputs(args, {}):
             if in_dims[1] is None:
                 # triggers some composite compliance problem
                 continue
-            self.vmap_outplace_test(push_vjp, args, {}, in_dims)
+            self.vmap_outplace_test(push_vjp, batched_args, {}, in_dims)
 
     def test_advanced_indexing(self, device):
         def test(f, args):

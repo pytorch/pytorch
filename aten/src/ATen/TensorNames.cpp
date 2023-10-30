@@ -2,7 +2,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace namedinference {
+namespace at::namedinference {
 
 
 Dimname TensorName::toDimname() const {
@@ -126,4 +126,4 @@ std::vector<Dimname> TensorNames::toDimnameVec() const {
 }
 
 
-}} // namespace at::namedinference
+} // namespace at::namedinference

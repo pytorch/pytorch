@@ -6,7 +6,7 @@ from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._TensorBase, method), docstr)
+    add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
 common_args = parse_kwargs(
@@ -4217,10 +4217,12 @@ memory is uninitialized.
 
 .. note::
 
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, new
-    elements are initialized to prevent nondeterministic behavior from using
-    the result as an input to an operation. Floating point and complex values
-    are set to NaN, and integer values are set to the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, new elements are initialized to prevent nondeterministic behavior
+    from using the result as an input to an operation. Floating point and
+    complex values are set to NaN, and integer values are set to the maximum
+    value.
 
 Args:
     sizes (torch.Size or int...): the desired size

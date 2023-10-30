@@ -1,5 +1,6 @@
 # Owner(s): ["module: nestedtensor"]
 
+import io
 import itertools
 import unittest
 from functools import partial
@@ -14,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     onlyCUDA,
     skipMeta,
+    PYTORCH_CUDA_MEMCHECK,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import (
@@ -27,6 +29,8 @@ from torch.testing._internal.common_utils import (
     subtest,
     TestCase,
 )
+
+from torch.nested._internal.nested_tensor import jagged_from_list, buffer_from_jagged
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -101,14 +105,14 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
 # Alternate approach to generating a random NT.
 # dims should be something like [5, None, 10], with None indicating that a
 # random ragged structure should be used
-def random_nt_from_dims(dims, device=None, dtype=None):
+def random_nt_from_dims(dims, device=None, dtype=None, requires_grad=False):
     sizes = [
         [d if d is not None else torch.randint(2, 10, size=(1,)).item() for d in dims[1:]]
         for d in range(dims[0])
     ]
     return torch.nested.nested_tensor([
         torch.randn(*size) for size in sizes
-    ], device=device, dtype=dtype)
+    ], device=device, dtype=dtype, requires_grad=requires_grad)
 
 
 # Creates an NT matching another NT's number of components and
@@ -394,6 +398,10 @@ class TestNestedTensor(TestCase):
         # Test non_contiguous case
         assert not nt_noncontiguous.is_contiguous()
         self.assertEqual(nt_contiguous, nt_noncontiguous.contiguous())
+
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
 
     @torch.inference_mode()
     def test_repr_string(self):
@@ -1112,15 +1120,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "split_with_sizes expects split_sizes to sum exactly to 20",
             lambda: torch.split_with_sizes(nt, bad_split_sizes, dim=-1))
-
-        # Failure when calling backward on a split_with_sizes
-        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        nt_grad = torch.nested.as_nested_tensor([a, b])
-        split_sizes = [2, 6, 4]
-        splits = torch.split_with_sizes(nt_grad, split_sizes, dim=-1)
-        self.assertRaisesRegex(RuntimeError, "the derivative for 'aten::split_with_sizes' is not implemented",
-                               lambda: splits[0].backward(splits[0].clone()))
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
@@ -2691,6 +2690,22 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    def test_split_with_sizes_flow_through(self, device):
+        a = torch.randn(2, 5, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 5, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 5, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            splits = nt.split_with_sizes([2, 3], dim=-1)
+            unbound = splits[1].unbind()
+            d = unbound[0]
+            d = torch.pow(d, 2)
+            return d
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
     def test_indexing_backward(self, device):
         x0 = torch.randn((2, 5))
         x1 = torch.randn((3, 4))
@@ -2826,10 +2841,214 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+# We can probably parametrizing existing tests instead of having a separate
+# test class as we begin to support more ops. Also maybe rewrite with OpInfos.
+class TestNestedTensorSubclass(TestCase):
+    def _get_example_tensor_lists(self):
+        return [
+            # (B, *, D) with B=4
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(4, 5),
+                torch.randn(6, 5)
+            ],
+            # (B, *, D_0, D_1) with B=5
+            [
+                torch.randn(2, 5, 6),
+                torch.randn(3, 5, 6),
+                torch.randn(4, 5, 6),
+                torch.randn(5, 5, 6),
+                torch.randn(6, 5, 6),
+            ],
+        ]
+
+    def test_tensor_attributes(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt, _offsets = jagged_from_list([a, b, c], None)
+
+        for op in (
+            torch.ops.aten.is_non_overlapping_and_dense.default,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.dim.default,
+            torch.ops.aten.sym_numel.default,
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.sym_storage_offset.default,
+        ):
+            op(nt)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "directly calling torch.ops.aten.size"):
+            torch.ops.aten.size.default(nt)
+
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets, coeff=1)
+        self.assertEqual(nt.size(), (3, singleton_int, 3))
+        self.assertEqual(nt.shape, (3, singleton_int, 3))
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.numel(), 27)
+
+    def test_linear(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = torch.nn.functional.linear(nt, weight)
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+
+    def test_unary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = nt.sin().cos()
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+
+    def test_binary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        # Incorrect usage: shape check will fail if the offsets tensor are not
+        #                  the same exact tensor object
+        nt1, _ = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], None)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot call binary pointwise function .* with inputs of shapes",
+            lambda: nt1 * nt2)
+
+        # Correct usage: chain the calls using the same offsets tensor object
+        def grad_test_func(a, b, c):
+            nt1, offsets = jagged_from_list([a, b, c], None)
+            nt2, offsets = jagged_from_list([a, b, c], offsets)
+            out = nt1 * nt2
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    def test_serialization(self, device, dtype, requires_grad):
+
+        def compare_metadata(nt1, nt2):
+            self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
+            self.assertEqual(nt1._nested_tensor_strides(), nt2._nested_tensor_strides())
+            self.assertEqual(nt1._nested_tensor_storage_offsets(),
+                             nt2._nested_tensor_storage_offsets())
+
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for a in [nt_contiguous, nt_noncontiguous]:
+            buffer = io.BytesIO()
+            serialized = torch.save(a, buffer)
+            buffer.seek(0)
+            b = torch.load(buffer)
+            # should be both conceptually equal and metadata equivalent
+            self.assertEqual(a, b)
+            compare_metadata(a, b)
+            # should be conceptually equal but not necessarily metadata equivalent
+            self.assertEqual(b, nt_contiguous)
+            self.assertEqual(b, nt_noncontiguous)
+
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @onlyCUDA
+    def test_pin_memory(self, device):
+        nt_contiguous, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7))
+        for nt in [nt_contiguous, nt_noncontiguous]:
+            self.assertFalse(nt.is_pinned())
+            pinned = nt.pin_memory(device)
+            self.assertTrue(pinned.is_pinned())
+            self.assertEqual(nt, pinned)
+            self.assertNotEqual(nt.data_ptr(), pinned.data_ptr())
+            # test that pin_memory on already pinned tensor has no effect
+            self.assertIs(pinned, pinned.pin_memory())
+            self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
+
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    def test_jagged_layout_construction(self, device, dtype, requires_grad):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged,
+                requires_grad=requires_grad)
+
+            device = torch.device(device)
+            expected_dim = tensor_list[0].dim() + 1
+            batch_size = len(tensor_list)
+            self.assertEqual(nt.dim(), expected_dim)
+            self.assertEqual(nt.device, device)
+            self.assertEqual(nt.dtype, dtype)
+            self.assertEqual(nt.layout, torch.jagged)
+            self.assertEqual(nt.requires_grad, requires_grad)
+            self.assertEqual(nt.values().device, device)
+            self.assertEqual(nt.offsets().device, device)
+            self.assertEqual(nt.shape[0], batch_size)
+            self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
+            self.assertEqual(nt.shape[2:], tensor_list[0].shape[1:])
+
+    @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @onlyCUDA
+    def test_jagged_layout_construction_with_pinned_memory(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device="cpu",
+                pin_memory=True)
+
+            self.assertEqual(nt.device, torch.device('cpu'))
+            self.assertTrue(nt.is_pinned())
+
+    @dtypes(torch.double, torch.half)
+    @onlyCUDA
+    def test_device_dtype_transfer_maintains_offsets(self, device, dtype):
+        for tensor_list in self._get_example_tensor_lists():
+            orig_device = torch.device("cpu")
+            orig_dtype = torch.float32
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=orig_device,
+                dtype=orig_dtype)
+
+            self.assertEqual(torch.int64, nt.offsets().dtype)
+            nt = nt.to(device=device).to(dtype=dtype)
+
+            # offsets should still be int64 on the original device
+            self.assertEqual(orig_device, nt.offsets().device)
+            self.assertEqual(torch.int64, nt.offsets().dtype)
+
+    def test_unbind(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t, tensor_list[i])
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+instantiate_device_type_tests(TestNestedTensorSubclass, globals())
 
 if __name__ == '__main__':
     run_tests()

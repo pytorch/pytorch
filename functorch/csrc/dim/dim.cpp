@@ -103,10 +103,10 @@ void initializeGlobals(Arena & A) {
     torch_Tensor = (PyTypeObject*) torch.attr("Tensor").ptr();
     torch_Tensor___mul__ = torch.attr("Tensor").attr("__mul__");
 
-    torch_Tensor_expand = torch.attr("_C").attr("_TensorBase").attr("expand");
-    torch_Tensor_split = torch.attr("_C").attr("_TensorBase").attr("split");
+    torch_Tensor_expand = torch.attr("_C").attr("TensorBase").attr("expand");
+    torch_Tensor_split = torch.attr("_C").attr("TensorBase").attr("split");
     torch_Tensor_copy_ = torch.attr("Tensor").attr("copy_");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     auto TensorBase = (PyTypeObject*) py_TensorBase.ptr();
     THPVariable_getitem = TensorBase->tp_as_mapping->mp_subscript;
     THPVariable_setitem = TensorBase->tp_as_mapping->mp_ass_subscript;
@@ -1118,7 +1118,7 @@ int64_t _Tensor_ndim(mpy::handle h) {
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
     if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
@@ -3188,7 +3188,7 @@ PyObject* _patch_tensor_class(PyObject * self_,
     PY_BEGIN
 
     auto torch = mpy::import("torch");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     replaceMappingIfMatches(py_TensorBase);
 
     Py_RETURN_NONE;

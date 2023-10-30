@@ -29,7 +29,7 @@ Other callbacks don't provide exception safety so avoid there.
 
 */
 
-#define DEFAULT_BACKLOG 2048
+#define DEFAULT_BACKLOG 16384
 #define MAX_KEY_COUNT (128 * 1024)
 #define MAX_STRING_LEN (8 * 1024)
 #define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
