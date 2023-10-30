@@ -623,6 +623,9 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
             raw_items = bound.arguments
+        elif not args:
+            # CustomDict() init using keyword arguments for key-value pairs
+            raw_items = collections.OrderedDict(kwargs)
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             raw_items = args[0].items
