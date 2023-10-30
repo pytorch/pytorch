@@ -334,7 +334,9 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
-    dim.__module__ = inspect.getmodule(inspect.stack()[1][0]).__name__  # type: ignore[union-attr]
+    dim.__module__ = getattr(
+        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
+    )
     return dim
 
 
@@ -412,7 +414,7 @@ def export(
         dynamic_shapes: Should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
          2) a tuple that specifies dynamic shape specifications for each input in original order.
-         if you are specifying dynamism on keyword args, you will need to pass them in the order that
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
          is defined in the original function signature.
 
          The dynamic shape of a tensor argument can be specified as either

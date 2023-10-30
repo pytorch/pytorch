@@ -107,7 +107,7 @@ def _process_dynamic_shapes(
             for i, shape in enumerate(dynamic_shapes):
                 yield from tree_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
-            if not isinstance(dynamic_shapes, (Mapping, Sequence)):
+            if not isinstance(dynamic_shapes, Mapping):
                 raise UserError(
                     UserErrorType.INVALID_INPUT,
                     f"Expected dynamic_shapes of a {type(combined_args)} to be a Mapping, "
@@ -118,16 +118,8 @@ def _process_dynamic_shapes(
                     UserErrorType.INVALID_INPUT,
                     f"Expected {dynamic_shapes} to have {len(combined_args)} items",
                 )
-
-            if isinstance(dynamic_shapes, Mapping):
-                for k, shape in dynamic_shapes.items():
-                    yield from tree_zip(combined_args[k], shape)
-            else:
-                # This means user didn't specify dynamic shapes
-                # with argument names.
-                combined_args_list = list(combined_args.values())
-                yield from tree_zip(combined_args_list, dynamic_shapes)
-
+            for k, shape in dynamic_shapes.items():
+                yield from tree_zip(combined_args[k], shape)
         elif dataclasses.is_dataclass(combined_args):
             if not type(dynamic_shapes) == type(combined_args):
                 raise UserError(
@@ -217,6 +209,8 @@ def _process_dynamic_shapes(
         signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
         combined_args = signature.bind(*args, **kwargs).arguments
 
+    # This means user didn't specify dynamic shapes with argument names.
+    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
@@ -243,10 +237,10 @@ def export__RC__(
     API for exporting with dynamic shape specifications instead of constraints.
     It should be considered "release candidate" (RC), meant to replace `export`.
 
-    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
+    Here, `dynamic_shapes` is expected to be a dict from
     argument names of `f` to dynamic shape specifications OR a tuple where each element
     corresponds to the original order of the arguments defined in the function signature
-    , as follows:
+    ,as follows:
     - The dynamic shape of a tensor argument can be specified as:
       - Either a dict from dynamic dimension indices to Dim types. It is not
         required to include static dimension indices in this dict, but when
@@ -780,7 +774,7 @@ def _export(
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
         inputs=[make_argument_spec(node) for node in gm.graph.nodes if node.op == "placeholder"],
-        outputs=[make_argument_spec(node) for node in pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]],
+        outputs=[make_argument_spec(node) for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)],
     )
     export_graph_signature = ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
 
@@ -950,7 +944,7 @@ def aot_compile(
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
     gm = _export_to_torch_ir(f, args, kwargs, constraints)
-    flat_example_inputs, _ = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    flat_example_inputs = pytree.tree_leaves(combine_args_kwargs(args, kwargs))
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]

@@ -1525,12 +1525,14 @@ def forward(self, arg0_1):
             return a.sum() + b.sum() + kw1.sum() - kw2.sum()
 
         dim = torch.export.Dim("dim")
-        dim_2 = torch.export.Dim("dim_2")
+        dim_for_kw1 = torch.export.Dim("dim_for_kw1")
         ep = torch.export.export(
             foo,
             (torch.randn(4, 4), torch.randn(4, 4)),
             {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
-            dynamic_shapes=(None, {0: dim}, {0: dim_2}, None))
+            # We are specifying dynamism on the first kwarg even though user passed in
+            # different order
+            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None))
 
         test_inp = (torch.randn(4, 4), torch.randn(7, 4))
         test_kwargs = {"kw2": torch.ones(4, 4), "kw1": torch.zeros(9, 4)}
