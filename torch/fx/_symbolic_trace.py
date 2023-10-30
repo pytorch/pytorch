@@ -306,7 +306,8 @@ class Tracer(TracerBase):
         #. Given a non-Proxy Tensor object, emit IR for various cases:
 
             * For a Parameter, emit a ``get_attr`` node referring to that Parameter,
-              if not exist, create a new ``get_attr`` node and add it to the graph.
+              if it is an external parameter, it will be added as a special
+              attribute similar to non-parameter and non-buffer tensors.
             * For a non-Parameter Tensor, store the Tensor away in a special
               attribute referring to that attribute.
 
@@ -321,6 +322,10 @@ class Tracer(TracerBase):
 
             The value ``a`` converted into the appropriate ``Argument``
         """
+        # The base tracer is used to construct Graphs when there is no associated
+        # module hierarchy, so it can never create parameter references.
+        # The default tracer adds the ability to refer to parameters when
+        # tracing modules.
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:
