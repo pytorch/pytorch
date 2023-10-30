@@ -60,14 +60,14 @@ from .api.python import (  # used by third-party packages
 
 __all__ = [
     "PyTree",
-    "TreeSpec",
-    "LeafSpec",
     "Context",
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
