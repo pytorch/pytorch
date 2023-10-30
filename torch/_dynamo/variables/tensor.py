@@ -4,6 +4,7 @@ import operator
 import types
 from typing import Dict, List
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -65,7 +66,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = [
+    _nonvar_fields = {
         "proxy",
         "dtype",
         "device",
@@ -76,7 +77,11 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-    ]
+        "is_sparse",
+        "class_type",
+        "specialized_value",
+        *VariableTracker._nonvar_fields,
+    }
 
     def get_real_value(self):
         """
@@ -961,9 +966,9 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", None)
-        need_unwrap = kwargs.pop("need_unwrap", True)
+    def __init__(
+        self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
+    ):
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -976,17 +981,6 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
-
-    def as_specialized(self, tx):
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
 
 
 class FakeItemVariable(TensorVariable):
