@@ -1546,7 +1546,7 @@ class TritonKernel(Kernel):
                 sum_ = ops.reduction(dtype, dtype, "sum", value)
                 self.inside_reduction = False
                 rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.div(sum_, rnumel)
+                mean = ops.truediv(sum_, rnumel)
 
                 self.inside_reduction = True
                 dx = ops.sub(value, mean)
