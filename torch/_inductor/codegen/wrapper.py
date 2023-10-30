@@ -148,7 +148,7 @@ class MemoryPlanningState:
         self.reuse_pool: Dict[Any, List[FreeIfNotReusedLine]] = collections.defaultdict(
             list
         )
-        self.total_allocated_buffer_size: Int = 0
+        self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key):
         return bool(self.reuse_pool.get(key, None))
@@ -339,6 +339,7 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.user_defined_kernel_count = 0
+        self.unbacked_symbol_decls = set()
         self.allow_stack_allocation = None
         self.stack_allocated_buffers = {}
 
@@ -575,7 +576,7 @@ class WrapperCodeGen(CodeGen):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
             self.allow_stack_allocation = (
-                self.allow_stack_allocation != False
+                self.allow_stack_allocation is not False
                 and config.allow_stack_allocation
                 and planning_state.total_allocated_buffer_size
                 <= MAX_STACK_ALLOCATION_SIZE
@@ -860,6 +861,31 @@ class WrapperCodeGen(CodeGen):
             """
         )
         compile_wrapper.splice(kernel.src, strip=True)
+
+        # Also include any possible kernel being called indirectly
+        from triton import JITFunction
+
+        symbols_included = {original_name}
+
+        def traverse(cur_kernel):
+            for symbol_name in cur_kernel.fn.__code__.co_names:
+                if symbol_name in symbols_included:
+                    continue
+                if symbol_name in cur_kernel.fn.__globals__:
+                    symbol = cur_kernel.fn.__globals__[symbol_name]
+                    if isinstance(symbol, JITFunction):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline("@triton.jit")
+                        compile_wrapper.splice(symbol.src, strip=True)
+                        symbols_included.add(symbol_name)
+                        traverse(symbol)
+                    elif isinstance(symbol, (int, str, bool)):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
+
+        traverse(kernel)
+
         compile_wrapper.writeline("''')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1101,6 +1127,15 @@ class WrapperCodeGen(CodeGen):
         self.allocated.add(output_buffer.get_name())
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
+
+    def codegen_unbacked_symbol_decl(self, symbol):
+        name = str(symbol)
+        if name in self.unbacked_symbol_decls:
+            return name
+        else:
+            # When in CppWrapperCodeGen, we should only generate the declaration once
+            self.unbacked_symbol_decls.add(name)
+            return self.declare + name
 
     def is_statically_known_int(self, x):
         try:
@@ -1448,6 +1483,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
 
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
+
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
                     output, sympy.Expr
@@ -1490,7 +1540,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             f"cached_output_{next(self.cached_output_id)}"
                         )
                         self.wrapper_call.writeline(
-                            f"thread_local ThreadLocalCachedOutputTensor<std::decay_t<decltype({output})>> {cached_output_name}({output});"
+                            f"thread_local ThreadLocalCachedOutputTensor<std::decay_t<decltype({output})>> "
+                            f"{cached_output_name}({output});"
                         )
                         self.wrapper_call.writeline(
                             f"{cached_output_name}.copy_data_from({output});"
@@ -1499,7 +1550,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
                         )
                         self.wrapper_call.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor.get(), output_handles[{idx}]));"
+                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor.get(), "
+                            f"output_handles[{idx}]));"
                         )
                     self.wrapper_call.writeline("}")
 

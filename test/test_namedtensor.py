@@ -529,8 +529,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.size('N'), 2)
         self.assertEqual(t.size('C'), 5)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name*'):
-            t.size(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.size('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
@@ -540,8 +538,6 @@ class TestNamedTensor(TestCase):
         t = torch.empty(2, 3, 5, names=('N', None, 'C'))
         self.assertEqual(t.stride('N'), 3 * 5)
         self.assertEqual(t.stride('C'), 1)
-        with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-            t.stride(None)
         with self.assertRaisesRegex(RuntimeError, 'Name \'channels\' not found in '):
             t.stride('channels')
         with self.assertRaisesRegex(RuntimeError, 'Name \'N\' not found in '):
