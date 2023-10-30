@@ -66,14 +66,11 @@ const DeviceAndResource kineto_ids() {
 }
 
 void addMetadata(
-    const activity_t* activity,
+    activity_t* activity,
     const std::string& key,
     const std::string& value) {
 #ifdef USE_KINETO
-  // ActivityTraceInterface returns const pointers, so we have to cast away the
-  // constness to add metadata.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  const_cast<activity_t*>(activity)->addMetadata(key, value);
+  activity->addMetadata(key, value);
 #endif // USE_KINETO
 }
 

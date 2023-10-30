@@ -634,9 +634,9 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
 }
 
 RecordQueue::RecordQueue(
-    const ProfilerConfig& config,
+    ProfilerConfig config,
     std::set<ActivityType> activities)
-    : id_(++queue_id_), config_{config}, activities_{std::move(activities)} {
+    : id_(++queue_id_), config_{std::move(config)}, activities_{std::move(activities)} {
   if (tracePython()) {
     python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
@@ -810,7 +810,7 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    const auto* activity = cpu_trace.addCPUActivity(
+    auto* activity = cpu_trace.addCPUActivity(
         e->name(),
         e->kinetoType(),
         e->kineto_info_,

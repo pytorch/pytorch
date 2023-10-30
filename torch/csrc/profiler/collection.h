@@ -621,7 +621,7 @@ class TORCH_API ThreadLocalSubqueue {
 
 class TORCH_API RecordQueue {
  public:
-  RecordQueue(const ProfilerConfig& config, std::set<ActivityType> activities);
+  RecordQueue(ProfilerConfig config, std::set<ActivityType> activities);
 
   bool tracePython() const;
   ThreadLocalSubqueue* getSubqueue();

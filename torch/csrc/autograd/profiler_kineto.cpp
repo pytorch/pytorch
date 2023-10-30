@@ -167,7 +167,8 @@ struct MetadataBase {
 
   void addMetadata(const std::string& key, const std::string& value) {
     if (kineto_activity_ && !value.empty() && value != "\"\"") {
-      torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      torch::profiler::impl::kineto::addMetadata(const_cast<torch::profiler::impl::kineto::activity_t*>(kineto_activity_), key, value);
     }
   }
 
