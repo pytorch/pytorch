@@ -894,7 +894,6 @@ class TestOperators(TestCase):
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
         skip('nn.functional.multi_head_attention_forward'),  # randomness
-        xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
@@ -957,6 +956,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
+        xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
     }))
     def test_vmapvjp(self, device, dtype, op):
@@ -1186,8 +1186,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('nn.functional.ctc_loss'),
-        xfail('as_strided'),
-        xfail('stft'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.fractional_max_pool2d'),
