@@ -414,12 +414,6 @@ class GuardBuilder(GuardBuilderBase):
                 ok_types,
             ), t.__name__
 
-        if istype(val, (torch.device, torch.dtype)):
-            # TODO(jansel): is this slow? perhaps optimize it
-            code = [f"str({ref}) == {str(val)!r}"]
-            self._produce_guard_code(guard, code)
-            return
-
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
             code = list()
