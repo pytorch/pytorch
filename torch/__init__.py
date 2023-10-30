@@ -1782,3 +1782,5 @@ def __getattr__(name):
 
 from . import _logging
 _logging._init_logs()
+
+from .dict import *
