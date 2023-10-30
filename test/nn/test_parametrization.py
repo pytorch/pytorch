@@ -11,7 +11,7 @@ import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
+    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import gradcheck
@@ -1098,6 +1098,7 @@ class TestNNParametrization(NNTestCase):
         # check that the new transfer didn't change the value for the from_module
         self.assertEqual(hold_test_param, model.test_param)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/112424")
     def test_new_spectral_norm(self):
         with set_default_dtype(torch.double):
             input = torch.randn(3, 5)

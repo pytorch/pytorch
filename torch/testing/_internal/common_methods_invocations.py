@@ -13979,7 +13979,16 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.expectedFailure,
+                "TestCompositeCompliance",
+                "test_backward",
                 dtypes=[torch.float32],
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMathBits",
+                "test_neg_view",
+                dtypes=[torch.float64],
                 device_type='cuda',
                 active_if=(TEST_WITH_TORCHINDUCTOR)
             ),
