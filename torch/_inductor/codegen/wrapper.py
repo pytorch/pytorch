@@ -330,7 +330,7 @@ class WrapperCodeGen(CodeGen):
         self.kenel_numel_expr = set()
         self.lines = []
         self.declare = ""
-        self.declare_reference = ""
+        self.declare_maybe_reference = ""
         self.ending = ""
         self.open_bracket = "["
         self.closed_bracket = "]"
@@ -1026,7 +1026,7 @@ class WrapperCodeGen(CodeGen):
         return f"del {buffer.get_name()}"
 
     def codegen_exact_buffer_reuse(self, old_name: str, new_name: str, del_line: str):
-        return f"{self.declare_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
+        return f"{self.declare_maybe_reference}{new_name} = {old_name}{del_line}{self.ending}  {self.comment} reuse"
 
     def make_buffer_reuse(self, old, new, delete_old: bool):
         assert old.get_dtype() == new.get_dtype()
@@ -1046,13 +1046,14 @@ class WrapperCodeGen(CodeGen):
         )
         if reinterpret_view in self.stack_allocated_buffers:
             self.stack_allocated_buffers[new_name] = new
-        return f"{self.declare_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
 
     def codegen_deferred_allocation(self, name, layout):
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_reference}{name} = {layout.view.codegen_reference()}{self.ending}  {self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
+                f"{self.comment} alias",
             )
         )
 
@@ -1181,7 +1182,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         super().__init__()
 
         self.declare = "auto "
-        self.declare_reference = "decltype(auto) "
+        self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
         self.open_bracket = "{"
         self.closed_bracket = "}"
