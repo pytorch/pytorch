@@ -353,7 +353,7 @@ def _safe_zero_index(x):
 # jacrev and jacfwd don't support complex functions
 # Helper function to throw appropriate error.
 def error_if_complex(func_name, args, is_input):
-    flat_args = pytree.arg_tree_leaves(*args)
+    flat_args = pytree.tree_leaves(args)
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
             input_or_output = ("inputs" if is_input else "outputs")
@@ -539,7 +539,7 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results = pytree.arg_tree_leaves(*chunked_result)
+                flat_results = pytree.tree_leaves(chunked_result)
 
                 if chunk_size == 1:
                     flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)

@@ -74,7 +74,7 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
 
     @staticmethod
     def flat_ids(args):
-        flat_args = pytree.arg_tree_leaves(*args)
+        flat_args = pytree.tree_leaves(args)
         return tuple(
             (t._cdata, t.storage().data_ptr())
             for t in flat_args

@@ -187,7 +187,6 @@ class InputGen:
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
         args = pytree.arg_tree_leaves(*args, **kwargs)
-        args = args + kwargs
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
