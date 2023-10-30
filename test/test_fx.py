@@ -3563,7 +3563,7 @@ class TestFX(JitTestCase):
 
         def verify_pytree(f, inp):
             val = pytree.tree_map(lambda x: torch.randn(3) if isinstance(x, PHBase) else x, inp)
-            num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
+            num_flat_args = len([i == PH for i in pytree.tree_leaves(inp)])
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
