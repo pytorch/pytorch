@@ -303,7 +303,11 @@ def convert_frame_assert(
         ):
             return None
         if code.co_name == "<genexpr>" and code.co_filename.endswith(
-            ("transformers/file_utils.py", "transformers/utils/generic.py")
+            (
+                "transformers/file_utils.py",
+                "transformers/utils/generic.py",
+                "diffusers/utils/outputs.py",
+            )
         ):
             # not needed, but cleans up torchbench error stats
             return None
