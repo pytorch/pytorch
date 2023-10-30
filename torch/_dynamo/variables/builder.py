@@ -431,8 +431,12 @@ class VariableBuilder:
 
             def build_key_value(k, v):
                 nonlocal idx
-                source_key = ConstDictKeySource(self.get_source(), idx)
-                key = VariableBuilder(self.tx, source_key)(k).add_guards(guards)
+                if ConstantVariable.is_literal(k):
+                    key = ConstantVariable.create(k).add_guards(guards)
+                    source_key = k
+                else:
+                    source_key = ConstDictKeySource(self.get_source(), idx)
+                    key = VariableBuilder(self.tx, source_key)(k).add_guards(guards)
 
                 source_value = GetItemSource(self.get_source(), source_key)
                 value = VariableBuilder(self.tx, source_value)(v)
