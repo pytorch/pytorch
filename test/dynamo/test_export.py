@@ -2196,9 +2196,9 @@ def forward(self, x):
             return t.x + t.y
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Dataclasses are supposed to be pytree nodes to be exportable. "
-            "Please take a look at torch.export.register_dataclass for more information",
+            AssertionError,
+            "graph-captured input #1, of type .*Tensor.*, "
+            "is not among original inputs of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
@@ -4253,8 +4253,8 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Dataclasses are supposed to be pytree nodes to be exportable. "
-            "Please take a look at torch.export.register_dataclass for more information.",
+            "Dataclasses are supposed to be pytree nodes to be exportable."
+            "Please take a look at torch._export.utils.register_dataclass_as_pytree_node for more information.",
         ):
             gm, _ = torch._dynamo.export(Mod())(Input(foo=torch.ones(2, 3)))
 

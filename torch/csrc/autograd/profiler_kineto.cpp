@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -57,7 +56,7 @@ inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return c10::getTime() / 1000;
+  return torch::profiler::impl::getTime() / 1000;
 #endif // USE_KINETO
 }
 
@@ -322,7 +321,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   void reportVulkanEventToProfiler(torch::profiler::impl::vulkan_id_t id) {
     if (!config_.disabled()) {
       record_queue_.getSubqueue()->emplace_vulkan_event(
-          c10::getApproximateTime(), id);
+          torch::profiler::impl::getApproximateTime(), id);
     }
   }
 
@@ -334,7 +333,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_allocation_event(
-          c10::getApproximateTime(),
+          torch::profiler::impl::getApproximateTime(),
           ptr,
           alloc_size,
           total_allocated,
@@ -351,7 +350,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       c10::Device device) override {
     if (config_.profile_memory && !config_.disabled()) {
       record_queue_.getSubqueue()->emplace_ooms_event(
-          c10::getApproximateTime(),
+          torch::profiler::impl::getApproximateTime(),
           alloc_size,
           total_allocated,
           total_reserved,
@@ -422,7 +421,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
   }
 
   uint64_t start_time_;
-  c10::ApproximateClockToUnixTimeConverter clock_converter_;
+  torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
   torch::profiler::impl::RecordQueue record_queue_;
   std::vector<KinetoEvent> kineto_events_;
   std::vector<experimental_event_t> event_tree_;
@@ -453,7 +452,8 @@ void onFunctionExit(
   auto* kineto_ctx_ptr =
       static_cast<torch::profiler::impl::KinetoObserverContext*>(ctx_ptr);
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
-  kineto_ctx_ptr->event_->end_time_ = c10::getApproximateTime();
+  kineto_ctx_ptr->event_->end_time_ =
+      torch::profiler::impl::getApproximateTime();
   if (!config.experimental_config.performance_events.empty()) {
     state_ptr->record_queue_.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);

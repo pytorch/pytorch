@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Callable, cast, Dict, List, Optional, Union
 
 import fsspec
+
 import torch
-from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
 from torch import Tensor
 from torch._utils import _get_device_module
@@ -261,7 +261,6 @@ def _write_files_from_queue(
     result_queue: queue.Queue,
     planner: SavePlanner,
     inflight_threshhold: int,
-    fs: AbstractFileSystem,
 ):
     try:
         while True:
@@ -290,19 +289,18 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with fs.transaction:
-                with fsspec.open(file_name, "wb") as stream:
-                    for write_item in bytes_w:
-                        data = planner.resolve_data(write_item)
-                        write_results.append(
-                            _write_item(stream, data, write_item, storage_key)
-                        )
+            with fsspec.open(file_name, "wb") as stream:
+                for write_item in bytes_w:
+                    data = planner.resolve_data(write_item)
+                    write_results.append(
+                        _write_item(stream, data, write_item, storage_key)
+                    )
 
-                    for tensor, write_item in loader.values():
-                        assert tensor.is_cpu
-                        write_results.append(
-                            _write_item(stream, tensor, write_item, storage_key)
-                        )
+                for tensor, write_item in loader.values():
+                    assert tensor.is_cpu
+                    write_results.append(
+                        _write_item(stream, tensor, write_item, storage_key)
+                    )
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -401,7 +399,6 @@ class FsspecWriter(StorageWriter):
                     result_queue,
                     planner,
                     self.per_thread_copy_ahead,
-                    self.fs,
                 ),
             )
             t.start()
@@ -412,7 +409,6 @@ class FsspecWriter(StorageWriter):
             result_queue=result_queue,
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
-            fs=self.fs,
         )
 
         for t in threads:

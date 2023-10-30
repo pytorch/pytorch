@@ -2275,7 +2275,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size, check=True):
+            def indirect_indexing(index_var, size, add_asserts=True):
                 return sympy_symbol(str(index_var))
 
             @staticmethod
@@ -2661,6 +2661,7 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:

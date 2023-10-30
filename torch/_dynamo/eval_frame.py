@@ -1203,21 +1203,12 @@ def export(
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
         for arg in flat_args:
-            prim_types = (
-                torch.Tensor,
-                str,
-                int,
-                float,
-                bool,
-                torch.SymBool,
-                torch.SymInt,
-                torch.SymFloat,
-            )
-            if not isinstance(arg, prim_types) and (arg is not None):
+            prim_types = (torch.Tensor, str, int, float, bool)
+            if not isinstance(arg, prim_types):
                 if dataclasses.is_dataclass(arg):
                     raise RuntimeError(
-                        "Dataclasses are supposed to be pytree nodes to be exportable. "
-                        "Please take a look at torch.export.register_dataclass "
+                        "Dataclasses are supposed to be pytree nodes to be exportable."
+                        "Please take a look at torch._export.utils.register_dataclass_as_pytree_node "
                         "for more information.",
                     )
                 else:

@@ -14,7 +14,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Pow, TrueDiv, Where
+from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -22,6 +22,8 @@ from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Pow, TrueDiv, W
 
 @functools.lru_cache(None)
 def handlers():
+    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
+
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
     # TODO default to some decompositions if the interpreter doesn't have them
