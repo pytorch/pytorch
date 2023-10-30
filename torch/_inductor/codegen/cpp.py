@@ -452,10 +452,6 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {b}"
 
     @staticmethod
-    def div(a, b):
-        return f"{a} / {b}"
-
-    @staticmethod
     def truediv(a, b):
         return f"{a} / {b}"
 
