@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     gradcheck, gradgradcheck, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
 from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
@@ -2531,7 +2531,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
-        tf32_precision=0.05,
+        tf32_precision=0.08 if SM90OrLater else 0.05,
         default_dtype=torch.double,
     ),
     dict(
@@ -2576,7 +2576,7 @@ new_module_tests = [
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
-        tf32_precision=0.03,
+        tf32_precision=0.05 if SM90OrLater else 0.03,
         default_dtype=torch.double,
     ),
     dict(

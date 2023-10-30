@@ -116,6 +116,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
     _fast_forward_iterator: Optional[Iterator] = None
 
+    def __iter__(self) -> Iterator[T_co]:
+        return self
+
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
             if attribute_name in _iter_deprecated_functional_names:

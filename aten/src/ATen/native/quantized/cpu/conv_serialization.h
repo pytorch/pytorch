@@ -6,7 +6,9 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -141,8 +143,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       config_vals.push_back(dilation[0].item<int16_t>());
     }
     // output_padding does not exist in v1, so we fill in a default value
-    for (const auto i : c10::irange(kSpatialDim)) {
-      (void)i; // Suppress unused variable
+    for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
       config_vals.push_back(0);
     }
     config_vals.push_back(groups[0].item<int16_t>());
@@ -302,23 +303,19 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
   int idx = 1;
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     stride.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     padding.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     dilation.emplace_back(config_vals.at(idx));
     idx++;
   }
-  for (const auto i : c10::irange(kSpatialDim)) {
-    (void)i; // Suppress unused variable
+  for (C10_UNUSED const auto i : c10::irange(kSpatialDim)) {
     TORCH_INTERNAL_ASSERT(idx < static_cast<int64_t>(config_vals.size()),
         "Unexpected index = ", idx, " for config_vals of size ",
         config_vals.size());

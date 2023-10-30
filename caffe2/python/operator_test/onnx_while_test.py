@@ -68,7 +68,7 @@ class TestONNXWhile(serial.SerializedTestCase):
             disable_scopes=disable_scopes,
         )
 
-        condition_arr = np.array(condition).astype(np.bool)
+        condition_arr = np.array(condition).astype(bool)
         max_trip_count_arr = np.array(max_trip_count).astype(np.int64)
         first_init = np.array([1]).astype(np.float32)
         second_init = np.array([1]).astype(np.float32)

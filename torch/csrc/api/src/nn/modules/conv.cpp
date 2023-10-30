@@ -20,11 +20,13 @@ namespace F = torch::nn::functional;
 static F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
     torch::nn::detail::conv_padding_mode_t conv_padding_mode) {
   F::PadFuncOptions::mode_t pad_mode;
-  if (c10::get_if<torch::enumtype::kReflect>(&conv_padding_mode)) {
+  if (std::holds_alternative<torch::enumtype::kReflect>(conv_padding_mode)) {
     pad_mode = torch::kReflect;
-  } else if (c10::get_if<torch::enumtype::kReplicate>(&conv_padding_mode)) {
+  } else if (std::holds_alternative<torch::enumtype::kReplicate>(
+                 conv_padding_mode)) {
     pad_mode = torch::kReplicate;
-  } else if (c10::get_if<torch::enumtype::kCircular>(&conv_padding_mode)) {
+  } else if (std::holds_alternative<torch::enumtype::kCircular>(
+                 conv_padding_mode)) {
     pad_mode = torch::kCircular;
   } else {
     TORCH_CHECK(
@@ -52,7 +54,7 @@ Conv1dImpl::Conv1dImpl(Conv1dOptions options_)
                      .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv1dImpl::forward(const Tensor& input) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv1d(
         F::pad(
             input,
@@ -91,7 +93,7 @@ Conv2dImpl::Conv2dImpl(Conv2dOptions options_)
                      .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv2dImpl::_conv_forward(const Tensor& input, const Tensor& weight) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv2d(
         F::pad(
             input,
@@ -134,7 +136,7 @@ Conv3dImpl::Conv3dImpl(Conv3dOptions options_)
                      .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv3dImpl::forward(const Tensor& input) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     return F::detail::conv3d(
         F::pad(
             input,
@@ -247,7 +249,7 @@ ConvTranspose1dImpl::ConvTranspose1dImpl(ConvTranspose1dOptions options_)
 Tensor ConvTranspose1dImpl::forward(
     const Tensor& input,
     const c10::optional<at::IntArrayRef>& output_size) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose1d");
   }
@@ -284,7 +286,7 @@ ConvTranspose2dImpl::ConvTranspose2dImpl(ConvTranspose2dOptions options_)
 Tensor ConvTranspose2dImpl::forward(
     const Tensor& input,
     const c10::optional<at::IntArrayRef>& output_size) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose2d");
   }
@@ -321,7 +323,7 @@ ConvTranspose3dImpl::ConvTranspose3dImpl(ConvTranspose3dOptions options_)
 Tensor ConvTranspose3dImpl::forward(
     const Tensor& input,
     const c10::optional<at::IntArrayRef>& output_size) {
-  if (!c10::get_if<enumtype::kZeros>(&options.padding_mode())) {
+  if (!std::get_if<enumtype::kZeros>(&options.padding_mode())) {
     TORCH_CHECK(
         false, "Only `zeros` padding mode is supported for ConvTranspose3d");
   }

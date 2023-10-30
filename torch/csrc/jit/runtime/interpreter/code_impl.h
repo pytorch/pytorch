@@ -14,8 +14,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-namespace torch {
-namespace jit {
+C10_DECLARE_bool(torch_jit_enable_expanded_stacks);
+
+namespace torch::jit {
 
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
@@ -227,7 +228,6 @@ struct CodeImpl {
   NodeSourceInfo getSourceInfoFromSourceRange(const SourceRange& range) {
     NodeSourceInfo nodeSource;
     SourceRange r = range;
-
     if (range.source()) {
       if (auto orig = range.source()->findSourceRangeThatGenerated(r)) {
         r = *orig;
@@ -272,10 +272,11 @@ struct CodeImpl {
         safe_narrow_cast<uint16_t, uint64_t>(N));
     instructions_source_.emplace_back(current_node_);
 
-    if (!current_node_->hasAttribute(attr::node_stack_idx)) {
+    if (FLAGS_torch_jit_enable_expanded_stacks &&
+        !current_node_->hasAttribute(attr::node_stack_idx)) {
       std::vector<NodeSourceInfo> expandedStack;
       getNodeStack(current_node_, &expandedStack);
-      int insertIdx = expanded_node_stacks_.size();
+      auto insertIdx = expanded_node_stacks_.size();
       expanded_node_stacks_.emplace_back(expandedStack);
       current_node_->i_(attr::node_stack_idx, insertIdx);
     }
@@ -562,7 +563,7 @@ struct CodeImpl {
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
@@ -1057,5 +1058,4 @@ struct MobileCodeImpl : CodeImpl {
 };
 
 } // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

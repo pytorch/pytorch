@@ -197,24 +197,25 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f32, f64},
+    "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
     "exponential": {f16},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
-    "multinomial": {f32, f64},
+    "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -231,29 +232,20 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
-    "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "exponential": {f16},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "geometric": {f16},
-    "linalg.eig": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.triplet_margin_loss": {f16},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "rand_like": {f16, f32, f64},
@@ -262,7 +254,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16},
 }
 
 
@@ -270,7 +261,6 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
@@ -278,14 +268,7 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfft2": {b8, i32, i64, f32, f64},
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
@@ -316,15 +299,13 @@ test_skips_or_fails = (
 )
 
 
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    torch.manual_seed(42)
+def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
+    wrapper_noop_set_seed
+)
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
@@ -342,6 +323,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("addr", "cuda", f16): {"reference_in_float": True},
+    ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
     ("asin", "cuda", f16): {"reference_in_float": True},
     ("atanh", "cuda", f16): {"reference_in_float": True},
@@ -366,28 +348,25 @@ inductor_override_kwargs = {
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    "gradient": {"check_gradient": False},  # segfault on check_gradient
-    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
-    "linalg.solve_triangular": {"check_gradient": False},
-    "linalg.lu_factor": {"check_gradient": False},
-    "linalg.lu_factor_ex": {"check_gradient": False},
+    # Temporarily skip interpolate bilinear and bicubic tests:
+    "nn.functional.interpolate.bicubic": {
+        "assert_equal": False,
+        "check_gradient": False,
+    },
+    "nn.functional.interpolate.bilinear": {"assert_equal": False},
+    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
-
 
 # Always test with all sample for following ops
 inductor_all_samples = {
@@ -561,6 +540,7 @@ class TestInductorOpInfo(TestCase):
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
                         "check_has_compiled": no_python,
+                        "output_process_fn_grad": sample_input.output_process_fn_grad,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
                     self.check_model_cuda(

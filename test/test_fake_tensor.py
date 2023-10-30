@@ -34,7 +34,7 @@ from unittest.mock import patch
 from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+import torch.utils._pytree as pytree
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -97,7 +97,7 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not dist.is_available(), "requires distributed")
     def test_fsdp_flat_param(self):
-        from torch.distributed.fsdp.flat_param import FlatParameter
+        from torch.distributed.fsdp._flat_param import FlatParameter
         with FakeTensorMode() as m:
             data = torch.randn(2, 2)
             param = FlatParameter(data, requires_grad=True)
@@ -224,9 +224,9 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
-        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
-            if not isinstance(a, FakeTensor):
-                self.assertTrue(not isinstance(b, FakeTensor))
+        for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
+            if not isinstance(a, torch.Tensor):
+                self.assertTrue(not isinstance(b, torch.Tensor))
                 continue
 
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
@@ -1013,24 +1013,31 @@ class FakeTensorOperatorInvariants(TestCase):
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
-                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3)
+                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3, scale=0.17677669529663687)
 
         args_new = [
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            [
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ],
+            [
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
+            ]
         ]
-
-        args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
-                (bsz, num_heads, seq_len, head_dim) in args_new]
-        try:
-            with torch._subclasses.CrossRefFakeMode():
-                Repro()(*args)
-        except RuntimeError as e:
-            # We expect the cross ref to succed for the first output to fail
-            # for the rng state, see Note [Seed and Offset]
-            self.assertTrue("output[0]" not in str(e))
-            self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
+        for args_list in args_new:
+            args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
+                    (bsz, num_heads, seq_len, head_dim) in args_list]
+            try:
+                with torch._subclasses.CrossRefFakeMode():
+                    Repro()(*args)
+            except RuntimeError as e:
+                # We expect the cross ref to succed for the first output to fail
+                # for the rng state, see Note [Seed and Offset]
+                self.assertTrue("output[0]" not in str(e))
+                self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")

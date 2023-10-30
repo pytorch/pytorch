@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 #include <mutex>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 SimpleGraphExecutorImpl::SimpleGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph,
@@ -39,5 +38,4 @@ GraphExecutorState SimpleGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

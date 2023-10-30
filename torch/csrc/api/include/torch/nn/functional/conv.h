@@ -31,7 +31,7 @@ inline Tensor conv1d(
     const Conv1dFuncOptions::padding_t& padding,
     ExpandingArray<1> dilation,
     int64_t groups) {
-  return c10::visit(
+  return std::visit(
       [&](const auto& pad) {
         return torch::conv1d(
             input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
@@ -77,7 +77,7 @@ inline Tensor conv2d(
     const Conv2dFuncOptions::padding_t& padding,
     ExpandingArray<2> dilation,
     int64_t groups) {
-  return c10::visit(
+  return std::visit(
       [&](const auto& pad) {
         return torch::conv2d(
             input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
@@ -123,7 +123,7 @@ inline Tensor conv3d(
     const Conv3dFuncOptions::padding_t& padding,
     ExpandingArray<3> dilation,
     int64_t groups) {
-  return c10::visit(
+  return std::visit(
       [&](const auto& pad) {
         return torch::conv3d(
             input, weight, bias, stride, padding_unwrap(pad), dilation, groups);
