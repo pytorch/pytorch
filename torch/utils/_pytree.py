@@ -37,6 +37,35 @@ from typing import (
 )
 
 
+__all__ = [
+    "PyTree",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
+    "register_pytree_node",
+    "tree_flatten",
+    "tree_unflatten",
+    "tree_leaves",
+    "tree_structure",
+    "tree_map",
+    "tree_map_",
+    "tree_map_only",
+    "tree_map_only_",
+    "tree_all",
+    "tree_any",
+    "tree_all_only",
+    "tree_any_only",
+    "treespec_dumps",
+    "treespec_loads",
+    "treespec_pprint",
+]
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -142,6 +171,9 @@ def _register_pytree_node(
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+
+
+register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
