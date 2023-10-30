@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import operator
 import os
 import re
 from itertools import count
@@ -254,8 +255,11 @@ class AllocateLine(MemoryPlanningLine):
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
 
-        if self.wrapper.can_prove_buffer_has_static_shape(self.node):
-            state.total_allocated_buffer_size += self.node.get_layout().storage_size()
+        static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
+        if static_shape is not None:
+            state.total_allocated_buffer_size += int(
+                functools.reduce(operator.mul, static_shape, 1)
+            )
 
         return self
 
@@ -1137,19 +1141,35 @@ class WrapperCodeGen(CodeGen):
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
 
-    def is_statically_known_int(self, x):
+    @staticmethod
+    def statically_known_int_or_none(x):
         try:
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            int(x)
-            return True
+            return int(x)
         except Exception:
-            return False
+            return None
 
-    def is_statically_known_list_of_ints(self, lst):
-        return all(isinstance(self.is_statically_known_int(x), int) for x in lst)
+    @staticmethod
+    def statically_known_list_of_ints_or_none(lst):
+        result = []
+        for x in lst:
+            num = WrapperCodeGen.statically_known_int_or_none(x)
+            if num is None:
+                return None
+            result.append(num)
+        return result
 
-    def can_prove_buffer_has_static_shape(self, buffer):
-        return self.is_statically_known_list_of_ints(buffer.get_size())
+    @staticmethod
+    def is_statically_known_list_of_ints(lst):
+        return WrapperCodeGen.statically_known_list_of_ints_or_none(lst) is not None
+
+    @staticmethod
+    def static_shape_for_buffer_or_none(buffer):
+        return WrapperCodeGen.statically_known_list_of_ints_or_none(buffer.get_size())
+
+    @staticmethod
+    def can_prove_buffer_has_static_shape(buffer):
+        return WrapperCodeGen.static_shape_for_buffer_or_none(buffer) is not None
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
