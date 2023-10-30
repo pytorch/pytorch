@@ -1180,6 +1180,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
