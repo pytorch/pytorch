@@ -3141,24 +3141,8 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
 
     broadcast_samples = kwargs.pop("broadcast_samples", False)
     for accumulate in [False, True]:
-
         if broadcast_samples:
-
-            # Test with indices arg
-            yield SampleInput(
-                make_arg((S, S,)),
-                (index_variable(2, S, device=device, allow_duplicates=accumulate),),
-                make_arg((2, S)),
-                accumulate=accumulate)
-
-            # Test with index as scalar
-            yield SampleInput(
-                make_arg((S, S)),
-                (torch.tensor(0, device=device), ),
-                make_arg((S,)),
-                accumulate=accumulate)
-        else:
-            # Test broadcasting indices
+           # Test broadcasting indices
             yield SampleInput(
                 make_arg((S, S, S, S)),
                 (index_variable(S, S, device=device, allow_duplicates=accumulate),
@@ -3172,6 +3156,20 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
                 make_arg(S, S),
                 (index_variable(2, S, device=device, allow_duplicates=accumulate),),
                 make_arg(1),
+                accumulate=accumulate)
+        else:
+             # Test with indices arg
+            yield SampleInput(
+                make_arg((S, S,)),
+                (index_variable(2, S, device=device, allow_duplicates=accumulate),),
+                make_arg((2, S)),
+                accumulate=accumulate)
+
+            # Test with index as scalar
+            yield SampleInput(
+                make_arg((S, S)),
+                (torch.tensor(0, device=device), ),
+                make_arg((S,)),
                 accumulate=accumulate)
 
             # Test with mask arg

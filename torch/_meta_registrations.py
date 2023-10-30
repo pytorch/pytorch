@@ -4,9 +4,6 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims_common as utils
-import torch._refs
-import torch._refs.nn.functional
-import torch._refs.special
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
@@ -5937,6 +5934,9 @@ _create_binary_float_meta_func(
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
+import torch._refs
+import torch._refs.nn.functional
+import torch._refs.special
 
 
 def activate_meta():
