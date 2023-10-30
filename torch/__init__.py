@@ -261,7 +261,7 @@ class SymInt:
     def __index__(self):
         return self.node.int_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -313,7 +313,7 @@ class SymFloat:
     def __bool__(self):
         return self.node.bool_()
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
@@ -363,7 +363,7 @@ class SymBool:
     def __int__(self):
         return builtins.int(self.node.bool_())
 
-    # Magic methods installed by torch.fx.experimental.symbolic_shapes
+    # Magic methods installed by torch.fx.experimental.sym_node
     def __and__(self, other) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
@@ -729,6 +729,14 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
+          quantized, sets new elements to a known value.  Floating point or
+          complex values are set to NaN. Integer values are set to the maximum
+          value.
+        * :func:`torch.empty`, :func:`torch.empty_like`, :func:`torch.empty_strided`,
+          and :func:`torch.empty_permuted` will fill the output tensor with a known
+          value. Floating point or complex dtype tensors are filled with NaN. Integer
+          dtype tensors are filled with the maximum value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -772,11 +780,6 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
-
-    In addition, several operations fill uninitialized memory when this setting
-    is turned on and when
-    :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
-    See the documentation for that attribute for more information.
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -996,7 +999,8 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
+    from torch.fx.experimental.symbolic_shapes import expect_true
+    if expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -1045,7 +1049,8 @@ def _check_is_size(i, message=None):
     """
     # This is responsible for the expect_true
     _check(i >= 0, message)
-    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
+    from torch.fx.experimental.symbolic_shapes import _advise_is_size
+    _advise_is_size(i)
 
 def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
@@ -1799,7 +1804,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     csan.enable_cuda_sanitizer()
 
 # Populate magic methods on SymInt and SymFloat
-import torch.fx.experimental.symbolic_shapes
+import torch.fx.experimental.sym_node
 
 from torch import func as func
 from torch.func import vmap
