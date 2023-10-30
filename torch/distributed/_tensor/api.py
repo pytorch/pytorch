@@ -9,7 +9,7 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -312,7 +312,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = device_mesh or mesh_resources.get_current_mesh()
+        device_mesh = device_mesh or _mesh_resources.get_current_mesh()
         device_type = device_mesh.device_type
 
         # convert the local tensor to desired device base on device mesh's device_type
@@ -398,6 +398,13 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 raise RuntimeError(
                     "Can not redistribute to _Partial, _Partial is for internal use only!"
                 )
+            elif isinstance(placement, Shard) and placement.dim < 0:
+                # normalize shard dim to be positive
+                placement.dim += self.ndim
+
+        # Early return the original DTensor if the placements are the same.
+        if self._spec.placements == placements:
+            return self
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements)
@@ -446,14 +453,27 @@ def distribute_tensor(
             first rank of each dimension of the `device_mesh`.
 
     Returns:
-        A :class:`DTensor` object
+        A :class:`DTensor` or `XLAShardedTensor` object.
+
+    Note:
+        When initialize the DeviceMesh with the `xla` device_type, `distribute_tensor`
+        return `XLAShardedTensor` instead. see [link](https://github.com/pytorch/pytorch/issues/92909)
+        for more details. The XLA integration is experimental and subject to change.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
 
     # get default device mesh if there's nothing specified
-    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
+    if device_type == "xla":
+        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+        # This returns XLAShardedTensor
+        from torch.distributed._tensor._xla import xla_distribute_tensor
+
+        return xla_distribute_tensor(
+            tensor, device_mesh, placements
+        )  # type:ignore[return-value]
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -480,7 +500,6 @@ def distribute_tensor(
             f"`placements` must have the same length as `device_mesh.ndim`! "
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
-
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we just need to check if the
         # device mesh and placements are the same
@@ -503,6 +522,9 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
+            if placement.dim < 0:
+                # normalize shard placement dim
+                placement.dim += tensor.ndim
             local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
@@ -557,7 +579,7 @@ def distribute_module(
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
-    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and

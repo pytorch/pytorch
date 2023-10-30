@@ -3,20 +3,27 @@ import copy
 import dataclasses
 import inspect
 import io
+import math
 import pathlib
 import sys
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
-
-import sympy
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
-
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
@@ -27,6 +34,11 @@ from torch.utils._pytree import (
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = [
@@ -109,13 +121,15 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
+    constraint_range: "StrictMinMaxConstraint"
     # Represent that `constraint_range` is shared with another _ConstraintTarget, which
     # typically arises because of a specified equality with another dynamic dimension.
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=2, upper=sympy.oo):
+    def _clone_with_range(self, lower=2, upper=math.inf):
+        # Import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
 
         constraint_range = StrictMinMaxConstraint(
@@ -184,6 +198,10 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
                 "A dynamic dim can be specified equal only to another dynamic dim. "
                 f"Equality with {type(other)} is not supported."
             )
+
+        # import sympy locally
+        from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & other.constraint_range.vr,
             warn_only=False,
@@ -337,16 +355,14 @@ def export(
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
-    a method) and produces a traced graph representing only the Tensor
-    computation of the function in an Ahead-of-Time (AOT) fashion, which can
-    subsequently be executed with different outputs or serialized.  The traced
-    graph (1) produces a normalized operator set consisting only of functional
-    `Core ATen Operator Set <https://pytorch.org/docs/stable/ir.html>`_
-    and user specified custom operators, (2) has eliminated all Python control
-    flow and data structures (except for certain
-    conditions), and (3) has the set of shape constraints needed to show that
-    this normalization and control flow elimination is sound for a future
-    input.
+    a method) along with example inputs, and produces a traced graph representing
+    only the Tensor computation of the function in an Ahead-of-Time (AOT) fashion,
+    which can subsequently be executed with different inputs or serialized.  The
+    traced graph (1) produces normalized operators in the functional ATen operator set
+    (as well as any user-specified custom operators), (2) has eliminated all Python control
+    flow and data structures (with certain exceptions), and (3) records the set of
+    shape constraints needed to show that this normalization and control-flow elimination
+    is sound for future inputs.
 
     **Soundness Guarantee**
 

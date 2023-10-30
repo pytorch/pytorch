@@ -362,6 +362,12 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
+    _nonvar_fields = {
+        "closure_scope",
+        "f_globals",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
     def __init__(
         self,
         fn_name,
@@ -551,7 +557,9 @@ def _traceable_collectives_source(fn):
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
-        base=AttrSource(base=GlobalSource(global_name="torch"), member="distributed"),
+        base=AttrSource(
+            base=GlobalSource(global_name="__import_torch"), member="distributed"
+        ),
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
@@ -650,9 +658,11 @@ class FunctoolsPartialVariable(VariableTracker):
 
 class TritonKernelVariable(VariableTracker):
     def __init__(self, kernel, kernel_idx, grid, **kwargs):
-        super().__init__(**kwargs)
+        from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        super().__init__(**kwargs)
 
         assert kernel is not None
 
@@ -662,6 +672,19 @@ class TritonKernelVariable(VariableTracker):
         assert kernel_idx is None or self.kernel_idx == kernel_idx
 
         self.grid = grid
+
+        if isinstance(kernel, Autotuner):
+            # We only support configs and keys arguments of triton.autotune
+            # Make sure other arguments are defaulted
+            defaults = inspect.signature(Autotuner).parameters
+            if (
+                defaults["warmup"].default != kernel.warmup
+                or defaults["rep"].default != kernel.rep
+                or defaults["prune_configs_by"].default != kernel.early_config_prune
+            ):
+                raise Unsupported(
+                    "Only configs and keys are supported for triton.autotune"
+                )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"

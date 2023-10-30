@@ -34,7 +34,7 @@ from unittest.mock import patch
 from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
+import torch.utils._pytree as pytree
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):
@@ -224,9 +224,9 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.FakeTensorMode():
             out_fake = fn()
 
-        for a, b in zip(tree_flatten(out), tree_flatten(out_fake)):
-            if not isinstance(a, FakeTensor):
-                self.assertTrue(not isinstance(b, FakeTensor))
+        for a, b in zip(pytree.tree_leaves(out), pytree.tree_leaves(out_fake)):
+            if not isinstance(a, torch.Tensor):
+                self.assertTrue(not isinstance(b, torch.Tensor))
                 continue
 
             prims.utils.compare_tensor_meta(a, b, check_strides=True)
