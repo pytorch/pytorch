@@ -42,7 +42,7 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
   PyFunctionTensorPostAccGradHooks(PyObject* dict);
   ~PyFunctionTensorPostAccGradHooks() override;
   void operator()(const Variable& tensor) override;
-  // fall back to the compiled_args of PostAccumulateGradHook superclass
+  void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
   PyObject* dict;
 };
 
