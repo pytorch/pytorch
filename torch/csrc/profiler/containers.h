@@ -76,6 +76,7 @@ class AppendOnlyList {
   typename std::enable_if<
       std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
   copy(c10::ArrayRef<T0> src) {
+    maybe_grow();
     size_t n = src.size();
     if (C10_LIKELY(next_ && (next_ + n <= end_))) {
       std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
