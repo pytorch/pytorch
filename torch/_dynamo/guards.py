@@ -319,9 +319,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(
-                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
-                )
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
             )
 
         ref = self.arg_ref(guard)
@@ -593,7 +591,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
         code = [
-            f"___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id})"
+            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
         ]
         self._produce_guard_code(guard, code)
 

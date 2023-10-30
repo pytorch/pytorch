@@ -1075,8 +1075,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left.as_specialized(self)
-        right = right.as_specialized(self)
         op = inst.argval
         supported_any = dict(
             itertools.chain(
@@ -1294,11 +1292,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
-        self.push(
-            SliceVariable(
-                [x.as_specialized(self) for x in items],
-            )
-        )
+        self.push(SliceVariable(items))
 
     def BUILD_LIST(self, inst):
         items = self.popn(inst.argval)

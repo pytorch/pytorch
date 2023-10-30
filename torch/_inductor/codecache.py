@@ -659,7 +659,6 @@ class CompiledFxGraph:
     mutated_inputs: Set[str] = field(default_factory=set)
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
 
     _boxed_call: Optional[bool] = None
 

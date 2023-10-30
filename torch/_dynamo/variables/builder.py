@@ -197,6 +197,7 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+        self.example_strong_ref = None
 
     def __eq__(self, other):
         return self.source.name() == other.source.name()
@@ -1204,9 +1205,7 @@ class VariableBuilder:
             else:
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
-                install_guard(
-                    self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)
-                )
+                install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
             options = {"source": self.get_source()}
             if isinstance(wrapped_value, torch.Tensor):
                 options.update({"raw_value": value})
