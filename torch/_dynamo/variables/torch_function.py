@@ -4,6 +4,7 @@ from typing import Dict, List
 from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource
 from ..utils import is_tensor_base_attr_getter
 from .base import VariableTracker
@@ -156,7 +157,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # [Note: __torch_function__] We currently only support attributes that are defined on
         # base tensors, custom attribute accesses will graph break.
         import torch
-        from .builder import SourcelessBuilder, VariableBuilder
+        from .builder import SourcelessBuilder
 
         if name in banned_attrs or not hasattr(torch.Tensor, name):
             unimplemented(
@@ -171,15 +172,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         if tx.output.torch_function_enabled:
             if self.source:
-                get_fn = VariableBuilder(
-                    tx,
-                    source=AttrSource(
-                        AttrSource(AttrSource(self.source, "__class__"), name),
-                        "__get__",
-                    ),
-                )(inspect.getattr_static(self.python_type(), name).__get__)
-            else:
-                get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
+                install_guard(
+                    AttrSource(AttrSource(self.source, "__class__"), name).make_guard(
+                        GuardBuilder.FUNCTION_MATCH
+                    )
+                )
+            get_fn = SourcelessBuilder()(tx, getattr(torch.Tensor, name).__get__)
 
             return self.call_torch_function(
                 tx,
