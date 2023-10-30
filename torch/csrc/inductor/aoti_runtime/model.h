@@ -122,6 +122,44 @@ class RAIIAtenTensorHandle {
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
+class ConstantHandle {
+ public:
+  ConstantHandle() = default;
+
+  explicit ConstantHandle(AtenTensorHandle handle) : handle_(handle) {
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(handle_, &data_));
+  }
+
+  operator AtenTensorHandle() const {
+    return handle_;
+  }
+
+  AtenTensorHandle tensor() const {
+    return handle_;
+  }
+
+  void* data_ptr() const {
+    return data_;
+  }
+
+ private:
+  AtenTensorHandle handle_;
+  void* data_ = nullptr;
+};
+
+inline void* get_data_ptr_wrapper(const ConstantHandle& constant) {
+  return constant.data_ptr();
+}
+
+inline const ConstantHandle& unwrap_raii_handle_if_needed(
+    const ConstantHandle& handle) {
+  return handle;
+}
+
+// Shouldn't be called.
+inline AtenTensorHandle wrap_with_raii_handle_if_needed(
+    const ConstantHandle& handle) = delete;
+
 // Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
 inline std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_raii_handles(
     AtenTensorHandle* handles,
@@ -269,7 +307,7 @@ class AOTInductorModelBase {
     for (const auto& info : constants_info_) {
       const auto it = constants_map_->find(info.name);
       if (it != constants_map_->end()) {
-        constants_[idx] = it->second;
+        constants_[idx] = ConstantHandle(it->second);
       }
       idx++;
     }
@@ -329,7 +367,7 @@ class AOTInductorModelBase {
   std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
-  std::vector<AtenTensorHandle> constants_;
+  std::vector<ConstantHandle> constants_;
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
