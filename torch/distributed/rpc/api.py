@@ -612,7 +612,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
         >>> # On both workers:
         >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
+        >>> def my_script_add(t1: torch.Tensor, t2: int):
         >>>    return torch.add(t1, t2)
 
         >>> # On worker 0:
@@ -793,7 +793,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout: float = UNSET_RPC_TIMEOU
 
         >>> # On both workers:
         >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
+        >>> def my_script_add(t1: torch.Tensor, t2: int):
         >>>    return torch.add(t1, t2)
 
         >>> # On worker 0:
@@ -887,7 +887,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
 
         >>> # On both workers:
         >>> @torch.jit.script
-        >>> def my_script_add(t1, t2):
+        >>> def my_script_add(t1: torch.Tensor, t2: int):
         >>>    return torch.add(t1, t2)
 
         >>> # On worker 0:
