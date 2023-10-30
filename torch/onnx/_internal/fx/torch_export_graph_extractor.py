@@ -42,6 +42,9 @@ class TorchExport(exporter.FXGraphExtractor):
         #         args=model_args,  # type: ignore[arg-type]
         #         kwargs=model_kwargs,  # type: ignore[arg-type]
         #     )
+        # TODO: input_adapter and output_adapter should be based on pytree flatten/unflatten API?
+
+        model = model.run_decompositions(options.decomposition_table)
 
         # Export FX graph to ONNX ModelProto.
         self.input_adapter.append_step(
@@ -50,6 +53,11 @@ class TorchExport(exporter.FXGraphExtractor):
         self.input_adapter.append_step(
             io_adapter.PrependParamsAndBuffersAotAutogradInputStep(model)
         )
+
+        # ONNX does not support None inputs. During graph building, all None inputs
+        # are removed. Here we register this step to input adapter.
+        options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
+
         updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
 
         # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
