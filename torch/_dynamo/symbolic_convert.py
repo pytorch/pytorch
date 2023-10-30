@@ -1186,7 +1186,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented(f"non-static call {typestr(argsvars)} {typestr(kwargsvars)}")
 
         # Map to a dictionary of str -> VariableTracker
-        kwargsvars = {k.vt.as_python_constant(): v for k, v in kwargsvars.items.items()}
+        kwargsvars = kwargsvars.keys_as_python_constant()
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(push=1)

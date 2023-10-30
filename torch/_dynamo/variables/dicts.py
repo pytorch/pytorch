@@ -1,5 +1,6 @@
 import collections
 import dataclasses
+import enum
 import functools
 import inspect
 import sys
@@ -19,7 +20,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, GetItemSource
-from ..utils import dict_keys, dict_values
+from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import VariableTracker
 from .constant import ConstantVariable
 
@@ -40,7 +41,7 @@ def is_hashable_python_var(x):
 
     return (
         variables.ConstantVariable.is_literal(x)
-        or isinstance(x, (Tensor, MethodWrapperType))
+        or isinstance(x, (Tensor, enum.Enum, MethodWrapperType))
         or is_builtin_callable(x)
         or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
     )
@@ -62,6 +63,7 @@ def is_hashable(x):
             x,
             (
                 variables.BuiltinVariable,
+                variables.SymNodeVariable,
                 variables.ConstantVariable,
                 variables.EnumVariable,
                 variables.MethodWrapperVariable,
@@ -78,6 +80,8 @@ class ConstDictVariable(VariableTracker):
         """
 
         def __init__(self, vt):
+            # We specialize SymNodes
+            vt = specialize_symnode(vt)
             assert is_hashable(vt), type(vt)
             self.vt = vt
 
