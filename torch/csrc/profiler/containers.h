@@ -58,13 +58,17 @@ class AppendOnlyList {
   AppendOnlyList& operator=(const AppendOnlyList&) = delete;
 
   size_t size() const {
-    return n_blocks_ * ChunkSize + (size_t)(next_ - end_);
+    return n_blocks_ * ChunkSize + next_ - buffer_last_->data();
   }
 
   template <class... Args>
   T* emplace_back(Args&&... args) {
     maybe_grow();
-    ::new ((void*)next_) T{std::forward<Args>(args)...};
+    if constexpr (std::is_trivially_destructible_v<T>) {
+      ::new ((void*)next_) T{std::forward<Args>(args)...};
+    } else {
+      *next_ = T{std::forward<Args>(args)...};
+    }
     return next_++;
   }
 
