@@ -3093,7 +3093,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                DistBackendError, "Health check failure"
+                dist.DistBackendError, "Health check failure"
             ):
                 c10d.init_process_group(
                     backend="nccl",
