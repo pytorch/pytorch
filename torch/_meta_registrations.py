@@ -1,6 +1,7 @@
 import math
 from enum import Enum
 from typing import List, Optional, Sequence, Tuple, Union
+from functools import partial
 
 import torch
 import torch._prims_common as utils
@@ -9,6 +10,7 @@ from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
     global_decomposition_table,
+    decomposition_table,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -46,6 +48,20 @@ def register_meta(op):
             _add_op_to_registry(meta_table, op, fn)
 
         tree_map(register, op)
+        return fn
+
+    return wrapper
+
+
+def register_meta_foreach(op_mapping):
+    def wrapper(fn):
+        fn = _convert_out_params(fn)
+        def register(op, scalar_op):
+            _add_op_to_registry(meta_table, op,
+                partial(fn, _scalar_fn=decomposition_table[scalar_op]))
+
+        for op, scalar_op in op_mapping.items():
+            register(op, scalar_op)
         return fn
 
     return wrapper
@@ -3014,19 +3030,13 @@ def meta__foreach_unaop(self):
     return [torch.empty_like(s) for s in self]
 
 
-@register_meta([aten._foreach_abs.default])
-def meta__foreach_abs(self):
+@register_meta_foreach({aten._foreach_abs.default: aten.abs.default})
+def meta__foreach_abs(self, _scalar_fn):
     torch._check(
         isinstance(self, List),
         lambda: f"Expect List[Tensor] but got {type(self)}",
     )
-    return [
-        torch.empty_like(
-            s,
-            dtype=corresponding_real_dtype(s.dtype) if s.dtype.is_complex else s.dtype,
-        )
-        for s in self
-    ]
+    return [_scalar_fn(s) for s in self]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
