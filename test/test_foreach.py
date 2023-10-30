@@ -400,19 +400,27 @@ class TestForeach(TestCase):
         # Empty lists
         with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
             foreach_op(tensors1, tensors2)
+        with self.assertRaisesRegex(RuntimeError, "There were no tensor arguments to this function"):
+            foreach_op_(tensors1, tensors2)
 
         # One empty list
         tensors1.append(torch.tensor([1], device=device, dtype=dtype))
         with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
             foreach_op(tensors1, tensors2)
+        with self.assertRaisesRegex(RuntimeError, "Tensor list must have same number of elements as scalar list."):
+            foreach_op_(tensors1, tensors2)
 
         # Lists have different amount of tensors
         tensors2.append(torch.tensor([1], device=device))
         tensors2.append(torch.tensor([1], device=device))
         with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
             foreach_op(tensors1, tensors2)
+        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
+            foreach_op_(tensors1, tensors2)
         with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
             foreach_op(tensors2, tensors1)
+        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
+            foreach_op_(tensors2, tensors1)
 
         # Corresponding tensors with different sizes that aren't compatible with broadcast
         # If sizes are different then foreach chooses slow path, thus error messages are expected
@@ -424,6 +432,11 @@ class TestForeach(TestCase):
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 [ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
+        try:
+            foreach_op_(tensors1, tensors2)
+        except RuntimeError as e:
+            with self.assertRaisesRegex(type(e), re.escape(str(e))):
+                [ref_(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
 
         # different devices
         if self.device_type == "cuda" and torch.cuda.device_count() > 1:
@@ -432,6 +445,8 @@ class TestForeach(TestCase):
             if dtype == torch.bool and foreach_op == torch._foreach_sub:
                 with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
                     foreach_op([tensor1], [tensor2])
+                with self.assertRaisesRegex(RuntimeError, re.escape(_BOOL_SUB_ERR_MSG)):
+                    foreach_op_([tensor1], [tensor2])
                 return
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 foreach_op([tensor1], [tensor2])
