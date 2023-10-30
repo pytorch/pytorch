@@ -739,6 +739,6 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     leaves: List[Any] = []
     for a in args:
         _tree_leaves_helper(a, leaves)
-    for a in kwargs:
+    for a in kwargs.values():
         _tree_leaves_helper(a, leaves)
     return leaves
