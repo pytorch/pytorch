@@ -2718,18 +2718,18 @@ class Buffer(IRNode):
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
             wrapper.writeline(
-                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
             )
             symbols_to_define.remove(s)
         assert (
@@ -3768,9 +3768,15 @@ class ExternKernelAlloc(ExternKernel):
 
 class UserDefinedTritonKernel(ExternKernel):
     def codegen(self, wrapper):
+        from triton.runtime.autotuner import Autotuner
+
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
+        configs = []
+        if isinstance(kernel, Autotuner):
+            configs = kernel.configs
+            kernel = kernel.fn
         new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
         self.codegen_comment(wrapper)
@@ -3779,7 +3785,9 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid,
             self.codegen_kwargs(),
         )
-        wrapper.define_user_defined_triton_kernel(new_name, kernel, self.kwargs)
+        wrapper.define_user_defined_triton_kernel(
+            new_name, kernel, configs, self.kwargs
+        )
 
     def should_allocate(self):
         return False

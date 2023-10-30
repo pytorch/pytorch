@@ -65,7 +65,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = [
+    _nonvar_fields = {
         "proxy",
         "dtype",
         "device",
@@ -76,7 +76,11 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-    ]
+        "is_sparse",
+        "class_type",
+        "specialized_value",
+        *VariableTracker._nonvar_fields,
+    }
 
     def get_real_value(self):
         """
