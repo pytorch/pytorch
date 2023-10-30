@@ -905,7 +905,7 @@ def rewrite_signature(
     def is_supported_type(val):
         return isinstance(val, supported_types)
 
-    def produce_matching(sources, candidates):
+    def produce_matching(sources, candidates, is_input):
         source_types = " or ".join(
             [
                 desc
@@ -917,6 +917,7 @@ def rewrite_signature(
         )
         source_vals = [val for vals in sources.values() for val in vals]
         matched_elements_positions = []
+        additional_buffers = {}
         dict_of_source_vals = {}
         for i, val in enumerate(source_vals):
             dict_of_source_vals[id(val)] = i
@@ -927,32 +928,48 @@ def rewrite_signature(
                     if id(val) in dict_of_source_vals:
                         matched_elements_positions.append(dict_of_source_vals[id(val)])
                     else:
-                        raise AssertionError(
-                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
-                        )
+                        additional_buffers[i] = val
                 else:
                     raise AssertionError(
                         f"{candidate_desc} #{i+1} is {val}, but only "
                         f"the following types are supported: {supported_types}"
                     )
 
-        return matched_elements_positions
+        return matched_elements_positions, additional_buffers
 
-    matched_input_elements_positions = produce_matching(
+    matched_input_elements_positions, additional_buffers = produce_matching(
         sources={"original inputs": flat_args},
         candidates={"graph-captured input": graph_captured_input},
+        is_input=True,
     )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
-    matched_output_elements_positions = produce_matching(
+    matched_output_elements_positions, additional_buffers_2 = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
             "original inputs": flat_args,
         },
         candidates={"original output": flat_results_traced},
+        is_input=False,
     )
+
+    count = 0
+    for node in graph.graph.nodes:
+        if count >= len(matched_input_elements_positions) and node.op == "placeholder":
+            with graph.graph.inserting_after(node):
+                getattr_node = graph.graph.get_attr(node.name)
+                node.replace_all_uses_with(getattr_node)
+                getattr_node.meta = node.meta
+                graph.graph.erase_node(node)
+                graph.register_buffer(node.name, additional_buffers[count])
+        count += 1
+
+    print(graph.graph)
+    graph.recompile()
+
+
 
     new_graph = FlattenInputOutputSignature(
         graph,
@@ -1149,6 +1166,8 @@ def export(
                 graph is None
             ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
             graph = gm
+
+            print(graph.graph)
 
             nonlocal fake_mode, example_inputs
             # NB: do NOT pass inner_example_inputs here, we are detecting the
