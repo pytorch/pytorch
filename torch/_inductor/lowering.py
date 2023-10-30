@@ -1653,7 +1653,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # only skip codegen if there is a cpu output, not input
-    for arg in pytree.tree_leaves((node.args, node.kwargs)):
+    for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
         if check_skip_condition(arg, node, is_output=False):
             return True
 

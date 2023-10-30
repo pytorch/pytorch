@@ -284,7 +284,7 @@ def factory_with_sizes_rule(
     kwargs: Dict[str, Any],
     default_mesh: DeviceMesh,
 ) -> DTensor:
-    flat_args = pytree.tree_leaves(args)
+    flat_args = pytree.arg_tree_leaves(*args)
     assert not any(isinstance(a, DTensor) for a in flat_args), (
         f"Not expect DTensor argument for factory op, but got {node.target} "
         f"with arguments {args}."
@@ -375,7 +375,9 @@ def _get_dtensor_dispatch_graph(
         op_overload = cast(torch._ops.OpOverload, node.target)
 
         if any(
-            a.is_shard() for a in pytree.tree_leaves(args) if isinstance(a, DSymInt)
+            a.is_shard()
+            for a in pytree.arg_tree_leaves(*args)
+            if isinstance(a, DSymInt)
         ):
             if op_overload in VIEW_SYM_INT_CONSUMERS:
                 assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
@@ -594,7 +596,7 @@ def _rebuild_graph(
         # Map DT's dispatch graph input placeholder nodes to the ones in
         # local traced graph. It uses index-based accessing, which is
         # brittle, just for testing purpose.
-        flatten_args = pytree.tree_leaves(node.args)
+        flatten_args = pytree.arg_tree_leaves(*node.args)
         i, value_remap = 0, {}
         for dtn in traced_dispatch.graph.nodes:
             if dtn.op == OP.PLACEHOLDER:

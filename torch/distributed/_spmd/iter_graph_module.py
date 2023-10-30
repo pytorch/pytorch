@@ -138,7 +138,7 @@ class IterGraph(fx.Graph):
         all_nodes: Set[fx.Node] = set(subgraph)
 
         for node in subgraph:
-            node_inputs = pytree.tree_leaves((node.args, node.kwargs))
+            node_inputs = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             for _input in node_inputs:
                 if not isinstance(_input, fx.Node):
                     continue

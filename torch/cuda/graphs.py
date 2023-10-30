@@ -293,7 +293,7 @@ def make_graphed_callables(
                 + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
                 + "``requires_grad=False``."
             )
-        flatten_arg = _pytree.tree_leaves(args)
+        flatten_arg = _pytree.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
         assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
             "In the beta API, sample_args "
@@ -443,7 +443,7 @@ def make_graphed_callables(
             # Runs the autograd function with inputs == all inputs to the graph that might require grad
             # (explicit user args + module parameters)
             # Assumes module params didn't change since capture.
-            flatten_user_args = _pytree.tree_leaves(user_args)
+            flatten_user_args = _pytree.arg_tree_leaves(*user_args)
             out = Graphed.apply(*(tuple(flatten_user_args) + module_params))
             return _pytree.tree_unflatten(out, output_unflatten_spec)
 

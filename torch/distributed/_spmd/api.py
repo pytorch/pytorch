@@ -302,7 +302,7 @@ def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
 
     for node in gm.graph.nodes:
         # replace all args with the results from the first unique comm op
-        args = pytree.tree_leaves(node.args)
+        args = pytree.arg_tree_leaves(*node.args)
 
         if node.target in DEDUP_TARGETS:
             args_key = (node.target, *args)
@@ -340,7 +340,7 @@ def _compile(
     # FIXME(@mrshenli): support multiple Optiimzer instances
     # FIXME(@mrshenli): need to broadcast model to sync parameters
     mod, opt = None, None
-    for arg in pytree.tree_leaves(list(args) + list(kwargs.values())):
+    for arg in pytree.arg_tree_leaves(*args, **kwargs):
         if isinstance(arg, nn.Module):
             assert mod is None, "Only support single nn.Module for now"
             mod = arg
@@ -539,7 +539,9 @@ def compile(
                 compiled_obj = _compile(func, module_override, mode, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
-            flat_inps = compiled_obj.flat_state + pytree.tree_leaves([args, kwargs])
+            flat_inps = compiled_obj.flat_state + pytree.arg_tree_leaves(
+                *args, **kwargs
+            )
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been

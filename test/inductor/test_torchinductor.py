@@ -187,9 +187,7 @@ class InputGen:
 
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
-        args = pytree.tree_leaves(args)
-        kwargs = pytree.tree_leaves(kwargs)
-        args = args + kwargs
+        args = pytree.arg_tree_leaves(*args, **kwargs)
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
@@ -7652,7 +7650,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
-                    for arg in pytree.tree_leaves((args, kwargs)):
+                    for arg in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(arg, torch.Tensor):
                             live_tensors[arg] = True
 

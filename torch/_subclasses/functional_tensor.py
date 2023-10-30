@@ -372,8 +372,8 @@ def dispatch_functionalize(func):
         func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
         func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
 
-        flattened_wrapped_args = pytree.tree_leaves(func_args)
-        flattened_wrapped_kwargs = pytree.tree_leaves(func_kwargs)
+        flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
+        flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)

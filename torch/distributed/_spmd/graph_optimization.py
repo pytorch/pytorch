@@ -173,7 +173,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
     MAX_WAIT_DISTANCE = 5
     node_list = []
     wait_nodes = []
-    inputs = pytree.tree_leaves((comm_node.args, comm_node.kwargs))
+    inputs = pytree.arg_tree_leaves(*comm_node.args, **comm_node.kwargs)
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
     distance = 0
     wait_prefixes = ("wait_comm", "wait_tensor")
@@ -582,7 +582,7 @@ def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
                 ("aten._foreach_", "aten._fused_")
             ):
                 should_remove = True
-            parents = pytree.tree_leaves((visiting.args, visiting.kwargs))
+            parents = pytree.arg_tree_leaves(*visiting.args, **visiting.kwargs)
             for parent in parents:
                 if isinstance(parent, fx.Node):
                     nodes.append(parent)
@@ -765,7 +765,7 @@ def get_fused_optimizer_block(optim_node: fx.Node) -> FusedOptimizerBlock:
         else:
             nodes.extend(
                 a
-                for a in pytree.tree_leaves((node.args, node.kwargs))
+                for a in pytree.arg_tree_leaves(*node.args, **node.kwargs)
                 if isinstance(a, fx.Node)
             )
     if step_node == optim_node:

@@ -1120,7 +1120,7 @@ def compile_fx(
         if config.keep_output_stride:
             *_, model_outputs_node = model.graph.nodes
             assert model_outputs_node.op == "output"
-            model_outputs = pytree.tree_leaves(model_outputs_node.args)
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
@@ -1343,7 +1343,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     @functools.wraps(compiled_fn)
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.tree_leaves(args))
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

@@ -1412,7 +1412,7 @@ class SubgraphTracer(fx.Tracer):
         self, op, target, args=None, kwargs=None, name=None, type_expr=None
     ):
         if self.parent is not None:
-            flat_args = pytree.tree_leaves((args, kwargs))
+            flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue

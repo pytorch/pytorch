@@ -83,7 +83,7 @@ def build_torch_function_fn(tx, value, source):
 
 def can_dispatch_torch_function(tx, args, kwargs):
     if tx.output.torch_function_enabled:
-        all_args = pytree.tree_leaves(args) + pytree.tree_leaves(kwargs)
+        all_args = pytree.arg_tree_leaves(*args, **kwargs)
         return any(isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args)
     else:
         return False
@@ -92,7 +92,7 @@ def can_dispatch_torch_function(tx, args, kwargs):
 def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
-    all_args = pytree.tree_leaves(args) + pytree.tree_leaves(kwargs)
+    all_args = pytree.arg_tree_leaves(*args, **kwargs)
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
         lambda x: x.class_type,
