@@ -1752,6 +1752,83 @@ class TestSDPA(NNTestCase):
             sdp_math = torch.nn.functional.scaled_dot_product_attention(x, x, x, scale=-1.0 / 0.0001)
         self.assertEqual(ref_result, sdp_math)
 
+    @onlyCPU
+    @parametrize("dtype", [torch.float32])
+    @parametrize("batch_size", [8, 32])
+    @parametrize("seq_len", [32, 256])
+    @parametrize("n_head", [4])
+    @parametrize("head_dim", [8, 64])
+    @parametrize("dropout_p", [0.0])
+    @parametrize("scale", [None])
+    @parametrize("is_causal", [False])
+    def test_flash_attention_vs_math_cpu(self, dtype: torch.dtype, batch_size: int, seq_len: int, n_head: int,
+                                         head_dim: int, dropout_p: float, scale: str, is_causal: bool):
+        def get_mask(lengths, dtype=torch.float32):
+            max_seq_len = lengths.max().item()
+            row_vector = torch.arange(0, max_seq_len, 1)
+            matrix = torch.unsqueeze(lengths, dim=-1)
+            mask = row_vector < matrix
+            mask = mask.to(dtype)
+            mask_4d_bhlt = 1 - mask[:, None, None, :]
+            mask_4d_bhlt = mask_4d_bhlt * torch.finfo(dtype).min
+            return mask_4d_bhlt
+        
+        def sdpa_math(query, key, value, attn_mask=None, backward=False):
+            if backward:
+                query.requires_grad = True
+                key.requires_grad = True
+                value.requires_grad = True
+
+            ret = torch._scaled_dot_product_attention_math(query, key, value, attn_mask)
+            context_layer = ret[0]
+            if backward:
+                context_layer.sum().backward()
+                return context_layer, (query.grad, key.grad, value.grad)
+            return context_layer, None
+        
+        def sdpa_flash(query, key, value, cum_seq_q, cum_seq_k, max_seq_len_q, max_seq_len_kv, backward=False):
+            if backward:
+                query.requires_grad = True
+                key.requires_grad = True
+                value.requires_grad = True
+
+            ret = torch._scaled_dot_product_flash_attention(query, key, value, cum_seq_q, cum_seq_k, max_seq_len_q, max_seq_len_kv)
+            context_layer = ret[0]
+            if backward:
+                context_layer.sum().backward()
+                return context_layer, (query.grad, key.grad, value.grad)
+            return context_layer, None 
+
+        query = torch.randn(batch_size, n_head, seq_len, head_dim, requires_grad=True)
+        key = torch.randn(batch_size, n_head, seq_len, head_dim, requires_grad=True)
+        value = torch.randn(batch_size, n_head, seq_len, head_dim, requires_grad=True)
+
+        seq_lens_kv = torch.randint(low=1, high=seq_len, size=(batch_size,))
+        seq_lens_kv[torch.randint(0, batch_size, size=(1,))] = seq_len
+        cum_seq_kv = torch.tensor([0] + [i for i in seq_lens_kv]).to(torch.int32)
+        cum_seq_kv = torch.cumsum(cum_seq_kv, dim=-1, dtype=torch.int32)
+        cum_seq_q = cum_seq_kv.clone()
+        
+        mask = get_mask(seq_lens_kv)
+        math_rst, math_grad = sdpa_math(
+            query.detach().clone(),
+            key.detach().clone(),
+            value.detach().clone(),
+            attn_mask=mask,
+            backward=True
+        )
+        flash_rst, flash_grad = sdpa_flash(
+            query.detach().clone(),
+            key.detach().clone(),
+            value.detach().clone(),
+            cum_seq_q, cum_seq_kv, seq_len, seq_len,
+            backward=True,
+        )
+
+        self.assertEqual(math_rst, flash_rst)
+        self.assertEqual(math_grad[0], flash_grad[0])
+
+
 class TestSDPACudaOnly(NNTestCase):
     """ Used to test CUDA only functionality of scaled_dot_product_attention
     Quarks:
