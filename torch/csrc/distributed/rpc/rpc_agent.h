@@ -36,7 +36,7 @@ using steady_clock_time_point =
 using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
-struct RpcBackendOptions {
+struct TORCH_API RpcBackendOptions {
   RpcBackendOptions()
       : RpcBackendOptions(kDefaultRpcTimeoutSeconds, kDefaultInitMethod) {}
 

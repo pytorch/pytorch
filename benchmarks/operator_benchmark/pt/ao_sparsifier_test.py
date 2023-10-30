@@ -1,9 +1,9 @@
-
-import operator_benchmark as op_bench
 import torch
 from torch import nn
 
 from torch.ao import pruning
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for sparsifier."""
@@ -13,9 +13,9 @@ sparse_configs_short = op_bench.config_list(
     attrs=[
         [(32, 16), 0.3, (4, 1), 2],
         [(32, 16), 0.6, (1, 4), 4],
-        [(17, 23), 0.9, (1, 1), 1]
+        [(17, 23), 0.9, (1, 1), 1],
     ],
-    tags=("short",)
+    tags=("short",),
 )
 
 sparse_configs_long = op_bench.cross_product_configs(
@@ -23,8 +23,9 @@ sparse_configs_long = op_bench.cross_product_configs(
     SL=(0.0, 1.0, 0.3, 0.6, 0.9, 0.99),  # Sparsity level
     SBS=((1, 4), (1, 8), (4, 1), (8, 1)),  # Sparse block shape
     ZPB=(0, 1, 2, 3, 4, None),  # Zeros per block
-    tags=("long",)
+    tags=("long",),
 )
+
 
 class WeightNormSparsifierBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, SL, SBS, ZPB):
@@ -44,6 +45,7 @@ class WeightNormSparsifierBenchmark(op_bench.TorchBenchmarkBase):
 
     def forward(self):
         self.sparsifier.step()
+
 
 all_tests = sparse_configs_short + sparse_configs_long
 op_bench.generate_pt_test(all_tests, WeightNormSparsifierBenchmark)

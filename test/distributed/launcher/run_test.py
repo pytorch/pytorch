@@ -501,7 +501,7 @@ class ElasticLaunchTest(unittest.TestCase):
             ]
         )
 
-        with open(out_file, "r") as fp:
+        with open(out_file) as fp:
             is_torchelastic_launched = fp.readline()
             self.assertEqual("True", is_torchelastic_launched)
 
@@ -523,7 +523,7 @@ class ElasticLaunchTest(unittest.TestCase):
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
-            with open(out_file, "r") as fp:
+            with open(out_file) as fp:
                 is_torchelastic_launched = fp.readline()
                 self.assertEqual("False", is_torchelastic_launched)
 

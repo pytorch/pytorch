@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from typing import Callable, cast, Dict, List, Optional, Union
 
 import fsspec
-
 import torch
+from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
 from torch import Tensor
+from torch._utils import _get_device_module
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
@@ -114,7 +115,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Union[None, io.RawIOBase, torch._C._CudaStreamBase] = None,
+        stream: Union[None, io.RawIOBase, torch.Stream] = None,
         inflight_threshhold: int = 1_000_000,
     ):
         self.resolve_fun = resolve_fun
@@ -124,9 +125,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.stream = stream or torch.cuda.current_stream()
-        if self.stream != torch.cuda.current_stream():
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_module = _get_device_module(self.device_type)
+        self.stream = stream or self.device_module.current_stream()
+        if self.stream != self.device_module.current_stream():
+            self.stream.wait_stream(self.device_module.current_stream())
 
     @property
     def _done(self):
@@ -143,7 +146,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with torch.cuda.stream(self.stream):
+        with self.device_module.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -151,7 +154,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.is_cuda:
+                if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
@@ -232,7 +235,7 @@ def _split_by_size_and_type(
 
 
 def _write_item(
-    stream: Optional[Union[io.RawIOBase, torch._C._CudaStreamBase]],
+    stream: Optional[Union[io.RawIOBase, torch.Stream]],
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
@@ -258,6 +261,7 @@ def _write_files_from_queue(
     result_queue: queue.Queue,
     planner: SavePlanner,
     inflight_threshhold: int,
+    fs: AbstractFileSystem,
 ):
     try:
         while True:
@@ -286,18 +290,19 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with fsspec.open(file_name, "wb") as stream:
-                for write_item in bytes_w:
-                    data = planner.resolve_data(write_item)
-                    write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
-                    )
+            with fs.transaction:
+                with fsspec.open(file_name, "wb") as stream:
+                    for write_item in bytes_w:
+                        data = planner.resolve_data(write_item)
+                        write_results.append(
+                            _write_item(stream, data, write_item, storage_key)
+                        )
 
-                for tensor, write_item in loader.values():
-                    assert not tensor.is_cuda
-                    write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
-                    )
+                    for tensor, write_item in loader.values():
+                        assert tensor.is_cpu
+                        write_results.append(
+                            _write_item(stream, tensor, write_item, storage_key)
+                        )
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -396,6 +401,7 @@ class FsspecWriter(StorageWriter):
                     result_queue,
                     planner,
                     self.per_thread_copy_ahead,
+                    self.fs,
                 ),
             )
             t.start()
@@ -406,6 +412,7 @@ class FsspecWriter(StorageWriter):
             result_queue=result_queue,
             planner=planner,
             inflight_threshhold=self.per_thread_copy_ahead,
+            fs=self.fs,
         )
 
         for t in threads:

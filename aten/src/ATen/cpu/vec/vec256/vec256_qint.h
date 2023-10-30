@@ -14,7 +14,6 @@
 
 #include <array>
 #include <cmath>
-#include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
 //
@@ -39,8 +38,7 @@
 // point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
 // iterations.
 
-namespace at {
-namespace vec {
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
@@ -109,8 +107,8 @@ inline Vectorized<float> convert_uint8_to_float(at::vec::Vectorized<uint8_t> src
 }
 
 inline Vectorized<uint8_t> convert_float_to_uint8(at::vec::Vectorized<float> src) {
-  // Convert from float32 to int32
-  __m256i x_values_int32 = _mm256_cvtps_epi32(src);
+  // Convert from float32 to int32 with truncation
+  __m256i x_values_int32 = _mm256_cvttps_epi32(src);
 
   // Convert from int32 to int16 using signed saturation
   __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
@@ -1272,4 +1270,4 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
 }
 
 #endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

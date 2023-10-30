@@ -8,10 +8,14 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/utils/numpy_stub.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
@@ -116,6 +120,12 @@ inline Variable valueToTensor(
     scalar = Scalar(THPUtils_unpackDouble(value));
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
+  } else if (torch::is_symint(value)) {
+    scalar = Scalar(py::cast<c10::SymInt>(py::handle(value)));
+  } else if (torch::is_symfloat(value)) {
+    scalar = Scalar(py::cast<c10::SymFloat>(py::handle(value)));
+  } else if (torch::is_symbool(value)) {
+    scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
     throw TypeError(
         "can't assign a %s to a %s",
@@ -125,7 +135,7 @@ inline Variable valueToTensor(
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
   // device
-  if (device == at::kCPU) {
+  if (device == at::kCPU && !scalar.isSymbolic()) {
     return at::lift_fresh(
         at::indexing::scalarToTensor(scalar, options, device));
   } else {
@@ -262,6 +272,14 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (THPVariable_Check(index)) {
     return false;
   }
+  //  Allow indexing with ndarray if numpy compilation is enabled. An ndarray
+  //  index should not be treated as a tuple since the indexing has a different
+  //  syntax.
+#ifdef USE_NUMPY
+  if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
+    return false;
+  }
+#endif
   if (!PySequence_Check(index)) {
     return false;
   }
@@ -468,12 +486,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices
-  if (THPUtils_checkLong(index)) {
+  if (THPUtils_checkLong(index) || torch::is_symint(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    dispatch_set_item(
-        self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
+    auto symint = torch::is_symint(index) ? py::cast<SymInt>(index)
+                                          : SymInt(THPUtils_unpackLong(index));
+    dispatch_set_item(self_, {at::indexing::TensorIndex(symint)}, value);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

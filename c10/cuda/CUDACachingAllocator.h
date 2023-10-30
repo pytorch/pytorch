@@ -43,6 +43,8 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
+extern const size_t kLargeBuffer;
+
 struct Stat {
   int64_t current = 0;
   int64_t peak = 0;
@@ -101,12 +103,6 @@ struct DeviceStats {
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
-struct History {
-  void* addr;
-  size_t real_size; // unrounded, actually requested size
-  std::shared_ptr<GatheredContext> context; // per-watcher context
-};
-
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
@@ -115,7 +111,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  std::vector<History> history;
+  std::shared_ptr<GatheredContext>
+      context_when_allocated; // per-watcher context
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -123,7 +120,7 @@ struct SegmentInfo {
   int64_t device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
-  int64_t requested_size = 0;
+  int64_t requested_size = 0; // unrounded, actually requested size
   int64_t allocated_size = 0;
   int64_t active_size = 0;
   cudaStream_t stream = 0;
@@ -131,6 +128,7 @@ struct SegmentInfo {
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 struct AllocatorState {
@@ -185,7 +183,12 @@ struct CheckpointDelta {
   std::vector<at::DataPtr> dataptrs_allocd;
 };
 
-C10_CUDA_API void setAllocatorSettings(const std::string& env);
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
 
 // Size pretty-printer
 std::string format_size(uint64_t size);
@@ -241,14 +244,14 @@ class CUDAAllocator : public Allocator {
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) = 0;
+      RecordContext when) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
-  // instead it requres cudaMemcpyAsyncPeer
+  // instead it requires cudaMemcpyAsyncPeer
   //  with P2P Enabled, all combinations work
   //  with P2P Disabled:
   //                       cudaMalloc cudaMallocAsync/cuMemMap
@@ -366,12 +369,9 @@ inline void recordHistory(
     bool enabled,
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    bool alloc_trace_record_context) {
+    RecordContext when) {
   return get()->recordHistory(
-      enabled,
-      context_recorder,
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
+      enabled, context_recorder, alloc_trace_max_entries, when);
 }
 
 inline bool isHistoryEnabled() {

@@ -45,7 +45,7 @@ def register_rendezvous_handler(scheme, handler):
     global _rendezvous_handlers
     if scheme in _rendezvous_handlers:
         raise RuntimeError(
-            "Rendezvous handler for {}:// already registered".format(scheme)
+            f"Rendezvous handler for {scheme}:// already registered"
         )
     _rendezvous_handlers[scheme] = handler
 
@@ -70,34 +70,30 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         query_dict = _query_to_dict(result.query)
         assert (
             "rank" not in query_dict and "world_size" not in query_dict
-        ), "The url: {url} has node-specific arguments(rank, world_size) already.".format(
-            url=url
-        )
+        ), f"The url: {url} has node-specific arguments(rank, world_size) already."
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
             query_dict["world_size"] = str(world_size)
         result = result._replace(
-            query="{}".format(
-                "&".join(["{}={}".format(k, v) for k, v in query_dict.items()])
-            )
+            query=f"{'&'.join([f'{k}={v}' for k, v in query_dict.items()])}"
         )
         url = urlunparse(result)
 
     if result.scheme not in _rendezvous_handlers:
-        raise RuntimeError("No rendezvous handler for {}://".format(result.scheme))
+        raise RuntimeError(f"No rendezvous handler for {result.scheme}://")
     return _rendezvous_handlers[result.scheme](url, **kwargs)
 
 
 def rendezvous(url: str, rank: int = -1, world_size: int = -1, **kwargs):
     if not isinstance(url, (str, bytes)):
-        raise RuntimeError("`url` must be a string. {}: {}".format(type(url), url))
+        raise RuntimeError(f"`url` must be a string. {type(url)}: {url}")
 
     if not isinstance(rank, numbers.Integral):
-        raise RuntimeError("`rank` must be an integer. {}".format(rank))
+        raise RuntimeError(f"`rank` must be an integer. {rank}")
 
     if not isinstance(world_size, numbers.Integral):
-        raise RuntimeError("`world_size` must be an integer. {}".format(world_size))
+        raise RuntimeError(f"`world_size` must be an integer. {world_size}")
 
     return _rendezvous_helper(url, rank, world_size, **kwargs)
 
@@ -147,7 +143,7 @@ def _torchelastic_use_agent_store() -> bool:
     return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
 
 
-def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
+def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
     """
     Smartly creates a c10d Store object on ``rank`` based on whether
     we need to re-use agent store. The TCPStore server is assumed to be hosted
@@ -174,7 +170,7 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     else:
         start_daemon = rank == 0
         return TCPStore(
-            hostname, port, world_size, start_daemon, timeout, multi_tenant=True
+            hostname, port, world_size, start_daemon, timeout, multi_tenant=True, use_libuv=use_libuv
         )
 
 
@@ -195,9 +191,10 @@ def _tcp_rendezvous_handler(
 
     rank = int(query_dict["rank"])
     world_size = int(query_dict["world_size"])
+    use_libuv = query_dict.get("use_libuv", "0") == "1"
     assert result.hostname is not None
 
-    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
+    store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout, use_libuv)
 
     yield (store, rank, world_size)
 
@@ -212,7 +209,7 @@ def _env_rendezvous_handler(
         return _rendezvous_error("env:// rendezvous: " + msg)
 
     def _env_error(var):
-        return _error("environment variable %s expected, but not set" % var)
+        return _error(f"environment variable {var} expected, but not set")
 
     def _get_env_or_raise(env_var: str) -> str:
         env_val = os.environ.get(env_var, None)
@@ -239,10 +236,12 @@ def _env_rendezvous_handler(
     else:
         world_size = int(_get_env_or_raise("WORLD_SIZE"))
 
+
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
+    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
 
-    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout)
+    store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout, use_libuv)
 
     yield (store, rank, world_size)
 

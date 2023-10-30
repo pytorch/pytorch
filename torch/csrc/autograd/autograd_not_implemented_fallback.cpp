@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -45,7 +46,7 @@ void _foreach_tensor(
   }
 }
 
-AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
+AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Nothing;
 
 } // namespace
 
@@ -74,19 +75,19 @@ static void warnAutogradNotImplemented(const std::string& op_name) {
 struct WarnNotImplemented : public Node {
   WarnNotImplemented(
       std::string op_name,
-      int64_t num_outputs,
+      size_t num_outputs,
       edge_list&& next_edges)
       : Node(std::move(next_edges)),
         op_name(std::move(op_name)),
         num_outputs(num_outputs) {}
 
-  WarnNotImplemented(std::string op_name, int64_t num_outputs)
+  WarnNotImplemented(std::string op_name, size_t num_outputs)
       : op_name(std::move(op_name)), num_outputs(num_outputs) {}
 
   variable_list apply(variable_list&& inputs) override;
 
   std::string op_name;
-  int64_t num_outputs;
+  size_t num_outputs;
 };
 
 auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
@@ -104,7 +105,6 @@ static void basicAutogradNotImplementedFallbackImpl(
   const auto num_arguments = schema.arguments().size();
   const auto num_returns = schema.returns().size();
   const auto stack_start = stack->size() - num_arguments;
-  const bool grad_mode = GradMode::is_enabled();
 
   if (getAutogradFallbackMode() == AutogradFallbackMode::Nothing) {
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
@@ -114,17 +114,18 @@ static void basicAutogradNotImplementedFallbackImpl(
       getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
   bool any_input_requires_grad = false;
-  if (grad_mode) {
-    _foreach_tensor(
-        [&](size_t _, size_t idx_arg, const at::Tensor& t) {
-          if (t.requires_grad()) {
-            any_input_requires_grad = true;
-          }
-        },
-        stack,
-        stack_start,
-        num_arguments);
-  }
+  _foreach_tensor(
+      [&](size_t _, size_t idx_arg, const at::Tensor& t) {
+        if (t.requires_grad()) {
+          any_input_requires_grad = true;
+        }
+      },
+      stack,
+      stack_start,
+      num_arguments);
+  // Optimization: TLS access can be slow. So we only check if it necessary
+  // by putting it after the requires_grad checks.
+  any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
@@ -177,7 +178,6 @@ static void basicAutogradNotImplementedFallbackImpl(
           if (t.requires_grad()) {
             t.register_hook([op_name](const at::Tensor& grad) {
               warnAutogradNotImplemented(op_name);
-              return grad;
             });
             // If history is rebased, then we will attempt to warn
             // on the view's base. This will catch most cases (because
@@ -185,11 +185,13 @@ static void basicAutogradNotImplementedFallbackImpl(
             // the entire program).
             if (t.is_view() && is_mutable_output) {
               // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              const_cast<at::TensorBase&>(t._base()).register_hook(
-                  [op_name](const at::TensorBase& grad) {
-                    warnAutogradNotImplemented(op_name);
-                    return grad;
-                  });
+              auto& base = const_cast<at::TensorBase&>(t._base());
+              if (base.requires_grad()) {
+                // Can only register_hook on tensors that require grad.
+                base.register_hook([op_name](const at::TensorBase& grad) {
+                  warnAutogradNotImplemented(op_name);
+                });
+              }
             }
             return;
           }
@@ -249,7 +251,7 @@ static void autogradNotImplementedFallbackImpl(
   std::vector<bool> is_inplace_output(num_returns, false);
   bool any_is_inplace_output = false;
   std::vector<bool> is_aliased_output(num_returns, false);
-  int aliased_output_idx = -1;
+  std::optional<size_t> aliased_output_idx;
 
   for (const auto i : c10::irange(num_returns)) {
     if (schema.is_aliasing({c10::SchemaArgType::output, i})) {
@@ -258,7 +260,7 @@ static void autogradNotImplementedFallbackImpl(
         any_is_inplace_output = true;
       } else {
         TORCH_CHECK(
-            aliased_output_idx == -1,
+            !aliased_output_idx.has_value(),
             "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
             "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
             "Please rewrite your function as a composite function.");
@@ -268,7 +270,7 @@ static void autogradNotImplementedFallbackImpl(
     }
   }
 
-  int aliased_input_idx = -1;
+  int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
     if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
         !schema.is_mutable({c10::SchemaArgType::input, i})) {
@@ -277,7 +279,7 @@ static void autogradNotImplementedFallbackImpl(
           "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
           "Please rewrite your function as a composite function.");
-      aliased_input_idx = i;
+      aliased_input_idx = static_cast<int64_t>(i);
     }
   }
 
@@ -384,10 +386,10 @@ static void autogradNotImplementedFallbackImpl(
       num_returns);
   // There should be only a single base-view pair, make sure their storage is
   // aliased.
-  if (aliased_input_idx != -1 && aliased_output_idx != -1) {
+  if (aliased_input_idx != -1 && aliased_output_idx.has_value()) {
     const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv =
-        (*stack)[stack->size() - num_returns + aliased_output_idx];
+        (*stack)[stack->size() - num_returns + *aliased_output_idx];
     TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor(), op_name);
     TORCH_INTERNAL_ASSERT(
         aliased_output_iv.isTensor() || aliased_output_iv.isTensorList(),
@@ -477,16 +479,16 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
           "Please rewrite your function as a composite function.");
-      aliased_output_idx = i;
+      aliased_output_idx = static_cast<int64_t>(i);
     }
   }
 
-  int64_t aliased_input_idx = -1;
+  std::optional<size_t> aliased_input_idx;
   for (const auto i : c10::irange(num_arguments)) {
     if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
         !schema.is_mutable({c10::SchemaArgType::input, i})) {
       TORCH_CHECK(
-          aliased_input_idx == -1,
+          !aliased_input_idx.has_value(),
           "Fallback ADInplaceOrView kernel expects only a single input in the operator schema to have a "
           "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
@@ -503,12 +505,13 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   }
   // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
   TORCH_CHECK(
-      (aliased_input_idx == -1 && aliased_output_idx == -1) ||
-          (aliased_input_idx == 0 && aliased_output_idx == 0),
+      (!aliased_input_idx.has_value() && aliased_output_idx == -1) ||
+          (aliased_input_idx.has_value() && aliased_input_idx.value() == 0 &&
+           aliased_output_idx == 0),
       "Fallback ADInplaceOrView kernel can only create view relationships between the first "
       "input and the first output (the output can be a vector of tensors). Please change the "
       "order of your operator's parameters so that this is the case.");
-  const bool is_view = aliased_input_idx != -1;
+  const bool is_view = aliased_input_idx.has_value();
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;

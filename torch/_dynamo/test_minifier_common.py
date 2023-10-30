@@ -86,7 +86,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 args = ["-c"]
             else:
                 assert len(args) >= 2, args
-                with open(args[1], "r") as f:
+                with open(args[1]) as f:
                     code = f.read()
                 args = args[1:]
 
@@ -97,8 +97,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config._config.copy()
-            inductor_config = torch._inductor.config._config.copy()
+            dynamo_config = torch._dynamo.config.shallow_copy_dict()
+            inductor_config = torch._inductor.config.shallow_copy_dict()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
@@ -122,8 +122,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     # around
                     torch._dynamo.reset()
             finally:
-                object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
-                object.__setattr__(torch._inductor.config, "_config", inductor_config)
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
@@ -156,7 +156,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
         launch_file = os.path.join(repro_dir, "minifier_launcher.py")
-        with open(launch_file, "r") as f:
+        with open(launch_file) as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
@@ -175,7 +175,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
         repro_file = os.path.join(repro_dir, "repro.py")
-        with open(repro_file, "r") as f:
+        with open(repro_file) as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
 

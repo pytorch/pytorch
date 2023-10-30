@@ -18,6 +18,10 @@ namespace {
   constexpr float kTolerance = 1e-5;
 #endif
 
+bool checkRtol(const at::Tensor& diff, float maxTolerance) {
+  return diff.abs().max().item<float>() <= maxTolerance;
+}
+
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
   float maxValue = 0.0f;
 
@@ -25,7 +29,7 @@ bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
     maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
 
-  return diff.abs().max().item<float>() <= (kTolerance * maxValue);
+  return checkRtol(diff, kTolerance * maxValue);
 }
 
 bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
@@ -271,6 +275,52 @@ class VulkanAPITest : public ::testing::Test {
   }
 };
 
+TEST_F(VulkanAPITest, zero_size_tensor) {
+  auto cpu = at::rand({1, 0, 0}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vk = cpu.vulkan();
+  auto out_vk = vk.cpu();
+  ASSERT_TRUE(at::equal(out_vk, cpu));
+}
+
+TEST_F(VulkanAPITest, zero_size_tensor_numel) {
+  auto vk = at::rand({18, 0, 5}, at::device(at::kVulkan).dtype(at::kFloat));
+  ASSERT_TRUE(vk.numel() == 0);
+}
+
+TEST_F(VulkanAPITest, zero_dim_tensor_1) {
+  auto cpu = at::rand({}, at::device(at::kCPU).dtype(at::kFloat));
+  auto vv = cpu.item<float>();
+
+  auto vk = cpu.vulkan();
+  auto out_vk = vk.cpu();
+  ASSERT_TRUE(almostEqual(cpu, out_vk));
+
+  auto vk_vv = out_vk.item<float>();
+  EXPECT_NEAR(vv, vk_vv, kTolerance);
+}
+
+TEST_F(VulkanAPITest, zero_dim_tensor_2) {
+  float v = 3.14f;
+  auto cpu = at::empty({}, at::device(at::kCPU).dtype(at::kFloat)) + v;
+  auto vk = at::empty({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+
+  ASSERT_TRUE(almostEqual(cpu, vk.cpu()));
+}
+
+TEST_F(VulkanAPITest, zero_dim_tensor_3) {
+  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat));
+
+  ASSERT_TRUE(vk.cpu().item<float>() == 0.0f);
+}
+
+TEST_F(VulkanAPITest, local_scalar_dense) {
+  float v = 8.31f;
+  // Force the zero-dim tensor to a non-zero constant v.
+  auto vk = at::zeros({}, at::device(at::kVulkan).dtype(at::kFloat)) + v;
+  c10::Scalar scalar = at::_local_scalar_dense(vk);
+  EXPECT_NEAR(v, scalar.toFloat(), kTolerance);
+}
+
 TEST_F(VulkanAPITest, copy_to_texture) {
   using namespace at::native::vulkan;
   at::Tensor test_tensors[] = {
@@ -297,6 +347,58 @@ TEST_F(VulkanAPITest, copy_to_texture) {
 
     ASSERT_TRUE(check_copy);
   }
+}
+
+void test_copy_to_texture_bool(const at::IntArrayRef input_shape) {
+  using namespace at::native::vulkan;
+  auto cpu = at::randint(0, 2, input_shape, at::TensorOptions(at::kCPU).dtype(at::kBool));
+  auto in_vulkan = cpu.vulkan();
+
+  auto out_vulkan = in_vulkan.cpu();
+  auto check = at::equal(cpu, out_vulkan.cpu());
+
+  if (!check) {
+    std::cout << "Copy texture to bool failed on input_shape " << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_hw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 != 0,  ch < 4
+  test_copy_to_texture_bool({5, 1, 2, 2});
+  test_copy_to_texture_bool({17, 2, 4, 2});
+  test_copy_to_texture_bool({9, 3, 3, 8});
+
+  // ch % 4 != 0, ch > 5
+  test_copy_to_texture_bool({7, 17, 4, 8});
+  test_copy_to_texture_bool({8, 6, 2, 4});
+  test_copy_to_texture_bool({13, 31, 4, 57});
+
+  // 3d, 2d, 1d
+  test_copy_to_texture_bool({17, 31, 4});
+  test_copy_to_texture_bool({64, 16});
+  test_copy_to_texture_bool({8});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_chw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 == 0
+  test_copy_to_texture_bool({5, 16, 2, 16});
+  test_copy_to_texture_bool({8, 8, 2, 2});
+  test_copy_to_texture_bool({16, 31, 4});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool) {
+  // Uses the shader: image_to_nchw_uint ((H * W) % 4 != 0)
+  test_copy_to_texture_bool({13, 1, 3, 5});
+  test_copy_to_texture_bool({13, 7, 1, 5});
+  test_copy_to_texture_bool({13, 8, 2, 5});
+  test_copy_to_texture_bool({13, 31, 2, 57});
+
+  test_copy_to_texture_bool({67, 19, 7});
+  test_copy_to_texture_bool({229, 213});
+  test_copy_to_texture_bool({1902});
 }
 
 TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
@@ -371,6 +473,10 @@ TEST_F(VulkanAPITest, add_broadcast5) {
 
 TEST_F(VulkanAPITest, add_broadcast6) {
   test_add({1, 15, 5, 4}, {21, 1, 5, 4}, 1.8f);
+}
+
+TEST_F(VulkanAPITest, add_zero_dim) {
+ test_add({2, 6, 5, 6}, {}, 1.5f);
 }
 
 TEST_F(VulkanAPITest, add_) {
@@ -562,6 +668,38 @@ TEST_F(VulkanAPITest, addmm_expand) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, addmm_expand2) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({17, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({6, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, addmm_error_bias) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  // mismatched bias size (should be 1-dim or {17, 9})
+  const auto bias_cpu = at::rand({5, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({17, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({6, 9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_vulkan = m1_cpu.vulkan();
+  EXPECT_THROW(at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
 }
 
 TEST_F(VulkanAPITest, avg_pool2d) {
@@ -779,6 +917,219 @@ TEST_F(VulkanAPITest, batch_norm_large) {
   }
 
   ASSERT_TRUE(check);
+}
+
+void test_baddbmm(
+    at::Tensor bias_cpu,
+    at::Tensor m1_cpu,
+    at::Tensor m2_cpu,
+    float beta,
+    float alpha) {
+  const auto out_cpu = at::baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+
+}
+
+TEST_F(VulkanAPITest, baddbmm) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+
+  const auto bias_cpu = at::rand({150, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_small) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 3.4f;
+
+  const auto bias_cpu = at::rand({3, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({3, 7, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({3, 6, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_one) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bais_error) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  // mismatched dimensions of batch sizes.
+  const auto bias_cpu = at::rand({200, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_vulkan = m1_cpu.vulkan();
+  EXPECT_THROW(at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({150, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_width) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({150, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_width) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_one) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch1) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch2) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_all) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+void test_bmm(at::Tensor m1_cpu, at::Tensor m2_cpu) {
+  const auto out_cpu = m1_cpu.bmm(m2_cpu);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = m1_vulkan.bmm(m2_cpu);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+
+}
+
+TEST_F(VulkanAPITest, bmm) {
+  const auto m1_cpu =
+      at::rand({131, 235, 546}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({131, 546, 267}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu);
+}
+
+TEST_F(VulkanAPITest, bmm_small) {
+  const auto m1_cpu =
+      at::rand({2, 6, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({2, 5, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu);
+}
+
+TEST_F(VulkanAPITest, bmm_one) {
+  const auto m1_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  test_bmm(m1_cpu, m2_cpu);
+}
+
+TEST_F(VulkanAPITest, bmm_error) {
+  // mismatched dimensions of batch sizes.
+  const auto m1_cpu =
+      at::rand({100, 235, 546}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu =
+      at::rand({200, 546, 267}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_vulkan = m1_cpu.vulkan();
+  EXPECT_THROW(m1_vulkan.bmm(m2_cpu), ::c10::Error);
 }
 
 TEST_F(VulkanAPITest, clamp) {
@@ -1566,6 +1917,10 @@ TEST_F(VulkanAPITest, div_broadcast6) {
   test_div({1, 15, 5, 4}, {21, 1, 5, 4});
 }
 
+TEST_F(VulkanAPITest, div_zero_dim) {
+  test_div({1, 15, 5, 4}, {});
+}
+
 TEST_F(VulkanAPITest, div_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -1808,6 +2163,69 @@ TEST_F(VulkanAPITest, expand_as) {
   ASSERT_TRUE(check);
 }
 
+void test_flip(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list) {
+  c10::InferenceMode mode;
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::flip(in_cpu, dim_list);
+  const auto out_vulkan = at::flip(in_vulkan, dim_list);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "test flip failed with input_shape: " << input_shape
+              << " and dim_list: " << dim_list << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, flip_1d) {
+  test_flip({5}, {0});
+  test_flip({5}, {-1});
+}
+
+TEST_F(VulkanAPITest, flip_2d) {
+  test_flip({5, 5}, {-1});
+  test_flip({2, 7}, {-2});
+
+  test_flip({5, 5}, {0, 1});
+}
+
+TEST_F(VulkanAPITest, flip_3d) {
+  test_flip({5, 7, 5}, {-1});
+  test_flip({2, 9, 7}, {-2});
+  test_flip({9, 7, 5}, {-3});
+
+  test_flip({10, 7, 5}, {0, 1});
+  test_flip({10, 7, 5}, {0, 2});
+  test_flip({10, 7, 5}, {1, 2});
+
+  test_flip({10, 7, 5}, {2, 1, 0});
+}
+
+TEST_F(VulkanAPITest, flip_4d) {
+  test_flip({2, 9, 1, 1}, {-1});
+  test_flip({7, 5, 9, 3}, {-2});
+  test_flip({3, 8, 5, 2}, {-3});
+  test_flip({7, 9, 5, 3}, {-4});
+
+  test_flip({10, 7, 5, 6}, {0, 1});
+  test_flip({10, 7, 5, 6}, {0, 2});
+  test_flip({10, 7, 5, 6}, {0, 3});
+  test_flip({10, 7, 5, 6}, {1, 2});
+  test_flip({10, 7, 5, 6}, {1, 3});
+  test_flip({10, 7, 5, 6}, {2, 3});
+
+  test_flip({10, 7, 5, 6}, {0, 1, 2});
+  test_flip({10, 7, 5, 6}, {0, 1, 3});
+  test_flip({10, 7, 5, 6}, {0, 2, 3});
+  test_flip({10, 7, 5, 6}, {3, 2, 1});
+
+  test_flip({10, 7, 5, 6}, {3, 2, 1, 0});
+}
+
 TEST_F(VulkanAPITest, gelu) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -1977,17 +2395,6 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       false);
   }, ::c10::Error);
 
-  // Act: normalized shape must be [C, H, W]
-  EXPECT_THROW({
-    at::layer_norm(
-      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      {5, 7},
-      at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      1e-05,
-      false);
-  }, ::c10::Error);
-
   // Act: incorrect weight dimensions
   EXPECT_THROW({
     at::layer_norm(
@@ -2010,17 +2417,6 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       false);
   }, ::c10::Error);
 
-  // Act: batch dim must be 1
-  EXPECT_THROW({
-    at::layer_norm(
-      at::rand({2, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      {3, 5, 7},
-      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      1e-05,
-      false);
-  }, ::c10::Error);
-
   // Act: input has too many dimensions
   EXPECT_THROW({
     at::layer_norm(
@@ -2031,33 +2427,32 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       1e-05,
       false);
   }, ::c10::Error);
-
-  // Act: input has too few dimensions
-  EXPECT_THROW({
-    at::layer_norm(
-      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      {3, 5},
-      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      at::rand({3, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-      1e-05,
-      false);
-  }, ::c10::Error);
 }
 
-TEST_F(VulkanAPITest, layer_norm_3d_small) {
+void test_layer_norm(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef normalized_shape,
+    const at::IntArrayRef weight_shape,
+    const at::IntArrayRef bias_shape,
+    const float eps) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
-  const auto weight_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto weight_cpu =
+      at::rand(weight_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto weight_vulkan = weight_cpu.vulkan();
 
-  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu =
+      at::rand(bias_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto bias_vulkan = bias_cpu.vulkan();
 
-  const auto output_cpu = at::layer_norm(input_cpu, {1, 1, 1}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {1, 1, 1}, weight_vulkan, bias_vulkan, 1e-05, false);
+  const auto output_cpu = at::layer_norm(
+      input_cpu, normalized_shape, weight_cpu, bias_cpu, eps, false);
+  const auto output_vulkan = at::layer_norm(
+      input_vulkan, normalized_shape, weight_vulkan, bias_vulkan, eps, false);
 
   const auto check = almostEqual(output_cpu, output_vulkan.cpu());
   if (!check) {
@@ -2067,119 +2462,23 @@ TEST_F(VulkanAPITest, layer_norm_3d_small) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, layer_norm_3d_medium) {
-  c10::InferenceMode mode;
-
-  const auto input_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto input_vulkan = input_cpu.vulkan();
-
-  const auto weight_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto weight_vulkan = weight_cpu.vulkan();
-
-  const auto bias_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_vulkan = bias_cpu.vulkan();
-
-  const auto output_cpu = at::layer_norm(input_cpu, {3, 5, 7}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {3, 5, 7}, weight_vulkan, bias_vulkan, 1e-05, false);
-
-  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
-  if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, layer_norm_2d) {
+  test_layer_norm({5, 7}, {7}, {7}, {7}, 1e-05);
+  test_layer_norm({5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
 }
 
-TEST_F(VulkanAPITest, layer_norm_3d_large) {
-  c10::InferenceMode mode;
-
-  const auto input_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto input_vulkan = input_cpu.vulkan();
-
-  const auto weight_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto weight_vulkan = weight_cpu.vulkan();
-
-  const auto bias_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_vulkan = bias_cpu.vulkan();
-
-  const auto output_cpu = at::layer_norm(input_cpu, {53, 139, 109}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {53, 139, 109}, weight_vulkan, bias_vulkan, 1e-05, false);
-
-  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
-  if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, layer_norm_3d) {
+  test_layer_norm({11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_layer_norm({11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_layer_norm({11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
 }
 
-TEST_F(VulkanAPITest, layer_norm_4d_small) {
-  c10::InferenceMode mode;
-
-  const auto input_cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto input_vulkan = input_cpu.vulkan();
-
-  const auto weight_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto weight_vulkan = weight_cpu.vulkan();
-
-  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_vulkan = bias_cpu.vulkan();
-
-  const auto output_cpu = at::layer_norm(input_cpu, {1, 1, 1}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {1, 1, 1}, weight_vulkan, bias_vulkan, 1e-05, false);
-
-  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
-  if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, layer_norm_4d_medium) {
-  c10::InferenceMode mode;
-
-  const auto input_cpu = at::rand({1, 3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto input_vulkan = input_cpu.vulkan();
-
-  const auto weight_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto weight_vulkan = weight_cpu.vulkan();
-
-  const auto bias_cpu = at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_vulkan = bias_cpu.vulkan();
-
-  const auto output_cpu = at::layer_norm(input_cpu, {3, 5, 7}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {3, 5, 7}, weight_vulkan, bias_vulkan, 1e-05, false);
-
-  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
-  if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, layer_norm_4d_large) {
-  c10::InferenceMode mode;
-
-  const auto input_cpu = at::rand({1, 53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto input_vulkan = input_cpu.vulkan();
-
-  const auto weight_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto weight_vulkan = weight_cpu.vulkan();
-
-  const auto bias_cpu = at::rand({53, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto bias_vulkan = bias_cpu.vulkan();
-
-  const auto output_cpu = at::layer_norm(input_cpu, {53, 139, 109}, weight_cpu, bias_cpu, 1e-05, false);
-  const auto output_vulkan = at::layer_norm(input_vulkan, {53, 139, 109}, weight_vulkan, bias_vulkan, 1e-05, false);
-
-  const auto check = almostEqual(output_cpu, output_vulkan.cpu());
-  if (!check) {
-    showRtol(output_cpu, output_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, layer_norm_4d) {
+  test_layer_norm({3, 11, 5, 7}, {7}, {7}, {7}, 1e-05);
+  test_layer_norm({3, 11, 5, 7}, {5, 7}, {5, 7}, {5, 7}, 1e-05);
+  test_layer_norm({3, 11, 5, 7}, {11, 5, 7}, {11, 5, 7}, {11, 5, 7}, 1e-05);
+  test_layer_norm(
+      {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, {3, 11, 5, 7}, 1e-05);
 }
 
 TEST_F(VulkanAPITest, leaky_relu) {
@@ -2653,34 +2952,128 @@ TEST_F(VulkanAPITest, max_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, mean) {
-  const auto in_cpu = at::rand({17, 3, 79, 53}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::mean(in_cpu, {-1, -2}, true);
 
+TEST_F(VulkanAPITest, mean_invalid_inputs) {
+  c10::InferenceMode mode;
+
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::mean(at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {3});
+  }, ::c10::Error);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {3});
+  }, ::c10::Error);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {-4});
+  }, ::c10::Error);
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, 1});
+  }, ::c10::Error);
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, -2});
+  }, ::c10::Error);
+}
+
+void test_mean_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool keepdim=false) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, true);
+
+  const auto out_cpu = at::mean(in_cpu, dim_list, keepdim);
+  const auto out_vulkan = at::mean(in_vulkan, dim_list, keepdim);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
+    std::cout << "mean_dim test failed with input shape: "
+              << input_shape << " and dim_list: " << dim_list << std::endl;
     showRtol(out_cpu, out_vulkan.cpu());
   }
 
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, mean2d) {
-  const auto in_cpu = at::rand({11, 7, 173, 37}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  const auto out_cpu = at::mean(in_cpu, {-1, -2}, false);
+TEST_F(VulkanAPITest, mean_dim_2d) {
+  test_mean_dim({2, 3}, {-1});
+  test_mean_dim({2, 7}, {-2});
+}
 
-  const auto in_vulkan = in_cpu.vulkan();
-  const auto out_vulkan = at::mean(in_vulkan, {-1, -2}, false);
+TEST_F(VulkanAPITest, mean_dim_3d) {
+  test_mean_dim({9, 7, 5}, {-1});
+  test_mean_dim({5, 7, 9}, {-2});
+  test_mean_dim({5, 7, 9}, {-3});
 
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
+  test_mean_dim({10, 7, 5}, {0, 1});
+  test_mean_dim({10, 7, 5}, {0, 2});
+  test_mean_dim({10, 7, 5}, {1, 2});
+  test_mean_dim({10, 7, 5}, {-1, -2});
+  test_mean_dim({10, 7, 5}, {0, -2});
+}
 
-  ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, mean_dim_4d) {
+  test_mean_dim({7, 9, 6, 5}, {-1});
+  test_mean_dim({6, 5, 7, 9}, {-2});
+  test_mean_dim({6, 5, 7, 9}, {-3});
+  test_mean_dim({6, 5, 7, 9}, {-4});
+
+  test_mean_dim({10, 7, 5, 6}, {0, 1});
+  test_mean_dim({10, 7, 5, 6}, {0, 2});
+  test_mean_dim({10, 7, 5, 6}, {0, 3});
+  test_mean_dim({10, 7, 5, 6}, {1, 2});
+  test_mean_dim({10, 7, 5, 6}, {1, 3});
+  test_mean_dim({10, 7, 5, 6}, {2, 3});
+  test_mean_dim({10, 7, 5, 6}, {-2, -4});
+
+  test_mean_dim({10, 7, 5, 6}, {0, 1, 2});
+  test_mean_dim({10, 7, 5, 6}, {0, 1, 3});
+  test_mean_dim({10, 7, 5, 6}, {0, 2, 3});
+  test_mean_dim({10, 7, 5, 6}, {3, 2, 1});
+  test_mean_dim({10, 7, 5, 6}, {3, -2, 1});
+  test_mean_dim({10, 7, 5, 6}, {-3, -2, -1});
+}
+
+TEST_F(VulkanAPITest, mean_dim_keepdim_2d) {
+  test_mean_dim({5, 7}, {-1}, true);
+  test_mean_dim({5, 7}, {-2}, true);
+}
+
+TEST_F(VulkanAPITest, mean_dim_keepdim_3d) {
+  test_mean_dim({9, 5, 7}, {-1}, true);
+  test_mean_dim({5, 9, 7}, {-2}, true);
+  test_mean_dim({7, 9, 5}, {-3}, true);
+
+  test_mean_dim({9, 5, 7}, {0, 1}, true);
+  test_mean_dim({5, 9, 7}, {0, 2}, true);
+  test_mean_dim({7, 9, 5}, {1, 2}, true);
+}
+
+TEST_F(VulkanAPITest, mean_dim_keepdim_4d) {
+  test_mean_dim({9, 5, 7, 11}, {-1}, true);
+  test_mean_dim({5, 9, 11, 7}, {-2}, true);
+  test_mean_dim({7, 11, 9, 5}, {-3}, true);
+  test_mean_dim({11, 7, 9, 5}, {-4}, true);
+
+  test_mean_dim({9, 5, 7, 11}, {0, 1}, true);
+  test_mean_dim({5, 9, 11, 7}, {0, 2}, true);
+  test_mean_dim({7, 11, 9, 5}, {0, 3}, true);
+  test_mean_dim({11, 7, 9, 5}, {1, 2}, true);
+  test_mean_dim({9, 5, 7, 11}, {1, 3}, true);
+  test_mean_dim({5, 9, 11, 7}, {2, 3}, true);
+
+  test_mean_dim({7, 11, 9, 5}, {-1, -2, -3}, true);
+  test_mean_dim({11, 7, 9, 5}, {-1, -2, -4}, true);
+  test_mean_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
 }
 
 TEST_F(VulkanAPITest, mm) {
@@ -2697,6 +3090,15 @@ TEST_F(VulkanAPITest, mm) {
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, mm_error) {
+  // mismatched dimensions of m1 and m2.
+  const auto m1_cpu = at::rand({179, 99}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_vulkan = m1_cpu.vulkan();
+
+  EXPECT_THROW(m1_vulkan.mm(m2_cpu), ::c10::Error);
 }
 
 void test_mul(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -2747,6 +3149,10 @@ TEST_F(VulkanAPITest, mul_broadcast5) {
 
 TEST_F(VulkanAPITest, mul_broadcast6) {
   test_mul({1, 15, 5, 4}, {21, 1, 5, 4});
+}
+
+TEST_F(VulkanAPITest, mul_zero_dim) {
+  test_mul({1, 15, 5, 4}, {});
 }
 
 TEST_F(VulkanAPITest, mul_) {
@@ -2895,6 +3301,331 @@ TEST_F(VulkanAPITest, mul_to_scalar_wrapped) {
   const auto check = almostEqual(c_cpu, c_vulkan.cpu());
   if (!check) {
     showRtol(c_cpu, c_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+void test_pow(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto other_vulkan = other_cpu.vulkan();
+
+  const auto out_cpu = at::pow(in_cpu, other_cpu);
+  const auto out_vulkan = at::pow(in_vulkan, other_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow test failed with input shape: "
+              << input_shape << " and other shape: " << other_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow) {
+  test_pow({4}, {4});
+  test_pow({4, 2}, {4, 2});
+  test_pow({11, 7, 9}, {11, 7, 9});
+  test_pow({3, 11, 9, 7}, {3, 11, 9, 7});
+}
+
+TEST_F(VulkanAPITest, pow_broadcast) {
+  // broadcast input
+  test_pow({1}, {3});
+  test_pow({1, 1}, {3, 2});
+  test_pow({2, 1, 3}, {2, 2, 5, 3});
+  test_pow({1, 1, 4}, {4, 8, 5, 4}); // mul4ch
+  test_pow({3, 7, 1, 4}, {3, 7, 9, 4});
+
+  // broadcast other
+  test_pow({3}, {1});
+  test_pow({3, 2}, {1, 2});
+  test_pow({2, 2, 5, 3}, {2, 1, 3});
+  test_pow({3, 7, 9, 4}, {3, 7, 1, 4});
+  test_pow({3, 8, 2, 5}, {1, 1, 2, 5}); // mul4ch
+
+  // broadcast both
+  test_pow({2, 1, 2}, {1, 5, 1});
+  test_pow({5, 1, 4}, {7, 1, 2, 1});
+  test_pow({2, 1, 7, 1}, {1, 5, 1, 4});
+  test_pow({1, 15, 5, 4}, {21, 1, 5, 4});
+  test_pow({1, 1, 5, 5}, {8, 8, 1, 1}); // mul4ch
+}
+
+TEST_F(VulkanAPITest, pow_zero_dim) {
+  test_mul({1, 15, 5, 4}, {});
+}
+
+void test_pow_(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_cpu = at::rand(other_shape, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto vulkan = cpu.vulkan();
+  const auto other_vulkan = other_cpu.vulkan();
+
+  cpu.pow_(other_cpu);
+  vulkan.pow_(other_vulkan);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "pow_ test failed with input shape: "
+              << input_shape << " and other shape: " << other_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_) {
+  test_pow_({4}, {4});
+  test_pow_({4, 2}, {4, 2});
+  test_pow_({11, 7, 9}, {11, 7, 9});
+  test_pow_({3, 11, 9, 7}, {3, 11, 9, 7});
+}
+
+TEST_F(VulkanAPITest, pow_broadcast_other_) {
+  test_pow_({3}, {1});
+  test_pow_({3, 2}, {1, 2});
+  test_pow_({2, 2, 5, 3}, {2, 1, 3});
+  test_pow_({3, 7, 9, 4}, {3, 7, 1, 4});
+}
+
+void test_pow_tensor_scalar(const at::IntArrayRef input_shape, const float exp) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::pow(in_cpu, exp);
+  const auto out_vulkan = at::pow(in_vulkan, exp);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow_tensor_scalar test failed with input shape: "
+              << input_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_tensor_scalar) {
+  test_pow_tensor_scalar({4}, 2.5);             // 1d
+  test_pow_tensor_scalar({4, 2}, -1);           // 2d
+  test_pow_tensor_scalar({11, 7, 9}, 7.7);      // 3d
+  test_pow_tensor_scalar({3, 11, 9, 7}, -0.03); // 4d
+}
+
+void test_pow_tensor_scalar_(const at::IntArrayRef input_shape, const float exp) {
+  // Make sure inputs are not 0, cannot compare
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.pow_(exp);
+  vulkan.pow_(exp);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "pow_scalar_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_tensor_scalar_) {
+  test_pow_tensor_scalar_({4}, 2.5);             // 1d
+  test_pow_tensor_scalar_({4, 2}, -1);           // 2d
+  test_pow_tensor_scalar_({11, 7, 9}, 7.7);      // 3d
+  test_pow_tensor_scalar_({3, 11, 9, 7}, -0.03); // 4d
+}
+
+void test_pow_scalar_tensor(const float base, const at::IntArrayRef other) {
+  const auto other_cpu = at::rand(other, at::device(at::kCPU).dtype(at::kFloat));
+  const auto other_vulkan = other_cpu.vulkan();
+
+  const auto out_cpu = at::pow(base, other_cpu);
+  const auto out_vulkan = at::pow(base, other_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "pow_scalar_tensor test failed with other shape: "
+              << other << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, pow_scalar_tensor) {
+  test_pow_scalar_tensor(2.5, {4});             // 1d
+  test_pow_scalar_tensor(2, {4, 2});            // 2d
+  test_pow_scalar_tensor(7.7, {11, 7, 9});      // 3d
+  test_pow_scalar_tensor(3, {3, 11, 9, 7});     // 4d
+}
+
+void test_floor_divide_scalar(const at::IntArrayRef input_shape, float input_scale, float other) {
+  c10::InferenceMode mode;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+
+  auto in_vulkan = in_cpu.vulkan();
+  auto out_vk = at::floor_divide(in_vulkan, other);
+  auto out_cpu = at::floor_divide(in_cpu, other);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(out_cpu - out_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale
+              << " other: " << other
+              << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_scalar) {
+  test_floor_divide_scalar({3, 3, 12, 12}, 100.0, 10.0);
+  test_floor_divide_scalar({12, 12}, 10.0, 3.4);
+  test_floor_divide_scalar({4, 5, 12, 12}, 100.0, 10.0);
+  test_floor_divide_scalar({3, 3, 12, 12}, 0.3, 0.08);
+}
+
+TEST_F(VulkanAPITest, floor_divide_scalar_error) {
+  c10::InferenceMode mode;
+
+  auto in_cpu = at::rand({2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
+  auto in_vulkan = in_cpu.vulkan();
+  EXPECT_THROW(at::floor_divide(in_vulkan, 0.0f), ::c10::Error);
+}
+
+void test_floor_divide_scalar_inplace(const at::IntArrayRef input_shape, float input_scale, float other) {
+  c10::InferenceMode mode;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  auto in_vk = in_cpu.vulkan();
+
+  in_cpu.floor_divide_(other);
+  in_vk.floor_divide_(other);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(in_cpu - in_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale
+              << " other: " << other
+              << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_scalar_inplace_error) {
+  c10::InferenceMode mode;
+
+  auto in_cpu = at::rand({2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
+  auto in_vulkan = in_cpu.vulkan();
+  EXPECT_THROW(in_vulkan.floor_divide(0.0f), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, floor_divide_scalar_inplace) {
+  test_floor_divide_scalar_inplace({3, 3, 12, 12}, 100.0, 10.0);
+  test_floor_divide_scalar_inplace({12, 12}, 10.0, 3.4);
+  test_floor_divide_scalar_inplace({4, 5, 12, 12}, 100.0, 10.0);
+  test_floor_divide_scalar_inplace({3, 3, 12, 12}, 0.3, 0.08);
+}
+
+TEST_F(VulkanAPITest, floor_divide_zero_dim_tensor) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{5, 3, 4, 5};
+  float input_scale = 100.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  auto in_vk = in_cpu.vulkan();
+
+  auto other_cpu = at::zeros({}, at::device(at::kCPU).dtype(at::kFloat)) + 10.0f;
+  auto other_vk = other_cpu.vulkan();
+
+  auto out_cpu = at::floor_divide(in_cpu, other_cpu);
+  auto out_vk = at::floor_divide(in_vk, other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(out_cpu - out_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale
+              << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_tensor) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{6, 3, 5, 5};
+  float input_scale = 10.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  // "other" is at least 0.5 to avoid rounding error causes by very small
+  // values.
+  auto other_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.5;
+
+  auto in_vk = in_cpu.vulkan();
+  auto other_vk = other_cpu.vulkan();
+
+  auto out_cpu = at::floor_divide(in_cpu, other_cpu);
+  auto out_vk = at::floor_divide(in_vk, other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(out_cpu - out_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale << std::endl;
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, floor_divide_tensor_inplace) {
+  c10::InferenceMode mode;
+
+  std::vector<int64_t> input_shape{5, 3, 5, 5};
+  float input_scale = 10.0;
+
+  auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  in_cpu = at::mul(in_cpu, input_scale);
+  // "other" is at least 0.5 to avoid rounding error causes by very small
+  // values.
+  auto other_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.5;
+
+  auto in_vk = in_cpu.vulkan();
+  auto other_vk = other_cpu.vulkan();
+
+  in_cpu.floor_divide_(other_cpu);
+  in_vk.floor_divide_(other_vk);
+
+  // max tolerance is 1.0 due to floor.
+  // may consider adding extra check on number of violation. it should be rare.
+  const auto check = checkRtol(in_cpu - in_vk.cpu(), 1.0f);
+  if (!check) {
+    std::cout << "floor_divide test failed with "
+              << "scale: " << input_scale << std::endl;
   }
 
   ASSERT_TRUE(check);
@@ -3386,6 +4117,10 @@ TEST_F(VulkanAPITest, sub_broadcast6) {
   test_sub({1, 15, 5, 4}, {21, 1, 5, 4}, 1.8f);
 }
 
+TEST_F(VulkanAPITest, sub_zero_dim) {
+  test_sub({1, 15, 5, 4}, {}, 1.8f);
+}
+
 TEST_F(VulkanAPITest, sub_) {
   auto a_cpu = at::rand({61, 17, 29, 83}, at::device(at::kCPU).dtype(at::kFloat));
   auto a_vulkan = a_cpu.vulkan();
@@ -3545,16 +4280,189 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, uniform) {
-  float a_min = -8.2f;
-  float a_max = -1.4f;
+TEST_F(VulkanAPITest, sum_invalid_inputs) {
+  c10::InferenceMode mode;
 
-  auto a_vulkan =
-      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
-  a_vulkan.uniform_(a_min, a_max);
+  // Act: input dimension too large
+  EXPECT_THROW({
+    at::sum(at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {3});
+  }, ::c10::Error);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {3});
+  }, ::c10::Error);
+
+  // Act: dimension out of range
+  EXPECT_THROW({
+    at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {-4});
+  }, ::c10::Error);
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, 1});
+  }, ::c10::Error);
+
+  // Act: repeated dimensions
+  EXPECT_THROW({
+    at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
+      .vulkan(), {1, -2});
+  }, ::c10::Error);
+}
+
+void test_sum_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool keepdim=false) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sum(in_cpu, dim_list, keepdim);
+  const auto out_vulkan = at::sum(in_vulkan, dim_list, keepdim);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "sum_dim test failed with input shape: "
+              << input_shape << " and dim_list: " << dim_list << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sum_dim_1d) {
+  test_sum_dim({7}, {-1});
+  test_sum_dim({3}, {0});
+}
+
+TEST_F(VulkanAPITest, sum_dim_2d) {
+  test_sum_dim({2, 3}, {-1});
+  test_sum_dim({2, 7}, {-2});
+  test_sum_dim({2, 7}, {-1, -2});
+}
+
+TEST_F(VulkanAPITest, sum_dim_3d) {
+  test_sum_dim({9, 7, 5}, {-1});
+  test_sum_dim({5, 7, 9}, {-2});
+  test_sum_dim({5, 7, 9}, {-3});
+
+  test_sum_dim({10, 7, 5}, {0, 1});
+  test_sum_dim({10, 7, 5}, {0, 2});
+  test_sum_dim({10, 7, 5}, {1, 2});
+
+  test_sum_dim({10, 7, 5}, {-1, -2});
+  test_sum_dim({10, 7, 5}, {-1, -3});
+  test_sum_dim({10, 7, 5}, {-2, -3});
+
+  test_sum_dim({10, 7, 5}, {0, 1, 2});
+  test_sum_dim({10, 7, 5}, {-1, -2, -3});
+}
+
+TEST_F(VulkanAPITest, sum_dim_4d) {
+  test_sum_dim({7, 9, 6, 5}, {-1});
+  test_sum_dim({6, 5, 7, 9}, {-2});
+  test_sum_dim({6, 5, 7, 9}, {-3});
+  test_sum_dim({6, 5, 7, 9}, {-4});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1});
+  test_sum_dim({10, 7, 5, 6}, {0, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 3});
+  test_sum_dim({10, 7, 5, 6}, {1, 2});
+  test_sum_dim({10, 7, 5, 6}, {1, 3});
+  test_sum_dim({10, 7, 5, 6}, {2, 3});
+  test_sum_dim({10, 7, 5, 6}, {-2, -4});
+
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 2});
+  test_sum_dim({10, 7, 5, 6}, {0, 1, 3});
+  test_sum_dim({10, 7, 5, 6}, {0, 2, 3});
+  test_sum_dim({10, 7, 5, 6}, {3, 2, 1});
+  test_sum_dim({10, 7, 5, 6}, {3, -2, 1});
+  test_sum_dim({10, 7, 5, 6}, {-3, -2, -1});
+
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -3});
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -4});
+  test_sum_dim({10, 7, 5, 6}, {-1, -3, -4});
+  test_sum_dim({10, 7, 5, 6}, {-2, -3, -4});
+
+  test_sum_dim({10, 7, 5, 6}, {-1, -2, -3, -4});
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_1d) {
+  test_sum_dim({5}, {-1}, true);
+  test_sum_dim({3}, {-1}, true);
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_2d) {
+  test_sum_dim({5, 7}, {-1}, true);
+  test_sum_dim({5, 7}, {-2}, true);
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_3d) {
+  test_sum_dim({9, 5, 7}, {-1}, true);
+  test_sum_dim({5, 9, 7}, {-2}, true);
+  test_sum_dim({7, 9, 5}, {-3}, true);
+
+  test_sum_dim({9, 5, 7}, {0, 1}, true);
+  test_sum_dim({5, 9, 7}, {0, 2}, true);
+  test_sum_dim({7, 9, 5}, {1, 2}, true);
+
+  test_sum_dim({7, 9, 5}, {0, 1, 2}, true);
+}
+
+TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
+  test_sum_dim({9, 5, 7, 11}, {-1}, true);
+  test_sum_dim({5, 9, 11, 7}, {-2}, true);
+  test_sum_dim({7, 11, 9, 5}, {-3}, true);
+  test_sum_dim({11, 7, 9, 5}, {-4}, true);
+
+  test_sum_dim({9, 5, 7, 11}, {0, 1}, true);
+  test_sum_dim({5, 9, 11, 7}, {0, 2}, true);
+  test_sum_dim({7, 11, 9, 5}, {0, 3}, true);
+  test_sum_dim({11, 7, 9, 5}, {1, 2}, true);
+  test_sum_dim({9, 5, 7, 11}, {1, 3}, true);
+  test_sum_dim({5, 9, 11, 7}, {2, 3}, true);
+
+  test_sum_dim({7, 11, 9, 5}, {-1, -2, -3}, true);
+  test_sum_dim({11, 7, 9, 5}, {-1, -2, -4}, true);
+  test_sum_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
+
+  test_sum_dim({9, 5, 7, 11}, {-1, -2, -3, -4}, true);
+}
+
+void test_sum(const at::IntArrayRef input_shape) {
+  const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto out_cpu = at::sum(in_cpu);
+  const auto out_vulkan = at::sum(in_vulkan);
+
+  ASSERT_TRUE(out_vulkan.dim() == 0);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "sum test failed with input shape: "
+              << input_shape << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, sum_test) {
+  test_sum({6});
+  test_sum({5, 6});
+  test_sum({0, 3, 1});
+  test_sum({5, 0, 1});
+  test_sum({5, 3, 0});
+  test_sum({3, 3, 1});
+  test_sum({7, 6, 6});
+  test_sum({7, 8, 5, 6});
+}
+
+
+void test_uniform(at::Tensor a_vulkan, const float a_min, const float a_max) {
   auto a_cpu = a_vulkan.cpu();
-
-  ASSERT_TRUE(a_cpu.max().item<float>() < a_max);
+  ASSERT_TRUE(a_cpu.max().item<float>() <= a_max);
   ASSERT_TRUE(a_cpu.min().item<float>() >= a_min);
 
   // Verify range, also perform a loose check with on histogram distribution.
@@ -3578,6 +4486,86 @@ TEST_F(VulkanAPITest, uniform) {
   ASSERT_TRUE(
       (b_hist - expected_per_bin).abs().max().item<float>() <=
       (expected_per_bin * 0.05));
+}
+
+TEST_F(VulkanAPITest, uniform) {
+  float a_min = -8.2f;
+  float a_max = -1.4f;
+  auto a_vulkan =
+      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.uniform_(a_min, a_max);
+  test_uniform(a_vulkan, a_min, a_max);
+}
+
+TEST_F(VulkanAPITest, rand_like) {
+  float a_min = 0.0f;
+  float a_max = 1.0f;
+  auto a_vulkan =
+      at::zeros({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::rand_like(a_vulkan);
+  // verify that the input are still all zeros (not in-place)
+  ASSERT_TRUE(at::mean(a_vulkan.cpu()).item<float>() == 0.0);
+  test_uniform(out_vulkan, a_min, a_max);
+}
+
+void test_normal(at::Tensor out_vulkan, const float mean, const float std) {
+  // Verify the distribution is normal. The difference between given mean vs generated mean should be within 5% of standard deviation, and the same for standard deviation itself.
+  ASSERT_TRUE(std::abs(at::mean(out_vulkan.cpu()).item<float>() - mean) < std::abs(std) * 0.05);
+  ASSERT_TRUE(std::abs(at::std(out_vulkan.cpu()).item<float>() - std) < std::abs(std) * 0.05);
+}
+
+TEST_F(VulkanAPITest, normal_) {
+  float a_mean = -10.0;
+  float a_std = 2.0;
+
+  auto a_vulkan =
+      at::zeros({3, 4, 5, 6}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.normal_(a_mean, a_std);
+
+  test_normal(a_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, normal_large) {
+  float a_mean = 1.0;
+  float a_std = 0.001;
+
+  auto a_vulkan =
+      at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.normal_(a_mean, a_std);
+
+  test_normal(a_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, normal_error) {
+  float a_mean = 1.0;
+  float a_std = -1;
+
+  auto a_vulkan =
+      at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  EXPECT_THROW(a_vulkan.normal_(a_mean, a_std), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, randn_like) {
+  float a_mean = 0.0;
+  float a_std = 1.0;
+
+  auto a_vulkan =
+      at::zeros({8, 7, 6, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::randn_like(a_vulkan);
+  // verify that the input are still all zeros (not in-place)
+  ASSERT_TRUE(at::mean(a_vulkan.cpu()).item<float>() == 0.0);
+  test_normal(out_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, randn_like_large) {
+  float a_mean = 0.0;
+  float a_std = 1.0;
+
+  auto a_vulkan =
+      at::zeros({80, 70, 60, 50}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::randn_like(a_vulkan);
+
+  test_normal(out_vulkan, a_mean, a_std);
 }
 
 void test_t(const at::IntArrayRef input_shape) {
@@ -4018,6 +5006,109 @@ TEST_F(VulkanAPITest, unbind_3d_depth_medium) {
 
 TEST_F(VulkanAPITest, unbind_3d_depth_large) {
   test_unbind({100, 1, 144}, 0);
+}
+
+void test_var(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool unbiased=true, bool keepdim=false) {
+  c10::InferenceMode mode;
+
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::var(in_cpu, dim_list, unbiased, keepdim);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::var(in_vulkan, dim_list, unbiased, keepdim);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, var_2d_unbiased) {
+  test_var({3, 5}, {1}, true, true);
+  test_var({3, 5}, {1}, true, false);
+
+  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  test_var({3, 5}, {0, 1}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_2d_biased) {
+  test_var({3, 5}, {1}, false, true);
+  test_var({3, 5}, {1}, false, false);
+
+  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  test_var({3, 5}, {0, 1}, false, true);
+}
+
+TEST_F(VulkanAPITest, var_3d_unbiased) {
+  test_var({3, 5, 7}, {1}, true, true);
+  test_var({3, 5, 7}, {1}, true, false);
+
+  test_var({3, 5, 7}, {0, 1}, true, true);
+  test_var({3, 5, 7}, {0, 1}, true, false);
+
+  test_var({3, 5, 7}, {0, 2}, true, true);
+  test_var({3, 5, 7}, {0, 2}, true, false);
+
+  test_var({3, 5, 7}, {-1, -2}, true, true);
+  test_var({3, 5, 7}, {-1, -2}, true, false);
+
+  test_var({3, 5, 7}, {0, 1, 2}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_3d_biased) {
+  test_var({3, 5, 7}, {1}, false, true);
+  test_var({3, 5, 7}, {1}, false, false);
+
+  test_var({3, 5, 7}, {0, 1}, false, true);
+  test_var({3, 5, 7}, {0, 1}, false, false);
+
+  test_var({3, 5, 7}, {0, 2}, false, true);
+  test_var({3, 5, 7}, {0, 2}, false, false);
+
+  test_var({3, 5, 7}, {-1, -2}, false, true);
+  test_var({3, 5, 7}, {-1, -2}, false, false);
+
+  test_var({3, 5, 7}, {0, 1, 2}, false, true);
+}
+
+TEST_F(VulkanAPITest, var_4d_unbiased) {
+  test_var({3, 5, 7, 11}, {0}, true, true);
+  test_var({3, 5, 7, 11}, {1}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1}, true, true);
+  test_var({3, 5, 7, 11}, {0, 1}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 2}, true, true);
+  test_var({3, 5, 7, 11}, {0, 2}, true, false);
+
+  test_var({3, 5, 7, 11}, {-1, -2}, true, true);
+  test_var({3, 5, 7, 11}, {-1, -2}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2}, true, true);
+  test_var({3, 5, 7, 11}, {0, -1, 2}, true, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2, 3}, true, true);
+}
+
+TEST_F(VulkanAPITest, var_4d_biased) {
+  test_var({3, 5, 7, 11}, {0}, false, true);
+  test_var({3, 5, 7, 11}, {1}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1}, false, true);
+  test_var({3, 5, 7, 11}, {0, 1}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 2}, false, true);
+  test_var({3, 5, 7, 11}, {0, 2}, false, false);
+
+  test_var({3, 5, 7, 11}, {-1, -2}, false, true);
+  test_var({3, 5, 7, 11}, {-1, -2}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2}, false, true);
+  test_var({3, 5, 7, 11}, {0, -1, 2}, false, false);
+
+  test_var({3, 5, 7, 11}, {0, 1, 2, 3}, false, true);
 }
 
 TEST_F(VulkanAPITest, view_explicit) {
@@ -6139,16 +7230,40 @@ void test_linear(
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, linear_2d) {
+TEST_F(VulkanAPITest, linear_2d_flat) {
   test_linear({1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_3d) {
+TEST_F(VulkanAPITest, linear_2d_small) {
+  test_linear({2, 3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_2d_large) {
+  test_linear({49, 37}, {23, 37}, {23});
+}
+
+TEST_F(VulkanAPITest, linear_3d_flat) {
   test_linear({1, 1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_4d) {
+TEST_F(VulkanAPITest, linear_3d_small) {
+  test_linear({2, 3, 4}, {5, 4}, {5});
+}
+
+TEST_F(VulkanAPITest, linear_3d_large) {
+  test_linear({23, 17, 41}, {15, 41}, {15});
+}
+
+TEST_F(VulkanAPITest, linear_4d_flat) {
   test_linear({1, 1, 1, 37}, {41, 37}, {41});
+}
+
+TEST_F(VulkanAPITest, linear_4d_small) {
+  test_linear({2, 3, 4, 5}, {6, 5}, {6});
+}
+
+TEST_F(VulkanAPITest, linear_4d_large) {
+  test_linear({9, 13, 11, 17}, {23, 17}, {23});
 }
 
 TEST_F(VulkanAPITest, lstm_success) {

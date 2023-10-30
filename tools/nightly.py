@@ -105,7 +105,7 @@ class Formatter(logging.Formatter):
         self.redactions[needle] = replace
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_base_dir() -> str:
     meta_dir = os.getcwd()
     base_dir = os.path.join(meta_dir, "nightly", "log")
@@ -113,17 +113,17 @@ def logging_base_dir() -> str:
     return base_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_run_dir() -> str:
     cur_dir = os.path.join(
         logging_base_dir(),
-        "{}_{}".format(datetime.datetime.now().strftime(DATETIME_FORMAT), uuid.uuid1()),
+        f"{datetime.datetime.now().strftime(DATETIME_FORMAT)}_{uuid.uuid1()}",
     )
     os.makedirs(cur_dir, exist_ok=True)
     return cur_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_record_argv() -> None:
     s = subprocess.list2cmdline(sys.argv)
     with open(os.path.join(logging_run_dir(), "argv"), "w") as f:
@@ -343,7 +343,7 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
 
 @timed("Installing pytorch nightly binaries")
 def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
-    """ "Install pytorch into a temporary directory"""
+    """Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
     p = subprocess.run(cmd, check=True)

@@ -1,18 +1,20 @@
+from __future__ import annotations
+
 import logging
+from typing import Optional, Sequence
 
 import torch
-from torch import _prims
-from torch._prims_common import RETURN_TYPE
+from torch import _prims, Tensor
 
 log = logging.getLogger(__name__)
 
 
 def make_prim(
-    schema,
+    schema: str,
     impl_aten,
     return_type=_prims.RETURN_TYPE.NEW,
-    doc="",
-    tags=None,
+    doc: str = "",
+    tags: Optional[Sequence[torch.Tag]] = None,
 ):
     def meta(*args, **kwargs):
         return _prims.TensorMeta(impl_aten(*args, **kwargs))
@@ -27,7 +29,7 @@ def make_prim(
     )
 
 
-def eager_force_stride(input_tensor, stride):
+def eager_force_stride(input_tensor: Tensor, stride) -> tuple[int, ...]:
     if input_tensor.stride() == stride:
         return input_tensor
     new_tensor = input_tensor.clone().as_strided(
@@ -48,7 +50,7 @@ seed = make_prim(
 seeds = make_prim(
     "inductor_seeds(int count, Device device) -> Tensor",
     lambda count, device: torch.randint(2**63 - 1, [count], device=device),
-    doc="Horizontally fusion of many inductor_seed() calls",
+    doc="Horizontal fusion of many inductor_seed() calls",
     tags=(torch.Tag.nondeterministic_seeded,),
 )
 lookup_seed = make_prim(
@@ -72,24 +74,17 @@ force_stride_order = make_prim(
     lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
-
-
-def _inductor_bucketize_impl(input, boundaries, *, out_int32=False, right=False):
-    return torch.bucketize(input, boundaries, out_int32=out_int32, right=right)
-
-
-def _inductor_bucketize_meta(input, boundaries, *, out_int32=False, right=False):
-    return torch.empty_like(
-        input,
-        memory_format=torch.preserve_format,
-        dtype=(torch.int32 if out_int32 else torch.int64),
-    )
-
-
-_bucketize = _prims._make_prim(
-    schema="_inductor_bucketize(Tensor input, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor",
-    meta=_inductor_bucketize_meta,
-    impl_aten=_inductor_bucketize_impl,
-    return_type=RETURN_TYPE.NEW,
-    doc="Same as torch.bucketize(), but does not get decomposed.",
+masked_scatter_with_index = make_prim(
+    "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
+    lambda input_tensor, mask, index, source: torch.masked_scatter(
+        input_tensor, mask, source
+    ),
+    doc="masked_scatter with precomputed indices",
+)
+_unsafe_index_put_ = make_prim(
+    "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
+    lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
+        self, indices, values, accumulate
+    ),
+    doc="Unsafe index_put_ (doesn't issue device asserts)",
 )

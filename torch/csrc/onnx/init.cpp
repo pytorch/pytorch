@@ -1,4 +1,5 @@
 #include <onnx/onnx_pb.h>
+#include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
@@ -209,7 +210,7 @@ void initONNXBindings(PyObject* module) {
           "Enables or disables ONNX logging.")
       .def(
           "_jit_set_onnx_log_output_stream",
-          [](std::string stream_name = "stdout") -> void {
+          [](const std::string& stream_name = "stdout") -> void {
             std::shared_ptr<std::ostream> out;
             if (stream_name == "stdout") {
               out = std::shared_ptr<std::ostream>(
@@ -226,7 +227,7 @@ void initONNXBindings(PyObject* module) {
           "Set specific file stream for ONNX logging.")
       .def(
           "_jit_onnx_log",
-          [](py::args args) -> void {
+          [](const py::args& args) -> void {
             if (::torch::jit::onnx::is_log_enabled()) {
               auto& out = ::torch::jit::onnx::_get_log_output_stream();
               for (auto arg : args) {
@@ -272,7 +273,9 @@ void initONNXBindings(PyObject* module) {
       .value("UINT64", ::ONNX_NAMESPACE::TensorProto_DataType_UINT64)
       .value("COMPLEX64", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX64)
       .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128)
-      .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16);
+      .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16)
+      .value("FLOAT8E4M3FN", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN)
+      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
       .value("ONNX", OperatorExportTypes::ONNX)

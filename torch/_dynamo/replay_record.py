@@ -40,7 +40,7 @@ class ExecutionRecord:
 
 @dataclasses.dataclass
 class ExecutionRecorder:
-    MOD_EXCLUDES = ["torch"]
+    MOD_EXCLUDES = ["torch", "torch.fx.passes"]
     LOCAL_MOD_PREFIX = "___local_mod_"
 
     code: CodeType

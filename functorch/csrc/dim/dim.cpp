@@ -4,6 +4,16 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <torch/csrc/utils/python_compat.h>
+
+
+// Many APIs have changed/don't exist anymore
+#if IS_PYTHON_3_12_PLUS
+
+// Re-enable this some day
+
+#else
+
 #include "minpybind.h"
 #include <frameobject.h>
 #include <opcode.h>
@@ -12,7 +22,6 @@
 #include <iostream>
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -94,10 +103,10 @@ void initializeGlobals(Arena & A) {
     torch_Tensor = (PyTypeObject*) torch.attr("Tensor").ptr();
     torch_Tensor___mul__ = torch.attr("Tensor").attr("__mul__");
 
-    torch_Tensor_expand = torch.attr("_C").attr("_TensorBase").attr("expand");
-    torch_Tensor_split = torch.attr("_C").attr("_TensorBase").attr("split");
+    torch_Tensor_expand = torch.attr("_C").attr("TensorBase").attr("expand");
+    torch_Tensor_split = torch.attr("_C").attr("TensorBase").attr("split");
     torch_Tensor_copy_ = torch.attr("Tensor").attr("copy_");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     auto TensorBase = (PyTypeObject*) py_TensorBase.ptr();
     THPVariable_getitem = TensorBase->tp_as_mapping->mp_subscript;
     THPVariable_setitem = TensorBase->tp_as_mapping->mp_ass_subscript;
@@ -880,7 +889,7 @@ mpy::obj<Tensor> Tensor::create_delayed(mpy::object op, mpy::vector_args args, S
     mpy::obj<Tensor> self = Tensor::create();
     self->capture_levels(levels);
     self->has_device_ = has_device;
-    self->delayed_ = std::make_unique<DelayedOperator>(op, args);
+    self->delayed_ = std::make_unique<DelayedOperator>(std::move(op), args);
     return self;
 }
 
@@ -1082,7 +1091,7 @@ PyObject* py_tree_flatten(PyObject *self,
 
 
 
-mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::handle agg) {
+mpy::object tree_map(Arena& A, const std::function<mpy::handle(mpy::handle)>& fn, mpy::handle agg) {
     Slice<mpy::handle> elements;
     auto unflatten = tree_flatten(A, agg, elements);
     for (auto i : elements.enumerate()) {
@@ -1109,7 +1118,7 @@ int64_t _Tensor_ndim(mpy::handle h) {
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
     if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
@@ -3179,7 +3188,7 @@ PyObject* _patch_tensor_class(PyObject * self_,
     PY_BEGIN
 
     auto torch = mpy::import("torch");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     replaceMappingIfMatches(py_TensorBase);
 
     Py_RETURN_NONE;
@@ -3252,3 +3261,5 @@ PyObject* Dim_init() {
         return nullptr;
     }
 }
+
+#endif

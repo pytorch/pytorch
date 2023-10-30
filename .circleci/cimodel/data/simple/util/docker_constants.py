@@ -1,10 +1,12 @@
 AWS_DOCKER_HOST = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
+
 def gen_docker_image(container_type):
     return (
         "/".join([AWS_DOCKER_HOST, "pytorch", container_type]),
         f"docker-{container_type}",
     )
+
 
 def gen_docker_image_requires(image_name):
     return [f"docker-{image_name}"]
@@ -30,4 +32,4 @@ def gen_mobile_docker(specifier):
 
 DOCKER_IMAGE_ASAN, DOCKER_REQUIREMENT_ASAN = gen_mobile_docker("asan")
 
-DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK = gen_mobile_docker("android-ndk-r19c")
+DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK = gen_mobile_docker("android-ndk-r21e")

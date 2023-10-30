@@ -213,8 +213,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: O
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            raise TypeError("Expected string type for pathname, but got {}"
-                            .format(type(pathname)))
+            raise TypeError(f"Expected string type for pathname, but got {type(pathname)}")
         yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
@@ -323,7 +322,7 @@ class StreamWrapper:
         else:
             # Traverse only simple structures
             if isinstance(v, dict):
-                for kk, vv in v.items():
+                for vv in v.values():
                     cls.close_streams(vv, depth=depth + 1)
             elif isinstance(v, (list, tuple)):
                 for vv in v:

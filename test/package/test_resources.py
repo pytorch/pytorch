@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: package/deploy"]
 
 from io import BytesIO
@@ -105,7 +104,7 @@ class TestResources(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
             he.save_text("main", "main", "my string")
-            he.save_binary("main", "main_binary", "my string".encode("utf-8"))
+            he.save_binary("main", "main_binary", b"my string")
             src = dedent(
                 """\
                 import importlib
@@ -120,7 +119,7 @@ class TestResources(PackageTestCase):
         hi = PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
-        self.assertEqual(m.b, "my string".encode("utf-8"))
+        self.assertEqual(m.b, b"my string")
 
     def test_resource_access_by_path(self):
         """
@@ -128,7 +127,7 @@ class TestResources(PackageTestCase):
         """
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
-            he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
+            he.save_binary("string_module", "my_string", b"my string")
             src = dedent(
                 """\
                 import importlib.resources

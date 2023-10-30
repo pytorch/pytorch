@@ -101,28 +101,26 @@ class TestDispatch(TestCase):
 
         # double underscore to make it less likely we conflict with something
         # else
-        test_namespace = "__test{}__".format(self.namespace_index)
+        test_namespace = f"__test{self.namespace_index}__"
 
         def check_invariants(actual_provenance):
             C._dispatch_check_invariants(name)
             # Normalize the test namespace so that expected outputs are stable
             actual_state = C._dispatch_dump(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
+                f"{test_namespace}::{name}").replace(test_namespace, "test")
             actual_table = C._dispatch_dump_table(
-                "{}::{}".format(test_namespace, name)).replace(test_namespace, "test")
+                f"{test_namespace}::{name}").replace(test_namespace, "test")
             expected_state, expected_table, expected_provenance = results.setdefault(
                 frozenset(active_ops),
                 Result(actual_state, actual_table, actual_provenance)
             )
             self.assertMultiLineEqual(
                 expected_state, actual_state,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
             self.assertMultiLineEqual(
                 expected_table, actual_table,
-                "expected from {}; actual from {}"
-                .format(expected_provenance, actual_provenance)
+                f"expected from {expected_provenance}; actual from {actual_provenance}"
             )
 
         results.setdefault(frozenset(), Result("", "", "hardcoded initial state"))
@@ -138,7 +136,7 @@ class TestDispatch(TestCase):
             active_ops.add(op_ix)
             try:
                 ops[op_ix](refs[op_ix])
-                check_invariants("running ctors {}".format(ctor_order[:i + 1]))
+                check_invariants(f"running ctors {ctor_order[:i + 1]}")
             except RuntimeError as e:
                 if not expect_raises:
                     raise
@@ -146,7 +144,7 @@ class TestDispatch(TestCase):
                 actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
-                    Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
+                    Result(actual, "", f"error after running ctors {ctor_order[:i + 1]}")
                 )
                 self.assertMultiLineEqual(expected, actual, expected_provenance)
                 set_to_report = frozenset(active_ops)
@@ -154,10 +152,10 @@ class TestDispatch(TestCase):
                 # NB: this finally test asserts that if a registrations fails,
                 # the dispatcher is left in the same state *that it was before*!
                 check_invariants(
-                    "running ctors {} and then failing to run ctor {} "
+                    f"running ctors {ctor_order[:i]} and then failing to run ctor {op_ix} "
                     "(did this failure leave the dispatcher in a wedged state? "
                     "it shouldn't!)"
-                    .format(ctor_order[:i], op_ix))
+                )
                 break
         last_ctor = i
         if expect_raises and len(active_ops) == len(ops):
@@ -167,7 +165,7 @@ class TestDispatch(TestCase):
             self.assertTrue(
                 False,
                 "expected exception to be raised, but nothing was raised "
-                "(after running ctors {})".format(ctor_order))
+                f"(after running ctors {ctor_order})")
         # In the order specified by dtor_order, run deregistrations
         for i, op_ix in enumerate(dtor_order):
             # Trigger a destruction
@@ -179,8 +177,7 @@ class TestDispatch(TestCase):
             else:
                 active_ops.remove(op_ix)
             check_invariants(
-                "running ctors {}, then running dtors {}"
-                .format(ctor_order[:last_ctor + 1], dtor_order[:i + 1])
+                f"running ctors {ctor_order[:last_ctor + 1]}, then running dtors {dtor_order[:i + 1]}"
             )
         return results[set_to_report][0]
 
@@ -785,11 +782,11 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
         impls = C._dispatch_find_dangling_impls()
         self.assertEqual(1, len(impls))
         self.assertEqual(
-            '''\
+            f'''\
 name: __test::foo
 schema: (none)
-CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
-'''.format(extension_path),
+CPU: registered at {extension_path}:5 :: () -> () [ boxed unboxed ]
+''',
             impls[0])
 
     def test_dispatch_print_registrations_for_dispatch_key_invalid(self):

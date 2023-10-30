@@ -108,7 +108,7 @@ def lint_file(
     original = None
     replacement = None
     if replace_pattern:
-        with open(filename, "r") as f:
+        with open(filename) as f:
             original = f.read()
 
         try:
@@ -252,7 +252,7 @@ def main() -> None:
             ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     lines = proc.stdout.decode().splitlines()
     for line in lines:

@@ -1,3 +1,4 @@
+import copy
 import itertools
 import math
 from typing import Any, Dict, Optional
@@ -14,10 +15,13 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 
 
 def _all_gather_sharded_tensor(
-    sharded_tensor: ShardedTensor, pg: Optional[dist.ProcessGroup] = None
+    sharded_tensor: ShardedTensor,
+    pg: Optional[dist.ProcessGroup] = None,
+    device: Optional[torch.device] = None,
 ) -> torch.Tensor:
     if pg is None:
         pg = distributed_c10d._get_default_group()
@@ -26,11 +30,14 @@ def _all_gather_sharded_tensor(
     dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
     tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
-    pg_device = distributed_c10d._get_pg_default_device(pg)
+    pg_device = (
+        distributed_c10d._get_pg_default_device(pg) if device is None else device
+    )
     if shards:
         local_tensor = shards[0].tensor.flatten()
-        if local_tensor.device.type != pg_device.type:
-            local_tensor = local_tensor.to(pg_device)
+        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -44,42 +51,61 @@ def _all_gather_sharded_tensor(
         dtype=local_tensor.dtype,
         device=pg_device,
     )
-    dist._all_gather_base(tensor, local_tensor, group=pg)
+    dist.all_gather_into_tensor(tensor, local_tensor, group=pg)
 
     tensor = tensor.narrow(0, 0, tensor_numel).reshape(sharded_tensor.size())
     return tensor
 
 
+# TODO: Make this API work for both FSDP, and 2D. Move it outside of FSDP.
+# External users are interesting in using this API.
 def _gather_state_dict(
     state_dict: Dict[str, Any],
     pg: Optional[dist.ProcessGroup] = None,
+    device: Optional[torch.device] = None,
 ) -> Dict[str, Any]:
     """
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
-    for key, tensor in state_dict.items():
-        if isinstance(tensor, ShardedTensor):
-            output_tensor = _all_gather_sharded_tensor(tensor, pg)
+    for key, value in state_dict.items():
+        if isinstance(value, ShardedTensor):
+            # ShardedTensor does not seem to record the original device type.
+            # So if the tensor is moved to CPU, we won't know the original type.
+            # As a result, we have to rely on the user to tell us the correct one.
+            output_tensor = _all_gather_sharded_tensor(value, pg, device)
             local_shard_device = (
-                tensor.local_shards()[0].tensor.device
-                if tensor.local_shards()
+                value.local_shards()[0].tensor.device
+                if value.local_shards()
                 else torch.device("cpu")
             )
-            if output_tensor.device != local_shard_device:
-                tensor = output_tensor.to(local_shard_device)
-            else:
-                tensor = output_tensor
-        elif isinstance(tensor, DTensor):
-            tensor = tensor.redistribute(
-                device_mesh=tensor.device_mesh, placements=[Replicate()]
+            with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                if output_tensor.device != local_shard_device:
+                    value = output_tensor.to(local_shard_device)
+                else:
+                    value = output_tensor
+        elif isinstance(value, DTensor):
+            if value.device != value.device_mesh.device_type:
+                value = value.to(value.device_mesh.device_type)
+            # FSDP all_gather: [Shard(0)] -> [Replicate()]
+            # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+            # 2D FSDP + TP all_gather:
+            # - [Shard(0), Shard(n)] -> [Replicate(), Replicate()]
+            # - [Shard(0), Replicate()] -> [Replicate(), Replicate()]
+            placements = [Replicate() for _ in value.placements]
+            value = value.redistribute(
+                device_mesh=value.device_mesh,
+                placements=placements,
             )
-            tensor = tensor.to_local()
-        new_state_dict[key] = tensor
+            value = value.to_local()
+        elif isinstance(value, dict):
+            value = _gather_state_dict(value, pg, device)
+
+        new_state_dict[key] = value
     return new_state_dict
 
 
-def _get_remove_device_str(rank, device_type, num_devices_per_node):
+def _get_remote_device_str(rank, device_type, num_devices_per_node):
     if device_type.lower() == "cpu":
         return f"rank:{rank}/{device_type}"
     else:
@@ -92,6 +118,7 @@ def _create_chunk_sharded_tensor(
     world_size: int,
     num_devices_per_node: int,
     pg: dist.ProcessGroup,
+    device: Optional[torch.device] = None,
 ) -> ShardedTensor:
     """
     Shard a tensor to chunks along the first dimension. The local rank will gets its
@@ -113,9 +140,13 @@ def _create_chunk_sharded_tensor(
     )[:-1]
     offsets = [0] * (len(chunk_sizes[0]) - 1)
     chunk_offsets = [[d0] + offsets for d0 in dim0_offsets]
-    device_type = distributed_c10d._get_pg_default_device(pg).type
+    device_type = (
+        distributed_c10d._get_pg_default_device(pg).type
+        if device is None
+        else device.type
+    )
     placements = [
-        _get_remove_device_str(r, device_type, num_devices_per_node)
+        _get_remote_device_str(r, device_type, num_devices_per_node)
         for r in range(len(chunk_sizes))
     ]
     assert len(chunk_sizes) == len(chunk_offsets) == len(placements)
@@ -148,15 +179,37 @@ def _create_chunk_dtensor(
     Shard a tensor to chunks along the first dimension. The local rank will gets its
     corresponding chunk as the local tensor to create a DTensor.
     """
-    shard_placement = DShard(0)
-    tensor_list, _ = shard_placement._split_tensor(
-        tensor,
-        device_mesh.size(dim=0),
-        with_padding=False,
-        contiguous=True,
-    )
-    # We need to explicitly call .clone() here as tensor.chunks() splits a tensor into the specified number of chunks.
-    # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    local_tensor = tensor_list[rank].clone().detach()
-    return DTensor.from_local(local_tensor, device_mesh, [shard_placement])
+    tensor = tensor.clone().detach()
+
+    # FSDP placements: [Shard(0)]
+    # HSDP placements: [Replicate(), Shard(0)]
+    replicate_placements = [Replicate() for _ in range(device_mesh.ndim)]
+    shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
+    shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
+
+    return DTensor.from_local(tensor, device_mesh, replicate_placements).redistribute(
+        device_mesh=device_mesh,
+        placements=shard_placements,
+    )
+
+
+def _all_gather_dtensor(
+    tensor: DTensor,
+    parent_mesh: Optional[DeviceMesh],
+) -> torch.Tensor:
+    """
+    All gather a DTensor in its sharded dimension and return the local tensor.
+    """
+    assert parent_mesh is None
+
+    placements = list(copy.deepcopy(tensor.placements))
+    # FSDP placements: [Shard(0)] -> [Replicate()]
+    # HSDP placements: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+    placements[-1] = Replicate()
+    tensor = tensor.redistribute(
+        device_mesh=tensor.device_mesh,
+        placements=placements,
+    )
+
+    return tensor.to_local()

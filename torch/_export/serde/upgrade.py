@@ -4,7 +4,7 @@ from typing import Tuple, Dict, Optional, List
 
 import torch
 from torch._export import export
-from torch._export.pass_base import ExportPassBase
+from torch._export.pass_base import _ExportPassBase
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor
@@ -74,7 +74,7 @@ class GraphModuleOpUpgrader:
     original TorchScript upgrader).
     """
 
-    class UpgraderPass(ExportPassBase):
+    class UpgraderPass(_ExportPassBase):
         def __init__(self, old_target: Target, new_target: Target):
             super().__init__()
             self.old_target = old_target
@@ -132,7 +132,7 @@ class GraphModuleOpUpgrader:
     def _populate_passes(upgraders: List[Tuple[str, str]]) -> List[UpgraderPass]:
         """Given a list of upgraders, loop through it from lower version to higher version and create passes for all
         upgraders. se torch.Library API to register old ops. Op name will be
-        <name>_<valid_from_ver>_<valid_till_ver>. Register upgarders as CompositeImplicitAutograd kernels. For example:
+        <name>_<valid_from_ver>_<valid_till_ver>. Register upgraders as CompositeImplicitAutograd kernels. For example:
 
         lib = Library("aten", "FRAGMENT")
         lib.define(old_schema)
@@ -193,10 +193,8 @@ class GraphModuleOpUpgrader:
         inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:
-            upgraded_program = exported_program.transform(_pass)
-            # NB: we have to retrace the graph_module instead of ep because of some failure. Also, we need to turn of
-            # _add_runtime_assertions because dynamo is not happy with sym_size.int.
-            exported_program = export(upgraded_program.graph_module, inputs, [], _add_runtime_assertions=False)
-            exported_program.call_spec = upgraded_program.call_spec
+            upgraded_program = exported_program._transform(_pass)
+            # NB: we have to retrace the graph_module instead of ep because of some failure.
+            exported_program = export(upgraded_program.module(), inputs, {})
 
         return exported_program

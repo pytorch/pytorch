@@ -2,7 +2,6 @@
 
 #include <c10/util/irange.h>
 #include <torch/arg.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/data/datasets/stateful.h>
 #include <torch/data/samplers.h>
 #include <queue>
@@ -391,7 +390,7 @@ class ChunkDataset final
 
     // Throw out any existing cached batch in the buffer and re-creates a new
     // chunk buffer.
-    batch_buffer_ = torch::make_unique<
+    batch_buffer_ = std::make_unique<
         detail::BatchDataBuffer<UnwrappedBatchType, ExampleSamplerType>>(
         options_.batch_size(), example_sampler_, options_.cache_size());
 

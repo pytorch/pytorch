@@ -23,7 +23,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _deprecation, _type_utils, errors
+from torch.onnx import _constants, _type_utils, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number
@@ -315,8 +315,10 @@ def quantized_args(
     *arg_q_descriptors: bool,
     scale: Optional[float] = None,
     zero_point: Optional[int] = None,
+    quantize_output: bool = True,
 ):
     """A decorator which extends support for quantized version of the base operator.
+
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
@@ -353,6 +355,7 @@ def quantized_args(
           the first quantized input scale.
         zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
+        quantize_output: If True, quantize the output of the base operator. Default is True
     """
 
     def decorator(fn):
@@ -435,7 +438,9 @@ def quantized_args(
                 _zero_point is not None
             ), "Bug: Zero point must be set for quantized operator"
 
-            return quantize_helper(g, output, _scale, _zero_point)
+            if quantize_output:
+                return quantize_helper(g, output, _scale, _zero_point)
+            return output
 
         return wrapper
 
@@ -471,8 +476,8 @@ def _if_scalar_type_as(self, tensor):
 
 
 @_beartype.beartype
-def _is_none(x: _C.Value) -> bool:
-    return x.node().mustBeNone()
+def _is_none(x: Any) -> bool:
+    return x is None or (x.node().mustBeNone() if isinstance(x, _C.Value) else False)
 
 
 @_beartype.beartype
@@ -1705,36 +1710,6 @@ def args_have_same_dtype(args):
         _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args
     )
     return has_same_dtype
-
-
-# TODO(justinchuby): Delete these setters, users should set the vars directly.
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_opset_version(opset_version: int):
-    GLOBALS.export_onnx_opset_version = opset_version
-
-
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_operator_export_type(operator_export_type):
-    GLOBALS.operator_export_type = operator_export_type
-
-
-# This function is for debug use only.
-# onnx_shape_inference = True by default.
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_onnx_shape_inference(onnx_shape_inference: bool):
-    GLOBALS.onnx_shape_inference = onnx_shape_inference
 
 
 # Deprecated. Internally use _type_utils.ScalarType

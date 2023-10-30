@@ -305,7 +305,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // root_key
   std::string root_key = get_tensor_id_ != nullptr
       ? get_tensor_id_(tensor)
-      : c10::to_string(tensor_data_.size());
+      : std::to_string(tensor_data_.size());
   pushString(root_key);
   // location
   pushString(tensor.device().str());
@@ -552,9 +552,11 @@ void Pickler::pushDouble(double value) {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
-#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
   push<double>(value);
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
 }
 void Pickler::pushComplexDouble(const IValue& value) {
   c10::complex<double> d = value.toComplexDouble();

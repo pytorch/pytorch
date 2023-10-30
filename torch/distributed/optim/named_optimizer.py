@@ -2,7 +2,7 @@ import logging
 import warnings
 
 from copy import deepcopy
-from typing import Any, Collection, Dict, List, Mapping, Optional, Union
+from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Union, overload
 
 import torch
 import torch.nn as nn
@@ -144,14 +144,22 @@ class _NamedOptimizer(optim.Optimizer):
 
         return self._post_state_dict({"state": ret_state, "param_groups": ret_groups})
 
-    def step(self, closure: Any = None) -> None:
+    @overload
+    def step(self, closure: None = ...) -> None:
+        ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float:
+        ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         """
         Performs a single optimization step.
 
         This will call :meth:`torch.optim.Optimizer.step` on the wrapped
         optimizer.
         """
-        self._optimizer.step(closure=closure)
+        return self._optimizer.step(closure=closure)
 
     @property
     def state(self) -> Mapping[torch.Tensor, Any]:  # type: ignore[override]

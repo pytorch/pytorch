@@ -2,9 +2,18 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/fill_native.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/zero_native.h>
+#endif
+
 namespace at::native {
 
-Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
+static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   using namespace mps;
 
   if (self.numel() == 0) {
@@ -66,7 +75,7 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
 }
 
 // returns false if tensor cannot be filled with fillBuffer()
-bool fill_mps_tensor_(Tensor& self, uint8_t value) {
+static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   if (self.is_contiguous()) {
     MPSStream* stream = getCurrentMPSStream();
     auto storage_byte_offset = self.storage_offset() * self.itemsize();
@@ -76,16 +85,25 @@ bool fill_mps_tensor_(Tensor& self, uint8_t value) {
   return false;
 }
 
-Tensor& zero_mps_(Tensor& self) {
-  // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (fill_mps_tensor_(self, 0) == true)
-    return self;
-  return fill_scalar_mps_impl(self, 0.0f);
-}
-
 Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
+  // check if it's possible to use fillBuffer() to fill the Tensor's storage
   if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
     return self;
+
+  if (isComplexType(self.scalar_type())) {
+    auto self_as_real = at::view_as_real(self);
+    auto self_as_real_real = self_as_real.select(self.dim(), 0);
+    auto self_as_real_imag = self_as_real.select(self.dim(), 1);
+    if (value.isComplex()) {
+      auto value_cdouble = value.to<c10::complex<double>>();
+      fill_scalar_mps_impl(self_as_real_real, value_cdouble.real());
+      fill_scalar_mps_impl(self_as_real_imag, value_cdouble.imag());
+      return self;
+    }
+    fill_scalar_mps_impl(self_as_real_real, value);
+    fill_scalar_mps_impl(self_as_real_imag, 0.0f);
+    return self;
+  }
   return fill_scalar_mps_impl(self, value);
 }
 
@@ -97,7 +115,11 @@ Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
   Scalar scalar_value = value.item();
   if (scalar_value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
     return self;
-  return fill_scalar_mps_impl(self, scalar_value);
+  return fill_scalar_mps(self, scalar_value);
+}
+
+Tensor& zero_mps_(Tensor& self) {
+  return fill_scalar_mps(self, 0.0f);
 }
 
 } // namespace at::native

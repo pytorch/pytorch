@@ -3,13 +3,19 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from typing import Tuple, Union, List, cast, TYPE_CHECKING
-from torch.utils._pytree import tree_map_only
+from typing import Tuple, Union, List, Optional, cast, TYPE_CHECKING
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import _register_wrapper_tensor
+from ._functional_collectives_impl import _register_tensor_wrapper
 from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
+from torch._custom_ops import impl_abstract
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only
+except ImportError:
+    from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
+
 
 if torch._running_with_deploy():
     def is_torchdynamo_compiling():
@@ -291,6 +297,47 @@ def reduce_scatter_tensor_coalesced(
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
+# This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
+# Today, this maps 1:1 with "aten ops that are views".
+def _is_view_op(tgt):
+    assert isinstance(tgt, torch._ops.OpOverload)
+    schema = tgt._schema
+    if len(schema.arguments) > 0:
+        first_arg = schema.arguments[0]
+        # check if op is a view
+        return first_arg.alias_info is not None and not first_arg.alias_info.is_write
+
+
+def all_to_all_single(
+    self: torch.Tensor,
+    output_split_sizes: Optional[List[int]],
+    input_split_sizes: Optional[List[int]],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
+    """
+    Each process splits input tensor and then scatters the split list
+    to all processes in a group. Then concatenate the received tensors from all
+    the processes in the group and return single output tensor.
+
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    if output_split_sizes is not None:
+        assert all(isinstance(size, (int, torch.SymInt)) for size in output_split_sizes), output_split_sizes
+    if input_split_sizes is not None:
+        assert all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes), input_split_sizes
+    tag, rankset, group_size = _expand_group(group, tag)
+    tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
+    return _maybe_wrap_tensor(tensor)
+
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
@@ -320,25 +367,57 @@ class AsyncCollectiveTensor(torch.Tensor):
         r.elem = elem
         return r
 
+    def __tensor_flatten__(self):
+        return ["elem"], None
+
+    def tolist(self):
+        wait_tensor(self.elem)
+        return self.elem.tolist()
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta):
+        assert meta is None
+        elem = inner_tensors["elem"]
+        return AsyncCollectiveTensor(elem)
+
     def __repr__(self):
+        wait_tensor(self.elem)
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
         wait_tensor(self.elem)
         return self
 
+    def _get_acs_underlying_tensor(self):
+        """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
+        return self.elem
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        is_view_op = _is_view_op(func)
+
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
-            wait_tensor(e.elem)
+            if not is_view_op:
+                wait_tensor(e.elem)
             return e.elem
+
+        def wrap(e: torch.Tensor):
+            # wait_tensor is idepotent and will do stream sync only once
+            assert not isinstance(e, AsyncCollectiveTensor)
+            res = AsyncCollectiveTensor(e)
+            _register_tensor_wrapper(res)
+            return res
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
         # we don't wrap the result as it doesn't need to be waited on.
         out = func(*unwrapped_args, **unwrapped_kwargs)
+
+        # View ops dont require a sync, so we should re-wrap the outputs.
+        if is_view_op:
+            out = tree_map_only(torch.Tensor, wrap, out)
 
         return out
 
@@ -417,6 +496,11 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
+    # If functionalization is turned on, we are almost definitely compiling/tracing.
+    # (In particular, AOTAutograd traces a model once with functionalization on
+    #  but proxy tracing turned of, so this is how we detect it).
+    if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL) is not None:
+        return True
     mode = get_innermost_proxy_mode()
     if mode is None:
         return False
@@ -426,7 +510,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_wrapper_tensor(res, self)
+    _register_tensor_wrapper(res)
     return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
@@ -455,9 +539,8 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
     out_size[0] //= group_size
     return input.new_empty(out_size)
 
-def _all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
+def _all_reduce_coalesced_meta(self, *args):
     return [torch.empty_like(t) for t in self]
-
 
 def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_size):
     def mk_out_tensor(input):
@@ -468,6 +551,42 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 
     return [mk_out_tensor(t) for t in inputs]
 
+# NB: We often say all_to_all has dynamic output size, but this is not
+# technically true: instead, what typically happens is you manually
+# communicate the output_split_sizes ahead of time (which is dynamic),
+# but then you pass those sizes explicitly, and the all to all itself
+# isn't dynamic, it just follows the specified output splits
+def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, rankset, group_size):
+    if output_split_sizes is None:
+        return input.new_empty(input.size())
+    else:
+        for s in output_split_sizes:
+            torch._check_is_size(s)
+        out_size = list(input.size())
+        out_size[0] = sum(output_split_sizes)
+        return input.new_empty(out_size)
+
+def _all_gather_into_tensor_native_meta(input, group_size, group_name):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name):
+    return [
+        _all_gather_into_tensor_native_meta(input, group_size, group_name)
+        for input in inputs
+    ]
+
+def _reduce_scatter_tensor_native_meta(input, group_size, group_name):
+    shape = list(input.size())
+    shape[0] //= group_size
+    return input.new_empty(shape)
+
+def _reduce_scatter_tensor_coalesced_native_meta(inputs, group_size, group_name):
+    return [
+        _reduce_scatter_tensor_native_meta(input, group_size, group_name)
+        for input in inputs
+    ]
 
 def _register_ops():
     ops_defs = [
@@ -478,6 +597,7 @@ def _register_ops():
         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+        "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
     ]
 
     my_module = sys.modules[__name__]
@@ -487,7 +607,7 @@ def _register_ops():
         meta_impl = getattr(my_module, f"_{op_name}_meta")
         c10_lib.define(op_def)
         c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
-        c10_lib_impl.impl(op_name, meta_impl, "Meta")
+        impl_abstract(f"c10d_functional::{op_name}")(meta_impl)
 
 
 if not torch._running_with_deploy():
@@ -497,6 +617,15 @@ if not torch._running_with_deploy():
     c10_lib = torch.library.Library("c10d_functional", "DEF")
     c10_lib_impl = torch.library.Library("c10d_functional", "IMPL")
     _register_ops()
+
+    _c10_lib_impl = torch.library.Library("_c10d_functional", "IMPL")
+    _c10_lib_impl.impl("all_reduce", _all_reduce_meta, "Meta")
+    _c10_lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
+    _c10_lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("all_gather_into_tensor_coalesced", _all_gather_into_tensor_coalesced_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+    _c10_lib_impl.impl("reduce_scatter_tensor_coalesced", _reduce_scatter_tensor_coalesced_native_meta, "Meta")
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
 

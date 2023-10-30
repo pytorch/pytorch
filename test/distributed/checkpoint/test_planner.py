@@ -38,6 +38,7 @@ from torch.distributed.checkpoint.default_planner import (
 )
 
 from torch.distributed.checkpoint.planner_helpers import create_read_items_for_chunk_list
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -86,14 +87,22 @@ class TestSavePlan(TestCase):
             "st": st
         }
         plan = create_default_local_save_plan(state_dict, False)
-        self.assertEqual(1, len(plan.items))
+        self.assertEqual(2, len(plan.items))
         wi = plan.items[0]
-        self.assertEqual(wi.index, MetadataIndex("st", [8]))
-        self.assertEqual(wi.type, WriteItemType.SHARD)
-        self.assertEqual(wi.tensor_data.size, st.size())
+        self.assertEqual(wi.index, MetadataIndex("tensor", [0]))
+        self.assertEqual(wi.type, WriteItemType.TENSOR)
+        self.assertEqual(wi.tensor_data.size, tensor.size())
         self.assertEqual(wi.tensor_data.properties, TensorProperties.create_from_tensor(torch.zeros(1)))
-        self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([8]))
-        self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([8]))
+        self.assertEqual(wi.tensor_data.chunk.offsets, torch.Size([0]))
+        self.assertEqual(wi.tensor_data.chunk.sizes, torch.Size([10]))
+
+        st_wi = plan.items[1]
+        self.assertEqual(st_wi.index, MetadataIndex("st", [8]))
+        self.assertEqual(st_wi.type, WriteItemType.SHARD)
+        self.assertEqual(st_wi.tensor_data.size, st.size())
+        self.assertEqual(st_wi.tensor_data.properties, TensorProperties.create_from_tensor(torch.zeros(1)))
+        self.assertEqual(st_wi.tensor_data.chunk.offsets, torch.Size([8]))
+        self.assertEqual(st_wi.tensor_data.chunk.sizes, torch.Size([8]))
 
         # Coordinator rank, should include replicated items as well
         plan = create_default_local_save_plan(state_dict, True)
@@ -124,6 +133,7 @@ class TestSavePlan(TestCase):
                 return create_default_local_save_plan(state_dict, rank == 0)
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
+        all_plans = dedup_tensors(all_plans)
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
 
         # The default global plan updates all indexes to include hints

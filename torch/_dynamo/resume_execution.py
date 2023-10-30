@@ -365,11 +365,9 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"<resume in {code_options['co_name']}>"
+            code_options["co_name"] = f"resume_in_{code_options['co_name']}"
             if is_py311_plus:
-                code_options[
-                    "co_qualname"
-                ] = f"<resume in {code_options['co_qualname']}>"
+                code_options["co_qualname"] = f"resume_in_{code_options['co_qualname']}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -437,6 +435,8 @@ class ContinueExecutionCache:
                 if inst.offset == target.offset:
                     break
                 inst.starts_line = None
+                if sys.version_info >= (3, 11):
+                    inst.positions = None
 
             if cleanup:
                 prefix.extend(cleanup)
@@ -490,13 +490,13 @@ class ContinueExecutionCache:
             instructions: List[Instruction], code_options: Dict[str, Any]
         ):
             nonlocal new_offset
-            (target,) = [i for i in instructions if i.offset == offset]
+            (target,) = (i for i in instructions if i.offset == offset)
             # match the functions starting at the last instruction as we have added a prefix
-            (new_target,) = [
+            (new_target,) = (
                 i2
                 for i1, i2 in zip(reversed(instructions), reversed(meta.instructions))
                 if i1 is target
-            ]
+            )
             assert target.opcode == new_target.opcode
             new_offset = new_target.offset
 
@@ -519,7 +519,7 @@ class ContinueExecutionCache:
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
                     prefix_blocks = []
-                    for idx, inst in enumerate(instructions):
+                    for inst in instructions:
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap
                         ):

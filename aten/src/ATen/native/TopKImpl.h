@@ -22,6 +22,11 @@ void topk_impl_loop(
     const bool sorted,
     char** data, const int64_t* strides, const int64_t n) {
 
+  // If k is zero, then output values and indices are empty tensors
+  // So iterating over other dims is pointless
+  if (k == 0) {
+    return;
+  }
   using elem_t = std::pair<accscalar_t, int64_t>;
   std::vector<elem_t> queue(dim_size);
   for (const auto i : c10::irange(n)) {

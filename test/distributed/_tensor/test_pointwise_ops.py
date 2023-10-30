@@ -143,6 +143,21 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             kwargs=kwargs,
         )
 
+    def test_partial_add(self):
+        device_mesh = self.build_device_mesh()
+        d_1 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
+        d_2 = DTensor.from_local(torch.rand(2, 2), device_mesh, [_Partial()])
+        d_3 = d_1 + d_2
+        self.assertTrue(d_3._spec.placements[0].is_partial())
+
+    def test_partial_mul_failure(self):
+        device_mesh = self.build_device_mesh()
+        d_1 = DTensor.from_local(torch.ones(2, 2), device_mesh, [_Partial()])
+        d_2 = DTensor.from_local(torch.ones(2, 2), device_mesh, [_Partial()])
+        d_3 = d_1 * d_2
+        self.assertTrue(d_3._spec.placements[0].is_replicate())
+        self.assertEqual(d_3.to_local(), torch.ones(2, 2) * (self.world_size**2))
+
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(

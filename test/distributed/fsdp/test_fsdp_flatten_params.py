@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     FlatParamHandle,
     FlatParamShardMetadata,
     HandleShardingStrategy,
@@ -58,7 +58,7 @@ class TestFlattenParams(FSDPTest):
             dim_feedforward=128,
             dropout=0.1,
         )
-        module.dummy_buffer = nn.Buffer(torch.tensor(1.0))
+        module.register_buffer("dummy_buffer", torch.tensor(1.0))
 
         def get_input(device, dtype):
             torch.manual_seed(1)  # keep everything deterministic

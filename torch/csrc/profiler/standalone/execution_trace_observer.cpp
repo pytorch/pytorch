@@ -44,7 +44,10 @@ inline std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
+std::string json_str_escape(const std::string& str);
+
 constexpr size_t maxNumElements = 4096;
+constexpr size_t maxStrLength = 8192;
 
 inline std::string getValueType(
     const c10::IValue& val,
@@ -125,13 +128,14 @@ inline std::string getScalarValue(const c10::IValue& val) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
     const std::string& str_val = val.toStringRef();
-    if (str_val.size() > maxNumElements) {
+    if (str_val.size() > maxStrLength) {
       LOG(WARNING) << "string size=" << str_val.size()
-                   << " exceeded maxNumElements=" << maxNumElements;
-      return fmt::format("\"{}\"", str_val.substr(0, maxNumElements));
+                   << " exceeded maxStrLength=" << maxStrLength;
+      return fmt::format(
+          "\"{}\"", json_str_escape(str_val.substr(0, maxStrLength)));
     }
 
-    return fmt::format("\"{}\"", str_val);
+    return fmt::format("\"{}\"", json_str_escape(str_val));
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());
   }

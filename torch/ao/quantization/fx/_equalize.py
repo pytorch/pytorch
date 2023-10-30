@@ -227,7 +227,7 @@ class EqualizationQConfig(namedtuple('EqualizationQConfig', ['input_activation',
         if isinstance(input_activation, nn.Module) or isinstance(weight, nn.Module):
             raise ValueError("EqualizationQConfig received observer instance, please pass observer class instead. " +
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
-        self = super(EqualizationQConfig, cls).__new__(cls, input_activation, weight)
+        self = super().__new__(cls, input_activation, weight)
         return self
 
 

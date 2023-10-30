@@ -80,6 +80,7 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
+    cell_or_freevar: bool = False
 
     def reconstruct(self, codegen):
         return [codegen.create_load(self.local_name)]
@@ -107,23 +108,6 @@ class RandomValueSource(Source):
 
     def name(self):
         return f"random_value_{self.random_call_index}"
-
-
-@dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -258,6 +242,21 @@ class NegateSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConvertIntSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False
@@ -367,36 +366,6 @@ class TypeSource(ChainedSource):
         return f"type({self.base.name()})"
 
 
-# NB - SuperSource is a weird one.
-# it is our only source with 2 bases, so we use the objec
-# as the base, rather than the type, since an invocation
-# like super(Foo, foo) is represented here, the source object base is more spiritually
-# aligned with the instance, rather than the type.
-# This whole construction is questionable tho, and we should probably find a way to
-# avoid this exception to our otherwise nice source parentage invariant.
-@dataclasses.dataclass(frozen=True)
-class SuperSource(ChainedSource):
-    type: Source
-
-    def __post_init__(self):
-        assert self.type is not None
-        assert self.base is not None
-
-    def reconstruct(self, codegen):
-        codegen.load_import_from("builtins", "super")
-        return (
-            self.type.reconstruct(codegen)
-            + self.base.reconstruct(codegen)
-            + create_call_function(2, True)
-        )
-
-    def guard_source(self):
-        return self.base.guard_source()
-
-    def name(self):
-        return f"super({self.type.name()}, {self.base.name()})"
-
-
 @dataclasses.dataclass(frozen=True)
 class ODictGetItemSource(ChainedSource):
     index: Any
@@ -474,6 +443,19 @@ class ConstantSource(Source):
         raise NotImplementedError()
 
 
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"___from_numpy({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "as_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -486,7 +468,13 @@ class ShapeEnvSource(Source):
         return GuardSource.SHAPE_ENV
 
 
-def is_from_local_source(source: Source):
+def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(source.base)
-    return isinstance(source, LocalSource)
+        return is_from_local_source(
+            source.base, allow_cell_or_freevar=allow_cell_or_freevar
+        )
+    if not isinstance(source, LocalSource):
+        return False
+    if not allow_cell_or_freevar and source.cell_or_freevar:
+        return False
+    return True

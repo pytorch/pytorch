@@ -1,17 +1,11 @@
-import datetime
 import gzip
-import inspect
 import io
 import json
 import os
-import time
-import uuid
 import zipfile
 
-from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
-from warnings import warn
 
 import boto3  # type: ignore[import]
 import requests
@@ -23,6 +17,8 @@ S3_RESOURCE = boto3.resource("s3")
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
 MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
+# NB: Rockset has an upper limit of 5000 documents in one request
+BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -116,17 +112,29 @@ def download_gha_artifacts(
 
 
 def upload_to_rockset(
-    collection: str, docs: List[Any], workspace: str = "commons"
+    collection: str,
+    docs: List[Any],
+    workspace: str = "commons",
+    client: Any = None,
 ) -> None:
-    print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    client.Documents.add_documents(
-        collection=collection,
-        data=docs,
-        workspace=workspace,
-    )
+    if not client:
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+
+    index = 0
+    while index < len(docs):
+        from_index = index
+        to_index = min(from_index + BATCH_SIZE, len(docs))
+        print(f"Writing {to_index - from_index} documents to Rockset")
+
+        client.Documents.add_documents(
+            collection=collection,
+            data=docs[from_index:to_index],
+            workspace=workspace,
+        )
+        index += BATCH_SIZE
+
     print("Done!")
 
 
@@ -220,124 +228,3 @@ def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
         t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
         for t in tests.values()
     )
-
-
-def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in data.items()}
-
-
-class EnvVarMetric:
-    name: str
-    env_var: str
-    required: bool = True
-    # Used to cast the value of the env_var to the correct type (defaults to str)
-    type_conversion_fn: Any = None
-
-    def __init__(
-        self,
-        name: str,
-        env_var: str,
-        required: bool = True,
-        type_conversion_fn: Any = None,
-    ) -> None:
-        self.name = name
-        self.env_var = env_var
-        self.required = required
-        self.type_conversion_fn = type_conversion_fn
-
-    def value(self) -> Any:
-        value = os.environ.get(self.env_var)
-        if value is None and self.required:
-            raise ValueError(
-                (
-                    f"Missing {self.name}. Please set the {self.env_var}"
-                    "environment variable to pass in this value."
-                )
-            )
-        if self.type_conversion_fn:
-            return self.type_conversion_fn(value)
-        return value
-
-
-def emit_metric(
-    metric_name: str,
-    metrics: Dict[str, Any],
-) -> None:
-    """
-    Upload a metric to DynamoDB (and from there, Rockset).
-
-    Parameters:
-        metric_name:
-            Name of the metric. Every unique metric should have a different name
-            and be emitted just once per run attempt.
-            Metrics are namespaced by their module and the function that emitted them.
-        metrics: The actual data to record.
-
-    Some default values are populated from environment variables, which must be set
-    for metrics to be emitted. (If they're not set, this function becomes a noop):
-    """
-
-    if metrics is None:
-        raise ValueError("You didn't ask to upload any metrics!")
-
-    # We use these env vars that to determine basic info about the workflow run.
-    # By using env vars, we don't have to pass this info around to every function.
-    # It also helps ensure that we only emit metrics during CI
-    env_var_metrics = [
-        EnvVarMetric("repo", "GITHUB_REPOSITORY"),
-        EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
-        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
-        EnvVarMetric("job", "GITHUB_JOB"),
-        EnvVarMetric("test_config", "TEST_CONFIG", required=False),
-        EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
-        EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
-        EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
-    ]
-
-    # Use info about the function that invoked this one as a namespace and a way to filter metrics.
-    calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]
-    calling_frame_info = inspect.getframeinfo(calling_frame)  # type: ignore[arg-type]
-    calling_file = os.path.basename(calling_frame_info.filename)
-    calling_module = inspect.getmodule(calling_frame).__name__  # type: ignore[union-attr]
-    calling_function = calling_frame_info.function
-
-    try:
-        reserved_metrics = {
-            "metric_name": metric_name,
-            "calling_file": calling_file,
-            "calling_module": calling_module,
-            "calling_function": calling_function,
-            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
-            **{m.name: m.value() for m in env_var_metrics},
-        }
-    except ValueError as e:
-        warn(f"Not emitting metrics. {e}")
-        return
-
-    # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
-    reserved_metrics[
-        "dynamo_key"
-    ] = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
-
-    # Ensure the metrics dict doesn't contain any reserved keys
-    for key in reserved_metrics.keys():
-        used_reserved_keys = [k for k in metrics.keys() if k == key]
-        if used_reserved_keys:
-            raise ValueError(f"Metrics dict contains reserved keys: [{', '.join(key)}]")
-
-    # boto3 doesn't support uploading float values to DynamoDB, so convert them all to decimals.
-    metrics = _convert_float_values_to_decimals(metrics)
-
-    try:
-        session = boto3.Session(region_name="us-east-1")
-        session.resource("dynamodb").Table("torchci-metrics").put_item(
-            Item={
-                **reserved_metrics,
-                **metrics,
-            }
-        )
-    except Exception as e:
-        # We don't want to fail the job if we can't upload the metric.
-        # We still raise the ValueErrors outside this try block since those indicate improperly configured metrics
-        warn(f"Error uploading metric to DynamoDB: {e}")
-        return

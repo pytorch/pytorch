@@ -1,3 +1,3 @@
 from .rearrange import rearrange
 
-__all__ = ['rearrange']
+__all__ = ["rearrange"]

@@ -5,7 +5,7 @@ from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to
 
 # class to store APoT quantizer and
 # implement quantize and dequantize
-class APoTQuantizer():
+class APoTQuantizer:
     alpha: torch.Tensor
     gamma: torch.Tensor
     quantization_levels: torch.Tensor

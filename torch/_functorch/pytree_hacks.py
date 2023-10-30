@@ -4,21 +4,19 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torch.utils._pytree import tree_flatten, tree_unflatten
+import warnings
+
+# TODO: remove this file when the migration of the pytree utility is done
+from torch.utils._pytree import tree_map_, treespec_pprint
 
 
-def tree_map_(fn_, pytree):
-    flat_args, _ = tree_flatten(pytree)
-    [fn_(arg) for arg in flat_args]
-    return pytree
+__all__ = ["tree_map_", "treespec_pprint"]
 
 
-class PlaceHolder():
-    def __repr__(self):
-        return '*'
-
-
-def treespec_pprint(spec):
-    leafs = [PlaceHolder() for _ in range(spec.num_leaves)]
-    result = tree_unflatten(leafs, spec)
-    return repr(result)
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "torch._functorch.pytree_hacks is deprecated and will be removed in a future release. "
+        "Please use torch.utils._pytree instead.",
+        DeprecationWarning,
+    )

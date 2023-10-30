@@ -41,7 +41,7 @@ class LinearReLU(nnq.Linear):
 
     @classmethod
     def from_float(cls, mod):
-        return super(LinearReLU, cls).from_float(mod)
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_linear_relu, output_scale, output_zero_point):

@@ -26,5 +26,9 @@ void main() {
     return;
   }
 
-  imageStore(uOutput, pos, OP(texelFetch(uInput, pos, 0), uBlock.other));
+  vec4 v = texelFetch(uInput, pos, 0);
+  vec4 v_other = vec4(uBlock.other);
+  vec4 out_texel = OP(v, v_other);
+
+  imageStore(uOutput, pos, out_texel);
 }

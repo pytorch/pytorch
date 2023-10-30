@@ -319,7 +319,7 @@ def process_jobs(
     try:
         # The job name from github is in the PLATFORM / JOB (CONFIG) format, so breaking
         # it into its two components first
-        current_platform, _ = [n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n]
+        current_platform, _ = (n.strip() for n in job_name.split(JOB_NAME_SEP, 1) if n)
     except ValueError as error:
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
@@ -410,16 +410,17 @@ def process_jobs(
             if target_job in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
                 target_cfg = m.group("cfg")
 
-                return _filter_jobs(
+                # NB: There can be multiple unstable configurations, i.e. inductor, inductor_huggingface
+                test_matrix = _filter_jobs(
                     test_matrix=test_matrix,
                     issue_type=issue_type,
                     target_cfg=target_cfg,
                 )
-
-        warnings.warn(
-            f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
-            + f"but the name {target_job_cfg} is invalid"
-        )
+        else:
+            warnings.warn(
+                f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
+                + f"but the name {target_job_cfg} is invalid"
+            )
 
     # Found no matching target, return the same input test matrix
     return test_matrix

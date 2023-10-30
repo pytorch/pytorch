@@ -181,7 +181,7 @@ class TestParseNativeYaml(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -268,7 +268,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
                 use_aten_lib=False,
                 out_file=out_file,
             )
-        with open(out_yaml_path, "r") as out_file:
+        with open(out_yaml_path) as out_file:
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
@@ -467,6 +467,7 @@ Kernel(
         """
             + """
 
+        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
 
@@ -552,6 +553,7 @@ Kernel(
         """
             + """
 
+        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
 
@@ -586,6 +588,7 @@ Kernel(
         """
             + """
 
+        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
 
