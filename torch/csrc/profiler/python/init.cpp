@@ -83,7 +83,6 @@ namespace detail {
 template <>
 struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(
       std::shared_ptr<torch::CapturedTraceback>,
       _("torch._C._profiler.CapturedTraceback"));
@@ -404,7 +403,9 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
       .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Vulkan>>(m, "_ExtraFields_Vulkan");
 
   using allocation_t = ExtraFields<EventType::Allocation>;
@@ -464,9 +465,11 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::OutOfMemory>>(
       m, "_ExtraFields_OutOfMemory");
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
