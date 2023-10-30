@@ -1400,18 +1400,14 @@ from a multi-output view call")
             prior_grad_enabled = ctx.global_context.global_state.get('grad_enabled')
             if (
                 prior_grad_enabled is not None
-                and torch.is_grad_enabled() != prior_grad_enabled
+                and torch.is_grad_enabled() != prior_grad_enabled[1]
             ):
                 set_grad_enabled = torch.is_grad_enabled()
                 aot_graphs_log.info(
-                    "grad_mode mutation encountered in graph. Will emit mutation epilogue, to set grad_mode=%s",
+                    ("grad_mode mutation encountered in graph."
+                     "Will emit mutation epilogue, to set grad_mode=%s"),
                     set_grad_enabled
                 )
-
-        if set_grad_enabled is None:
-            aot_graphs_log.info(
-                "Unable to determine if grad_mode was mutated due to lack of TracingContext or global_state"
-            )
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
