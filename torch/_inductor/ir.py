@@ -3508,7 +3508,7 @@ class ExternKernel(InputsKernel):
 
         def deref_alias_and_mutation(x):
             if isinstance(x.get_layout(), AliasedLayout):
-                return deref_alias_and_mutation(x.get_layout().view())
+                return deref_alias_and_mutation(x.get_layout().view)
             elif isinstance(x.get_layout(), MutationLayout):
                 target = x.get_layout().target
                 if isinstance(target.get_layout(), FlexibleLayout):
