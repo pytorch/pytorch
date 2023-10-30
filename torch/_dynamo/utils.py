@@ -1000,7 +1000,10 @@ def const_repr(x, *, local) -> str:
 
 def dict_const_keys_repr(const_keys, *, local) -> str:
     keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
-    return "{" + keys_str + "}"
+    if keys_str:
+        return "{" + keys_str + "}"
+    else:
+        return "set()"
 
 
 def global_key_name(key):
