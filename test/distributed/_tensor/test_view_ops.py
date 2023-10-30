@@ -25,7 +25,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     redistribute_profiler,
     with_comms,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 class TestViewOps(DTensorTestBase):
@@ -133,7 +133,7 @@ class TestViewOps(DTensorTestBase):
         spec = ops[op]
         rules = spec.dim_map(*args, **kwargs)
         outputs = op(*args, **kwargs)
-        flat_args, _ = tree_flatten(args)
+        flat_args = pytree.tree_leaves(args)
         in_shape = flat_args[0].shape
 
         no_shard_dims = set()
