@@ -47,7 +47,7 @@ def check_docathon_label(pr: "GitHubPR") -> None:
     check that that issue has a docathon label. If it does, propagate all the
     labels from the issue to the PR.
     """
-    # Get the pull request body
+    # Get the pull request body.
     token = os.environ.get("GITHUB_TOKEN")
     g = Github(token)
     repo = g.get_repo("pytorch/pytorch")
