@@ -1081,8 +1081,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left.as_specialized(self)
-        right = right.as_specialized(self)
+        left = left
+        right = right
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
@@ -1316,7 +1316,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                [x.as_specialized(self) for x in items],
+                items,
                 **options,
             )
         )
