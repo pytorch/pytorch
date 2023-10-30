@@ -90,7 +90,7 @@ class TestPipeline(FSDPTest):
             optim_state_dict=optim_state_dict,
         )
 
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(8)
     @with_temp_dir
     def test_pipeline(self) -> None:
         self.assertTrue(os.path.exists(self.temp_dir))
