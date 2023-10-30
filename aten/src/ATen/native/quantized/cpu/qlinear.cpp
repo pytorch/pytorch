@@ -913,7 +913,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     int64_t output_zero_point,
     bool fp32_output,
     std::string& post_op_name, // e.g. "none", "relu"
-    torch::List<double>& post_op_args,
+    torch::List<c10::optional<at::Scalar>>& post_op_args,
     std::string& post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
@@ -1119,7 +1119,7 @@ class QLinearOnednn final {
       int64_t output_zero_point,
       bool fp32_output,
       std::string post_op_name,
-      torch::List<double> post_op_args,
+      torch::List<c10::optional<at::Scalar>> post_op_args,
       std::string post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
