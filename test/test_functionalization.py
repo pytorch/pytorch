@@ -1649,6 +1649,26 @@ def forward(self, arg0_1):
 
         self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
 
+    def test_python_functionalization_lift_fresh(self):
+        def f(x):
+            tmp = torch.tensor([0.0])
+            return tmp + x
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    add = torch.ops.aten.add.Tensor(lift_fresh_copy, arg0_1);  lift_fresh_copy = arg0_1 = None
+    return add""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
 @xfail_inherited_tests([
     "test_as_strided",
