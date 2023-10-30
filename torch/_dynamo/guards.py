@@ -319,9 +319,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(
-                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
-                )
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
             )
 
         ref = self.arg_ref(guard)
