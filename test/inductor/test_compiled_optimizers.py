@@ -212,7 +212,7 @@ class CompiledOptimizerTests(TestCase):
                 opt.step()
 
             with torch.set_grad_enabled(False):
-                step_fn_compiled = torch.compile(fn, backend="eager")
+                step_fn_compiled = torch.compile(fn)
                 step_fn_compiled()
             p_ref = weakref.ref(p)
             self.assertTrue(p_ref() is not None)

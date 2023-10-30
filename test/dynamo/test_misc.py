@@ -6605,7 +6605,7 @@ def fn():
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
     def test_inline_dict_function_passed_as_arg(self):
-        @torch.compile(backend="eager")
+        @torch.compile
         def fn(d, x, y):
             if d[x] is torch.float32:
                 return y.cos()
