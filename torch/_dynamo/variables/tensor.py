@@ -982,19 +982,6 @@ class UnspecializedPythonVariable(TensorVariable):
             need_unwrap=need_unwrap,
         )
 
-    def as_specialized(self, tx):
-        unimplemented("not needed???")
-
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
-
 
 class FakeItemVariable(TensorVariable):
     """An unspecialized python variable which prevents access to the underlying raw value.

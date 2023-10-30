@@ -184,7 +184,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_use_and_specialize(self):
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt, fullgraph=True)
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
         def fn(x, y):
             x = x + y
             if y == 2:
@@ -197,6 +197,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(torch.tensor([5]), 3), 9))
         self.assertTrue(same(fn(torch.tensor([4]), 3), 8))
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_no_recompiles(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True, dynamic=True)
+        def fn(x, y):
+            return x + y
+
+        self.assertTrue(same(fn(torch.tensor([5]), 100), 105))
+        self.assertTrue(same(fn(torch.tensor([4]), 200), 204))
+        self.assertTrue(same(fn(torch.tensor([3]), 300), 303))
+        self.assertTrue(same(fn(torch.tensor([2]), 400), 402))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_builtin_functions_on_cuda(self):
