@@ -91,11 +91,11 @@ def _test_aot_autograd_forwards_backwards_helper(
     # Verify grads are equal between compiled and non-compiled versions of f.
 
     def call_forwards_backwards(f, args):
-        flat_args, _ = pytree.tree_flatten(args)
+        flat_args = pytree.tree_leaves(args)
         diff_args = [arg for arg in flat_args if isinstance(arg, torch.Tensor) and
                      arg.requires_grad]
         out = wrapper_set_seed(f, args)
-        flat_out, _ = pytree.tree_flatten(out)
+        flat_out = pytree.tree_leaves(out)
 
         sm = 0
         for i in flat_out:
