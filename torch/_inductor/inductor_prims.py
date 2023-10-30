@@ -81,10 +81,3 @@ masked_scatter_with_index = make_prim(
     ),
     doc="masked_scatter with precomputed indices",
 )
-_unsafe_index_put_ = make_prim(
-    "_unsafe_index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
-    lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
-        self, indices, values, accumulate
-    ),
-    doc="Unsafe index_put_ (doesn't issue device asserts)",
-)

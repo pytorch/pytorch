@@ -25,22 +25,13 @@ from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
-class TestPatternMatcher(TestCase):
-    def common(
-        self,
-        fn,
-        args,
-        expected_matches,
-        expected_nodes,
-        additional_check=lambda code: None,
-    ):
+class TestPaternMatcher(TestCase):
+    def common(self, fn, args, expected_matches, expected_nodes):
         counters.clear()
         torch.manual_seed(42)
         expected = fn(*args)
         torch.manual_seed(42)
-        actual, codes = run_and_get_code(torch.compile(fn), *args)
-        if len(codes) == 1:
-            codes = codes[0]
+        actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         if inductor_config.cpp_wrapper:
             # CPP wrapper runs everything twice, so we'll match the pattern twice
@@ -51,7 +42,6 @@ class TestPatternMatcher(TestCase):
             counters["inductor"]["pattern_matcher_count"], expected_matches
         )
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], expected_nodes)
-        additional_check(codes)
         counters.clear()
 
     def test_mm_plus_mm(self):
@@ -916,34 +906,6 @@ class TestPatternMatcher(TestCase):
                     PatternPrettyPrinter.run(search_fn_pattern),
                     msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
                 )
-
-    def test_randperm_index(self):
-        def scaled_index_add(x, y, scale_y):
-            index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
-            out = torch.index_add(x, dim=0, source=y * scale_y, index=index)
-            return out
-
-        dim = 4
-        x = torch.randn([8, dim], requires_grad=True, device="cuda")
-        gO = torch.randn([8, dim], device="cuda")
-        y = torch.randn([4, dim], requires_grad=True, device="cuda")
-        scale = torch.randn([dim], requires_grad=True, device="cuda")
-
-        with torch.no_grad():
-            self.common(lambda *args: scaled_index_add(*args), (x, y, scale), 1, 3)
-
-        def code_check(codes):
-            self.assertNotIn("device_assert", codes[0])
-            self.assertNotIn("device_assert", codes[1])
-
-        # Ugh, there is an extra match here because of removing pointless views
-        self.common(
-            lambda *args: scaled_index_add(*args).backward(gO),
-            (x, y, scale),
-            3,
-            7,
-            additional_check=code_check,
-        )
 
 
 if __name__ == "__main__":
