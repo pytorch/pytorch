@@ -8827,7 +8827,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         rightmost_supports_scalarlist: bool = False,
         without_values_kwarg: bool = False,
     ):
-        super().__init__(3 + 1, True, True)
+        super().__init__(3 + 1, rightmost_supports_scalar, rightmost_supports_scalarlist)
         self.without_values_kwarg = without_values_kwarg
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):

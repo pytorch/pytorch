@@ -1098,7 +1098,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 
         return expected
 
-
 # NB: we're running these tests only on CUDA because there are some
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
@@ -1125,7 +1124,6 @@ class TestMeta(TestCase):
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefFunctionMode
         func = op.get_op()
-
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
             args = [sample_input.input] + list(sample_input.args)
@@ -1155,7 +1153,6 @@ class TestMeta(TestCase):
                 if op.name != "empty_like":
                     self.assertEqual(ref, meta)
 
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
@@ -1168,7 +1165,6 @@ class TestMeta(TestCase):
             self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
         if func in meta_inplace_skips:
             self.skipTest("Skipped")
-        orig_func = func
         func = self._get_safe_inplace(func)
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:
@@ -1192,7 +1188,6 @@ class TestMeta(TestCase):
         if func in meta_dispatch_early_skips:
             self.skipTest("Function is in dispatch early skips")
 
-        orig_func = func
         if inplace:
             func = self._get_safe_inplace(func)
 
