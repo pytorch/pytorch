@@ -183,11 +183,11 @@ class TestFSDPMemory(FSDPTest):
                 expected[f"iter {iteration}: start"] = sharded_model_size_mb + 1
                 # it is hard to calculate this memory size, get it from printed memory usage
                 if ckpt == "ckpt":
-                    expected[f"iter {iteration}: after fwd"] = 51
-                    expected[f"iter {iteration}: after loss"] = 51
+                    expected[f"iter {iteration}: after fwd"] = 55
+                    expected[f"iter {iteration}: after loss"] = 55
                 else:
-                    expected[f"iter {iteration}: after fwd"] = 340
-                    expected[f"iter {iteration}: after loss"] = 340
+                    expected[f"iter {iteration}: after fwd"] = 344
+                    expected[f"iter {iteration}: after loss"] = 344
                 # sharded model size + sharded grad size + 1M temp memory
                 expected[f"iter {iteration}: after bwd"] = 2 * sharded_model_size_mb + 1
             else:
@@ -196,17 +196,17 @@ class TestFSDPMemory(FSDPTest):
                 expected[f"iter {iteration}: start"] = 2 * sharded_model_size_mb + 1
                 if ckpt == "ckpt":
                     expected[f"iter {iteration}: after fwd"] = (
-                        51 + sharded_model_size_mb
+                        55 + sharded_model_size_mb
                     )
                     expected[f"iter {iteration}: after loss"] = (
-                        51 + sharded_model_size_mb
+                        55 + sharded_model_size_mb
                     )
                 else:
                     expected[f"iter {iteration}: after fwd"] = (
-                        340 + sharded_model_size_mb
+                        344 + sharded_model_size_mb
                     )
                     expected[f"iter {iteration}: after loss"] = (
-                        340 + sharded_model_size_mb
+                        344 + sharded_model_size_mb
                     )
                 expected[f"iter {iteration}: after bwd"] = 3 * sharded_model_size_mb + 1
 

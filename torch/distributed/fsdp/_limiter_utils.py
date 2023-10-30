@@ -17,6 +17,7 @@ class _FreeEventQueue:
     ) -> None:
         self._queue: OrderedDict[torch.Tensor, torch.cuda.Event] = OrderedDict()
         self._max_num_inflight_all_gathers = max_num_inflight_all_gathers
+        self._paused = False
 
     def enqueue(
         self,
@@ -24,6 +25,8 @@ class _FreeEventQueue:
         event: torch.cuda.Event,
     ) -> None:
         """Enqueues a free event."""
+        if self._paused:
+            return None
         # Delete and re-insert to maintain event order
         if tensor in self._queue:
             self._queue.pop(tensor)
@@ -32,6 +35,8 @@ class _FreeEventQueue:
 
     def dequeue_if_needed(self) -> Optional[Tuple[torch.Tensor, torch.cuda.Event]]:
         """Dequeues a single event if the limit is reached."""
+        if self._paused:
+            return None
         if len(self._queue) >= self._max_num_inflight_all_gathers:
             return self.dequeue()
         return None
@@ -46,3 +51,15 @@ class _FreeEventQueue:
     def pop(self, tensor: torch.Tensor) -> Optional[torch.cuda.Event]:
         """Erase tensor-event pair from queue"""
         return self._queue.pop(tensor, None)
+
+    def pause(self) -> None:
+        """Disable enqueue and dequeue_if_needed"""
+        self._paused = True
+
+    def resume(self) -> None:
+        """Enable enqueue and dequeue_if_needed"""
+        self._paused = False
+
+    def len(self) -> int:
+        """Returns the length of the queue."""
+        return len(self._queue)

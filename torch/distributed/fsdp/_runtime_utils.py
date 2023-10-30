@@ -497,12 +497,19 @@ def _post_forward(
         state.training_state = TrainingState.IDLE
         if handle:
             handle._training_state = HandleTrainingState.IDLE
-        # Clear FreeEventQueue here if in eval mode where we cannot rely on the
-        # clean-up in post backward
-        if (not state._is_training) and state._is_root:
-            while tensor_free_event := state._free_event_queue.dequeue():
-                tensor, _ = tensor_free_event
-                _free_storage(tensor)
+        if state._is_root:
+            if state._is_training:
+                # We are at the boundary of forward and backward. Pause
+                # queuing/dequeuing in this forward-pass queue. This is for
+                # protection of the queue against Activation Checkpointing,
+                # which has recomputation that may behave like forward.
+                state._free_event_queue.pause()
+            else:
+                # Clear FreeEventQueue here if in eval mode where we cannot rely on the
+                # clean-up in post backward
+                while tensor_free_event := state._free_event_queue.dequeue():
+                    tensor, _ = tensor_free_event
+                    _free_storage(tensor)
         return output
 
 
@@ -554,6 +561,15 @@ def _root_pre_forward(
             if _is_composable(state):
                 return _root_cast_forward_input(state, module, args, kwargs)
             return args, kwargs
+
+        # State is root, hence we are entering the forward pass for the entire
+        # model. Check free event queue status and turn it on (it was turned off
+        # at the end of root forward)
+        _p_assert(
+            state._free_event_queue.len() == 0,
+            "Rate limiting queue has uncleaned items at the start of forward pass",
+        )
+        state._free_event_queue.resume()
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
