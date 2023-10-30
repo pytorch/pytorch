@@ -58,13 +58,8 @@ __all__ = [
 ]
 
 
-from .exported_program import (
-    ExportBackwardSignature,
-    ExportedProgram,
-    ExportGraphSignature,
-    ModuleCallEntry,
-    ModuleCallSignature,
-)
+from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
+from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
