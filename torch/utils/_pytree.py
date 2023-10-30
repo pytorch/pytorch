@@ -177,6 +177,11 @@ def _register_pytree_node(
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
 
     if _register_cxx_pytree_node:
+        import torch
+
+        if torch._running_with_deploy():
+            return
+
         try:
             from . import _cxx_pytree
         except ImportError:

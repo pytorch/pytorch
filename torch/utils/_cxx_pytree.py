@@ -26,14 +26,8 @@ from typing import (
     Union,
 )
 
-import torch
-
-if not torch._running_with_deploy():
-    import optree
-    from optree import PyTreeSpec  # direct import for type annotations
-else:
-    optree = None  # type: ignore[assignment]
-    from ._pytree import TreeSpec as PyTreeSpec  # type: ignore[assignment]
+import optree
+from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
