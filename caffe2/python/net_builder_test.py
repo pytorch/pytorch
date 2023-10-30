@@ -90,7 +90,7 @@ class TestNetBuilder(unittest.TestCase):
         plan.AddStep(to_execution_step(nb))
         ws = workspace.C.Workspace()
         ws.run(plan)
-        expected = [
+        expected_results = [
             (y, 5),
             (z, False),
             (w, True),
@@ -99,7 +99,7 @@ class TestNetBuilder(unittest.TestCase):
             (p, 2),
             (q, 3),
         ]
-        for b, expected in expected:
+        for b, expected in expected_results:
             actual = ws.blobs[str(b)].fetch()
             self.assertEqual(actual, expected)
 

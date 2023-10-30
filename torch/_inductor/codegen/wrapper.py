@@ -326,6 +326,8 @@ class WrapperCodeGen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
         self.cached_thread_locals = set()
+        self.user_defined_kernel_count = 0
+        self.unbacked_symbol_decls = set()
 
         self.write_header()
         self.write_prefix()
@@ -771,11 +773,15 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def define_user_defined_triton_kernel(self, kernel, kwargs):
-        name = kernel.__name__
+    def get_unique_kernel_name(self, name: str) -> str:
+        new_name = f"{name}_{self.user_defined_kernel_count}"
+        self.user_defined_kernel_count += 1
+        return new_name
 
+    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+        original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
-        compile_wrapper.writeline(f"async_compile.triton({name!r}, '''")
+        compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         compile_wrapper.splice(
             """
@@ -834,6 +840,31 @@ class WrapperCodeGen(CodeGen):
             """
         )
         compile_wrapper.splice(kernel.src, strip=True)
+
+        # Also include any possible kernel being called indirectly
+        from triton import JITFunction
+
+        symbols_included = {original_name}
+
+        def traverse(cur_kernel):
+            for symbol_name in cur_kernel.fn.__code__.co_names:
+                if symbol_name in symbols_included:
+                    continue
+                if symbol_name in cur_kernel.fn.__globals__:
+                    symbol = cur_kernel.fn.__globals__[symbol_name]
+                    if isinstance(symbol, JITFunction):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline("@triton.jit")
+                        compile_wrapper.splice(symbol.src, strip=True)
+                        symbols_included.add(symbol_name)
+                        traverse(symbol)
+                    elif isinstance(symbol, (int, str, bool)):
+                        compile_wrapper.newline()
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
+
+        traverse(kernel)
+
         compile_wrapper.writeline("''')")
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
@@ -1076,6 +1107,15 @@ class WrapperCodeGen(CodeGen):
         self.reuses[output_buffer.get_name()] = input_buffer.get_name()
         self.writeline(ReuseLine(self, input_buffer, output_buffer))
 
+    def codegen_unbacked_symbol_decl(self, symbol):
+        name = str(symbol)
+        if name in self.unbacked_symbol_decls:
+            return name
+        else:
+            # When in CppWrapperCodeGen, we should only generate the declaration once
+            self.unbacked_symbol_decls.add(name)
+            return self.declare + name
+
 
 class CppWrapperCodeGen(WrapperCodeGen):
     """
@@ -1297,12 +1337,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_->at("{constants_key}").get();"""
+                            f"""auto {constants_key} = constants_.at({idx});"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_->at("{constants_key}").get());"""
+                            + f"""constants_.at({idx}));"""
                         )
                 else:
                     # Append constants as inputs to the graph
@@ -1406,7 +1446,22 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
 
-            self.prefix.writeline("constants_ = constants_map;")
+            self.prefix.writeline("update_constants_map(std::move(constants_map));")
+
+            def escape_string(x):
+                return (
+                    x.replace("\\", "\\\\")
+                    .replace('"', '\\"')
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                )
+
+            self.prefix.writeline(
+                f'in_spec_ = "{escape_string(config.aot_inductor.serialized_in_spec)}";'
+            )
+            self.prefix.writeline(
+                f'out_spec_ = "{escape_string(config.aot_inductor.serialized_out_spec)}";'
+            )
 
             for idx, output in enumerate(V.graph.graph_outputs):
                 assert not isinstance(
@@ -1672,7 +1727,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_device(self, device):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_device_type_{device.type}(),{device.index if device.index else 0}"
+            return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
 
@@ -1684,7 +1739,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def codegen_dtype(self, dtype):
         if config.aot_inductor.abi_compatible:
-            return f"aoti_torch_dtype_{str(dtype).split('.')[-1]}()"
+            return f"cached_torch_dtype_{str(dtype).split('.')[-1]}"
         else:
             from .cpp import DTYPE_TO_ATEN
 
