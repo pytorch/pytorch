@@ -124,6 +124,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
+    SavedTensorBox,
     SkipFilesVariable,
     TypingVariable,
 )
@@ -362,10 +363,14 @@ class VariableBuilder:
         from torch.utils._triton import has_triton
 
         if has_triton():
+            from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         else:
 
             class JITFunction:
+                pass
+
+            class Autotuner:
                 pass
 
         make_guards = self.make_guards
@@ -543,14 +548,20 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            # The autograd.function context
+            saved_tensors_source = AttrSource(self.source, "saved_tensors")
+            saved_tensors = [
+                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
+                for n, v in enumerate(value.saved_tensors)
+            ]
             return self.tx.output.side_effects.track_object_existing(
                 self.source,
                 value,
                 AutogradFunctionContextVariable(
                     value,
                     source=self.source,
-                    guards=make_guards(GuardBuilder.TYPE_MATCH),
+                    guards=make_guards(GuardBuilder.TYPE_MATCH)
+                    | {saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH)},
+                    saved_tensors=SavedTensorBox(saved_tensors),
                 ),
             )
         elif (
@@ -709,7 +720,7 @@ class VariableBuilder:
                 sym_node_proxy,
                 new_symint == 1,
             )
-        elif isinstance(value, JITFunction):
+        elif isinstance(value, (JITFunction, Autotuner)):
             return TritonKernelVariable(
                 value,
                 None,  # No kernel idx provided

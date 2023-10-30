@@ -3079,7 +3079,7 @@ def fn():
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        make_key = ConstDictVariable._make_const_key
+        make_key = ConstantVariable.create
 
         d1 = {
             make_key("a"): ConstantVariable.create(10),
