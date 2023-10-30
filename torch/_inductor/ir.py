@@ -755,7 +755,11 @@ class Reduction(Loops):
                             "Use previous IRNode's range and reduction_ranges instead of split. "
                             "current ranges: %s, current reduction ranges: %s, current split: %d, "
                             "new ranges: %s, new reduction ranges: %s",
-                            ranges, reduction_ranges, split, new_ranges, new_reduction_ranges
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
                         )
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
