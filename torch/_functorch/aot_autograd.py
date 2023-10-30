@@ -594,7 +594,7 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
-    # Whether we need to emit a set_grad_enabled mutation in the runtime_wrapper epilogue
+    # The set_grad_enabled mutation we will emit in the runtime_wrapper epilogue
     set_grad_enabled: Optional[bool] = None
 
     def __post_init__(self):
