@@ -1505,25 +1505,44 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
+            cst_names = V.graph.constants.keys()
             for idx, output in enumerate(output_refs):
-                if config.aot_inductor.abi_compatible:
-                    if output in self.cached_thread_locals:
+                if output in cst_names:
+                    # In some rare cases where we return a constant, we
+                    # have to return a copy of this constant, because
+                    # (1) constants are not owned by the Model instance
+                    # (2) constants remain the same cross inference runs,
+                    #     assuming they are not updated at runtime
+                    # Basically, we cannot release or transfer the ownership
+                    # of any origianl constant to the user.
+                    if config.aot_inductor.abi_compatible:
                         self.wrapper_call.writeline(
-                            f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
-                        )
-                        self.wrapper_call.writeline(
-                            f"aoti_torch_assign_tensors({output}, output_handles[{idx}]);"
+                            f"aoti_torch_clone({output}, &output_handles[{idx}]);"
                         )
                     else:
                         self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = {output}.release();"
+                            f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                            + f"new at::Tensor(std::move({output}.clone())));"
                         )
-
                 else:
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
-                        + f"new at::Tensor({output}));"
-                    )
+                    if config.aot_inductor.abi_compatible:
+                        if output in self.cached_thread_locals:
+                            self.wrapper_call.writeline(
+                                f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
+                            )
+                            self.wrapper_call.writeline(
+                                f"aoti_torch_assign_tensors({output}, output_handles[{idx}]);"
+                            )
+                        else:
+                            self.wrapper_call.writeline(
+                                f"output_handles[{idx}] = {output}.release();"
+                            )
+
+                    else:
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                            + f"new at::Tensor({output}));"
+                        )
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
