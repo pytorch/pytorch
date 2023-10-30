@@ -15,14 +15,8 @@ collection support for PyTorch APIs.
 import functools
 from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Type, Union
 
-import torch
-
-if not torch._running_with_deploy():
-    import optree
-    from optree import PyTreeSpec  # direct import for type annotations
-else:
-    optree = None  # type: ignore[assignment]
-    from .python import TreeSpec as PyTreeSpec  # type: ignore[assignment]
+import optree
+from optree import PyTreeSpec  # direct import for type annotations
 
 from .typing import (
     Context,
