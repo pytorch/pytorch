@@ -428,9 +428,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args = pytree.tree_leaves(args)
-    flat_kwargs = pytree.tree_leaves(kwargs)
-    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+    return any(test_unsupported(x) for x in flat_args)
 
 
 core_backward_failures = {

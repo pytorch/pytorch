@@ -50,7 +50,7 @@ def type_casts(
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [
-            x for x in pytree.tree_leaves((args, kwargs)) if isinstance(x, Tensor)
+            x for x in pytree.arg_tree_leaves(*args, **kwargs) if isinstance(x, Tensor)
         ]
         computation_dtype, result_dtype = utils.elementwise_dtypes(
             *flat_args, type_promotion_kind=type_promotion
