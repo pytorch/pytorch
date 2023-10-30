@@ -836,12 +836,7 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        self.no_x_dim = (
-            self.reduction_hint == ReductionHint.INNER
-            and self.persistent_reduction
-            and len(self.numels) == 2
-            and self.numels[-1] >= 256
-        )
+        self.no_x_dim = False
         self.initialize_range_tree(pid_cache)
 
         # A set of autotuning hints to pass as part of triton_meta
