@@ -1284,7 +1284,11 @@ class VariableBuilder:
             else:
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
+                guards = {
+                    self.get_source().make_guard(
+                        GuardBuilder.TYPE_MATCH, is_volatile=True
+                    )
+                }
                 options = {"guards": guards}
             else:
                 options = {}

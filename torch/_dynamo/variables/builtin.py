@@ -450,26 +450,10 @@ class BuiltinVariable(VariableTracker):
         return check_unspec_python_args(args, kwargs)
 
     @staticmethod
-    def unwrap_unspec_args_kwargs(args, kwargs):
-        unwrapped_args = []
-        unwrapped_kwargs = {}
-        for x in args:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_args.append(x.raw_value)
-            else:
-                unwrapped_args.append(x.as_python_constant())
-        for k, v in kwargs:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_kwargs.update({k: v.raw_value})
-            else:
-                unwrapped_kwargs.update({k: v.as_python_constant()})
-        return unwrapped_args, unwrapped_kwargs
+    def unwrap_unspec_args_kwargs(tx, args, kwargs):
+        return [x.as_specialized(tx).as_python_constant() for x in args], {
+            k: v.as_specialized(tx).as_python_constant() for k, v in kwargs.items()
+        }
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -549,7 +533,7 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
-                    _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
+                    _args, _kwargs = self.unwrap_unspec_args_kwargs(tx, args, kwargs)
                     raw_value = self.fn(*_args, **_kwargs)
 
                     need_unwrap = any(

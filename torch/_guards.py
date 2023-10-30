@@ -761,10 +761,10 @@ class Source:
     def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn, is_volatile=False) -> Guard:
+    def make_guard(self, fn, *, is_volatile=False) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self, fn, is_volatile)
+        return Guard(self, fn, is_volatile=is_volatile)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
