@@ -29,7 +29,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 
-from .graph_signature import (
+from .graph_signature import (  # noqa: F401
     _sig_to_specs,
     ArgumentSpec,
     ConstantArgument,
@@ -38,6 +38,7 @@ from .graph_signature import (
     OutputKind,
     SymIntArgument,
     TensorArgument,
+    InputSpec,
 )
 
 
