@@ -175,10 +175,10 @@ class TestFxGraphCache(TestCase):
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
 
-    @largeTensorTest("16GB", device="cuda")
+    @largeTensorTest("64GB", device="cuda")
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda",))
-    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_cache_load_with_guards_int32_bounds(self, device, dtype):
         """
         Test caching the same graph, but under conditions that introduce guards
