@@ -258,13 +258,6 @@ class VariableTracker(metaclass=HasPostInit):
         except NotImplementedError:
             return False
 
-    def as_specialized(self, tx):
-        """
-        For specialized variables, return itself,
-        For unspecialized variables, convert to constant variable and return.
-        """
-        return self
-
     def can_make_guard(self):
         try:
             self.make_guard(None)
