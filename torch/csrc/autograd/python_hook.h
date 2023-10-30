@@ -4,6 +4,10 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
+namespace torch::dynamo::autograd {
+class SwapSavedVariables;
+} // namespace torch::dynamo::autograd
+
 namespace torch {
 namespace autograd {
 
@@ -43,7 +47,11 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
   ~PyFunctionTensorPostAccGradHooks() override;
   void operator()(const Variable& tensor) override;
   void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
+  void apply_with_saved(
+      Variable& tensor,
+      torch::dynamo::autograd::SwapSavedVariables& saved);
   PyObject* dict;
+  std::vector<int> hook_ids;
 };
 
 } // namespace autograd

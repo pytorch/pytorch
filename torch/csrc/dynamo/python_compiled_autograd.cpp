@@ -420,7 +420,7 @@ variable_list compiled_autograd(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      SwapSavedVariables saved(compiler_call, state);
+      SwapSavedVariables saved(compiler_call, state, py_compiler.get());
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
