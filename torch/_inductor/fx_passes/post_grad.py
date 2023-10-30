@@ -566,11 +566,6 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp(aten.view)
-def view_noop(arg, size):
-    return arg.shape == size
-
-
 # Note, we also always have a check for identical metadata, which is why these
 # are safe
 @register_noop_decomp([aten.copy], nop_arg=1)
@@ -581,7 +576,9 @@ def true_noop(*args, **kwargs):
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
-    Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
+    Removes aten.clone and aten.alias ops from the graph when it's safe.
+
+    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
     """
     input_storages = set()
     output_storages = set()
