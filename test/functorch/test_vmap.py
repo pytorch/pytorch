@@ -59,7 +59,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils import _pytree as pytree
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1252,7 +1252,7 @@ class TensorFactory:
 def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                check_view=False, check_propagates_grad=True):
     result = vmap(op, in_dims, out_dims)(*inputs)
-    are_nested, _ = tree_flatten(tree_map(lambda t: t.is_nested, result))
+    are_nested = [t.is_nested for t in pytree.tree_leaves(result)]
     reference_result = reference_vmap(op, inputs, in_dims, out_dims, return_nt=any(are_nested))
     self.assertEqual(result, reference_result)
     op_has_single_return = not isinstance(result, tuple)
