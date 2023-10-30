@@ -714,12 +714,12 @@ isFwGradDefined(${req_inp})\
 )
 FW_DERIVATIVE_SIZE_CHECK_TEMPLATE = CodeTemplate(
     """\
-  TORCH_CHECK(
-      self.size() == ${inp_name}.size(),
-        "Tensor lists must have the same number of tensors, got ",
-      self.size(),
-        " and ",
-      ${inp_name}.size());
+TORCH_CHECK(
+    self.size() == ${inp_name}.size(),
+      "Tensor lists must have the same number of tensors, got ",
+    self.size(),
+      " and ",
+    ${inp_name}.size());
 """
 )
 
@@ -1813,11 +1813,12 @@ def emit_body(
                     )
                     is_list_type = is_tensor_list_type(inp_type)
                     if is_list_type:
-                        content.append(
-                            FW_DERIVATIVE_SIZE_CHECK_TEMPLATE.substitute(
-                                inp_name=inp_name
+                        if inp_name != "self":
+                            content.append(
+                                FW_DERIVATIVE_SIZE_CHECK_TEMPLATE.substitute(
+                                    inp_name=inp_name
+                                )
                             )
-                        )
                         cur_derivative_conditions.append(
                             FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
                                 req_inp=inp_name + "[i]"
