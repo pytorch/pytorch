@@ -559,7 +559,7 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     # NOTE(angelayi): For huggingface benchmark, some example outputs are
     # formatted as a dataclass which pytree cannot consume. So we want
     # to register the pytree implementation here
-    example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+    example_outputs_flat = pytree.tree_leaves(example_outputs)
     output_dataclass_types = [
         type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
     ]
@@ -1496,7 +1496,7 @@ class OnnxModelFromTorchScript(OnnxModel):
         if isinstance(pt_outputs, torch.Tensor):
             pt_outputs = (pt_outputs,)
 
-        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+        pt_outputs = pytree.tree_leaves(pt_outputs)
 
         # Hack for huggingface model outputs
         try:
@@ -1511,7 +1511,7 @@ class OnnxModelFromTorchScript(OnnxModel):
                 return x
 
             pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
-            pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+            pt_outputs = pytree.tree_leaves(pt_outputs)
 
         return pt_outputs
 
@@ -1631,7 +1631,7 @@ class _OnnxPatch:
             )
 
         # Flatten nested tuple of tensors, i.e. past_key_values
-        correct_result = pytree.tree_flatten(correct_result)[0]
+        correct_result = pytree.tree_leaves(correct_result)
         # Hack to put results from different runs on same device.
         # This is needed for ONNX CPU fallback benchmark, where PyTorch eager is run on GPU.
         # Assuming outputs from a single run are always on same device!
@@ -1640,12 +1640,12 @@ class _OnnxPatch:
             x == devices[0] for x in devices
         ), "All tensors must be on same device!"
         device = devices[0]
-        new_result = pytree.tree_flatten(new_result)[0]
+        new_result = pytree.tree_leaves(new_result)
         new_result = pytree.tree_map(
             lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x,
             new_result,
         )
-        fp64_outputs = pytree.tree_flatten(fp64_outputs)[0]
+        fp64_outputs = pytree.tree_leaves(fp64_outputs)
 
         return correct_result, new_result, fp64_outputs
 
