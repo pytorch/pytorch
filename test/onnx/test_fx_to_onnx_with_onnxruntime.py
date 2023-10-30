@@ -439,6 +439,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
+    @pytorch_test_common.skip_model_type_exported_program_test(
+        "RuntimeError:"
+        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
+        " If you need this functionality, please file a github issue."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
+    )
     def test_mutation(self):
         class MutationModel(torch.nn.Module):
             def forward(self, x):
@@ -470,6 +476,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
+    @pytorch_test_common.skip_model_type_exported_program_test(
+        "RuntimeError:"
+        " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
+        " If you need this functionality, please file a github issue."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112429"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
         "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
@@ -592,6 +604,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4)), model_type=self.model_type
         )
 
+    @pytorch_test_common.skip_model_type_exported_program_test(
+        "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112443"
+    )
     def test_operator_with_dynamic_output_shape(self):
         def func(x):
             return x.nonzero()
@@ -600,6 +616,22 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),), model_type=self.model_type
         )
 
+    @pytorch_test_common.skip_model_type_exported_program_test(
+        "AssertionError: AssertionError: original output #1 is BaseModelOutputWithPastAndCrossAttentions("
+        " last_hidden_state=FakeTensor(..., size=(2, 128, 16), grad_fn=<ViewBackward0>),"
+        " past_key_values=((FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>)),"
+        "  (FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
+        "  FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>))),"
+        " hidden_states=None, attentions=None, cross_attentions=None),"
+        " but only the following types are supported:"
+        " (<class 'torch.Tensor'>, <class 'torch.SymInt'>, <class 'torch.SymFloat'>, <class 'torch.SymBool'>)"
+        " Github issue: https://github.com/pytorch/pytorch/issues/110100"
+    )
     def test_gpt2_tiny_from_config(self):
         # Model
         config = transformers.GPT2Config(

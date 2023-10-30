@@ -211,6 +211,30 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
+def skip_model_type_exported_program_test(reason: str):
+    """Skip test with models using ExportedProgram as input.
+
+    Args:
+        reason: The reason for skipping the ONNX export test.
+
+    Returns:
+        A decorator for skipping tests.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.model_type == "torch.export.ExportedProgram":
+                raise unittest.SkipTest(
+                    f"Skip model_type==torch.export.ExportedProgram test. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
 def skip_load_checkpoint_after_model_creation(reason: str):
     """Skip loading checkpoint right after model initialization.
 
