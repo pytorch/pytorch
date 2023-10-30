@@ -329,7 +329,7 @@ def tree_leaves(pytree: PyTree) -> List[Any]:
     child_pytrees, context = flatten_fn(pytree)
 
     # Recursively flatten the children
-    result : List[Any] = []
+    result: List[Any] = []
     for child in child_pytrees:
         result += tree_leaves(child)
 
