@@ -8,6 +8,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
 
 import sympy
@@ -20,13 +21,14 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import code_hash, get_path
+from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
+    do_bench,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -2521,6 +2523,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2640,6 +2643,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
@@ -2677,6 +2681,7 @@ class TritonScheduling(BaseScheduling):
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
+                V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
@@ -2830,6 +2835,81 @@ class TritonScheduling(BaseScheduling):
 
     def flush(self):
         pass
+
+    def benchmark_fused_nodes(self, nodes):
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+            node_schedule, numel, rnumel
+        )
+
+        kernel = TritonKernel(
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
+        )
+
+        # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+        for n in nodes:
+            n.last_usage = set()
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
+            src_code = kernel.codegen_kernel()
+
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        mod = PyCodeCache.load(src_code)
+
+        def cache_file_path():
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return float(fd.read())
+            return None
+
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
+                fd.write(str(ms))
+
+        log.debug(
+            "kernel src code for %s written to: %s",
+            {n.get_name() for n in nodes},
+            mod.__file__,
+        )
+        ms = load_cache()
+        if ms is not None:
+            return ms
+
+        args = mod.get_args()
+        call = mod.call
+        wrapped_jit_function = mod.triton_
+
+        # call once to trigger the compilation
+        call(wrapped_jit_function.clone_args(*args)[0])
+
+        launchers = wrapped_jit_function.launchers
+        assert len(launchers) == 1
+        if launchers[0].n_spills > 0:
+            # skip benchmarking the kernel if there are register spills
+            ms = float("inf")
+        else:
+            # We have to clone the inplace updated arguments to avoid earlier calls
+            # generating out of range indices for later calls.
+            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+
+        log.debug(
+            "The fused kernel for %s took %.3f ms to run",
+            {n.get_name() for n in nodes},
+            ms,
+        )
+        store_cache()
+        return ms
 
 
 @dataclasses.dataclass
