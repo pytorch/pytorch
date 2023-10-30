@@ -34,7 +34,6 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
-    specialize_args_kwargs,
     tensortype_to_dtype,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -452,25 +451,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
-        unwrapped_args = []
-        unwrapped_kwargs = {}
-        for x in args:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_args.append(x.raw_value)
-            else:
-                unwrapped_args.append(x.as_python_constant())
-        for k, v in kwargs:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_kwargs.update({k: v.raw_value})
-            else:
-                unwrapped_kwargs.update({k: v.as_python_constant()})
-        return unwrapped_args, unwrapped_kwargs
+        return [x.as_python_constant() for x in args], {
+            k: v.as_python_constant() for k, v in kwargs.items()
+        }
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -495,7 +478,6 @@ class BuiltinVariable(VariableTracker):
             args[0], variables.TensorVariable
         ):
             tensor_args = False
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
 
         if (
             self.can_insert_in_graph()
@@ -646,7 +628,6 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable.create(
                 self.as_python_constant()(
@@ -790,7 +771,6 @@ class BuiltinVariable(VariableTracker):
 
     def call_range(self, tx, *args):
         if self.unspec_python_args(*args) or self.constant_args(*args):
-            args, _ = specialize_args_kwargs(tx, args, {})
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = [
@@ -943,8 +923,6 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
-        if self.unspec_python_args(*args, **kwargs):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
