@@ -160,7 +160,7 @@ class DTensorExpandMode(ParallelMode):
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> GraphModule:
-        flat_args, _ = pytree.tree_flatten(list(args) + list(kwargs.values()))
+        flat_args = pytree.tree_leaves(list(args) + list(kwargs.values()))
 
         mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
         shard_schema: Schema = Schema(mesh=mesh, placements=[Shard(0)])
@@ -169,12 +169,12 @@ class DTensorExpandMode(ParallelMode):
 
         inps, schemas = [], []
 
-        for p in pytree.tree_flatten(params_and_buffers)[0]:
+        for p in pytree.tree_leaves(params_and_buffers):
             assert isinstance(p, torch.Tensor), f"expecting Tensor but got {type(p)}"
             inps.append(p)
             schemas.append(replicate_schema)
 
-        for o in pytree.tree_flatten(named_states)[0]:
+        for o in pytree.tree_leaves(named_states):
             if isinstance(o, torch.Tensor):
                 inps.append(o)
                 schemas.append(replicate_schema)

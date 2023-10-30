@@ -238,8 +238,8 @@ class TestControlFlow(TestCase):
 
         def fwbw(map_op, f, x, y):
             z = map_op(f, x, y)
-            flat_x, _ = pytree.tree_flatten(x)
-            flat_z, _ = pytree.tree_flatten(z)
+            flat_x = pytree.tree_leaves(x)
+            flat_z = pytree.tree_leaves(z)
             grads = torch.autograd.grad(flat_z, flat_x, [torch.ones_like(z) for z in flat_z])
             return z, grads
 
@@ -975,8 +975,8 @@ def forward(self, arg0_1):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 
@@ -995,8 +995,8 @@ def forward(self, arg0_1):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 

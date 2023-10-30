@@ -298,8 +298,8 @@ class TestGenericPytree(TestCase):
             def f(x):
                 return x * 3
 
-            sm1 = sum(map(f, pytree_impl.tree_flatten(pytree)[0]))
-            sm2 = sum(pytree_impl.tree_flatten(pytree_impl.tree_map(f, pytree))[0])
+            sm1 = sum(map(f, pytree_impl.tree_leaves(pytree)))
+            sm2 = sum(pytree_impl.tree_leaves(pytree_impl.tree_map(f, pytree)))
             self.assertEqual(sm1, sm2)
 
             def invf(x):

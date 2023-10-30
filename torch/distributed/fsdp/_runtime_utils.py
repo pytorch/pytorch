@@ -37,7 +37,7 @@ from torch.distributed.utils import (
     _p_assert,
     _to_kwargs,
 )
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 log = logging.getLogger(__name__)
 
@@ -1456,8 +1456,8 @@ def _register_post_backward_reshard_only_hook(
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_list, _ = tree_flatten(args)
-        kwargs_list, _ = tree_flatten(kwargs)
+        args_list = pytree.tree_leaves(args)
+        kwargs_list = pytree.tree_leaves(kwargs)
         inp_tensors = [
             obj
             for obj in chain(args_list, kwargs_list)

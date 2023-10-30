@@ -27,6 +27,7 @@ from typing import (
 )
 
 import torch
+from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
@@ -788,7 +789,6 @@ def detect_fake_mode(inputs: Any = None):
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-    from torch.utils._pytree import tree_flatten
 
     fake_modes = []
 
@@ -804,7 +804,7 @@ def detect_fake_mode(inputs: Any = None):
         if isinstance(m, FakeTensorMode):
             fake_modes.append((m, "active fake mode", i))
 
-    flat_inputs, _ = tree_flatten(inputs)
+    flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))

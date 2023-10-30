@@ -963,7 +963,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (x, weight, bias)
 
         expected = m(*example_inputs)
-        expected, _ = pytree.tree_flatten(expected)
+        expected = pytree.tree_leaves(expected)
 
         # compiler under no_grad
         with torch.no_grad():
@@ -974,7 +974,7 @@ class AOTInductorTestsTemplate:
 
         optimized = AOTInductorModelRunner.load(self.device, so_path, example_inputs)
         actual = optimized(example_inputs)
-        actual, _ = pytree.tree_flatten(actual)
+        actual = pytree.tree_leaves(actual)
 
         self.assertTrue(same(actual, expected))
 

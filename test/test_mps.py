@@ -11103,8 +11103,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 

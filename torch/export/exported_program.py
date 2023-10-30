@@ -736,7 +736,7 @@ class ExportedProgram:
             outputs=[
                 make_argument_spec(old_outputs[i], node)
                 for i, node in enumerate(
-                    pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]
+                    pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
                 )
             ],
         )

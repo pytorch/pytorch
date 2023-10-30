@@ -46,7 +46,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils._pytree import PyTree, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
 
@@ -245,8 +245,8 @@ def torch_decomp_decompositions(func):
     return decomposition_table[func] in decomp_attrs
 
 
-def tree_flatten_only(ty: Type[T], pytree: PyTree):
-    flat_vals, _ = tree_flatten(pytree)
+def tree_flatten_only(ty: Type[T], tree: PyTree):
+    flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
 
@@ -1177,7 +1177,9 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
+        for arg in itertools.chain(
+            pytree.tree_leaves(args), pytree.tree_leaves(kwargs)
+        ):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -1901,7 +1903,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     tensor_impls = set()
     storages = set()
 
-    for e in tree_flatten((args, kwargs))[0]:
+    for e in pytree.tree_leaves((args, kwargs)):
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
                 storages.add(e._typed_storage()._cdata)
@@ -1910,7 +1912,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # proper aliasing/metadata relationship between outputs and inputs will
     # not be set up, bc of conversion to device, unless we can reuse an
     # input impl
-    for e in tree_flatten(r)[0]:
+    for e in pytree.tree_leaves(r):
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse
