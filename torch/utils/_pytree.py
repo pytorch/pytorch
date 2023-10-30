@@ -37,6 +37,35 @@ from typing import (
 )
 
 
+__all__ = [
+    "PyTree",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
+    "register_pytree_node",
+    "tree_flatten",
+    "tree_unflatten",
+    "tree_leaves",
+    "tree_structure",
+    "tree_map",
+    "tree_map_",
+    "tree_map_only",
+    "tree_map_only_",
+    "tree_all",
+    "tree_any",
+    "tree_all_only",
+    "tree_any_only",
+    "treespec_dumps",
+    "treespec_loads",
+    "treespec_pprint",
+]
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -142,6 +171,9 @@ def _register_pytree_node(
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+
+
+register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -321,7 +353,19 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
 
 def tree_leaves(pytree: PyTree) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    return tree_flatten(pytree)[0]
+    if _is_leaf(pytree):
+        return [pytree]
+
+    node_type = _get_node_type(pytree)
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+    child_pytrees, context = flatten_fn(pytree)
+
+    # Recursively flatten the children
+    result: List[Any] = []
+    for child in child_pytrees:
+        result += tree_leaves(child)
+
+    return result
 
 
 def tree_structure(pytree: PyTree) -> TreeSpec:
@@ -369,7 +413,7 @@ def tree_map(fn: Any, pytree: PyTree) -> PyTree:
 
 
 def tree_map_(fn: Any, pytree: PyTree) -> PyTree:
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = tree_leaves(pytree)
     deque(map(fn, flat_args), maxlen=0)  # consume and exhaust the iterable
     return pytree
 
@@ -475,12 +519,12 @@ def tree_map_only_(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
 
 
 def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = tree_leaves(pytree)
     return all(map(pred, flat_args))
 
 
 def tree_any(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = tree_leaves(pytree)
     return any(map(pred, flat_args))
 
 
@@ -500,7 +544,7 @@ def tree_all_only(ty: Type3[T, S, U], pred: Fn3[T, S, U, bool], pytree: PyTree) 
 
 
 def tree_all_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = tree_leaves(pytree)
     return all(pred(x) for x in flat_args if isinstance(x, ty))
 
 
@@ -515,7 +559,7 @@ def tree_any_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> boo
 
 
 def tree_any_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:
-    flat_args, _ = tree_flatten(pytree)
+    flat_args = tree_leaves(pytree)
     return any(pred(x) for x in flat_args if isinstance(x, ty))
 
 
