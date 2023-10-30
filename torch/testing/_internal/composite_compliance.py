@@ -238,9 +238,9 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # have consistent metadata. If they don't have consistent metadata,
             # that means the operator did something fishy.
             check = partial(check_metadata_consistency, CCT=CompositeCompliantTensor)
-            tree_map(check, args)
-            tree_map(check, kwargs)
-            tree_map(check, rs)
+            pytree.tree_map_(check, args)
+            pytree.tree_map_(check, kwargs)
+            pytree.tree_map_(check, rs)
             return rs
 
     return CompositeCompliantTensor, CompositeCompliantTensorMode()
