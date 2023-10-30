@@ -13992,6 +13992,13 @@ op_db: List[OpInfo] = [
                 device_type='cuda',
                 active_if=(TEST_WITH_TORCHINDUCTOR)
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCompositeCompliance",
+                "test_forward_ad",
+                dtypes=[torch.float32],
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
         ),
     ),
     BinaryUfuncInfo('nextafter',
