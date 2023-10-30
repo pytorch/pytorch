@@ -257,49 +257,58 @@ class TestPrioritizations:
         for relevance_group, tests in self._traverse_priorities():
             _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
 
-    def _get_test_relevance_group(self, test_name: str) -> Relevance:
-        """Returns the highest rank any of this tests classes have been given."""
-        query_test = TestRun(test_name)
+    def _get_test_relevance_group(self, test_run: TestRun) -> Relevance:
+        """Returns the rank of the given test run."""
         for relevance_group, tests in self._traverse_priorities():
-            if any(test.contains(query_test) for test in tests):
+            if any(t.contains(test_run) for t in tests):
                 return Relevance(relevance_group)
 
-        raise ValueError(f"Test {test_name} not found in any relevance group")
+        print("holup, retry")
+        for relevance_group, tests in self._traverse_priorities():
+            if any(
+                t.contains(test_run) for t in tests
+            ):  # t could be the entire test_run or a superset
+                return Relevance(relevance_group)
 
-    def _get_test_order(self, test_name: str) -> int:
-        """Returns the highest rank of any tests classes of this test specified by this heuristic."""
+        raise ValueError(f"Test {test_run} not found in any relevance group")
+
+    def _get_test_order(self, test_run: TestRun) -> int:
+        """Returns the rank this heuristic suggested for the test run."""
         base_rank = 0
-        query_test = TestRun(test_name)
 
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(query_test):
+                if test.contains(
+                    test_run
+                ):  # test could be the entire test_run or a superset
                     return base_rank + idx
             base_rank += len(relevance_group_tests)
 
-        raise ValueError(f"Test {test_name} not found in any relevance group")
+        raise ValueError(f"Test {test_run} not found in any relevance group")
 
-    def _get_test_order_within_relevance_group(self, test_name: str) -> int:
+    def _get_test_order_within_relevance_group(self, test_run: TestRun) -> int:
         """Returns the highest test order of any test class within the same relevance group."""
-        query_test = TestRun(test_name)
         for _, relevance_group_tests in self._traverse_priorities():
             for idx, test in enumerate(relevance_group_tests):
-                if test.contains(query_test):
+                if test.contains(
+                    test_run
+                ):  # test could be the entire test_run or a superset
                     return idx
 
-        raise ValueError(f"Test {test_name} not found in any relevance group")
+        raise ValueError(f"Test {test_run} not found in any relevance group")
 
-    def get_priority_info_for_test(self, test_name: str) -> Dict[str, Any]:
+    def get_priority_info_for_test(self, test_run: TestRun) -> Dict[str, Any]:
         """Given a failing test, returns information about it's prioritization that we want to emit in our metrics."""
+        relevance = self._get_test_relevance_group(test_run)
         return {
-            METRIC_RELEVANCE_GROUP: self._get_test_relevance_group(test_name).name,
+            METRIC_RELEVANCE_GROUP: relevance.name,
             METRIC_ORDER_WITHIN_RELEVANCE_GROUP: self._get_test_order_within_relevance_group(
-                test_name
+                test_run
             ),
             METRIC_NUM_TESTS_IN_RELEVANCE_GROUP: len(
-                self._test_priorities[self._get_test_relevance_group(test_name).value]
+                self._test_priorities[relevance.value]
             ),
-            METRIC_ORDER_OVERALL: self._get_test_order(test_name),
+            METRIC_ORDER_OVERALL: self._get_test_order(test_run),
         }
 
 
@@ -346,12 +355,13 @@ class AggregatedHeuristics:
 
         return aggregated_priorities
 
-    def get_test_stats(self, test: str) -> Dict[str, Any]:
+    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
         """
         Returns the aggregated statistics for a given test.
         """
         stats: Dict[str, Any] = {
-            "test_name": test,
+            "test_name": test.test_file,
+            "test_filters": test.get_pytest_filter(),
         }
 
         # Get baseline metrics assuming we didn't have any TD heuristics
