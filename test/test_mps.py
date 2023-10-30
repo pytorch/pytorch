@@ -7458,30 +7458,6 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 8, 4, 5), diag=-2)
         helper((2, 8, 4, 5), diag=-3)
 
-    def test_lu_factor(self):
-        # TODO: Remove this test after at::lu_unpack is implemented in favor of OpInfo.
-        def helper(shape):
-            cpu_A = torch.randn(shape, device='cpu', dtype=torch.float32, requires_grad=True)
-            A = cpu_A.detach().clone().to('mps').requires_grad_()
-            LU_cpu, pivots_cpu = torch.linalg.lu_factor(cpu_A)
-            LU, pivots = torch.linalg.lu_factor(A)
-
-            self.assertEqual(LU, LU_cpu)
-            self.assertEqual(pivots, pivots_cpu)
-
-            # TODO: implement at::lu_unpack for backward pass
-            # cpu_grad = torch.randn(LU.shape)
-            # grad = cpu_grad.to('mps')
-
-            # LU_cpu.backward(gradient=cpu_grad)
-            # LU.backward(gradient=grad)
-
-            # self.assertEqual(cpu_A.grad, A.grad)
-
-        helper((3, 3))  # unbatched
-        helper((2, 3, 3))  # batched
-        helper((2, 2, 4))  # batched and non-square
-
     # test eye
     def test_eye(self):
         def helper(n, m, dtype):
