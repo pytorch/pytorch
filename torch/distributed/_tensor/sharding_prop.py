@@ -166,7 +166,7 @@ class ShardingPropagator:
                     mesh = arg[0].mesh
                     break
 
-            assert mesh is not None, "Cannot find mesh for op {}".format(op_schema.op)
+            assert mesh is not None, f"Cannot find mesh for op {op_schema.op}"
 
             # swap the args spec with args strategies
             args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
