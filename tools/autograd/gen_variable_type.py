@@ -719,7 +719,7 @@ FW_DERIVATIVE_SIZE_CHECK_TEMPLATE = CodeTemplate(
         "Tensor lists must have the same number of tensors, got ",
       self.size(),
         " and ",
-      {inp_name}.size());
+      ${inp_name}.size());
 """
 )
 
