@@ -334,7 +334,9 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
-    dim.__module__ = inspect.getmodule(inspect.stack()[1][0]).__name__  # type: ignore[union-attr]
+    dim.__module__ = getattr(
+        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
+    )
     return dim
 
 
