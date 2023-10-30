@@ -630,7 +630,7 @@ class CustomizedDictVariable(ConstDictVariable):
             # CustomDict({'a': 1, 'b': 2})
             raw_items = args[0].items
         else:
-            unimplemented("custome dict init with args/kwargs unimplemented")
+            unimplemented("custom dict init with args/kwargs unimplemented")
 
         items = collections.OrderedDict()
         for key in raw_items.keys():
