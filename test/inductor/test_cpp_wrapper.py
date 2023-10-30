@@ -194,6 +194,36 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest(
+            "test_qconv2d",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
