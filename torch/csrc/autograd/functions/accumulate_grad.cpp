@@ -83,6 +83,7 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor variable_copy = variable;
   at::Tensor grad_copy = variable.grad();
   saved.before(variable_copy);
+  at::Tensor fake_variable_copy = variable_copy;
   saved.before(grad_copy);
   variable_copy.mutable_grad() = grad_copy;
   // op is intentionally static
@@ -90,12 +91,12 @@ variable_list AccumulateGrad::apply_with_saved(
                        .findSchemaOrThrow("inductor::accumulate_grad_", "")
                        .typed<void(const at::Tensor&, const at::Tensor&)>();
   op.call(variable_copy, grads[0]);
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    (*hook)(variable_copy);
+  }
   saved.after(variable_copy);
   saved.after(grad_copy);
-
-  TORCH_CHECK(
-      tensor_post_acc_grad_hooks() == nullptr,
-      "compiled_autograd does not support tensor_post_acc_grad_hooks");
 
   return variable_list();
 }
