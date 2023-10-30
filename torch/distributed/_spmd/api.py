@@ -302,7 +302,7 @@ def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
 
     for node in gm.graph.nodes:
         # replace all args with the results from the first unique comm op
-        args, _ = pytree.tree_flatten(node.args)
+        args = pytree.tree_leaves(node.args)
 
         if node.target in DEDUP_TARGETS:
             args_key = (node.target, *args)
@@ -340,7 +340,7 @@ def _compile(
     # FIXME(@mrshenli): support multiple Optiimzer instances
     # FIXME(@mrshenli): need to broadcast model to sync parameters
     mod, opt = None, None
-    for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[0]:
+    for arg in pytree.tree_leaves(list(args) + list(kwargs.values())):
         if isinstance(arg, nn.Module):
             assert mod is None, "Only support single nn.Module for now"
             mod = arg
@@ -466,7 +466,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
+    flat_state = pytree.tree_leaves([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
@@ -539,7 +539,7 @@ def compile(
                 compiled_obj = _compile(func, module_override, mode, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
-            flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
+            flat_inps = compiled_obj.flat_state + pytree.tree_leaves([args, kwargs])
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
