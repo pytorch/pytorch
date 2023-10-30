@@ -154,7 +154,8 @@ def common_reduction_strategy(
 
     return reduction_strategy
 
-REDUCTION_LINEAR_OP_MAP = {
+
+LINEAR_REDUCTION_OP_MAP = {
     aten.all.default: c10d.ReduceOp.SUM,
     aten.all.dim: c10d.ReduceOp.SUM,
     aten.sum.default: c10d.ReduceOp.SUM,
@@ -173,10 +174,11 @@ REDUCTION_LINEAR_OP_MAP = {
     aten.min.out: c10d.ReduceOp.MIN,
 }
 
+
 @register_op_strategy(
-    list(REDUCTION_LINEAR_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
+    list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
 )
-def reduction_linear_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
@@ -187,7 +189,7 @@ def reduction_linear_op_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStr
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
 
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    reduction_op = REDUCTION_LINEAR_OP_MAP[op_schema.op]
+    reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
     return common_reduction_strategy(
         mesh,
         input_strategy,

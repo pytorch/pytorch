@@ -1,6 +1,6 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, Dict, List, Optional
+from typing import Callable, cast, Dict, List, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -114,16 +114,31 @@ class ShardingPropagator:
         """
 
         if output_spec is not None:
-            # Normalise
-            output_spec: List[DTensorSpec] = [output_spec] if isinstance(output_spec, DTensorSpec) else list(output_spec)
-            output_tensor_meta: List[TensorMeta] = [output_tensor_meta] if isinstance(output_tensor_meta, TensorMeta) else list(output_tensor_meta) 
-            
+            # Normalize
+            output_spec = (  # type: ignore[no-redef]
+                [output_spec]
+                if isinstance(output_spec, DTensorSpec)
+                else list(output_spec)
+            )
+            output_spec = cast(List[DTensorSpec], output_spec)
+            output_tensor_meta = (  # type: ignore[no-redef]
+                [output_tensor_meta]
+                if isinstance(output_tensor_meta, TensorMeta)
+                else list(output_tensor_meta),  # type: ignore[call-overload]
+            )
+            output_tensor_meta = cast(List[TensorMeta], output_tensor_meta)
+
             # Validate lengths
             if len(output_spec) != len(output_tensor_meta):
-                raise ValueError(f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the number of op outputs {len(output_tensor_meta)}.")
-            
+                raise ValueError(
+                    f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the "
+                    f"number of op outputs {len(output_tensor_meta)}."
+                )
+
             # Validate elements and wrap
-            for i, (output_spec_i, output_tensor_meta_i) in enumerate(zip(output_spec, output_tensor_meta)):
+            for i, (output_spec_i, output_tensor_meta_i) in enumerate(
+                zip(output_spec, output_tensor_meta)
+            ):
                 if isinstance(output_spec_i, DTensorSpec):
                     assert isinstance(output_tensor_meta_i, TensorMeta)
                     output_spec_i.tensor_meta = output_tensor_meta_i
