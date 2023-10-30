@@ -28,6 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+from types import MethodWrapperType
 from typing import Any, Dict, Optional, Tuple, Union
 
 try:
@@ -850,6 +851,16 @@ def guard_if_dyn(arg):
     return arg
 
 
+def specialize_symnode(arg):
+    from .variables import ConstantVariable, SymNodeVariable
+
+    # Guard and specialize
+    if isinstance(arg, SymNodeVariable):
+        return ConstantVariable.create(arg.evaluate_expr())
+
+    return arg
+
+
 def check_constant_args(args, kwargs):
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
@@ -973,13 +984,13 @@ def iter_contains(items, search, tx, options, check_tensor_identity=False):
 
 def dict_param_key_ids(value):
     return {
-        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+        id(k) for k in value.keys() if isinstance(k, (torch.Tensor, MethodWrapperType))
     }
 
 
 def dict_const_keys(value):
     return {
-        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
+        k for k in value.keys() if not isinstance(k, (torch.Tensor, MethodWrapperType))
     }
 
 
@@ -987,7 +998,7 @@ def const_repr(x, *, local) -> str:
     from .allowed_functions import is_builtin_callable
 
     if isinstance(x, (tuple, list)):
-        return f"{x.__name__}({','.join(const_repr(s, local=local) for s in x)})"
+        return f"{type(x).__name__}({','.join(const_repr(s, local=local) for s in x)})"
     elif isinstance(x, enum.Enum):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
