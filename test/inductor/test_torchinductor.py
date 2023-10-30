@@ -12,6 +12,7 @@ import random
 import re
 import subprocess
 import sys
+import threading
 import time
 import typing
 import unittest
@@ -2599,6 +2600,29 @@ class CommonTemplate:
             check_lowp=False,
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_multi_threading(self):
+        model = torch.nn.Linear(2, 3).eval()
+        inp = torch.randn(4, 2)
+
+        num_run = 3
+
+        def run_weights_sharing_model(m, inp):
+            with torch.no_grad():
+                for i in range(num_run):
+                    y = m(inp)
+
+        numb_instance = 2
+        threads = []
+        compiled_m = torch.compile(model)
+        for i in range(1, numb_instance + 1):
+            thread = threading.Thread(
+                target=run_weights_sharing_model, args=(compiled_m, inp)
+            )
+            threads.append(thread)
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
     def test_adaptive_avg_pool2d_low_prec(self):

@@ -1311,6 +1311,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
                         """
                     )
+            else:
+                self.prefix.splice(
+                    """
+                        py::gil_scoped_release release;
+                    """
+                )
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
