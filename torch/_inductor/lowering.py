@@ -29,7 +29,6 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
@@ -1640,7 +1639,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         if "val" not in node.meta:
             return False
 
-        for meta in tree_flatten(node.meta["val"])[0]:
+        for meta in pytree.tree_leaves(node.meta["val"]):
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
 
@@ -1654,7 +1653,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # only skip codegen if there is a cpu output, not input
-    for arg in tree_flatten((node.args, node.kwargs))[0]:
+    for arg in pytree.tree_leaves((node.args, node.kwargs)):
         if check_skip_condition(arg, node, is_output=False):
             return True
 

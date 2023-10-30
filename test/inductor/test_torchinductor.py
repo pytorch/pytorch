@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -185,15 +186,15 @@ class InputGen:
 
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
-        args, _ = tree_flatten(args)
-        kwargs, _ = tree_flatten(kwargs)
+        args = pytree.tree_leaves(args)
+        kwargs = pytree.tree_leaves(kwargs)
         args = args + kwargs
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
         return leaf_tensors
 
-    flat_results, _ = tree_flatten(results)
+    flat_results = pytree.tree_leaves(results)
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -329,7 +330,7 @@ def check_model(
     assert type(actual) == type(correct)
 
     correct_flat, correct_spec = tree_flatten(correct)
-    actual_flat, _ = tree_flatten(actual)
+    actual_flat = pytree.tree_leaves(actual)
 
     def reference_to_expect(actual_flat, correct_flat):
         return tuple(
@@ -375,8 +376,8 @@ def check_model(
     if check_gradient:
         actual = output_process_fn_grad(actual)
         correct = output_process_fn_grad(correct)
-        actual_flat = tree_flatten(actual)[0]
-        correct_flat = tree_flatten(correct)[0]
+        actual_flat = pytree.tree_leaves(actual)
+        correct_flat = pytree.tree_leaves(correct)
 
         # generate random unit norm gradients
         grads = [
@@ -396,7 +397,7 @@ def check_model(
             # AOTAutograd will end up forcing all of the outputs of the forward to not require grad.
             # There's no easy fix to this (see the note above), although one option is to
             # force any derivative formulas in core to return tensors of zeros instead of None.
-            flat_results, _ = tree_flatten(actual)
+            flat_results = pytree.tree_leaves(actual)
             results_that_require_grad = [
                 x
                 for x in flat_results
@@ -7641,7 +7642,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
-                    for arg in tree_flatten((args, kwargs))[0]:
+                    for arg in pytree.tree_leaves((args, kwargs)):
                         if isinstance(arg, torch.Tensor):
                             live_tensors[arg] = True
 
