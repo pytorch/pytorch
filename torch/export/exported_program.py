@@ -92,6 +92,7 @@ class ExportedProgram:
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
         dialect: Optional[str] = None,
+        tensor_constants: Optional[Dict[str, torch.Tensor]] = None,
     ):
         from torch._export.exported_program import _create_graph_module_for_export
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
@@ -113,6 +114,7 @@ class ExportedProgram:
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
         self._dialect = dialect or "ATEN"
+        self._tensor_constants = tensor_constants or {}
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -205,6 +207,11 @@ class ExportedProgram:
     def dialect(self):
         return self._dialect
 
+    @property
+    @compatibility(is_backward_compatible=False)
+    def tensor_constants(self):
+        return self._tensor_constants
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
         from torch._export import combine_args_kwargs
@@ -230,12 +237,22 @@ class ExportedProgram:
         ordered_buffers = tuple(
             self.state_dict[name] for name in self.graph_signature.buffers
         )
-        self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
+        ordered_tensor_constants = tuple(
+            self.tensor_constants[name]
+            for name in self.graph_signature.lifted_tensor_constants
+        )
+        self._check_input_constraints(
+            *ordered_params, *ordered_buffers, *ordered_tensor_constants, *args
+        )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
         res = torch.fx.Interpreter(self.graph_module).run(
-            *ordered_params, *ordered_buffers, *args, enable_io_processing=False
+            *ordered_params,
+            *ordered_buffers,
+            *ordered_tensor_constants,
+            *args,
+            enable_io_processing=False,
         )
 
         if self.call_spec.out_spec is not None:
@@ -321,6 +338,7 @@ class ExportedProgram:
         decomp_table = decomp_table or core_aten_decompositions()
 
         old_placeholders = _get_placeholders(self.graph_module)
+        old_outputs = list(self.graph.nodes)[-1].args[0]
         fake_args = [node.meta["val"] for node in old_placeholders]
 
         buffers_to_remove = [name for name, _ in self.graph_module.named_buffers()]
@@ -333,67 +351,32 @@ class ExportedProgram:
 
         # Update the signatures with the new placeholder names in case they
         # changed when calling aot_export
+        def update_arg(old_arg, new_ph):
+            if isinstance(old_arg, ConstantArgument):
+                return old_arg
+            elif isinstance(old_arg, TensorArgument):
+                return TensorArgument(name=new_ph.name)
+            elif isinstance(old_arg, SymIntArgument):
+                return SymIntArgument(name=new_ph.name)
+            raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
+
         new_placeholders = _get_placeholders(gm)
+        new_outputs = list(gm.graph.nodes)[-1].args[0]
+
+        input_specs = [
+            InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
+            for i, spec in enumerate(self.graph_signature.input_specs)
+        ]
+        output_specs = [
+            OutputSpec(spec.kind, update_arg(spec.arg, new_outputs[i]), spec.target)
+            for i, spec in enumerate(self.graph_signature.output_specs)
+        ]
+
         assert len(new_placeholders) == len(old_placeholders)
         old_new_placeholder_map = {
             old_node.name: new_node.name
             for old_node, new_node in zip(old_placeholders, new_placeholders)
         }
-        old_outputs = list(self.graph.nodes)[-1].args[0]
-        new_outputs = list(gm.graph.nodes)[-1].args[0]
-        assert len(new_outputs) == len(old_outputs)
-        old_new_output_map = {
-            old_node.name: new_node.name
-            for old_node, new_node in zip(old_outputs, new_outputs)
-        }
-
-        def make_argument_spec(old_node, node) -> ArgumentSpec:
-            if "val" not in node.meta:
-                assert len(node.users) == 0
-                val = old_node.meta["val"]
-            else:
-                val = node.meta["val"]
-            if isinstance(val, torch.Tensor):
-                return TensorArgument(name=node.name)
-            elif isinstance(val, torch.SymInt):
-                return SymIntArgument(name=node.name)
-            else:
-                return ConstantArgument(value=val)
-
-        input_specs, output_specs = _sig_to_specs(
-            user_inputs={
-                old_new_placeholder_map[inp] for inp in self.graph_signature.user_inputs
-            },
-            inputs_to_parameters={
-                old_new_placeholder_map[inp]: param
-                for inp, param in self.graph_signature.inputs_to_parameters.items()
-            },
-            inputs_to_buffers={
-                old_new_placeholder_map[inp]: buffer
-                for inp, buffer in self.graph_signature.inputs_to_buffers.items()
-            },
-            user_outputs={
-                old_new_output_map[out] for out in self.graph_signature.user_outputs
-            },
-            buffer_mutations={
-                old_new_output_map[out]: buffer
-                for out, buffer in self.graph_signature.buffers_to_mutate.items()
-            },
-            grad_params={},
-            grad_user_inputs={},
-            loss_output=None,
-            inputs=[
-                make_argument_spec(old_placeholders[i], node)
-                for i, node in enumerate(gm.graph.nodes)
-                if node.op == "placeholder"
-            ],
-            outputs=[
-                make_argument_spec(old_outputs[i], node)
-                for i, node in enumerate(
-                    pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
-                )
-            ],
-        )
 
         new_graph_signature = ExportGraphSignature(
             input_specs=input_specs, output_specs=output_specs
@@ -438,6 +421,7 @@ class ExportedProgram:
             copy.deepcopy(self.module_call_graph),
             self.example_inputs,
             self.dialect,
+            self.tensor_constants,
         )
 
         if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
@@ -554,6 +538,7 @@ class ExportedProgram:
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
             self.dialect,
+            self.tensor_constants,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
