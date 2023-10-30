@@ -1507,7 +1507,7 @@ def do_sharding(
 
 
 class TestFailure(NamedTuple):
-    test: str
+    test: TestRun
     message: str
 
 
@@ -1772,7 +1772,7 @@ def main():
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
             metrics_dict[f"{test_batch.name}_failures"] = [
-                x.test for x in test_batch.failures
+                str(x.test) for x in test_batch.failures
             ]
 
     finally:
