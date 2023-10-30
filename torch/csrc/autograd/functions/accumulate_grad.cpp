@@ -71,6 +71,10 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
     args.collect(variable);
     args.collect(variable.grad());
   }
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    hook->compiled_args(args);
+  }
 }
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& grads,
@@ -93,7 +97,7 @@ variable_list AccumulateGrad::apply_with_saved(
   op.call(variable_copy, grads[0]);
   auto& hook = tensor_post_acc_grad_hooks();
   if (hook != nullptr) {
-    (*hook)(variable_copy);
+    hook->apply_with_saved(variable_copy, saved);
   }
   saved.after(variable_copy);
   saved.after(grad_copy);

@@ -11,6 +11,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <iostream>
 #include <sstream>
 
 using torch::autograd::Variable;
@@ -233,7 +234,22 @@ void PyFunctionTensorPostAccGradHooks::compiled_args(
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
-    args.add_post_acc_grad_hook(c10::SafePyObject(value, getPyInterpreter()));
+    c10::SafePyObject hook_obj(value, getPyInterpreter());
+    hook_ids.emplace_back(args.add_post_acc_grad_hook(std::move(hook_obj)));
+  }
+}
+
+void PyFunctionTensorPostAccGradHooks::apply_with_saved(
+    Variable& tensor,
+    torch::dynamo::autograd::SwapSavedVariables& saved) {
+  for (const auto hook : hook_ids) {
+    THPObjectPtr py_var(THPVariable_Wrap(tensor));
+    PyObject_CallMethod(
+        saved.get_py_compiler(),
+        "post_acc_grad_hook",
+        "Oi",
+        py_var.get(),
+        hook);
   }
 }
 
