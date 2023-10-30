@@ -382,6 +382,7 @@ def prod_dim_int(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
 def unbind_int(func, *args, **kwargs):
+    # Note that this specializes on the length of the offsets
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -394,13 +395,7 @@ def unbind_int(func, *args, **kwargs):
     values = inp._values
     offsets = inp.offsets()
 
-    views = []
-    start = 0
-    for length in offsets.diff().cpu().tolist():
-        views.append(inp._values[start : start + length, ...])
-        start += length
-
-    return tuple(views)
+    return torch.split(values, offsets.diff().tolist())
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
@@ -678,4 +673,22 @@ def stack_default(func, *args, **kwargs):
 
     return NestedTensor(
         func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.embedding.default,
+    "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?",
+)
+def embedding_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    # guaranteed this is non-empty if we got here
+    indices = new_kwargs.pop("indices")
+    weight = new_kwargs.pop("weight")
+
+    return NestedTensor(
+        func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )

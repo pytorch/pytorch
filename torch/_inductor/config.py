@@ -85,6 +85,10 @@ reorder_for_locality = True
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
+# this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
+# but the mul gets fused with other pointwise ops instead.
+force_fuse_int_mm_with_mul = False
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
@@ -95,9 +99,6 @@ use_mixed_mm = False
 # Autotune will not compare with normal cast->then->mm option.
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
-
-# TODO: capture whether the graph is from export
-from_export = False
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -225,6 +226,9 @@ constant_and_index_propagation = True
 # we always add constants into graph.constants without
 # performing any constant-inlining optimization
 always_keep_tensor_constants = False
+
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
 
 
 def is_fbcode():
@@ -426,9 +430,6 @@ class triton:
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
 
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
-
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
@@ -483,8 +484,16 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
+    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
+
+    # Serialized tree spec for flattening inputs
+    serialized_in_spec = ""
+
+    # Serialized tree spec for flattening outputs
+    serialized_out_spec = ""
 
 
 class cuda:
