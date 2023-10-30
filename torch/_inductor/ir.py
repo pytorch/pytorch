@@ -3506,10 +3506,21 @@ class ExternKernel(InputsKernel):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
+        def deref_alias_and_mutation(x):
+            if isinstance(x.get_layout(), AliasedLayout):
+                return deref_alias_and_mutation(x.get_layout().view())
+            elif isinstance(x.get_layout(), MutationLayout):
+                target = x.get_layout().target
+                if isinstance(target.get_layout(), FlexibleLayout):
+                    raise AssertionError(
+                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                    )
+                return deref_alias_and_mutation(target)
+            return x
+
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), AliasedLayout):
-                x = x.get_layout().view
+            x = deref_alias_and_mutation(x)
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
@@ -3520,15 +3531,6 @@ class ExternKernel(InputsKernel):
                 x.get_layout(), FixedLayout
             ) and x.get_layout().is_stride_ordered(order):
                 return x
-            elif isinstance(x.get_layout(), MutationLayout):
-                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
-                    raise AssertionError(
-                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
-                    )
-                elif isinstance(
-                    x.get_layout().real_layout(), FixedLayout
-                ) and x.get_layout().real_layout().is_stride_ordered(order):
-                    return x
 
         # TODO - Storage to InputBuffer
         if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):
@@ -4361,6 +4363,15 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             super().codegen(wrapper)
 
+    @staticmethod
+    def tensor_to_layout(output: torch.Tensor):
+        return FixedLayout(
+            output.device,
+            output.dtype,
+            convert_shape_to_inductor(output.size()),
+            convert_shape_to_inductor(output.stride()),
+        )
+
     @classmethod
     def create(cls, kernel, *args, **kwargs):
         fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
@@ -4376,18 +4387,10 @@ class FallbackKernel(ExternKernelAlloc):
                 schema,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = FallbackKernel.find_device(tensor_args, example_output)
+        device = cls.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
 
-        def tensor_to_layout(output: torch.Tensor):
-            return FixedLayout(
-                output.device,
-                output.dtype,
-                convert_shape_to_inductor(output.size()),
-                convert_shape_to_inductor(output.stride()),
-            )
-
-        packed = FallbackKernel(
+        packed = cls(
             MultiOutputLayout(device),
             kernel,
             tensor_args,
@@ -4409,7 +4412,7 @@ class FallbackKernel(ExternKernelAlloc):
                 }
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    tensor_to_layout(output),
+                    cls.tensor_to_layout(output),
                     packed,
                     indices,
                 )
@@ -6415,9 +6418,9 @@ class InPlaceHint(ExternKernel):
 
     def codegen(self, wrapper):
         input_name = self.inputs[0].codegen_reference()
-        output_name = self.get_name()
+        output_name = self.codegen_reference()
         if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
+            wrapper.codegen_tensor_copy(output_name, input_name, "no reuse")
 
     def __init__(self, layout, input):
         input = self.realize_input(input)
@@ -6684,6 +6687,202 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+
+
+# TODO(yifu): replace the CollectiveKernel IR hierarchy with _CollectiveKernel.
+class _CollectiveKernel(FallbackKernel):
+    @classmethod
+    def make_fallback_kernel(cls, layout, kernel, inputs, *args, **kwargs):
+        with V.graph.fake_mode:
+            (
+                example_outputs,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        return (
+            cls(
+                layout,
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            ),
+            example_outputs,
+        )
+
+    @staticmethod
+    def wrap_inplace_input(inp):
+        return TensorBox.create(
+            InPlaceHint(
+                FlexibleLayout(inp.get_device(), inp.get_dtype(), inp.get_size()),
+                inp,
+            )
+        )
+
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        return True
+
+    # This is identical to FallbackKernel.set_cpp_kernel(), minus the
+    # part that checks against input aliasing and mutation.
+    def set_cpp_kernel(self, kernel):
+        from .codegen.wrapper import get_cpp_op_schema
+
+        self.kernel = kernel._schema.name
+        self.cpp_kernel_overlad_name = kernel._schema.overload_name
+        self.cpp_kernel_key = (
+            f"{self.kernel.replace('::', '_')}_{self.cpp_kernel_overlad_name}"
+        )
+
+        self.cpp_op_schema = get_cpp_op_schema(kernel)
+        self.ordered_kwargs_for_cpp_kernel = [
+            x.name for x in kernel._schema.arguments if x.kwarg_only
+        ]
+
+    # NOTE: [In-Place Collective Safety]
+    # Between the initiation and completion of an in-place collective, the
+    # input buffers are subject to both volatile reads and volatile writes.
+    # They must not be read, written to or reused by another kernel. To ensure
+    # the constraints, we model collective -> wait_tensor as as two-step
+    # mutation of the input buffers.
+    @classmethod
+    def create_inplace_single(cls, kernel, inp: TensorBox, *args, **kwargs):
+        assert isinstance(inp, TensorBox)
+        inp = cls.wrap_inplace_input(inp)
+        output, _ = cls.make_fallback_kernel(
+            MutationLayout(inp),
+            kernel,
+            inp,
+            *args,
+            **kwargs,
+        )
+        output.outputs = [output]
+        return output
+
+    @classmethod
+    def create_inplace_coalesced(cls, kernel, inputs: List[TensorBox], *args, **kwargs):
+        assert isinstance(inputs, list) and all(
+            isinstance(x, TensorBox) for x in inputs
+        )
+        inputs = pytree.tree_map(cls.wrap_inplace_input, inputs)
+        packed, _ = cls.make_fallback_kernel(
+            MultiOutputLayout(inputs[0].get_device()),
+            kernel,
+            inputs,
+            *args,
+            **kwargs,
+        )
+        packed.outputs = [
+            MultiOutput(
+                MutationLayout(inp),
+                packed,
+                [(list, i)],
+            )
+            for i, inp in enumerate(inputs)
+        ]
+        return packed.outputs
+
+    # NOTE: [Out-of-Place Collective Safety]
+    # Between the initiation and completion of an out-of-place collective:
+    #
+    # Input buffers:
+    # - Are subject to volatile reads
+    # - Can be read by another kernel
+    # - Must not be written to or reused by another kernel
+    #
+    # Output buffers:
+    # - Are subject to volatile writes
+    # - Must not be read, written to or reused by another kernel
+    #
+    # To ensure the safety of input buffers without sacrificing read
+    # availability, we add input buffers as read deps of wait_tensor kernels.
+    #
+    # To ensure the safety of output buffers, we model wait_tensor as a
+    # mutation to the output buffer.
+    @classmethod
+    def create_out_of_place_single(cls, kernel, inp: TensorBox, *args, **kwargs):
+        assert isinstance(inp, TensorBox)
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inp, *args, **kwargs)
+        assert isinstance(example_output, torch.Tensor)
+        output = cls(
+            cls.tensor_to_layout(example_output),
+            kernel,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            schema=schema,
+        )
+        output.outputs = [output]
+        return output
+
+    @classmethod
+    def create_out_of_place_coalesced(
+        cls, kernel, inputs: List[TensorBox], *args, **kwargs
+    ):
+        assert isinstance(inputs, list) and all(
+            isinstance(x, TensorBox) for x in inputs
+        )
+        packed, example_outputs = cls.make_fallback_kernel(
+            MultiOutputLayout(inputs[0].get_device()),
+            kernel,
+            inputs,
+            *args,
+            **kwargs,
+        )
+        packed.outputs = [
+            MultiOutput(
+                cls.tensor_to_layout(example_output),
+                packed,
+                [(list, i)],
+            )
+            for i, example_output in enumerate(example_outputs)
+        ]
+        return packed.outputs
+
+
+class _WaitKernel(_CollectiveKernel):
+    def get_volatile_read(self):
+        inp = self.inputs[0]
+        if isinstance(inp, _CollectiveKernel):
+            return inp.inputs[0]
+        elif isinstance(inp, MultiOutput) and isinstance(
+            inp.inputs[0], _CollectiveKernel
+        ):
+            _, idx = inp.indices[0]
+            return inp.inputs[0].inputs[idx]
+        else:
+            raise AssertionError(
+                f"wait_tensor's input must be a collective output. Got {inp}"
+            )
+
+    @classmethod
+    def create_wait(cls, inp: TensorBox):
+        output, _ = cls.make_fallback_kernel(
+            MutationLayout(inp),
+            torch.ops._c10d_functional.wait_tensor.default,
+            inp,
+        )
+        output.outputs = output
+        return output
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        # See [Out-of-Place Collective Safety].
+        volatile_read = self.get_volatile_read()
+        read_writes.reads.add(dependencies.StarDep(volatile_read.get_name()))
+        return read_writes
 
 
 # NB: recursive structure here reflects val_to_arg_str, avoid
