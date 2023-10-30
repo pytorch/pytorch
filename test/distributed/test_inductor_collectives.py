@@ -551,24 +551,6 @@ class AsyncFuncHandle:
         return self.cuda_event.query()
 
 
-# TODO: how to implement segment-boundary graph splitting in Dynamo?
-# - we should figure out how to detect segment-boundary in Dynamo. Before that, how to know when we are entering / exiting a Python function.
-#   - Yanbo told me that check_verbose() in skipfiles.py will be used on all Python functions.
-#   - for module methods called by forward, File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/symbolic_convert.py", line 2270, in check_inlineable
-#     `result = skipfiles.check_verbose(func, allow_torch=True)` will cover them
-#   - for module forward method, this will cover it:
-#     File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/eval_frame.py", line 184, in _initialize
-#     `if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(`
-#     or, File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/eval_frame.py", line 531, in catch_errors
-#     `skipfiles.check(frame.f_code)`
-#   - How to make the schedule exhaustive, while provide an elegant way to say "everything else"? How to do this both for forward methods and backward weight grad compute / allreduce / opt update?
-- forward methods (do it via module hooks?)
-- weight grad compute (within compiled autograd - maybe pass a schedule into compiled autograd API?)
-- allreduce (via acc grad hook)
-- opt update (via another hook)
-#   - Can we start by creating a set of APIs that work for eager mode, and then trace through it?
-#     - module method hook (swap out module method with the scheduler maybe_run) + some weight_grad_hook (can we have it? how?)?
-
 # TODO: how to implement get_fx_graphs(segment)?
 
 
