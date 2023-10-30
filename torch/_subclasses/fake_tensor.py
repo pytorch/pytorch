@@ -1253,8 +1253,8 @@ class FakeTensor(torch.Tensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        pytree.tree_map_(merge_devices, args)
+        pytree.tree_map_(merge_devices, kwargs)
 
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,
