@@ -11,12 +11,13 @@ import types
 import warnings
 
 from collections import defaultdict
-from typing import Callable, cast, Dict, List, Optional, Set
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
+np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
-    np = None
+    pass
 
 
 import torch
@@ -46,7 +47,7 @@ skipfiles" there.
 """
 
 
-def make_function_id_set(lazy_initializer):
+class FunctionIdSet:
     """
     Track a set of `id()`s of objects which are either allowed or not
     allowed to go into the generated FX graph.  Use to test for torch.*,
@@ -56,42 +57,44 @@ def make_function_id_set(lazy_initializer):
     added to the graph and what will cause a graph break.
     """
 
-    class FunctionIdSet:
-        function_ids: Optional[Set[int]] = None
-        function_names: Optional[Dict[int, str]] = None
+    function_ids: Optional[Set[int]] = None
+    function_names: Optional[Dict[int, str]] = None
 
-        def __call__(self):
-            if self.function_ids is None:
-                value = lazy_initializer()
-                if isinstance(value, dict):
-                    self.function_ids = set(value.keys())
-                    self.function_names = value
-                else:
-                    assert isinstance(value, set)
-                    self.function_ids = value
-            return self.function_ids
+    def __init__(self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]):
+        self.lazy_initializer = lazy_initializer
 
-        def get_name(self, idx: int, default: str):
-            self()  # lazy init
-            return self.function_names.get(idx, default)
+    def __call__(self):
+        if self.function_ids is None:
+            value = self.lazy_initializer()
+            if isinstance(value, dict):
+                self.function_ids = set(value.keys())
+                self.function_names = value
+            else:
+                assert isinstance(value, set)
+                self.function_ids = value
+        return self.function_ids
 
-        def add(self, idx: int):
-            self()  # lazy init
-            self.function_ids.add(idx)
+    def get_name(self, idx: int, default: str):
+        self()  # lazy init
+        assert self.function_names is not None
+        return self.function_names.get(idx, default)
 
-        def remove(self, idx: int):
-            if idx in self():
-                self.function_ids.remove(idx)
+    def add(self, idx: int):
+        function_ids = self()  # lazy init
+        function_ids.add(idx)
 
-        def __contains__(self, idx: int):
-            return idx in self()
+    def remove(self, idx: int):
+        function_ids = self()
+        if idx in function_ids:
+            function_ids.remove(idx)
 
-    return FunctionIdSet()
+    def __contains__(self, idx: int):
+        return idx in self()
 
 
-@make_function_id_set
-def _disallowed_function_ids():
-    remove = [
+@FunctionIdSet
+def _disallowed_function_ids() -> Set[int]:
+    remove: List[Any] = [
         True,
         False,
         None,
@@ -121,6 +124,7 @@ def _disallowed_function_ids():
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
         torch.resize_as_,
+        torch._tensor._convert,
     ]
 
     # extract all dtypes from torch
@@ -144,8 +148,11 @@ def _disallowed_function_ids():
     return {id(x) for x in remove}
 
 
-@make_function_id_set
-def _allowed_function_ids():
+# We are in progress of refactoring and moving the following functions to test_trace_rules.py.
+# If you made any change to the following functions, please also update there as well.
+# If you are not clear of how to update, please contact @yanboliang.
+@FunctionIdSet
+def _allowed_function_ids() -> Dict[int, str]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
@@ -270,14 +277,14 @@ def _allowed_function_ids():
     return torch_object_ids
 
 
-@make_function_id_set
-def _allowed_user_defined_function_ids():
-    rv = {}
+@FunctionIdSet
+def _allowed_user_defined_function_ids() -> Dict[int, str]:
+    rv: Dict[int, str] = {}
     return rv
 
 
-@make_function_id_set
-def _builtin_function_ids():
+@FunctionIdSet
+def _builtin_function_ids() -> Dict[int, str]:
     rv = {
         id(v): f"builtins.{k}"
         for k, v in builtins.__dict__.items()
@@ -298,8 +305,8 @@ def _builtin_function_ids():
     return rv
 
 
-@make_function_id_set
-def _numpy_function_ids():
+@FunctionIdSet
+def _numpy_function_ids() -> Dict[int, str]:
     rv = dict()
     for mod in NP_SUPPORTED_MODULES:
         rv.update(
@@ -313,8 +320,8 @@ def _numpy_function_ids():
     return rv
 
 
-@make_function_id_set
-def _builtin_constant_ids():
+@FunctionIdSet
+def _builtin_constant_ids() -> Dict[int, str]:
     """
     Collects constant builtins by eliminating callable items.
     """
@@ -353,7 +360,7 @@ def _maybe_init_lazy_module(obj: object) -> None:
             fn()
 
 
-def is_allowed(obj):
+def is_allowed(obj) -> bool:
     """Is this safe to trace like torch.add ?"""
     _maybe_init_lazy_module(obj)
 
@@ -372,30 +379,30 @@ def is_allowed(obj):
     )
 
 
-def is_user_defined_allowed(obj):
+def is_user_defined_allowed(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return id(obj) in _allowed_user_defined_function_ids
 
 
-def is_forbidden(obj):
+def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
     return getattr(obj, "_dynamo_forbidden", False)
 
 
-def torch_get_name(obj, default):
+def torch_get_name(obj, default) -> str:
     """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
 
 
-def is_builtin_callable(obj):
+def is_builtin_callable(obj) -> bool:
     return id(obj) in _builtin_function_ids
 
 
-def is_builtin_constant(obj):
+def is_builtin_constant(obj) -> bool:
     return id(obj) in _builtin_constant_ids
 
 
-def is_numpy(obj):
+def is_numpy(obj) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids

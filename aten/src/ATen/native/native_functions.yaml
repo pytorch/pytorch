@@ -682,14 +682,28 @@
   structured_delegate: all.out
   variants: function, method
 
+- func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: all.dims_out
+  variants: function, method
+  cpp_no_default_args: ['dim']
+  dispatch:
+    CompositeExplicitAutograd: all_dims_default
+
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
-  precomputed:
-  - dim -> int dim
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
+
+- func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: all_dims_out
+    CompositeExplicitAutograd: all_dims_out_default
+  cpp_no_default_args: ['dim']
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -710,14 +724,29 @@
   variants: function, method
   tags: core
 
+- func: any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: any.dims_out
+  variants: function, method
+  cpp_no_default_args: ['dim']
+  tags: core
+  dispatch:
+    CompositeExplicitAutograd: any_dims_default
+
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
-  precomputed:
-  - dim -> int dim
   dispatch:
     CPU, CUDA: any_out
     MPS: any_out_mps
+
+- func: any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: any_dims_out
+    CompositeExplicitAutograd: any_dims_out_default
+  cpp_no_default_args: ['dim']
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2999,7 +3028,7 @@
 - func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: _unsafe_index
+    CompositeExplicitAutograd: _unsafe_index
 
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -6779,12 +6808,12 @@
   structured_delegate: _addmm_activation.out
   variants: function, method
 
-- func: _scaled_mm(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None) -> (Tensor, Tensor)
+- func: _scaled_mm(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, bool use_fast_accum=False) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _scaled_mm_cuda
 
-- func: _scaled_mm.out(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!), Tensor(b!))
+- func: _scaled_mm.out(Tensor self, Tensor mat2, *, Tensor? bias=None, ScalarType? out_dtype=None, Tensor? scale_a=None, Tensor? scale_b=None, Tensor? scale_result=None, bool use_fast_accum=False, Tensor(a!) out, Tensor(b!) out_amax) -> (Tensor(a!), Tensor(b!))
   variants: function
   dispatch:
     CUDA: _scaled_mm_out_cuda

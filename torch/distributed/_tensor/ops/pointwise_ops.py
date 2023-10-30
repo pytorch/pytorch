@@ -18,6 +18,7 @@ from torch.distributed._tensor.op_schema import (
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
+    is_tensor_partial,
     map_placements_after_broadcast,
     normalize_dim,
     register_op_strategy,
@@ -519,9 +520,6 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
-    aten._foreach_add.List,
-    aten._foreach_add_.List,
-    aten._foreach_add_.Scalar,
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
     aten._foreach_div_.ScalarList,
@@ -534,28 +532,22 @@ for_each_ops = [
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
-    # aten._foreach_pow.List,
-    # aten._foreach_reciprocal.default,
-    # aten._foreach_add.List,
-    # aten._foreach_div.List,
-    # aten._foreach_mul.List,
-    # aten._foreach_add.Scalar,
-    # aten._foreach_div.Scalar,
-    # aten._foreach_mul.Scalar,
-    # aten._foreach_addcdiv.Scalar,
-    # aten._foreach_addcmul.Scalar,
+]
+
+for_each_linearity_ops = [
+    aten._foreach_add_.Scalar,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
 ]
 
 
-def foreach_list_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def foreach_list_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+) -> StrategyType:
     """
     for each list op stratgy mostly follow the same logic as pointwise strategy
     except that it handles list of tensors instead, and normally we don't need to
     handle implicit broadcasting
-
-    TODO: handle linearity for foreach ops, normally we don't need to do this
-    as foreach ops are mostly inplace ops and we just follow the first argument,
-    and the first argument most likely are not partial tensors
     """
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
@@ -584,6 +576,11 @@ def foreach_list_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
         strategies = []
         for strtgy in child_strtgy.strategies:
             spec_to_follow = strtgy.output_spec
+            if not linearity:
+                assert not is_tensor_partial(
+                    spec_to_follow
+                ), f"{op_schema.op} does not support operation on partial tensor!"
+
             redistribute_costs: List[List[float]] = []
 
             for arg_strtgy in args_strategies:
@@ -604,7 +601,19 @@ def foreach_list_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     return tup_strategy
 
 
+def foreach_list_linear_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    """
+    for each list op stratgy that supports linearity
+    """
+    return foreach_list_strategy(mesh, op_schema, linearity=True)
+
+
 for op in for_each_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
         foreach_list_strategy
+    )
+
+for op in for_each_linearity_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        foreach_list_linear_strategy
     )
