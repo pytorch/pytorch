@@ -635,9 +635,7 @@ bool TensorImpl::is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
-          has_symbolic_sizes_strides_)) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
     return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
   }
   return sizes_default();
@@ -672,9 +670,7 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(
-          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
-          has_symbolic_sizes_strides_)) {
+  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->strides(this);
   }
   return strides_default();
