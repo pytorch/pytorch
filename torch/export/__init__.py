@@ -354,6 +354,7 @@ def export(
     *,
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -437,9 +438,21 @@ def export(
     from torch._export import export, export__RC__
 
     if constraints is not None:
-        return export(f, args, kwargs, constraints)
+        return export(
+            f,
+            args,
+            kwargs,
+            constraints,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
     else:
-        return export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
+        return export__RC__(
+            f,
+            args,
+            kwargs,
+            dynamic_shapes=dynamic_shapes,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
 
 def save(

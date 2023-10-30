@@ -230,6 +230,7 @@ def export__RC__(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     API for exporting with dynamic shape specifications instead of constraints.
@@ -249,7 +250,13 @@ def export__RC__(
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
     constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(f, args, kwargs, constraints=constraints)
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints=constraints,
+        preserve_module_call_signature=preserve_module_call_signature
+    )
 
 
 def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
