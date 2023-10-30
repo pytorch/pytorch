@@ -45,6 +45,7 @@ from torch.testing._internal.autograd_function_db import (
 
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
+from torch.utils import _pytree as pytree
 from functorch import grad, vjp, vmap, jacrev, jacfwd
 import torch.autograd.forward_ad as fwAD
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -138,7 +139,7 @@ def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, req
 # TODO: consolidate with normalize_op_input_output2
 def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_grad=None):
     flat_args, args_spec = tree_flatten(args)
-    flat_sample_args, _ = tree_flatten(sample_args)
+    flat_sample_args = pytree.tree_leaves(sample_args)
     diff_argnums = tuple(i for i, (arg, sample) in enumerate(zip(flat_args, flat_sample_args))
                          if diff_arg(sample, requires_grad=True))
     assert len(diff_argnums) > 0
@@ -268,8 +269,8 @@ def get_jvp_variant(f, sample):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = pytree.tree_leaves(primals_out)
+            flat_tangents_out = pytree.tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, tangents
@@ -303,8 +304,8 @@ def _get_jvp_variant(fn, primals, tangents):
         if isinstance(primals_out, torch.Tensor):
             return (primals_out, tangents_out)
         else:
-            flat_primals_out, _ = tree_flatten(primals_out)
-            flat_tangents_out, _ = tree_flatten(tangents_out)
+            flat_primals_out = pytree.tree_leaves(primals_out)
+            flat_tangents_out = pytree.tree_leaves(tangents_out)
             return tuple(flat_primals_out + flat_tangents_out)
 
     return wrapped, primals + tangents
@@ -857,7 +858,7 @@ class TestOperators(TestCase):
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
-            cotangents, _ = tree_flatten(cotangents)
+            cotangents = pytree.tree_leaves(cotangents)
             num_args = len(args)
 
             args_and_cotangents = tuple(args) + tuple(cotangents)
@@ -867,8 +868,8 @@ class TestOperators(TestCase):
                 cotangents = args_and_cotangents[num_args:]
                 result, vjp_fn = vjp(fn, *args)
                 result_vjps = vjp_fn(cotangents)
-                result, _ = tree_flatten(result)
-                result_vjps, _ = tree_flatten(result_vjps)
+                result = pytree.tree_leaves(result)
+                result_vjps = pytree.tree_leaves(result_vjps)
                 return (*result, *result_vjps)
 
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
@@ -1607,8 +1608,8 @@ class TestOperators(TestCase):
                 (primals, tangents) = tree_unflatten(args, spec)
                 primals_out, tangents_out = jvp(push_vjp, primals, tangents)
 
-                flat_primals_out, _ = tree_flatten(primals_out)
-                flat_tangents_out, _ = tree_flatten(tangents_out)
+                flat_primals_out = pytree.tree_leaves(primals_out)
+                flat_tangents_out = pytree.tree_leaves(tangents_out)
                 return tuple(flat_primals_out + flat_tangents_out)
 
             is_batch_norm_and_training = is_batch_norm_training(op, sample.kwargs)
@@ -1820,8 +1821,8 @@ class TestOperators(TestCase):
         def is_differentiable(inp):
             return isinstance(inp, Tensor) and (inp.grad_fn is not None or inp.requires_grad)
 
-        def get_flat_differentiable(pytree):
-            flattened = tree_flatten(pytree)[0]
+        def get_flat_differentiable(tree):
+            flattened = pytree.tree_leaves(tree)
             return tuple(i for i in flattened if is_differentiable(i))
 
         def get_differentiable_linked(list1, list2):
@@ -1830,7 +1831,7 @@ class TestOperators(TestCase):
             return zip(*paired_list)
 
         def filter_none(out):
-            flattened = tree_flatten(out)[0]
+            flattened = pytree.tree_leaves(out)
             return tuple(o for o in flattened if o is not None)
 
         if not op.supports_autograd:
@@ -1848,8 +1849,8 @@ class TestOperators(TestCase):
                 out_flattened = out
                 cotangents_flattened = cotangents
                 if not isinstance(out_flattened, torch.Tensor):
-                    out_flattened = tree_flatten(out)[0]
-                    cotangents_flattened = tree_flatten(cotangents)[0]
+                    out_flattened = pytree.tree_leaves(out)
+                    cotangents_flattened = pytree.tree_leaves(cotangents)
                     out_flattened, cotangents_flattened = get_differentiable_linked(out_flattened, cotangents_flattened)
 
                 return filter_none(

@@ -14,6 +14,7 @@ from torch.distributed._spmd.partial_lower import partial_lower
 from torch.fx.graph import _PyTreeCodeGen, PythonCode
 from torch.fx.node import Argument
 from torch.profiler import record_function
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -137,7 +138,7 @@ class IterGraph(fx.Graph):
         all_nodes: Set[fx.Node] = set(subgraph)
 
         for node in subgraph:
-            node_inputs, _ = tree_flatten((node.args, node.kwargs))
+            node_inputs = pytree.tree_leaves((node.args, node.kwargs))
             for _input in node_inputs:
                 if not isinstance(_input, fx.Node):
                     continue
