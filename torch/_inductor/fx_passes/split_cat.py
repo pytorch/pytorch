@@ -27,6 +27,7 @@ from ..pattern_matcher import (
     RepeatedExpr,
 )
 from .pre_grad import (
+    merge_getitem_cat_pass,
     merge_splits_pass,
     normalization_pass,
     split_cat_pass,
@@ -1002,3 +1003,134 @@ def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
         return
     split_node = next(node for node in match.nodes if node.target == torch.split)
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
+
+
+# noqa: W605
+# ############The pattern to be optimized is#########
+
+#                 split_node(dim=1)
+#       /     \         ...       /         \
+# getitem    getitem          getitem     getitem   -> user=1
+#    \       /                     \       /
+#      cat (user=mul, dim=1)           cat(user=mul, dim=1)
+#       |            \                   |          \
+
+# ################After transformation#############
+
+#                 split_node(dim=1)
+#       /              ...                  \
+#     getitem                             getitem
+#     |    \                              |     \
+
+
+def safe_to_abort_node(node: torch.fx.Node):
+    """
+    1. the input nodes of the node should come from the same parent
+    2. the user of all the input nodes should be only one
+    """
+    prev_node = None
+    for arg in node.args[0]:
+        if len(arg.users) != 1 or arg.target != operator.getitem:
+            return False
+        if prev_node is None:
+            prev_node = arg.args[0]
+        else:
+            if arg.args[0] != prev_node:
+                return False
+    return True
+
+
+def remove_zeros(split_sections: List[int]):
+    """
+    Remove zeros from the list and get the index mapping dict from getitem
+    in split node to getitem in new split node
+    """
+    new_split_sections, index_mapping = [], {}
+    idx = 0
+    for i in range(len(split_sections)):
+        if split_sections[i] > 0:
+            new_split_sections.append(split_sections[i])
+            index_mapping[i] = idx
+            idx += 1
+
+    return new_split_sections, index_mapping
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.cat,
+        getitem_split,
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=merge_getitem_cat_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
+    if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
+        return
+    graph = match.graph
+    split_node = next(node for node in match.nodes if node.target == torch.split)
+    split_input, split_size, split_dim = _get_split_args_default(split_node)
+    # if the cat and split have different dims, return
+    # Find the next users (i.e. users after the getitem)
+    next_users = find_next_users(split_node)
+    # 'immutable_list' object does not support mutation. Create a new copy of it
+    split_sections = list(split_sections)
+    for cat_user in next_users:
+        if cat_user.target == torch.cat:
+            cat_dim = get_arg_value(cat_user, 1, "dim")
+            if split_dim != cat_dim:
+                continue
+            # check the all getitems in the cat_user from the same node
+            if not safe_to_abort_node(cat_user):
+                continue
+            # find the index of getitems to be cated/stacked
+            indices = []
+            for arg in cat_user.args[0]:
+                indices.append(arg.args[1])
+            # update the arg of cat user, only keep the first getitem
+            cat_user.update_arg(0, cat_user.args[0][0])
+            # calculate the fused tensor sizes in the indices
+            fused_tensor_size = 0
+            for i in range(len(split_node.args[1])):
+                if i in indices:
+                    fused_tensor_size += split_node.args[1][i]
+            # update the split sections
+            split_sections[indices[0]] = fused_tensor_size
+            # padding others with zeros to keep the same dict size
+            for i in indices[1:]:
+                split_sections[i] = 0
+            # remove all unused indexes in the split_node
+            new_split_sections, index_mapping = remove_zeros(split_sections)
+            with graph.inserting_after(split_node):
+                new_split_node = graph.call_function(
+                    torch.split,
+                    args=(split_input, split_sections),
+                    kwargs={"dim": split_dim},
+                )
+                split_node.replace_all_uses_with(new_split_node)
+                new_split_node.meta.update(split_node.meta)
+                # remove all unused getitem nodes
+                to_remove = [cat_user]
+                # dictionary keys changed during iteration
+                new_split_getitem_nodes = list(new_split_node.users.keys())
+                for getitem_node in new_split_getitem_nodes:
+                    if getitem_node.args[1] in indices[1:]:
+                        to_remove.append(getitem_node)
+                    # update meta data of getitem
+                    elif getitem_node.args[1] == indices[0]:
+                        cat_user.replace_all_uses_with(getitem_node)
+                        getitem_node.meta.update(cat_user.meta)
+                    else:
+                        # update getitem index for new split node
+                        getitem_node.update_arg(1, index_mapping[getitem_node.args[1]])
+                graph.erase_node(split_node)
+                for getitem_node in to_remove:
+                    graph.erase_node(getitem_node)
+                # update the split sections of new split node
+                new_split_node.update_arg(1, new_split_sections)
+                split_node = new_split_node
+                split_sections = new_split_sections
+
+                counters["inductor"]["getitem_cat_merged"] += 1
