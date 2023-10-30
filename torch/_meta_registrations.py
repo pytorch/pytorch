@@ -2850,7 +2850,7 @@ def meta_index_Tensor(self, indices):
     # at the beginning of the tensor, if they're not contiguous
     if not has_contiguous_subspace:
         dims = []
-        transposed_indices: Optional[Tensor] = []
+        transposed_indices: List[Optional[Tensor]] = []
         for i, index in enumerate(indices):
             if index is not None:
                 dims.append(i)

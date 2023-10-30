@@ -3142,7 +3142,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     broadcast_samples = kwargs.pop("broadcast_samples", False)
     for accumulate in [False, True]:
         if broadcast_samples:
-           # Test broadcasting indices
+            # Test broadcasting indices
             yield SampleInput(
                 make_arg((S, S, S, S)),
                 (index_variable(S, S, device=device, allow_duplicates=accumulate),
@@ -3158,7 +3158,7 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
                 make_arg(1),
                 accumulate=accumulate)
         else:
-             # Test with indices arg
+            # Test with indices arg
             yield SampleInput(
                 make_arg((S, S,)),
                 (index_variable(2, S, device=device, allow_duplicates=accumulate),),
@@ -15900,11 +15900,10 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            test_neg_view=False,
-           sample_inputs_func=sample_inputs_index_put,
+           sample_inputs_func=partial(sample_inputs_index_put, broadcast_samples=True),
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
            )),
-
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
