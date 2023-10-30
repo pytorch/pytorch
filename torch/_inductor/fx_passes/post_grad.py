@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.immutable_collections import immutable_dict
 
-from .. import config, inductor_prims, ir, pattern_matcher
+from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -652,7 +652,7 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def can_inplace(node, mutated_arg):
+    def can_replace(node, mutated_arg):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -665,7 +665,7 @@ def reinplace_scatters(graph):
             if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
                 return False
 
-            # # Check for any uses other than current node and copy_ epilogue
+            # Check for any uses other than current node and copy_ epilogue
             if len(mutated_arg.users) > 2:
                 return False
 
@@ -682,15 +682,12 @@ def reinplace_scatters(graph):
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
-        aten._unsafe_index_put.default: InplaceableOp(
-            inductor_prims._unsafe_index_put_, 0
-        ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_inplace(node, node.args[inplaceable_op.mutated_arg]):
+            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
@@ -700,7 +697,7 @@ def reinplace_scatters(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_inplace(node, node.kwargs["kwargs"][arg]):
+                if not can_replace(node, node.kwargs["kwargs"][arg]):
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
