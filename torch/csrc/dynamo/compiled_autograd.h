@@ -76,7 +76,6 @@ struct NodeCall {
   std::vector<std::pair<int, int>> tensor_pre_hooks;
   std::vector<int> pre_hooks;
   std::vector<int> post_hooks;
-  std::vector<int> post_acc_grad_hooks;
   std::vector<std::pair<int, int>> graph_output;
   bool needed = true;
 };
@@ -356,13 +355,9 @@ class CompiledNodeArgs {
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
-    if (fn->tensor_post_acc_grad_hooks() != nullptr) {
-      fn->tensor_post_acc_grad_hooks()->compiled_args(*this);
-    }
     collect_size(_node_call.tensor_pre_hooks.size());
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
-    collect_size(_node_call.post_acc_grad_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
       collect_size(h.second); // index
     }
@@ -392,10 +387,10 @@ class CompiledNodeArgs {
     _node_call.post_hooks.emplace_back(fn_id);
   }
 
-  void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
+  int add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
+    return fn_id;
   }
 
   void collect_size(size_t s) {
@@ -627,8 +622,12 @@ class SwapSavedVariables {
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
 
-  SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
-      : compiler(c), state(s) {}
+  SwapSavedVariables(AutogradCompilerCall& c, TraceState& s, PyObject* p)
+      : compiler(c), state(s), py_compiler(p) {}
+
+  PyObject* get_py_compiler() {
+    return py_compiler;
+  }
 
   void debug_asserts() {
     stashed_variables.debug_assert();
@@ -674,6 +673,7 @@ class SwapSavedVariables {
 
   AutogradCompilerCall& compiler;
   TraceState& state;
+  PyObject* py_compiler;
 
   // These mappings are used to save the prior values when we overwrite things
   // in before(). In after(), we use these to cleanup after ourselves.
