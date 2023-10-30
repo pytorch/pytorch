@@ -8,10 +8,9 @@ import re
 import sys
 import types
 import unittest
-from typing import List, Optional, Sequence, Union
+from typing import Sequence, Union
 from unittest.mock import patch
 
-np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -63,7 +62,7 @@ def named_buffers_for_optimized_module(mod):
     return mod._orig_mod.named_buffers
 
 
-def remove_optimized_module_prefix(name) -> str:
+def remove_optimized_module_prefix(name):
     return re.sub(r"^_orig_mod[.]", "", name)
 
 
@@ -141,21 +140,21 @@ def reduce_to_scalar_loss(out):
     raise NotImplementedError("Don't know how to reduce", type(out))
 
 
-def debug_dir() -> str:
+def debug_dir():
     path = os.path.join(os.path.dirname(__file__), "../debug")
     if not os.path.exists(path):
         os.mkdir(path)
     return path
 
 
-def debug_dump(name, code: types.CodeType, extra="") -> None:
+def debug_dump(name, code: types.CodeType, extra=""):
     with open(os.path.join(debug_dir(), name), "w") as fd:
         fd.write(
             f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _) -> Optional[GuardedCode]:
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -188,7 +187,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -207,7 +206,7 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -224,21 +223,21 @@ class EagerAndRecordGraphs:
     def __init__(self):
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         self.graphs.append(gm)
         return gm
 
 
-def strip_comment(code) -> str:
+def strip_comment(code):
     code = str(code)
     return re.sub(r"(?m)^ *#.*\n?", "", code)
 
 
-def remove_trailing_space(code) -> str:
+def remove_trailing_space(code):
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
-def normalize_gm(gm_str) -> str:
+def normalize_gm(gm_str):
     # strip comments as comments have path to files which may differ from
     # system to system.
     return remove_trailing_space(strip_comment(gm_str))
@@ -253,7 +252,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected = CompileCounter()
         try:
             gm = torch.fx.symbolic_trace(fn)
-            expected(gm)  # type: ignore[call-arg] # FIXME: https://github.com/pytorch/pytorch/issues/112230
+            expected(gm)
             print("\nfx.symbolic_trace graph:")
             gm.graph.print_tabular()
             expected_ops = expected.op_count

@@ -5,7 +5,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/strong_type.h>
 
 #include <torch/csrc/profiler/kineto_shim.h>
@@ -30,7 +29,7 @@ struct CompressedEvent {
   TraceKey key_;
   uint64_t system_tid_;
   kineto::DeviceAndResource kineto_info_;
-  c10::time_t enter_t_;
+  time_t enter_t_;
 };
 
 /*
@@ -50,9 +49,9 @@ struct TORCH_API PythonTracerBase {
 
   virtual void stop() = 0;
   virtual std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<c10::time_t(c10::approx_time_t)> time_converter,
+      std::function<time_t(approx_time_t)> time_converter,
       std::vector<CompressedEvent>& enters,
-      c10::time_t end_time_ns) = 0;
+      time_t end_time_ns) = 0;
 };
 
 using MakeFn = std::unique_ptr<PythonTracerBase> (*)(RecordQueue*);

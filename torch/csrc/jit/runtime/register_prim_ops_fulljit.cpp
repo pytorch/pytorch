@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -371,7 +370,8 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output = c10::getTime(/*allow_monotonic=*/true);
+           auto output =
+               torch::profiler::impl::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
