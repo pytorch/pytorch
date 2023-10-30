@@ -303,10 +303,10 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       size_t python_tid,
       PyFrameState caller,
       args_t args)
-      : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        callsite_{args.frame_state_},
-        module_{args.module_info_},
-        optimizer_{args.optimizer_info_} {}
+      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller)),
+        callsite_{std::move(args.frame_state_)},
+        module_{std::move(args.module_info_)},
+        optimizer_{std::move(args.optimizer_info_)} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
@@ -322,7 +322,7 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
       size_t python_tid,
       PyFrameState caller,
       args_t args)
-      : PyExtraFieldsBase(end_time_ns, python_tid, caller),
+      : PyExtraFieldsBase(end_time_ns, python_tid, std::move(caller)),
         function_name_{std::move(args)} {}
 
   at::StringView function_name_;
@@ -502,7 +502,7 @@ using perf_profiler_t = torch::profiler::impl::linux_perf::PerfProfiler;
 
 class TORCH_API ThreadLocalSubqueue {
  public:
-  ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
+  ThreadLocalSubqueue(const uint64_t tid, ProfilerConfig config);
 
   std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn);
 

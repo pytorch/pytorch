@@ -203,6 +203,7 @@ class ExperimentalConfigWrapper {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const torch::profiler::impl::ExperimentalConfig& config_;
 };
 } // namespace

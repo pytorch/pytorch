@@ -623,8 +623,8 @@ c10::DeviceType Result::deviceType() const {
 
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
-    const ProfilerConfig& config)
-    : tid_{tid}, config_{config}, kineto_info_{kineto::kineto_ids()} {
+    ProfilerConfig config)
+    : tid_{tid}, config_{std::move(config)}, kineto_info_{kineto::kineto_ids()} {
   torch::profiler::impl::kineto::recordThreadInfo();
   if (!config_.experimental_config.performance_events.empty()) {
     perf_profiler_ =

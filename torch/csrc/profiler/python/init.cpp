@@ -159,6 +159,7 @@ int RecordFunctionFast_init(
     PyObject* args,
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
+  // NOLINTNEXTLINE(*-c-arrays*)
   constexpr const char* kwlist[] = {"name", nullptr};
   PyObject* name = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
@@ -307,7 +308,7 @@ void initPythonBindings(PyObject* module) {
                 p.enable_cuda_sync_events,
                 p.performance_events);
           },
-          [](py::tuple t) { // __setstate__
+          [](const py::tuple& t) { // __setstate__
             if (t.size() >= 4) {
               throw std::runtime_error("Expected atleast 4 values in state");
             }
@@ -528,7 +529,7 @@ void initPythonBindings(PyObject* module) {
       py::arg("python") = true,
       py::arg("script") = true,
       py::arg("cpp") = true);
-  m.def("symbolize_tracebacks", [](py::list tbs) {
+  m.def("symbolize_tracebacks", [](const py::list& tbs) {
     std::vector<CapturedTraceback*> tb_ptrs;
     tb_ptrs.reserve(tbs.size());
     for (py::handle tb : tbs) {
@@ -538,6 +539,7 @@ void initPythonBindings(PyObject* module) {
   });
   installCapturedTracebackPython();
 
+  // NOLINTNEXTLINE(*-c-arrays*)
   static PyMethodDef RecordFunctionFast_methods[] = {
       {"__enter__", RecordFunctionFast_enter, METH_NOARGS, nullptr},
       {"__exit__", RecordFunctionFast_exit, METH_VARARGS, nullptr},
