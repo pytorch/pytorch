@@ -3139,42 +3139,45 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
+    broadcast_samples = kwargs.pop("broadcast_samples", False)
     for accumulate in [False, True]:
 
-        # Test with indices arg
-        yield SampleInput(
-            make_arg((S, S,)),
-            (index_variable(2, S, device=device, allow_duplicates=accumulate),),
-            make_arg((2, S)),
-            accumulate=accumulate)
+        if broadcast_samples:
 
-        # Test with index as scalar
-        yield SampleInput(
-            make_arg((S, S)),
-            (torch.tensor(0, device=device), ),
-            make_arg((S,)),
-            accumulate=accumulate)
+            # Test with indices arg
+            yield SampleInput(
+                make_arg((S, S,)),
+                (index_variable(2, S, device=device, allow_duplicates=accumulate),),
+                make_arg((2, S)),
+                accumulate=accumulate)
 
-        # Test broadcasting indices
-        yield SampleInput(
-            make_arg((S, S, S, S)),
-            (index_variable(S, S, device=device, allow_duplicates=accumulate),
-             torch.tensor(0, device=device),
-             index_variable(1, S, device=device, allow_duplicates=accumulate)),
-            make_arg((S, S)),
-            accumulate=accumulate)
+            # Test with index as scalar
+            yield SampleInput(
+                make_arg((S, S)),
+                (torch.tensor(0, device=device), ),
+                make_arg((S,)),
+                accumulate=accumulate)
+        else:
+            # Test broadcasting indices
+            yield SampleInput(
+                make_arg((S, S, S, S)),
+                (index_variable(S, S, device=device, allow_duplicates=accumulate),
+                 torch.tensor(0, device=device),
+                 index_variable(1, S, device=device, allow_duplicates=accumulate)),
+                make_arg((S, S)),
+                accumulate=accumulate)
 
-        # Test broadcasting values
-        yield SampleInput(
-           make_arg(S, S),
-           (index_variable(2, S, device=device, allow_duplicates=accumulate),),
-           make_arg(1),
-           accumulate=accumulate)
+            # Test broadcasting values
+            yield SampleInput(
+                make_arg(S, S),
+                (index_variable(2, S, device=device, allow_duplicates=accumulate),),
+                make_arg(1),
+                accumulate=accumulate)
 
-        # Test with mask arg
-        mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
-        yield SampleInput(
-            make_arg((S, S)), (mask, ), make_arg((S,)), accumulate=accumulate)
+            # Test with mask arg
+            mask = torch.zeros(S, dtype=torch.bool) if accumulate else mask_not_all_zeros((S,))
+            yield SampleInput(
+                make_arg((S, S)), (mask, ), make_arg((S,)), accumulate=accumulate)
 
 def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     def small_3d_unique():
@@ -15889,6 +15892,21 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
                             device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
+    OpInfo('index_put',
+           variant_test_name="broadcast",
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=False,
+           supports_inplace_autograd=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           # https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
+           test_neg_view=False,
+           sample_inputs_func=sample_inputs_index_put,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+           )),
+
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),

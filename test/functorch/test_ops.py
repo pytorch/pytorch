@@ -763,6 +763,10 @@ class TestOperators(TestCase):
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
         xfail("index_reduce"),
+        # RuntimeError:
+        # The expanded size of the tensor (1) must match the existing size (2) at non-singleton dimension 2.
+        # Target sizes: [2, 2, 1, 2, 5].  Tensor sizes: [2, 1, 1]
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=torch.float32),
         decorate("linalg.householder_product", decorator=runOnRocm),  # works on ROCm
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -1007,12 +1011,17 @@ class TestOperators(TestCase):
         xfail('masked.mean'),  # silent incorrectness (nan difference)
         xfail('as_strided', 'partial_views'),  # Tensor-likes are not close!
 
+        # RuntimeError: The expanded size of the tensor (1) must match the existing size (2)
+        # at non-singleton dimension 2.  Target sizes: [2, 2, 1, 2, 5].  Tensor sizes: [2, 1, 1]
+        xfail('index_put', 'broadcast', device_type='cuda', dtypes=torch.float32),
+
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
         xfail('as_strided_scatter'),
+
         xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)

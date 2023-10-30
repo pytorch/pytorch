@@ -4,6 +4,9 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims_common as utils
+import torch._refs
+import torch._refs.nn.functional
+import torch._refs.special
 from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
@@ -2850,7 +2853,7 @@ def meta_index_Tensor(self, indices):
     # at the beginning of the tensor, if they're not contiguous
     if not has_contiguous_subspace:
         dims = []
-        transposed_indices = []
+        transposed_indices: Optional[Tensor] = []
         for i, index in enumerate(indices):
             if index is not None:
                 dims.append(i)
@@ -3676,13 +3679,15 @@ def check_index_put_inputs(self, indices, values, accumulate=False):
         else:
             indices_without_scalars.append(slice(None))
 
-
     if len(indices_without_scalars) != 0:
         expected_values_shape = expected_values_shape[indices_without_scalars]
 
     # Test if values is broadcastable to the expected shape
     common_shape = _broadcast_shapes(
-        *(t.shape if isinstance(t, TensorLike) else None for t in [expected_values_shape, values])
+        *(
+            t.shape if isinstance(t, TensorLike) else None
+            for t in [expected_values_shape, values]
+        )
     )
 
 
@@ -5932,9 +5937,6 @@ _create_binary_float_meta_func(
 
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
-import torch._refs
-import torch._refs.nn.functional
-import torch._refs.special
 
 
 def activate_meta():
