@@ -18,12 +18,17 @@ import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 
-from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    guard_scalar,
+    GuardOnDataDependentSymNode,
+    SymTypes,
+)
 
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
-from ..exc import unimplemented
+from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
@@ -60,7 +65,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = [
+    _nonvar_fields = {
         "proxy",
         "dtype",
         "device",
@@ -71,7 +76,11 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-    ]
+        "is_sparse",
+        "class_type",
+        "specialized_value",
+        *VariableTracker._nonvar_fields,
+    }
 
     def get_real_value(self):
         """
@@ -816,7 +825,14 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph=None):
-        return guard_scalar(self.sym_num)
+        try:
+            return guard_scalar(self.sym_num)
+        except GuardOnDataDependentSymNode as e:
+            raise UserError(  # noqa: TRY200
+                UserErrorType.ANTI_PATTERN,
+                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                case_name="constrain_as_size_example",
+            )
 
     def call_method(
         self,

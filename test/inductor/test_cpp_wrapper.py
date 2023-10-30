@@ -287,7 +287,7 @@ if RUN_CUDA:
         BaseTest(
             "test_cat_slice_cat",
             device=None,
-            tests=test_pattern_matcher.TestPaternMatcher(),
+            tests=test_pattern_matcher.TestPatternMatcher(),
         ),
         BaseTest(
             "test_addmm",

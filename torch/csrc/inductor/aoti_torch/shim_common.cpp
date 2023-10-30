@@ -1,4 +1,5 @@
 #include <c10/core/DeviceType.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -88,6 +89,14 @@ int32_t aoti_torch_dtype_int64() {
 
 int32_t aoti_torch_dtype_bool() {
   return (int32_t)c10::ScalarType::Bool;
+}
+
+bool aoti_torch_grad_mode_is_enabled() {
+  return c10::GradMode::is_enabled();
+}
+
+void aoti_torch_grad_mode_set_enabled(bool enabled) {
+  return c10::GradMode::set_enabled(enabled);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
