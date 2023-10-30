@@ -45,14 +45,14 @@ from .typing import (
 
 __all__ = [
     "PyTree",
-    "TreeSpec",
-    "LeafSpec",
     "Context",
     "FlattenFunc",
     "UnflattenFunc",
     "DumpableContext",
     "ToDumpableContextFn",
     "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",

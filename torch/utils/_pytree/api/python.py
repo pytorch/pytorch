@@ -51,6 +51,13 @@ from .typing import (
 
 
 __all__ = [
+    "PyTree",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
     "TreeSpec",
     "LeafSpec",
     "register_pytree_node",

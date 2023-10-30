@@ -4,6 +4,7 @@ import unittest
 from collections import namedtuple, OrderedDict
 
 import torch
+import torch.utils._pytree as _pytree
 import torch.utils._pytree.api.cxx as cxx_pytree
 import torch.utils._pytree.api.python as py_pytree
 from torch.testing._internal.common_utils import (
@@ -26,6 +27,11 @@ class GlobalDummyType:
 
 
 class TestGenericPytree(TestCase):
+    def test_aligned_public_apis(self):
+        self.assertEqual(_pytree.__all__, py_pytree.__all__)
+        self.assertEqual(_pytree.__all__, cxx_pytree.__all__)
+        self.assertEqual(cxx_pytree.__all__, py_pytree.__all__)
+
     @parametrize(
         "pytree_impl",
         [
