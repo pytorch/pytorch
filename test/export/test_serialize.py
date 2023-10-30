@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_sym_bool)
+"""
 # Owner(s): ["module: dynamo"]
 import io
 import pathlib
