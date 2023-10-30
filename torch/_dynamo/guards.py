@@ -127,7 +127,7 @@ CLOSURE_VARS = collections.OrderedDict(
             if isinstance(a, (np.generic, np.ndarray))
             else a,
         ),
-        ("torch", torch)
+        ("torch", torch),
     ]
 )
 
