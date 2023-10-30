@@ -17,7 +17,7 @@ from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
-from torch._inductor.utils import has_triton
+from torch.utils._triton import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -301,6 +301,47 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model, inputs = get_hf_bert(self.rank)
             model = DDP(model)
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(config, "optimize_ddp", False)
+    def test_ddp_activation_checkpointing(self):
+
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            CheckpointImpl,
+            apply_activation_checkpointing,
+            checkpoint_wrapper,
+        )
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(64, 32)
+                self.fc2 = torch.nn.Linear(32, 16)
+                self.fc3 = torch.nn.Linear(16, 8)
+
+            def forward(self, inp):
+                return self.fc3(self.fc2(self.fc1(inp)))
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            self.assertFalse(config.optimize_ddp)
+            model = MyModel().to(device="cuda")
+
+            # Activation checkpointing for Linear layers.
+            non_reentrant_wrapper = functools.partial(
+                checkpoint_wrapper,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            )
+            check_fn = lambda submodule: isinstance(submodule, torch.nn.Linear)  # noqa: E731
+            apply_activation_checkpointing(model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
+
+            model = DDP(model)
+            x = torch.randn(10, 64).cuda()
+            correct_outputs = model(x)
+
+            opt_model = torch.compile(model)
+            outputs = opt_model(x)
+            self.assertTrue(same(correct_outputs, outputs))
 
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):

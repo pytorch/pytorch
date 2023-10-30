@@ -3,14 +3,20 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     ContextWrappingVariable,
-    CUDAStreamContextVariable,
-    CUDAStreamVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     GradModeVariable,
+    InferenceModeVariable,
+    StreamContextVariable,
+    StreamVariable,
     WithExitFunctionVariable,
 )
-from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
+from .dicts import (
+    ConstDictVariable,
+    CustomizedDictVariable,
+    DataClassVariable,
+    DefaultDictVariable,
+)
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -63,6 +69,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "DataClassVariable",
+    "CustomizedDictVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",

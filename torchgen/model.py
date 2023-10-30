@@ -84,10 +84,14 @@ class DispatchKey(Enum):
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
+    NestedTensor = auto()
+    Dense = auto()
 
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
+    Conjugate = auto()
+    Negative = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
@@ -209,6 +213,7 @@ class DispatchKey(Enum):
 class _TorchDispatchModeKey(Enum):
     FAKE = auto()
     PROXY = auto()
+    FUNCTIONAL = auto()
 
 
 def codegen_per_backend_entries() -> str:
@@ -1409,7 +1414,7 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                # mutable keyward arguments whose name has _scratch_ prefix are
+                # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
                 assert len(
                     [
@@ -2204,7 +2209,7 @@ class Arguments:
             post_self_positional=tuple(
                 map(strip_arg_annotation, self.post_self_positional)
             ),
-            # Since TensorOptions are droped, the post_tensor_options_kwargs are
+            # Since TensorOptions are dropped, the post_tensor_options_kwargs are
             # converted to pre_tensor_options_kwargs
             pre_tensor_options_kwarg_only=tuple(
                 map(strip_arg_annotation, self.pre_tensor_options_kwarg_only)

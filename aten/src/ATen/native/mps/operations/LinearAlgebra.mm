@@ -15,6 +15,7 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/stack.h>
@@ -98,7 +99,7 @@ static void prepare_matrices_for_broadcasting(const Tensor* bias,
 
 enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
-void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
+static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   using namespace mps;
 
   TORCH_CHECK(pivot, "linalg_lu_factor(): MPS doesn't allow pivot == False.");
@@ -145,7 +146,7 @@ void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tens
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       MPSMatrixDecompositionLU* filter = [[[MPSMatrixDecompositionLU alloc] initWithDevice:device
@@ -183,7 +184,6 @@ void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& LU, Tens
                          pivotIndices:pivotIndices
                                status:statusBuffer];
       }
-      mpsStream->commit(true);
     }
   });
   auto stacked_pivots = A_.dim() > 2 ? at::stack(pivots_list) : pivots_list[0];

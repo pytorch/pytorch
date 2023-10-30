@@ -255,6 +255,7 @@ GENERATED_CPP_CORE = [
 
 _GENERATED_AUTOGRAD_PYTHON_HEADERS = [
     "torch/csrc/autograd/generated/python_functions.h",
+    "torch/csrc/autograd/generated/python_return_types.h",
 ]
 
 _GENERATED_AUTOGRAD_CPP_HEADERS = [

@@ -56,7 +56,7 @@ def _find_q_dq_node_for_user(
     produer: torch.fx.Node, user: torch.fx.Node
 ) -> Tuple[Any, Any]:
     """
-    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Find q, dq pair corresponding to [producer -> q -> dq -> user]
     Utils works by finding dq arg of user and ensuring it is connected to
     producer
     """
@@ -124,6 +124,20 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
             all_args.append(schema.default_value)
     return all_args
 
+def _is_supported_batch_norm_for_training(node: Node):
+    """
+    Return True if the given node refers to an aten batch norm op QAT supports.
+    """
+    supported_ops = [
+        torch.ops.aten._native_batch_norm_legit.default,
+        # Note: we won't need this op anymore after batch norm consolidation
+        # For now, we need to continue to support it because it gives better
+        # training numerics than `_native_batch_norm_legit`
+        torch.ops.aten.cudnn_batch_norm.default,
+        torch.ops.aten.miopen_batch_norm.default,
+    ]
+    return node.target in supported_ops
+
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
@@ -148,7 +162,7 @@ def fold_bn_weights_into_conv_node(
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
     if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
         eps_arg_index = 6
-    elif bn_node.target == torch.ops.aten._native_batch_norm_legit.default:
+    elif _is_supported_batch_norm_for_training(bn_node):
         eps_arg_index = 7
     else:
         raise ValueError("BN node target is unexpected ", bn_node.target)
@@ -168,13 +182,14 @@ def fold_bn_weights_into_conv_node(
     setattr(m, weight_attr_name, fused_weight)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     else:
         bias_attr_name = weight_attr_name + "_bias"
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
         with m.graph.inserting_before(conv_node):
             get_bias_node = m.graph.get_attr(bias_attr_name)
         # NOTE: here we assume the bias of conv is not quantized!
         conv_args[2] = get_bias_node
-    setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     conv_node.args = tuple(conv_args)
 
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
@@ -228,11 +243,14 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
 def get_aten_graph_module(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
+    is_cuda: bool = False,
     **kwargs,
 ) -> GraphModule:
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
+    if is_cuda:
+        example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
         pattern,
         example_inputs,

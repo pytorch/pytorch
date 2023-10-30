@@ -323,7 +323,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     MPSGraphTensor* scatterDataTensor_ = nil;
   };
 
-  stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  dispatch_sync(stream->queue(), ^() {
+    stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  });
   int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
   at::native::resize_output(out_, {total_nonzero, nDim});
   if (out_.numel() == 0) {

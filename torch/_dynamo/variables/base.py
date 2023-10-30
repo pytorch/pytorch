@@ -107,7 +107,14 @@ class VariableTracker(metaclass=HasPostInit):
     """
 
     # fields to leave unmodified in apply()
-    _nonvar_fields = ["value"]
+    _nonvar_fields = {
+        "value",
+        "guards",
+        "source",
+        "mutable_local",
+        "recursively_contains",
+        "user_code_variable_name",
+    }
 
     @staticmethod
     def propagate(*vars: List[List["VariableTracker"]]):
@@ -198,7 +205,7 @@ class VariableTracker(metaclass=HasPostInit):
         return self.clone(guards=set.union(self.guards, {guard}))
 
     def add_guards(self, guards):
-        if not guards:
+        if guards is None:
             return self
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))
@@ -269,7 +276,7 @@ class VariableTracker(metaclass=HasPostInit):
             raise NotImplementedError()
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable(value, **options)
+        return variables.ConstantVariable.create(value, **options)
 
     def is_proxy(self):
         try:
@@ -314,7 +321,7 @@ class VariableTracker(metaclass=HasPostInit):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
             )
         elif (
@@ -328,12 +335,22 @@ class VariableTracker(metaclass=HasPostInit):
             )
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
+            # This is fine for objects that are not mutable locals
+            self.user_code_variable_name = new_name
+            return self
+        new_vt = self.clone(user_code_variable_name=new_name)
+        return tx.replace_all(self, new_vt)
+
     def __init__(
         self,
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
+        user_code_variable_name: str = None,
     ):
         super().__init__()
         self.guards = guards or set()
@@ -342,6 +359,7 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
+        self.user_code_variable_name = user_code_variable_name
 
     def __post_init__(self, *args, **kwargs):
         if self.recursively_contains is None:
