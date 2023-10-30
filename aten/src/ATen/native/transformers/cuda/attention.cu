@@ -782,8 +782,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   //    attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
   std::cout << "got attention shape and stride before: " << attention.sizes() << " " << attention.strides() << std::endl;
   // attention = attention.transpose(0, 2);
-  attention =
-    attention.reshape({batch_size, num_heads, max_seqlen_batch_q, head_dim}).transpose(1,2);
+  // attention =
+  //  attention.reshape({batch_size, num_heads, max_seqlen_batch_q, head_dim}).transpose(1,2);
   std::cout << "got attention shape and stride after: " << attention.sizes() << " " << attention.strides() << std::endl;
   return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }

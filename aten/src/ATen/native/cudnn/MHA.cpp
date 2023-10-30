@@ -1025,7 +1025,7 @@ run_cudnn_LLM_fprop(int64_t b,
       dtype = fe::DataType_t::HALF;
     }
     //o = at::zeros({b, s_q, h, d}, q.options());
-    o = at::empty_strided({b, s_q, h, d}, {h * d, d, b * h * d, 1}, q.options());
+    o = at::empty_strided({b, h, s_q, d}, {h * d, d, b * h * d, 1}, q.options());
     if (return_softmaxstats) {
       softmaxstats = at::zeros({b, h, s_q}, q.options());
     }
