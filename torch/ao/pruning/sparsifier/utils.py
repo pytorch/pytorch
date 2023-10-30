@@ -143,6 +143,7 @@ class PerChannelNormObserver(UniformQuantizationObserverBase):
     r"""
     A custom observer that computes the L2 norm of each channel and stores it in a buffer.
     """
+
     def __init__(self, **kwargs) -> None:
         # init with fixed qparams for quantization flow
         super().__init__(
@@ -179,4 +180,4 @@ class PerChannelNormObserver(UniformQuantizationObserverBase):
         return x_orig
 
     def calculate_qparams(self):
-        raise NotImplementedError("PerChannelNormObserver is designed to store activatios only. ")
+        raise NotImplementedError("PerChannelNormObserver is designed to store activations only. ")
