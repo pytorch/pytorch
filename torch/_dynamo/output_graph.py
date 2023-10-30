@@ -545,7 +545,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
-            if node.meta["creation_timestamp"] > self.timestamp:
+            if (
+                node.meta["creation_timestamp"] > self.timestamp
+                # placeholders here may have been lazily added by existing objects
+                and node.op != "placeholder"
+            ):
                 # Erasing node alone does not remove the meta information
                 # So, remove the help tensor explicitly
                 if "example_value" in node.meta:
@@ -995,7 +999,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-        compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = self.call_user_compiler(gm) if ncalls > 0 else gm.forward
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -1412,7 +1416,7 @@ class SubgraphTracer(fx.Tracer):
         self, op, target, args=None, kwargs=None, name=None, type_expr=None
     ):
         if self.parent is not None:
-            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            flat_args = pytree.tree_leaves((args, kwargs))
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue

@@ -46,7 +46,6 @@ ignored_torch_name_rule_set = {
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
     "torch._C._profiler._RecordFunctionFast",
-    "torch._decomp.decompositions_for_rng.PhiloxStateTracker",
     "torch._subclasses.fake_tensor.FakeTensorMode",
     "torch._subclasses.functional_tensor.FunctionalTensorMode",
     "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
