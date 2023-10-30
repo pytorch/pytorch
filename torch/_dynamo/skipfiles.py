@@ -401,8 +401,8 @@ _recompile_re()
 def is_module_forward(obj, f_code):
     return (
         obj is not None
-        and isinstance(obj, torch.nn.Module)
         and f_code.co_name == "forward"
+        and isinstance(obj, torch.nn.Module)
     )
 
 

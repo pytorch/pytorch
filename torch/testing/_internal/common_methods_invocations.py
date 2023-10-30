@@ -13977,6 +13977,12 @@ op_db: List[OpInfo] = [
                 "TestNormalizeOperators",
                 "test_normalize_operator_exhaustive",
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                dtypes=[torch.float32],
+                device_type='cuda',
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
         ),
     ),
     BinaryUfuncInfo('nextafter',
