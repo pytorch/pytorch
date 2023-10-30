@@ -481,6 +481,20 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     )
 
 
+@register_op_impl(lambda func: func.name() == "fbgemm::merge_pooled_embeddings")
+def merge_pooled_embeddings(fake_mode, func, *args, **kwargs):
+    out_device = torch.device("meta")
+    for arg in itertools.chain(args, kwargs.values()):
+        if isinstance(arg, torch.device):
+            out_device = arg
+
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(*args, **kwargs)
+    return fake_mode.fake_tensor_converter.from_meta_and_device(
+        fake_mode, r, out_device
+    )
+
+
 def stride_incorrect_op(op):
     if op.namespace not in ("aten", "prims"):
         return False
