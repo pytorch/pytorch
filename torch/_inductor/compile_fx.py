@@ -8,17 +8,7 @@ import time
 import warnings
 from itertools import count
 
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -394,12 +384,6 @@ def compile_fx_inner(
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
 
-    # Return the output strides to the caller via TracingContext
-    context = torch._guards.TracingContext.get()
-    if context is not None and context.output_strides is not None:
-        assert len(context.output_strides) == 0
-        context.output_strides.extend(compiled_graph.output_strides)
-
     if aot_mode:
         return compiled_graph
 
@@ -598,19 +582,20 @@ def fx_codegen_and_compile(
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            output_strides: List[Optional[Tuple[int, ...]]] = []
-            if graph.graph_outputs is not None:
-                # We'll put the output strides in the compiled graph so we
-                # can later return them to the caller via TracingContext
+            context = torch._guards.TracingContext.get()
+            if context is not None and context.output_strides is not None:
+                # Return the output strides to the caller via TracingContext
+                assert len(context.output_strides) == 0
+                assert graph.graph_outputs is not None
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
-                        output_strides.append(
+                        context.output_strides.append(
                             tuple(  # type: ignore[arg-type]
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
                     else:
-                        output_strides.append(None)
+                        context.output_strides.append(None)
 
             compiled_fn = graph.compile_to_fn()
 
@@ -630,7 +615,6 @@ def fx_codegen_and_compile(
                 mutated_inputs=graph.mutated_inputs,
                 mutated_input_idxs=set(graph.mutated_input_idxs),
                 constants=graph.constants,
-                output_strides=output_strides,
             )
     return compiled_graph
 
