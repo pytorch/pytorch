@@ -137,6 +137,9 @@ class ConstDictVariable(VariableTracker):
             for k, v in self.items.items()
         }
 
+    def keys_as_python_constant(self):
+        return {k.vt.as_python_constant(): v for k, v in self.items.items()}
+
     def python_type(self):
         return self.user_cls
 
@@ -560,11 +563,10 @@ class DataClassVariable(ConstDictVariable):
 
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        keys = tuple(self.items.keys())
-        for key in keys:
-            codegen(self.items[key])
         # All the keys are just wrapped strings
-        keys = tuple(x.vt.as_python_constant() for x in keys)
+        d = self.keys_as_python_constant()
+        codegen.foreach(d.values())
+        keys = tuple(d.keys())
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
@@ -691,11 +693,10 @@ class CustomizedDictVariable(ConstDictVariable):
     # called from torch/_dynamo/codegen.py
     def reconstruct(self, codegen):
         codegen.extend_output([codegen._create_load_const(self.user_cls)])
-        keys = tuple(self.items.keys())
-        for key in keys:
-            codegen(self.items[key])
         # All the keys are just wrapped strings
-        keys = tuple(x.vt.as_python_constant() for x in keys)
+        d = self.keys_as_python_constant()
+        codegen.foreach(d.values())
+        keys = tuple(d.keys())
         return codegen.create_call_function_kw(len(keys), keys, True)
 
     def call_method(
@@ -804,7 +805,7 @@ class PythonSysModulesVariable(VariableTracker):
         return real_dict.call_method(tx, name, args, kwargs)
 
     def _contains_helper(self, tx, key: VariableTracker):
-        k = key.value
+        k = key.as_python_constant()
         has_key = k in sys.modules
         guard = self.make_guard(
             functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
