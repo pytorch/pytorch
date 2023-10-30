@@ -417,6 +417,10 @@ class TestForeach(TestCase):
             foreach_op(tensors1, tensors2)
         with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 1 and 2"):
             foreach_op_(tensors1, tensors2)
+        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
+            foreach_op(tensors2, tensors1)
+        with self.assertRaisesRegex(RuntimeError, "Tensor lists must have the same number of tensors, got 2 and 1"):
+            foreach_op_(tensors2, tensors1)
 
         # Corresponding tensors with different sizes that aren't compatible with broadcast
         # If sizes are different then foreach chooses slow path, thus error messages are expected
