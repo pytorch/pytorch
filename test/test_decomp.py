@@ -7,6 +7,7 @@ from torch._decomp import core_aten_decompositions, decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
@@ -15,6 +16,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     suppress_warnings,
     TEST_WITH_ASAN,
+    TEST_WITH_SLOW,
     run_tests,
     skipIfTorchDynamo,
 )
@@ -426,8 +428,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
+    flat_args = pytree.tree_leaves(args)
+    flat_kwargs = pytree.tree_leaves(kwargs)
     return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
 
 
@@ -464,6 +466,20 @@ core_backward_failures = {
     skip('xlogy'),  # slow: fails with --timeout=360 secs
     xfail('zero_'),
 }
+if not TEST_WITH_SLOW:
+    core_backward_failures.update({
+        skip('addr'),  # slow: takes 46 sec on A100
+        skip('baddbmm'),  # slow: takes 800+ sec on A100
+        skip('clamp_min'),  # slow: takes 800 sec on A100
+        skip('clamp_max'),  # slow: takes 800 sec on A100
+        skip('logit'),  # slow: takes 44 sec on A100
+        skip('nn.functional.hardswish'),  # slow: takes 60 sec on A100
+        skip('std_mean'),  # slow: takes 170 sec on A100
+        skip('split', variant_name='list_args'),  # slow: takes 118 sec on A100
+        skip('transpose'),  # slow: takes 50 sec on A100
+        skip('unbind'),  # slow: takes 70 sec on A100
+        skip('unsafe_split'),  # slow: takes 49 sec on A100
+    })
 
 
 class TestDecomp(TestCase):
@@ -661,9 +677,9 @@ class TestDecomp(TestCase):
             if self.run_all:
                 # Execute recursively via DFS, to find the root of a possible error first
                 with self:
-                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                    decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
             else:
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+                decomp_out = pytree.tree_leaves(decomposition(*args, **kwargs))
 
             # At this stage we should not be decomposing an in-place op
             # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
@@ -673,7 +689,7 @@ class TestDecomp(TestCase):
             # decomposition does not modify any of the inputs in-place. If it does
             # real_out should be differen than decom_out so we should catch this
             real_out_unflat = func(*args, **kwargs)
-            real_out, _ = tree_flatten(real_out_unflat)
+            real_out = pytree.tree_leaves(real_out_unflat)
 
             assert len(real_out) == len(decomp_out)
 

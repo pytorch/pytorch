@@ -436,6 +436,9 @@ class ShardedTensor(ShardedTensorBase):
 
             for shard in local_shards:
                 src = shard.tensor.flatten()
+                if src.nelement() == 0 :
+                    warnings.warn("Gathering a tensor with zero elements on rank " + str(rank))
+                    return
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset: shard_offset + src.numel()].copy_(src)
 
