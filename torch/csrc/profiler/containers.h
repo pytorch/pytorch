@@ -58,7 +58,7 @@ class AppendOnlyList {
   AppendOnlyList& operator=(const AppendOnlyList&) = delete;
 
   size_t size() const {
-    return n_blocks_ * ChunkSize + next_ - buffer_last_->data();
+    return n_blocks_ * ChunkSize - (size_t)(end_ - next_);
   }
 
   template <class... Args>
@@ -76,8 +76,11 @@ class AppendOnlyList {
   typename std::enable_if<
       std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
   copy(c10::ArrayRef<T0> src) {
-    maybe_grow();
     size_t n = src.size();
+    if (C10_UNLIKELY(n == 0)) {
+      return;
+    }
+    maybe_grow();
     if (C10_LIKELY(next_ && (next_ + n <= end_))) {
       std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
       next_ += n;
