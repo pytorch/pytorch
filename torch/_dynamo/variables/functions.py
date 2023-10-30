@@ -448,7 +448,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             tuple(make_cell(None) for _ in range(len(self.get_code().co_freevars))),
         )
         if self.kwdefaults:
-            func.__kwdefaults__ = self.kwdefaults.items
+            func.__kwdefaults__ = self.kwdefaults.keys_as_python_constant()
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -508,15 +508,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         if self.annotations:
             try:
-                if isinstance(self.annotations, variables.ConstDictVariable):
-                    annotations = {
-                        k: v.as_python_constant()
-                        for k, v in self.annotations.items.items()
-                    }
-                else:
-                    annotations = tuple(
-                        [v.as_python_constant() for v in self.annotations.items]
-                    )
+                annotations = self.annotations.as_python_constant()
                 codegen.extend_output([codegen._create_load_const(annotations)])
             except NotImplementedError:
                 codegen(self.annotations)
@@ -676,7 +668,7 @@ class TritonKernelVariable(VariableTracker):
         if isinstance(kernel, Autotuner):
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
-            defaults = inspect.signature(Autotuner).parameters
+            defaults = inspect.signature(Autotuner.__init__).parameters
             if (
                 defaults["warmup"].default != kernel.warmup
                 or defaults["rep"].default != kernel.rep
