@@ -7492,30 +7492,41 @@ def ___make_guard_fn():
         self.assertEqual(counter.op_count, 6)
 
     def test_torch_device_python_type(self):
-        def fn(target):
-            target_device = target.device
-            self.assertIsInstance(target_device, torch.device)
-            a = torch.zeros(2, 3, device=target_device)
-            b = torch.zeros(2, 3, device=target_device)
-            c = torch.zeros(2, 3, device=target_device)
-            return a + b + c
+        for device, device_type, index in [
+            ("cpu", "cpu", None),
+            ("cuda:0", "cuda", 0),
+        ]:
+            if device == "cuda:0" and not TEST_CUDA:
+                continue
 
-        from torch._dynamo.variables import ConstantVariable
+            def fn(target):
+                target_device = target.device
+                a = torch.zeros(2, 3, device=target_device)
+                # Constant assert at trace time
+                assert isinstance(target_device, torch.device)
+                assert target_device.type == device_type
+                assert target_device.index == index
+                b = torch.zeros(2, 3, device=target_device)
+                c = torch.zeros(2, 3, device=target_device)
+                return a + b + c
 
-        device = torch.device("cpu")
-        expected_variable = ConstantVariable(device)
-        self.assertEqual(expected_variable.python_type(), type(device))
+            from torch._dynamo.variables import ConstantVariable
 
-        opt_func = torch._dynamo.optimize("inductor")(fn)
-        a = torch.tensor([2, 3], device=device)
-        res = opt_func(a)
-        self.assertIsInstance(res, torch.Tensor)
+            device = torch.device(device)
+            expected_variable = ConstantVariable(device)
+            self.assertEqual(expected_variable.python_type(), type(device))
+
+            opt_func = torch._dynamo.optimize("inductor", nopython=True)(fn)
+            a = torch.tensor([2, 3], device=device)
+            res = opt_func(a)
+            self.assertIsInstance(res, torch.Tensor)
 
     def test_torch_dtype_python_type(self):
         def fn(target):
             target_dtype = target.dtype
-            self.assertIsInstance(target_dtype, torch.dtype)
             a = torch.zeros(2, 3, dtype=target_dtype)
+            # Constant assert at trace time
+            assert isinstance(target_dtype, torch.dtype)
             b = torch.zeros(2, 3, dtype=target_dtype)
             c = torch.zeros(2, 3, dtype=target_dtype)
             return a + b + c
@@ -7526,7 +7537,7 @@ def ___make_guard_fn():
         expected_variable = ConstantVariable(dtype)
         self.assertEqual(expected_variable.python_type(), type(dtype))
 
-        opt_func = torch._dynamo.optimize("inductor")(fn)
+        opt_func = torch._dynamo.optimize("inductor", nopython=True)(fn)
         a = torch.tensor([2, 3], dtype=dtype)
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
