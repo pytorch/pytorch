@@ -109,6 +109,15 @@ def test_bsr_scatter_mm(x, y, **meta):
     return _test_worker(test_func)
 
 
+def test_linear(x, y, **meta):
+    import torch.nn.functional as F
+
+    def test_func(x=x, y=y.transpose(-2, -1)):
+        return F.linear(y, x)
+
+    return _test_worker(test_func)
+
+
 if __name__ == "__main__":
     import argparse
     import atexit
@@ -282,7 +291,7 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
     for m, k, n, bm, bk, sparsity in itertools.product(
-        m_list, n_list, k_list, bm_list, bk_list, sparsity_list
+        m_list, k_list, n_list, bm_list, bk_list, sparsity_list
     ):
         k = k or m
         n = n or m
@@ -374,6 +383,8 @@ if __name__ == "__main__":
                             file=outfile,
                         )
                         continue
+                    except AssertionError:
+                        raise
                     except Exception as msg:
                         msg = str(msg).split("\n", 1)[0]
                         print(
