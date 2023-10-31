@@ -17,6 +17,7 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/_scaled_mm.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/bmm.h>
@@ -40,6 +41,19 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
+
+template <class T>
+c10::optional<T> pointer_to_optional(T* ptr) {
+  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
+}
+
+template <class T>
+c10::optional<T> value_to_optional(ShimOptional val_opt) {
+  return val_opt.has_value
+      ? c10::make_optional(reinterpret_cast<T&>(val_opt.value))
+      : c10::nullopt;
+}
+
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -283,6 +297,40 @@ AOTITorchError aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* out_tensor = new at::Tensor();
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
+  });
+}
+
+AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    ShimOptional out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    bool use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
+    at::Tensor* bias_tensor = tensor_handle_to_tensor_pointer(bias);
+    at::Tensor* scale_a_tensor = tensor_handle_to_tensor_pointer(scale_a);
+    at::Tensor* scale_b_tensor = tensor_handle_to_tensor_pointer(scale_b);
+    at::Tensor* scale_result_tensor =
+        tensor_handle_to_tensor_pointer(scale_result);
+    auto [r0, r1] = at::_scaled_mm(
+        *self_tensor,
+        *mat2_tensor,
+        pointer_to_optional(bias_tensor),
+        value_to_optional<c10::ScalarType>(out_dtype),
+        pointer_to_optional(scale_a_tensor),
+        pointer_to_optional(scale_b_tensor),
+        pointer_to_optional(scale_result_tensor));
+    at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
+    *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
+    at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
+    *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
   });
 }
 

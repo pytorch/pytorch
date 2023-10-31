@@ -74,6 +74,11 @@ using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
 
+struct ShimOptional {
+  bool has_value;
+  int64_t value;
+};
+
 // Getter functions for retrieving various constants from the runtime, that
 // can subsequently be passed to other aoti_* functions.  By hiding these
 // behind functions, the precise value of device/dtype is NOT part of the
@@ -181,6 +186,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle* ret7, // returns new reference
     AtenTensorHandle* ret8 // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
+    AtenTensorHandle self,
+    AtenTensorHandle mat2,
+    AtenTensorHandle bias,
+    ShimOptional out_dtype,
+    AtenTensorHandle scale_a,
+    AtenTensorHandle scale_b,
+    AtenTensorHandle scale_result,
+    bool use_fast_accum,
+    AtenTensorHandle* ret0,
+    AtenTensorHandle* ret1);
 
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
