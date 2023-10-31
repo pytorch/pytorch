@@ -406,7 +406,10 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            bwd_args = [ctx, speculated_fwd_result]
+            if isinstance(speculated_fwd_result, variables.TupleVariable):
+                bwd_args = [ctx, *speculated_fwd_result.items]
+            else:
+                bwd_args = [ctx, speculated_fwd_result]
             safe_or_raise_always_restore(
                 tx,
                 graph_checkpoint,
