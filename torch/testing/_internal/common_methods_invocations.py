@@ -8865,12 +8865,15 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 opinfo, rightmost_arg_type, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             for rightmost_arg in rightmost_arg_list:
                 kwargs = {}
-                if rightmost_arg_type == ForeachRightmostArgType.TensorList or self.without_values_kwarg:
+                if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+                    args.append(rightmost_arg)
+                    assert len(args) == 2, f"{len(args)=}"
+                elif self.without_values_kwarg:
                     args.append(rightmost_arg)
                 else:
                     kwargs["values"] = rightmost_arg
+                    assert len(args) == 2, f"{len(args)=}"
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
-                assert len(args) == 2, f"{len(args)=}"
                 sample = ForeachSampleInput(input, *args, **kwargs)
                 yield sample
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
@@ -9306,21 +9309,21 @@ foreach_pointwise_without_values_kwarg_op_db: List[ForeachFuncInfo] = [
         skips=(
             # Integer division with addcdiv is no longer supported
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                dtypes=integral_types()),
+                         dtypes=integral_types()),
         ),
     ),
 ]
