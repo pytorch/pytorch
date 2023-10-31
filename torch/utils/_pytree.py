@@ -122,8 +122,8 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 def _register_pytree_node(
     cls: Any,
-    flatten_fn: FlattenFunc,
-    unflatten_fn: UnflattenFunc,
+    flatten_func: FlattenFunc,
+    unflatten_func: UnflattenFunc,
     to_str_fn: Optional[ToStrFunc] = None,  # deprecated
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
@@ -134,10 +134,10 @@ def _register_pytree_node(
     """
     Args:
         cls: the type to register
-        flatten_fn: A callable that takes a pytree and returns a flattened
+        flatten_func: A callable that takes a pytree and returns a flattened
             representation of the pytree and additional context to represent the
             flattened pytree.
-        unflatten_fn: A callable that takes a flattened version of the pytree,
+        unflatten_func: A callable that takes a flattened version of the pytree,
             additional context, and returns an unflattened pytree.
         to_dumpable_context: An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable
@@ -159,8 +159,8 @@ def _register_pytree_node(
 
     node_def = NodeDef(
         cls,
-        flatten_fn,
-        unflatten_fn,
+        flatten_func,
+        unflatten_func,
     )
     SUPPORTED_NODES[cls] = node_def
 
