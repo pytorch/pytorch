@@ -50,6 +50,10 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+class CustomDictSubclass(collections.OrderedDict):
+    pass
+
+
 clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
 
 
@@ -443,6 +447,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_ordered_dict_kwargs(x):
         z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
+    def test_custom_dict_kwargs(x):
+        z = CustomDictSubclass(sample=torch.ones(10))
         return z
 
     @make_test
