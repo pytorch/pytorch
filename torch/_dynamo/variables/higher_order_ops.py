@@ -83,12 +83,12 @@ def only_consist_of(var, types):
 
 
 def _assert_tensors_nonaliasing(inputs, outputs):
-    input_tensor_ids = set(
-        pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), inputs)
-    )
-    output_tensor_ids = set(
-        pytree.tree_flatten_only(torch.Tensor, lambda t: id(t), outputs)
-    )
+    input_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
+    }
+    output_tensor_ids = {
+        id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
+    }
     assert input_tensor_ids.isdisjoint(
         output_tensor_ids
     ), "inputs to function body cannot alias outputs"
@@ -397,6 +397,16 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
+                args.append(v)
+
+        if kwargs:
+            unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
+
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
@@ -586,8 +596,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # consistent
         example_value = true_r.as_proxy().node.meta["example_value"]
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
-
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -595,7 +603,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 torch.ops.higher_order.cond,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
@@ -739,7 +747,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
