@@ -3562,6 +3562,19 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8)))
 
+        def fn2(a, b):
+            abs_max = torch.abs(a).max()
+            b[0] = abs_max.to(a.dtype)
+            return b
+
+        self.common(
+            fn2,
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float16),
+                torch.randn(8, device="cuda", dtype=torch.float32),
+            ),
+        )
+
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
             def __init__(
