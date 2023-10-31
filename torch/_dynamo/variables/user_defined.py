@@ -610,6 +610,33 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(key, self)
 
 
+class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        fn_variable = variables.UserFunctionVariable(
+            self.value.forward.__func__, **options
+        )
+        args = [self] + args
+        return tx.inline_user_function_return(
+            fn_variable,
+            args,
+            kwargs,
+        )
+
+
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):

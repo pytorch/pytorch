@@ -142,6 +142,7 @@ from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
+    SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -1876,7 +1877,7 @@ class SourcelessBuilder:
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
         elif isinstance(value, torch.fx.graph_module.GraphModule):
-            return UserDefinedObjectVariable(value)
+            return SourcelessGraphModuleVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
