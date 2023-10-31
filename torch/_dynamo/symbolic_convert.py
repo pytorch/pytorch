@@ -81,7 +81,7 @@ from .variables.ctx_manager import (
     GenericContextWrappingVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable, SetVariable
+from .variables.dicts import ConstDictVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
@@ -92,6 +92,7 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -341,9 +342,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
             # if __bool__ is missing, trying __len__ to infer a truth value.
-            if isinstance(x, GetAttrVariable):
+            if x.is_python_constant() and x.as_python_constant() is None:
                 x = value.var_getattr(self, "__len__")
-
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
@@ -520,20 +520,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
-    inconsistent_side_effects: bool
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
-
-    def mark_inconsistent_side_effects(self):
-        """
-        InstructionTranslator has encountered instructions which may cause
-        dynamo to see a different version of history from eager
-        See: https://github.com/pytorch/pytorch/issues/110765
-        """
-        self.inconsistent_side_effects = True
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -592,9 +583,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return v.parents_tracker not in recursive_parents
+            return oldvar.mutable_local not in v.recursively_contains
 
-        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -1079,8 +1069,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left
-        right = right
+        left = left.as_specialized(self)
+        right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
@@ -1314,7 +1304,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                items,
+                [x.as_specialized(self) for x in items],
                 **options,
             )
         )
@@ -1433,10 +1423,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
+                recursively_contains=new_rec_contains,
                 regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
@@ -1992,7 +1991,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
-        self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
         self.log_starts_line()
 
@@ -2216,7 +2214,6 @@ class InstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
-            and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
@@ -2390,8 +2387,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if tracer.f_globals is parent.f_globals:
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
-
-        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
 
         log.debug("DONE INLINING %s", code)
 

@@ -682,28 +682,14 @@
   structured_delegate: all.out
   variants: function, method
 
-- func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  structured_delegate: all.dims_out
-  variants: function, method
-  cpp_no_default_args: ['dim']
-  dispatch:
-    CompositeExplicitAutograd: all_dims_default
-
 - func: all.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  precomputed:
+  - dim -> int dim
   dispatch:
     CPU, CUDA: all_out
     MPS: all_out_mps
-
-- func: all.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  structured: True
-  dispatch:
-    CPU, CUDA: all_dims_out
-    CompositeExplicitAutograd: all_dims_out_default
-  cpp_no_default_args: ['dim']
 
 - func: all.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -724,29 +710,14 @@
   variants: function, method
   tags: core
 
-- func: any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
-  device_check: NoCheck   # TensorIterator
-  structured_delegate: any.dims_out
-  variants: function, method
-  cpp_no_default_args: ['dim']
-  tags: core
-  dispatch:
-    CompositeExplicitAutograd: any_dims_default
-
 - func: any.out(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True
+  precomputed:
+  - dim -> int dim
   dispatch:
     CPU, CUDA: any_out
     MPS: any_out_mps
-
-- func: any.dims_out(Tensor self, int[]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  structured: True
-  dispatch:
-    CPU, CUDA: any_dims_out
-    CompositeExplicitAutograd: any_dims_out_default
-  cpp_no_default_args: ['dim']
 
 - func: any.dimname(Tensor self, Dimname dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3313,22 +3284,6 @@
 - func: _mixed_dtypes_linear(Tensor input, Tensor weight, Tensor scale, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
     CUDA: _mixed_dtypes_linear
-
-- func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-
-- func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-
-- func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
-
-- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
-
-- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-
-- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-
-- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
-
-- func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
@@ -7639,15 +7594,6 @@
 
 # - func: quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 #
-
-# Quantized RNN cells
-- func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
-
-- func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
-
-- func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
-
-- func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)

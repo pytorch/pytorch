@@ -244,11 +244,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
-    xfail_torchlib_forward_compatibility(
-        "all",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.all.dims"),
-        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
-    ),
     xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
@@ -261,11 +256,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
-    ),
-    xfail_torchlib_forward_compatibility(
-        "any",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.any.dims"),
-        github_issue="https://github.com/microsoft/onnxscript/pull/1084"
     ),
     xfail(
         "arange",
@@ -459,6 +449,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.dropout",
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
+    ),
+    xfail(
+        "nn.functional.embedding",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
     ),
     xfail(
         "nn.functional.max_pool2d",

@@ -9,7 +9,7 @@ import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
-from torch.distributed._tensor.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
     Placement,
@@ -312,7 +312,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+        device_mesh = device_mesh or mesh_resources.get_current_mesh()
         device_type = device_mesh.device_type
 
         # convert the local tensor to desired device base on device mesh's device_type
@@ -409,35 +409,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
         return Redistribute.apply(self, device_mesh, placements)
 
-    def full_tensor(
-        self, *, grad_placements: Optional[Sequence[Placement]] = None
-    ) -> torch.Tensor:
-        """
-        Return the full tensor of this DTensor. It will perform necessary collectives
-        to gather the local tensors from other ranks in its DeviceMesh and concatenate
-        them together. It's a syntatic sugar of the following code:
-
-        `dtensor.redistribute(placements=[Replicate()] * mesh.ndim).to_local()`
-
-        Keyword args:
-            grad_placements (List[:class:`Placement`], optional): the placements describes
-                the future layout of any gradient layout of the full Tensor returned from this
-                function.
-                `full_tensor` converts DTensor to a full torch.Tensor and the returned torch.tensor
-                might not be used as the original replicated DTensor layout later in the code. This
-                argument is the hint that user can give to autograd in case the gradient
-                layout of the returned tensor does not match the original replicated DTensor layout.
-                If not specified, we will assume the gradient layout of the full tensor be replicated.
-
-        Returns:
-            A :class:`torch.Tensor` object that represents the full tensor of this DTensor.
-
-        .. note:: `full_tensor` is differentiable.
-        """
-        return self.redistribute(
-            placements=[Replicate()] * self.device_mesh.ndim
-        ).to_local(grad_placements=grad_placements)
-
     @property
     def device_mesh(self) -> DeviceMesh:
         """
@@ -493,7 +464,7 @@ def distribute_tensor(
     torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
 
     # get default device mesh if there's nothing specified
-    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
         # call PyTorch/XLA SPMD for `xla` backend type device mesh.
@@ -608,7 +579,7 @@ def distribute_module(
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
-    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and

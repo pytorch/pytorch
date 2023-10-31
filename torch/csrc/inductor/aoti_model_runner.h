@@ -25,8 +25,6 @@ class TORCH_API AOTIModelRunner {
       AOTInductorStreamHandle cuda_stream_handle = nullptr,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr);
 
-  std::vector<const char*> get_call_spec();
-
   AOTIModelRunner(
       const char* model_path,
       size_t num_models,
@@ -40,7 +38,6 @@ class TORCH_API AOTIModelRunner {
   decltype(&AOTInductorModelContainerGetNumOutputs) get_num_outputs_func_{
       nullptr};
   decltype(&AOTInductorModelContainerRun) run_func_{nullptr};
-  decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 };
 
@@ -53,10 +50,6 @@ class TORCH_API AOTIModelRunnerCpu : public AOTIModelRunner {
       std::vector<at::Tensor> inputs,
       AOTIProxyExecutorHandle proxy_executor_handle = nullptr) {
     return AOTIModelRunner::run(inputs, nullptr, proxy_executor_handle);
-  }
-
-  std::vector<const char*> get_call_spec() {
-    return AOTIModelRunner::get_call_spec();
   }
 };
 

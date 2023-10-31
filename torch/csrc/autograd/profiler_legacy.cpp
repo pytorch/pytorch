@@ -18,7 +18,6 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/irange.h>
 
@@ -478,7 +477,7 @@ void LegacyEvent::record(bool record_cuda) {
     torch::profiler::impl::cudaStubs()->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
-  cpu_ns_ = c10::getTime();
+  cpu_ns_ = torch::profiler::impl::getTime();
 }
 
 /* static */ LegacyEvent LegacyEvent::fromIValue(

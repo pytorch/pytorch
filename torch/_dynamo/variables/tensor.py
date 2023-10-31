@@ -4,7 +4,6 @@ import operator
 import types
 from typing import Dict, List
 
-
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -19,17 +18,12 @@ import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    guard_scalar,
-    GuardOnDataDependentSymNode,
-    SymTypes,
-)
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
@@ -66,7 +60,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = {
+    _nonvar_fields = [
         "proxy",
         "dtype",
         "device",
@@ -77,11 +71,7 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-        "is_sparse",
-        "class_type",
-        "specialized_value",
-        *VariableTracker._nonvar_fields,
-    }
+    ]
 
     def get_real_value(self):
         """
@@ -826,14 +816,7 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph=None):
-        try:
-            return guard_scalar(self.sym_num)
-        except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
-                UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
-                case_name="constrain_as_size_example",
-            )
+        return guard_scalar(self.sym_num)
 
     def call_method(
         self,
@@ -931,8 +914,6 @@ class NumpyNdarrayVariable(TensorVariable):
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
-        elif name in ["__version__"]:
-            unimplemented("delegate np.__version__ to NumPy")
         if result is None:
             raise NotImplementedError()
         return result
@@ -966,9 +947,9 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
-    def __init__(
-        self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
-    ):
+    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
+        raw_value = kwargs.pop("raw_value", None)
+        need_unwrap = kwargs.pop("need_unwrap", True)
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -981,6 +962,17 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
+
+    def as_specialized(self, tx):
+        for graph_arg in tx.output.graphargs:
+            if graph_arg.source is self.source:
+                graph_arg.erase()
+
+        for g in self.guards:
+            if g.is_volatile:
+                g.create_fn = GuardBuilder.CONSTANT_MATCH
+
+        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
 
 
 class FakeItemVariable(TensorVariable):

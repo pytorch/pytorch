@@ -19,7 +19,6 @@ def as_nested_tensor(
     tensor_list: List[Tensor],
     dtype: Optional[DType] = None,
     device: Optional[Device] = None,
-    layout=None
 ) -> Tensor:
     r"""
     Constructs a nested tensor preserving autograd history from :attr:`tensor_list` a list of tensors.
@@ -35,8 +34,6 @@ def as_nested_tensor(
             Default: if None, same :class:`torch.dtype` as leftmost tensor in the list.
         device (:class:`torch.device`, optional): the desired device of returned nested tensor.
             Default: if None, same :class:`torch.device` as leftmost tensor in the list
-        layout (:class:`torch.layout`, optional): the desired layout of returned nested tensor.
-            Only strided and jagged layouts are supported. Default: if None, the strided layout.
 
     Example::
 
@@ -56,20 +53,9 @@ def as_nested_tensor(
         not isinstance(t, Tensor) for t in tensor_list
     ):
         raise TypeError(
-            "as_nested_tensor(): Expected first argument to be a list of tensors "
+            "nested_tensor(): Expected first argument to be a list of tensors "
         )
-
-    if layout is None:
-        layout = torch.strided
-    if layout == torch.strided:
-        return torch._nested_tensor_from_tensor_list(tensor_list, dtype, None, device, None)
-    elif layout == torch.jagged:
-        from torch.nested._internal.nested_tensor import jagged_from_list
-
-        nt, _ = jagged_from_list(tensor_list, offsets=None, device=device, dtype=dtype)
-        return nt
-    else:
-        raise RuntimeError(f"Specified layout is unsupported for nested tensors: {layout}")
+    return torch._nested_tensor_from_tensor_list(tensor_list, dtype, None, device, None)
 
 
 # Note: This not only adds doc strings for the nested ops, but
@@ -169,15 +155,9 @@ Example::
             requires_grad=requires_grad,
             pin_memory=pin_memory)
     elif layout == torch.jagged:
-        # Need to:
-        #   * Detach tensors to discard autograd history
-        #   * Wrap lists of scalars as tensors
-        list_of_tensors = [t.detach() if isinstance(t, Tensor) else torch.as_tensor(t)
-                           for t in tensor_list]
-
         from torch.nested._internal.nested_tensor import jagged_from_list
 
-        nt, _ = jagged_from_list(list_of_tensors, offsets=None, device=device, dtype=dtype)
+        nt, _ = jagged_from_list(tensor_list, offsets=None, device=device, dtype=dtype)
 
         nt.requires_grad_(requires_grad)
         if pin_memory:

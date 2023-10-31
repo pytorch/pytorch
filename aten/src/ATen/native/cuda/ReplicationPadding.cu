@@ -242,11 +242,13 @@ void replication_pad2d_backward_out_cuda_template(
   const auto padR = paddingSize[1];
   const auto padT = paddingSize[2];
   const auto padB = paddingSize[3];
+  int planeDim = 0;
   int dimh = 1;
   int dimw = 2;
 
   int numInputDims = input.dim();
   if (numInputDims == 4) {
+    planeDim++;
     dimh++;
     dimw++;
   }
@@ -268,7 +270,7 @@ void replication_pad2d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad2d_backward_cuda", [&] {
 
         auto gradInput_ = gradInput;
@@ -374,8 +376,18 @@ void replication_pad3d_backward_out_cuda_template(
   shapeAndGradOutputCheck3d(input, gradOutput, pleft, pright, ptop,
       pbottom, pfront, pback);
 
+  int planeDim = 0;
+  int dimd = 1;
+  int dimh = 2;
+  int dimw = 3;
 
   int numInputDims = input.dim();
+  if (numInputDims == 5) {
+    planeDim++;
+    dimd++;
+    dimh++;
+    dimw++;
+  }
 
   gradInput.resize_as_(input);
   if (gradInput.numel() == 0) {
@@ -383,7 +395,7 @@ void replication_pad3d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad3d_backward_cuda", [&] {
       auto gradInput_ = gradInput;
       auto gradOutput_ = gradOutput;
@@ -437,7 +449,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
     input.scalar_type(), "replication_pad1d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -486,10 +498,12 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
       "output gradient tensor must fit into 32-bit index math");
 
   const int padL = paddingSize[0];
+  int planeDim = 0;
   int dimw = 1;
 
   int numInputDims = input.ndimension();
   if (numInputDims == 3) {
+    planeDim++;
     dimw++;
   }
   int iwidth = input.size(dimw);
@@ -499,7 +513,7 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
 
       auto gradInput_ = gradInput;
@@ -543,7 +557,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
   // const auto padR = paddingSize[1]; // This padding is ignored here
   const auto padT = paddingSize[2];
   // const auto padB = paddingSize[3]; // This padding is ignored here
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
     input.scalar_type(), "replication_pad2d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;
@@ -635,7 +649,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
     return;
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kHalf,
     input.scalar_type(), "replication_pad3d_cuda", [&] {
       at::Tensor input_ = input;
       at::Tensor output_ = output;

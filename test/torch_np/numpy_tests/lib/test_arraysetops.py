@@ -3,39 +3,24 @@
 """Test functions for 1D array set operations.
 
 """
-from unittest import skipIf
+from unittest import expectedFailure as xfail
 
-import numpy
-
+import torch._numpy as np
 from pytest import raises as assert_raises
+
+from torch._numpy import unique
+
+from torch._numpy.testing import assert_array_equal, assert_equal
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    subtest,
-    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
-    xpassIfTorchDynamo,
 )
 
 
-# If we are going to trace through these, we should use NumPy
-# If testing on eager mode, we use torch._numpy
-if TEST_WITH_TORCHDYNAMO:
-    import numpy as np
-    from numpy import ediff1d, in1d, intersect1d, setdiff1d, setxor1d, union1d, unique
-    from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
-
-else:
-    import torch._numpy as np
-    from torch._numpy import unique
-    from torch._numpy.testing import assert_array_equal, assert_equal
-
-
-@skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-@xpassIfTorchDynamo  # (reason="TODO")
+@xfail  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestSetOps(TestCase):
     def test_intersect1d(self):
@@ -160,14 +145,11 @@ class TestSetOps(TestCase):
             (np.array([1, 2, 3], dtype=np.int64), None, np.nan, "to_end"),
             # should fail because attempting
             # to downcast to int type:
-            subtest(
-                (
-                    np.array([1, 2, 3], dtype=np.int64),
-                    np.array([5, 7, 2], dtype=np.float32),
-                    None,
-                    "to_begin",
-                ),
-                decorators=[xfailIfTorchDynamo],
+            (
+                np.array([1, 2, 3], dtype=np.int64),
+                np.array([5, 7, 2], dtype=np.float32),
+                None,
+                "to_begin",
             ),
             # should fail because attempting to cast
             # two special floating point values
@@ -223,7 +205,6 @@ class TestSetOps(TestCase):
         assert_equal(actual, expected)
         assert actual.dtype == expected.dtype
 
-    @skipIf(True, reason="NP_VER: fails with NumPy 1.22.x")
     @parametrize("kind", [None, "sort", "table"])
     def test_isin(self, kind):
         # the tests for in1d cover most of isin's behavior
@@ -236,7 +217,7 @@ class TestSetOps(TestCase):
         isin_slow = np.vectorize(_isin_slow, otypes=[bool], excluded={1})
 
         def assert_isin_equal(a, b):
-            x = np.isin(a, b, kind=kind)
+            x = isin(a, b, kind=kind)
             y = isin_slow(a, b)
             assert_array_equal(x, y)
 
@@ -463,7 +444,7 @@ class TestSetOps(TestCase):
         a = np.array([0, 1, 2], dtype="timedelta64[s]")
         b = a
         # Make sure it raises a value error:
-        with assert_raises(ValueError):
+        with pytest.raises(ValueError):
             in1d(a, b, kind="table")
 
     @parametrize(
@@ -494,7 +475,7 @@ class TestSetOps(TestCase):
         )
 
         if expect_failure:
-            with assert_raises(RuntimeError, match="exceed the maximum"):
+            with pytest.raises(RuntimeError, match="exceed the maximum"):
                 in1d(ar1, ar2, kind=kind)
         else:
             assert_array_equal(in1d(ar1, ar2, kind=kind), expected)
@@ -763,7 +744,7 @@ class TestUnique(TestCase):
     #    assert_equal(a3_idx.dtype, np.intp)
     #    assert_equal(a3_inv.dtype, np.intp)
 
-    @xpassIfTorchDynamo  # (reason="unique with nans")
+    @xfail  # (reason="unique with nans")
     def test_unique_1d_2(self):
         # test for ticket 2111 - float
         a = [2.0, np.nan, 1.0, np.nan]
@@ -809,7 +790,7 @@ class TestUnique(TestCase):
         assert_array_equal(unique(inp, axis=0), unique(inp_arr, axis=0), msg)
         assert_array_equal(unique(inp, axis=1), unique(inp_arr, axis=1), msg)
 
-    @xpassIfTorchDynamo  # _run_axis_tests xfails with the message
+    @xfail  # _run_axis_tests xfails with the message
     #   torch has different unique ordering behaviour"
     def test_unique_axis(self):
         types = []
@@ -835,7 +816,7 @@ class TestUnique(TestCase):
         uniq = unique(x, axis=axis)
         assert_array_equal(uniq, [1, 2, 3, 4])
 
-    @xpassIfTorchDynamo  # (reason="unique / return_index")
+    @xfail  # (reason="unique / return_index")
     def test_unique_axis_zeros(self):
         # issue 15559
         single_zero = np.empty(shape=(2, 0), dtype=np.int8)
@@ -942,8 +923,7 @@ class TestUnique(TestCase):
         msg = "Unique's return_counts=True failed with axis=1"
         assert_array_equal(cnt, np.array([2, 1, 1]), msg)
 
-    @skipIf(True, reason="NP_VER: fails on CI with older NumPy")
-    @xpassIfTorchDynamo  # (reason="unique / return_index / nans")
+    @xfail  # (reason="unique / return_index / nans")
     def test_unique_nanequals(self):
         # issue 20326
         a = np.array([1, 1, np.nan, np.nan, np.nan])

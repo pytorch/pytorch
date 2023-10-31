@@ -2354,10 +2354,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
         Vectorized<T>{vinner_type(image_half<underline_type>())}; // i/2*ln()
   }
 
-  Vectorized<T> atanh() const {
-    return mapOrdinary(std::atanh);
-  }
-
   Vectorized<T> asin() const {
     // asin(x)
     // = -i*ln(iz + sqrt(1 -z^2))
@@ -2379,7 +2375,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     auto ln = Vectorized<T>(Vectorized<T>(b_a) + root).log();
     return Vectorized<T>(ln.vec().swapped()).conj();
 #else
-    return mapOrdinary(std::asin);
+    return map(std::asin);
 #endif
   }
 

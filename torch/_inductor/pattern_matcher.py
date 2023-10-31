@@ -1169,7 +1169,7 @@ def fx_to_pattern(
 
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
-        return MultiOutputPattern(pytree.tree_leaves(pattern))
+        return MultiOutputPattern(pytree.tree_flatten(pattern)[0])
     return pattern
 
 

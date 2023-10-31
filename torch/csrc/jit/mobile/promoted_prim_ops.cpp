@@ -180,10 +180,7 @@ void toList(Stack& stack) {
       (out_ty == at::FloatType::get() && t.is_floating_point()) ||
           (out_ty == at::ComplexType::get() && t.is_complex()) ||
           tryScalarTypeFromJitType(*out_ty) == t.scalar_type(),
-      "Output annotation element type and runtime tensor element type must match for tolist(): ",
-      *tryScalarTypeFromJitType(*out_ty),
-      " vs ",
-      t.scalar_type());
+      "Output annotation element type and runtime tensor element type must match for tolist()");
 
   // Check that the dimension of the Tensor matches that of the
   // annotation.

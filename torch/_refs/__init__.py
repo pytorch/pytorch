@@ -2227,10 +2227,18 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[DimsType] = None,
+    dim: Optional[int] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
+    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
+    # case must be handled separately.
+    if dim is None:
+        assert not keepdim
+        result = torch.logical_not(torch.any(torch.logical_not(a)))
+    else:
+        result = torch.logical_not(
+            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
+        )
 
     if a.dtype == torch.uint8:
         result = result.to(dtype=torch.uint8)
@@ -2250,10 +2258,7 @@ def any(
     keepdim: bool = False,
 ) -> TensorLikeType:
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    if isinstance(dim, (list, tuple)) and len(dim) == 0:
-        result = a_.clone()
-    else:
-        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
+    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
