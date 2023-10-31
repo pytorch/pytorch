@@ -1,5 +1,5 @@
 from torchvision.models.quantization.resnet import resnet18
-from torch.ao.quantization.experimental.quantization_helper import (
+from quantization_helper import (
     evaluate,
     prepare_data_loaders,
     training_loop

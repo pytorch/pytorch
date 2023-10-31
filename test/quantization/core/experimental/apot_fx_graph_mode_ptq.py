@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.ao.quantization
 from torchvision.models.quantization.resnet import resnet18
-from torch.ao.quantization.experimental.quantization_helper import (
+from quantization_util import (
     evaluate,
     prepare_data_loaders
 )
@@ -34,7 +34,7 @@ def calibrate(model, data_loader):
         for image, target in data_loader:
             model(image)
 
-from torch.ao.quantization.experimental.qconfig import (
+from torch.ao.quantization.experimental.apot.qconfig import (
     uniform_qconfig_8bit,
     apot_weights_qconfig_8bit,
     apot_qconfig_8bit,
