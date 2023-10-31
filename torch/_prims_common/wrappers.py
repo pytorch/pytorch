@@ -82,7 +82,7 @@ class elementwise_type_promotion_wrapper:
     """
     Adds elementwise type promotion to a Python reference implementation.
 
-    Takes two kwargs, type_promoting_args and type_promotion_kind.
+    Takes three kwargs, type_promoting_args, type_promotion_kind and result_dtype.
 
     type_promoting_args must be a string Sequence specifiying the argument names of all
     arguments that participate in type promotion (and should be type promoted). If the
@@ -91,6 +91,8 @@ class elementwise_type_promotion_wrapper:
 
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
+
+    result_dtype will promote the result to the dtype specified by the argument name.
 
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
@@ -135,7 +137,9 @@ class elementwise_type_promotion_wrapper:
             result = fn(**bound.arguments)
 
             if self.result_dtype and self.result_dtype in bound.arguments:
-                result_dtype = bound.arguments[self.result_dtype]
+                maybe_dtype = bound.arguments[self.result_dtype]
+                if maybe_dtype:  # dtype cannot be None
+                    result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)
