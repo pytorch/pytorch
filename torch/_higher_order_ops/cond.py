@@ -8,8 +8,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
-from torch._dynamo.exc import CondOpArgsMismatchError
-from torch._dynamo.utils import disable_cache_limit
+from torch._functorch.utils import exposed_in
 
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
@@ -42,6 +41,7 @@ class UnsupportedAliasMutationException(RuntimeError):
     reason: str
 
 
+@exposed_in("torch")
 def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
@@ -142,7 +142,7 @@ def cond(pred, true_fn, false_fn, operands):
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
-        with disable_cache_limit():
+        with torch._dynamo.utils.disable_cache_limit():
             return torch.compile(cond_op, backend="eager", fullgraph=True)(
                 pred, true_fn, false_fn, operands
             )
@@ -195,10 +195,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         if node.op == "output":
             false_outs.extend(node.args)
 
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_outs)
+    flat_true_outs = pytree.arg_tree_leaves(*true_outs)
+    flat_false_outs = pytree.arg_tree_leaves(*false_outs)
     if len(flat_true_outs) != len(flat_false_outs):
-        raise CondOpArgsMismatchError(
+        raise torch._dynamo.exc.CondOpArgsMismatchError(
             f"Expected to return same number of outputs but got:"
             f"\n  {true_fn.__name__} returns {len(flat_true_outs)} item(s)"
             f"\n  {false_fn.__name__} returns {len(flat_false_outs)} item(s)"
@@ -208,7 +208,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         true_out = flat_true_outs[i]
         false_out = flat_false_outs[i]
         if true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]:
-            raise CondOpArgsMismatchError(
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_out.meta['tensor_meta']}"
                 f"\n  {false_fn.__name__} returns {false_out.meta['tensor_meta']}"
@@ -282,8 +282,8 @@ def inner(mode, pred, true_fn, false_fn, operands):
 def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     with mode:
         true_outs = true_fn(*operands)
-        flat_true_outs, _ = pytree.tree_flatten(true_outs)
-        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+        flat_true_outs = pytree.tree_leaves(true_outs)
+        flat_false_outs = pytree.tree_leaves(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
@@ -291,7 +291,7 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
-            raise CondOpArgsMismatchError(
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
                 f"Expected each tensor to have same metadata but got:"
                 f"\n  {true_fn.__name__} returns {true_meta}"
                 f"\n  {false_fn.__name__} returns {false_meta}"
@@ -371,7 +371,7 @@ def _has_potential_branch_input_alias(branch, inputs):
                         return out_storage in input_storages
                     return False
 
-                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
+                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
                     return True
 
         for _, module in gm.named_children():

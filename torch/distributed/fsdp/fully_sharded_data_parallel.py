@@ -1243,6 +1243,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         rank0_only: bool = True,
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
+        cpu_offload: bool = True,
     ) -> Dict[str, Any]:
         """
         The internal API that is used by all the optim_state_dict implementations.
@@ -1277,6 +1278,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             group=group,
             using_optim_input=using_optim_input,
             use_orig_params=use_orig_params,
+            cpu_offload=cpu_offload,
         )
 
     @staticmethod
@@ -1850,6 +1852,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             full_state_dict=state_dict_settings.state_dict_type
             == StateDictType.FULL_STATE_DICT,
             group=group,
+            cpu_offload=getattr(
+                state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
+            ),
         )
 
     @staticmethod

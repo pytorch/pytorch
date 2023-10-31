@@ -376,10 +376,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -772,7 +769,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -823,6 +820,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)

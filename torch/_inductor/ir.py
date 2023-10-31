@@ -16,6 +16,7 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Iterable,
     List,
     Optional,
     Sequence,
@@ -44,13 +45,18 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .dependencies import extract_read_writes, var_builder
+from .dependencies import (
+    extract_input_node_reduction_ranges,
+    extract_read_writes,
+    var_builder,
+)
 from .utils import (
     argsort,
     cache_on_self,
@@ -58,6 +64,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -112,6 +119,9 @@ def validate_ir(node_or_nodes):
         if isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
+        elif isinstance(nodes, dict):
+            for node in nodes.values():
+                _check_tensorbox(node)
         else:
             assert isinstance(
                 nodes,
@@ -122,7 +132,6 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.logic.boolalg.Boolean,
                     Expr,
-                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -178,12 +187,12 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def get_stride_order(seq: Sequence[int]):
+def get_stride_order(seq: Sequence[int]) -> List[int]:
     """
     Convert strides to stride order
     """
     sorted_idx: List[int] = argsort(seq)
-    out = [None for _ in range(len(seq))]
+    out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
     return out
@@ -236,7 +245,6 @@ def is_cpu(x):
     return get_device_type(x) == "cpu"
 
 
-@dataclasses.dataclass
 class IRNode:
     _current_origins: ClassVar[Set[Any]] = set()
 
@@ -305,6 +313,21 @@ class IRNode:
         will catch this thrown error and suppress it with a warning.
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
+
+    # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
+    # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
+    # the code dynamically check for defined attributes.
+    get_device: Callable[[], torch.device]
+    get_dtype: Callable[[], torch.dtype]
+    get_name: Callable[[], str]
+    get_reads: Callable[[], Any]
+    get_stride: Callable[[], Any]
+    get_storage_numel: Callable[[], Any]
+    has_exceeded_max_reads: Callable[[], bool]
+    make_loader: Callable[[], Callable[[Any], Any]]
+    make_indexer: Callable[[], Callable[[Any], Any]]
+    mark_reuse: Callable[[List[Any]], None]
+    realize_hint: Callable[[], None]
 
 
 @dataclasses.dataclass
@@ -385,6 +408,21 @@ class Loops(IRNode):
                     self.make_loader(),
                     self.get_size(),
                 ).reads
+
+    def get_reduction_size(self):
+        raise NotImplementedError(
+            f"get_reduction_size() is not implemented by {type(self)}!"
+        )
+
+    def get_reduction_type(self):
+        raise NotImplementedError(
+            f"get_reduction_type() is not implemented by {type(self)}!"
+        )
+
+    def constant_to_device(self, device):
+        raise NotImplementedError(
+            f"constant_to_device() is not implemented by {type(self)}!"
+        )
 
 
 def nop_loader_fn(idx, *, dtype):
@@ -587,6 +625,7 @@ class Reduction(Loops):
         reduction_ranges,
         reduction_type,
         reduction_numel,
+        input_node: Optional[IRNode] = None,
     ):
         def _is_static(x):
             return isinstance(x, (int, sympy.Integer))
@@ -692,9 +731,40 @@ class Reduction(Loops):
 
         # easy cases
         if numel_hint == 1:
-            return ReductionHint.INNER, inner_reduction_splits(
-                reduction_numel_hint, numel_hint
-            )
+            split = inner_reduction_splits(reduction_numel_hint, numel_hint)
+            if split == 1:
+                # No need to split.
+                return ReductionHint.INNER, split
+            if (
+                len(ranges) == 0
+                and input_node is not None
+                and isinstance(input_node, TensorBox)
+            ):
+                # Only handles the case where keep_dim = False.
+                # Otherwise, we need to propagate reduction dim info to the stage where
+                # the intermediate loader of the first Reduction is generated.
+                new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                    input_node
+                )
+                if new_ranges is not None and new_reduction_ranges is not None:
+                    extracted_numel_hint = V.graph.sizevars.symbolic_hint(
+                        sympy_product(new_ranges + new_reduction_ranges)
+                    )
+                    if reduction_numel_hint == extracted_numel_hint:
+                        log.debug(
+                            "Use previous IRNode's range and reduction_ranges instead of split. "
+                            "current ranges: %s, current reduction ranges: %s, current split: %d, "
+                            "new ranges: %s, new reduction ranges: %s",
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
+                        )
+                        # If the input_node or its dependent nodes are also Reduction nodes,
+                        # use reduction_sizes of this node or its dependent nodes directly.
+                        return ReductionHint.INNER, -1
+            return ReductionHint.INNER, split
         if (
             reduction_numel_hint <= min_elements_per_thread
             or numel_hint >= num_sm * 2 * 32
@@ -825,6 +895,7 @@ class Reduction(Loops):
         reduction_ranges: List[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: Optional[IRNode] = None,
     ):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
@@ -903,13 +974,33 @@ class Reduction(Loops):
             reduction_ranges,
             reduction_type,
             reduction_numel,
+            input_node,
         )
         # intermediate reduction in split can contain complex indexing,
         # and num_splits will fail to correctly set the hint
         # reuse the passed hint if available
         if reduction_hint == ReductionHint.DEFAULT:
             reduction_hint = hint
-        if split > 1:
+        if split == -1:
+            assert input_node is not None
+            new_ranges, new_reduction_ranges = extract_input_node_reduction_ranges(
+                input_node
+            )
+            assert new_ranges is not None
+            assert new_reduction_ranges is not None
+            return cls.create_multilayer_existing_ranges(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                new_ranges,
+                new_reduction_ranges,
+                reduction_type,
+                reduction_hint,
+            )
+        elif split > 1:
             # triton doesn't support reduce to single element well, so break it up
             return cls.create_multilayer(
                 device,
@@ -972,6 +1063,8 @@ class Reduction(Loops):
     def _multilayer_second_step_hint(
         split: int, numel_hint: int, reduction_hint: ReductionHint
     ) -> ReductionHint:
+        if split == -1:
+            return reduction_hint
         if split <= 512 and numel_hint <= 512 and reduction_hint == ReductionHint.OUTER:
             return ReductionHint.OUTER_TINY
         if (
@@ -1018,6 +1111,88 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
+    def _multilayer_wrap_loader_existing_ranges(
+        cls,
+        loader,
+        original_ranges,
+        original_reduction_ranges,
+        new_ranges,
+        new_reduction_ranges,
+        default,
+    ):
+        assert len(original_ranges) == 0, f"{original_ranges}= is not equal to []"
+        reindex = View.dynamic_reshape_indexer(
+            original_reduction_ranges, tuple(new_ranges) + tuple(new_reduction_ranges)
+        )
+
+        def wrapper_fn(index, reduction_index):
+            return loader([], reindex(tuple(index) + tuple(reduction_index)))
+
+        return wrapper_fn
+
+    @classmethod
+    def create_multilayer_helper(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        wrapper_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        split: int,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
+        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
+        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
+        intermediate_dtype = (
+            dst_dtype
+            if dst_dtype not in (torch.float16, torch.bfloat16)
+            else torch.float
+        )
+        intermediate = Reduction.create(
+            device,
+            intermediate_dtype,
+            src_dtype,
+            wrapper_fn,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            reduction_hint,
+        )
+        intermediate.realize()
+        intermediate_loader = intermediate.make_loader()
+
+        def intermediate_fn(index, reduction_index):
+            return intermediate_loader([*index, *reduction_index])
+
+        numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
+        reduction_hint = cls._multilayer_second_step_hint(
+            split, numel_hint, reduction_hint
+        )
+
+        assert original_ranges == new_ranges[: len(original_ranges)]
+        return TensorBox.create(
+            Reduction(
+                device,
+                dst_dtype,
+                intermediate_fn,
+                original_ranges,
+                new_ranges[len(original_ranges) :],
+                reduction_type,
+                src_dtype,
+                reduction_hint,
+            )
+        )
+
+    @classmethod
     def create_multilayer(
         cls,
         device: torch.device,
@@ -1042,45 +1217,59 @@ class Reduction(Loops):
             inner_fn, reduction_ranges, reduction_numel, split, block_size, default
         )
 
-        # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
-        # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
-        # in fp32 and not reduce precision by breaking up the kernel into multiple layers
-        intermediate_dtype = (
-            dst_dtype
-            if dst_dtype not in (torch.float16, torch.bfloat16)
-            else torch.float
-        )
-        intermediate = Reduction.create(
+        return cls.create_multilayer_helper(
             device,
-            intermediate_dtype,
+            dst_dtype,
             src_dtype,
             wrapper_fn,
+            ranges,
+            reduction_ranges,
             [*ranges, split],
             [block_size],
             reduction_type,
+            split,
             reduction_hint,
         )
-        intermediate.realize()
-        intermediate_loader = intermediate.make_loader()
 
-        def intermediate_fn(index, reduction_index):
-            return intermediate_loader([*index, *reduction_index])
-
-        numel_hint = V.graph.sizevars.size_hint(sympy_product(ranges))
-        reduction_hint = cls._multilayer_second_step_hint(
-            split, numel_hint, reduction_hint
+    @classmethod
+    def create_multilayer_existing_ranges(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        original_ranges: List[Expr],
+        original_reduction_ranges: List[Expr],
+        new_ranges: List[Expr],
+        new_reduction_ranges: List[Expr],
+        reduction_type: str,
+        reduction_hint: ReductionHint,
+    ):
+        """
+        Break a large reduction up into multiple smaller reductions
+        recursively
+        """
+        default = cls.default_value(reduction_type, dst_dtype)
+        wrapper_fn = cls._multilayer_wrap_loader_existing_ranges(
+            inner_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            default,
         )
-        return TensorBox.create(
-            Reduction(
-                device,
-                dst_dtype,
-                intermediate_fn,
-                ranges,
-                [split],
-                reduction_type,
-                src_dtype,
-                reduction_hint,
-            )
+        return cls.create_multilayer_helper(
+            device,
+            dst_dtype,
+            src_dtype,
+            wrapper_fn,
+            original_ranges,
+            original_reduction_ranges,
+            new_ranges,
+            new_reduction_ranges,
+            reduction_type,
+            -1,
+            reduction_hint,
         )
 
 
@@ -1146,9 +1335,12 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
-        def const(idx, val):
+        def const(val):
             def inner_fn(idx):
-                return ops.constant(val, dst_dtype)
+                return ops.constant(
+                    val,
+                    dtype,
+                )
 
             return Pointwise.create(
                 device=device,
@@ -1172,7 +1364,7 @@ class WelfordReduction(Reduction):
 
                 return Pointwise.create(
                     device=device,
-                    dtype=dst_dtype,
+                    dtype=dtype,
                     inner_fn=inner_fn,
                     ranges=list(ranges),
                 )
@@ -1251,7 +1443,7 @@ class WelfordReduction(Reduction):
         return (0, 0, 0)
 
     @classmethod
-    def create_multilayer(
+    def create_multilayer(  # type: ignore[override]
         cls,
         device: torch.device,
         dtype: torch.dtype,
@@ -1377,7 +1569,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
-        # the ReinterpretedView either, so dont pass along those arguments
+        # the ReinterpretView either, so don't pass along those arguments
         buffer, _ = as_storage_and_layout(
             x.data,
             freeze=freeze,
@@ -1455,7 +1647,7 @@ class BaseView(IRNode):
         return self.data.get_storage_numel()
 
     def is_extern(self):
-        return self.data.is_extern()
+        return self.data.is_extern()  # type: ignore[attr-defined]
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -1465,7 +1657,7 @@ class BaseView(IRNode):
             ).reads
 
     def unwrap_view(self):
-        x = self
+        x: IRNode = self
         while isinstance(x, BaseView):
             x = x.data
         return x
@@ -1684,14 +1876,25 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
+        unbacked_symbols_in_sizes = False
+        if (
+            len(free_unbacked_symbols(old_size)) > 0
+            or len(free_unbacked_symbols(new_size)) > 0
+        ):
+            unbacked_symbols_in_sizes = True
+
         if 0 in new_size:
 
             def fake_reindex(index):
                 return tuple([0] * len(old_size))
 
-            return cls(x, tuple(new_size), fake_reindex)
+            return cls(x, list(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x):
+        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
+            if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
+                # realize x; otherwise, the dynamic_reshape_indexer below will fail
+                # due to the size_hint's inability to process unbacked SymInts
+                x.realize()
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -1856,7 +2059,7 @@ class ReinterpretView(BaseView):
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.get_name(),
+            self.data,
             self.layout.size,
             self.layout.stride,
             self.layout.offset,
@@ -1914,6 +2117,9 @@ class SliceView(View):
 
 
 class BaseConstant(IRNode):
+    dtype: torch.dtype
+    device: torch.device
+
     def get_size(self):
         return ()
 
@@ -1981,7 +2187,7 @@ class Layout(IRNode):
         device: torch.device,
         dtype: torch.dtype,
         size: List[Expr],
-        stride: List[Expr],
+        stride: Optional[Sequence[Union[Expr, int]]],
         offset: Expr = Integer(0),
     ):
         assert stride is None or len(size) == len(
@@ -2040,10 +2246,28 @@ class Layout(IRNode):
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
+
+        # ignore dimensions of size 1, they dont affect layout
+        non_1_indices = [
+            i
+            for i, dim in enumerate(self.size)
+            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+        ]
+
+        stride = [self.stride[i] for i in non_1_indices]
+        order = [order[i] for i in non_1_indices]
+
+        def sorted_indices(arr):
+            sorted_arr = sorted(arr)
+            return [sorted_arr.index(element) for element in arr]
+
+        # since we may have removed dimensions, need to re-sort & re-index order
+        order = sorted_indices(order)
+
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
@@ -2092,7 +2316,7 @@ class FixedLayout(Layout):
         device: torch.device,
         dtype: torch.dtype,
         size: Union[List[Expr], List[int]],
-        stride: Optional[Union[List[Expr], List[int]]] = None,
+        stride: Optional[Sequence[Union[Expr, int]]] = None,
         offset: Union[Expr, int] = Integer(0),
     ):
         if stride is None:
@@ -2213,7 +2437,7 @@ class FlexibleLayout(Layout):
 class AliasedLayout(Layout):
     """Shares the same storage as another tensor"""
 
-    def __init__(self, view: "ReinterpretView"):
+    def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2244,8 +2468,8 @@ class NoneLayout(IRNode):
     # If you have an ir.Node with NoneLayout, you probably need to setup
     # dependencies manually in scheduler
 
-    def __init__(self):
-        self.device = torch.device("cpu")
+    def __init__(self, device):
+        self.device = device
 
     def storage_size(self):
         return 0
@@ -2260,13 +2484,13 @@ class MutationLayout(Layout):
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,  # type: ignore[arg-type]
+            None,
         )
         self.target = target
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter
+    @Layout.stride.getter  # type: ignore[attr-defined]
     def stride(self):
         return self.real_layout().stride
 
@@ -2504,18 +2728,18 @@ class Buffer(IRNode):
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
             wrapper.writeline(
-                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
             )
             symbols_to_define.remove(s)
         assert (
@@ -2531,6 +2755,10 @@ class Buffer(IRNode):
         Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
         """
         return 0
+
+    def should_allocate(self):
+        # Returns False by default.
+        return False
 
 
 class InputBuffer(Buffer):
@@ -2620,20 +2848,21 @@ class ComputedBuffer(Buffer):
 
     def make_loader(self):
         # Inline constants and index_expressions
-        can_inline = (
+        if (
             hasattr(self.data, "make_loader")
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
-        )
-        if can_inline:
+        ):
+            # can be inlined
             return self.data.make_loader()
         return super().make_loader()
 
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
-        if self.data.get_reduction_type():
+        if isinstance(self.data, Reduction):
             return partial(self.data.store_reduction, self.name, indexer)
         else:
+            assert isinstance(self.data, Pointwise)
             return partial(self.data.store_output, self.name, indexer)
 
     def get_fill_order(self):
@@ -3019,17 +3248,43 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        buffer_names = []
         for i in range(len(inputs)):
-            kernel.data.inputs.append(
-                cls.realize_into(
-                    inputs[i],
-                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
-                )
+            input_buffer = cls.realize_into(
+                inputs[i],
+                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
-        kernel.data.name = V.graph.register_buffer(kernel.data)
-        kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+            concat_kernel.inputs.append(input_buffer)
+
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
+
+            if (
+                input_unwrapped.is_input_buffer()
+                and inputs[i].get_device().type == "cuda"
+                and not is_dynamic(input_buffer)
+            ):
+                buffer_names.append(input_buffer.get_name())
+
+        if len(buffer_names) > 1:
+            V.graph.register_list(buffer_names)
+
+        concat_kernel.name = V.graph.register_buffer(concat_kernel)
+        concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
 
         return kernel
+
+    @classmethod
+    def can_realize_into_without_copy(cls, src):
+        if isinstance(src, TensorBox):
+            # unwrap a TensorBox
+            return cls.can_realize_into_without_copy(src.data)
+
+        return isinstance(src.data.layout, FlexibleLayout) and not isinstance(
+            src.data, ExternKernelAlloc
+        )
 
     @classmethod
     def realize_into(cls, src, dst):
@@ -3047,9 +3302,8 @@ class ConcatKernel(NopKernel):
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
-            if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
-                src.data, ExternKernelAlloc
-            ):
+            assert hasattr(src.data, "layout")
+            if cls.can_realize_into_without_copy(src):
                 src.data.layout = AliasedLayout(dst)
                 return src.data
         # introduce a copy
@@ -3073,6 +3327,9 @@ class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
+    ordered_kwargs_for_cpp_kernel: Iterable[str] = dataclasses.field(
+        default_factory=list
+    )
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
@@ -3265,6 +3522,8 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
+            while isinstance(x.get_layout(), AliasedLayout):
+                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
@@ -3344,21 +3603,24 @@ class ExternKernel(InputsKernel):
         )
 
     def codegen_kwargs(self):
-        kwargs = []
-        if self.kwargs:
-            if V.graph.cpp_wrapper:
-                # TODO: use native_functions.yaml as the ground truth
+        if not self.kwargs:
+            return []
+        if V.graph.cpp_wrapper:
+            # FIXME: we should unconditionally fill self.kwargs with missing default values
+            # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
+            if self.kwargs:
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel has to be provided"
-                for arg_name in self.ordered_kwargs_for_cpp_kernel:
-                    v = self.get_kwargs_value(arg_name)
-                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
-            else:
-                kwargs = [
-                    f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
-                    for k, v in self.kwargs.items()
-                ]
+                ), "ordered_kwargs_for_cpp_kernel is missing"
+            kwargs = []
+            for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                v = self.get_kwargs_value(arg_name)
+                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+        else:
+            kwargs = [
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
+                for k, v in self.kwargs.items()
+            ]
         return kwargs
 
     def codegen_size_asserts(self, wrapper):
@@ -3518,6 +3780,73 @@ class ExternKernelAlloc(ExternKernel):
         raise NotImplementedError
 
 
+class UserDefinedTritonKernel(ExternKernel):
+    def codegen(self, wrapper):
+        from triton.runtime.autotuner import Autotuner
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+        kernel = kernel_side_table.get_kernel(self.kernel_idx)
+        configs = []
+        if isinstance(kernel, Autotuner):
+            configs = kernel.configs
+            kernel = kernel.fn
+        new_name = wrapper.get_unique_kernel_name(kernel.__name__)
+
+        self.codegen_comment(wrapper)
+        wrapper.generate_user_defined_triton_kernel(
+            new_name,
+            self.grid,
+            configs,
+            self.codegen_kwargs(),
+        )
+        wrapper.define_user_defined_triton_kernel(
+            new_name, kernel, configs, self.kwargs
+        )
+
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        # UserDefinedTritonKernel does not return anything, but rather
+        # modifies input in place, do not let it get DCEd
+        return True
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
+    def get_mutation_names(self):
+        return [t.get_name() for t in self.inputs]
+
+    def __init__(self, *, kernel_idx, grid, kernel_args):
+        inputs = []
+        kwargs = dict()
+        constant_args = []
+        device = None
+        for k, v in kernel_args.items():
+            if isinstance(v, TensorBox):
+                device = v.get_device()
+                t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
+                inputs.append(t)
+                kwargs[k] = t
+                V.graph.mark_buffer_mutated(t.get_name())
+            else:
+                constant_args.append(v)
+                kwargs[k] = v
+        assert device is not None
+
+        super().__init__(
+            None,
+            NoneLayout(device),  # type: ignore[arg-type]
+            inputs,
+            tuple(constant_args),
+            kwargs,
+        )
+        self.name = V.graph.register_buffer(self)
+        self.kernel_idx = kernel_idx
+        self.grid = grid
+
+
 class InplaceBernoulliFallback(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
@@ -3544,6 +3873,33 @@ class InplaceBernoulliFallback(ExternKernel):
             MutationLayout(x),
             self.unwrap_storage([x]),
             constant_args,
+        )
+        self.name = V.graph.register_buffer(self)
+
+
+class AccumulateGrad(ExternKernel):
+    """
+    This needs to be a custom class to handle mutation properly
+    """
+
+    kernel = "inductor_ops.accumulate_grad_"
+
+    def codegen(self, wrapper):
+        (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.kernel}({variable}, {new_grad})")
+
+    def should_allocate(self):
+        return False
+
+    def get_mutation_names(self):
+        assert isinstance(self.layout, MutationLayout)
+        return (self.layout.target.get_name(),)
+
+    def __init__(self, variable, new_grad):
+        super().__init__(
+            None,
+            MutationLayout(variable),
+            self.unwrap_storage([variable, new_grad]),
         )
         self.name = V.graph.register_buffer(self)
 
@@ -3715,7 +4071,7 @@ class DynamicScalar(ExternKernel):
         return False
 
     def __init__(self, sym, data):
-        super().__init__(None, NoneLayout(), [data])
+        super().__init__(None, NoneLayout(torch.device("cpu")), [data])  # type: ignore[arg-type]
         self.sym = sym
 
     def get_unbacked_symbol_defs(self):
@@ -3760,12 +4116,10 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
         assert isinstance(
             kernel,
             (
                 torch._ops.OpOverload,
-                torch._ops.OpOverloadPacket,
                 torch._ops.HigherOrderOperator,
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
@@ -3777,19 +4131,17 @@ class FallbackKernel(ExternKernelAlloc):
                 else kernel.__name__
             )
             if V.graph.cpp_wrapper:
-                if isinstance(kernel, torch._ops.OpOverload):
-                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                    self.kernel = (
-                        f"at::_ops::{kernel.__name__.replace('.default', '')}::call"
-                        if kernel._overloadname == "default"
-                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                    )
-                    schema = kernel._schema
-                else:
-                    self.kernel = f"at::{op_base_name}"
+                assert isinstance(kernel, torch._ops.OpOverload)
+                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                self.kernel = (
+                    f"at::{op_base_name}"
+                    if kernel._overloadname == "default"
+                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                )
+                schema = kernel._schema
             else:
                 self.kernel = f"aten.{op_base_name}"
 
@@ -3877,6 +4229,14 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+        # Previously, we want to maintain forward-compatibility by skipping
+        # default args in the serialized artifacts in fbcode. However,
+        # some of our shim interfaces require default values being set.
+        # Discussed with Sherlock offline and we decided to allow serializing
+        # default args into the C++ wrapper code for now. We will refine this
+        # part if we see real FC requirement. More details related to FC
+        # can be found at:
+        # https://docs.google.com/document/d/1FzWm-sHYwmRi3x_g036kOxd99KaYquUsA-L5JwOn8ys/edit?usp=sharing
         if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
@@ -3910,6 +4270,18 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         return None
 
+    def has_side_effects(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return get_schema_info(self.op_overload).is_mutable()
+
+    def has_aliasing(self):
+        # TODO - some fallbacks are still OpOverloadPackets
+        if not isinstance(self.op_overload, torch._ops.OpOverload):
+            return False
+        return torch._inductor.utils.is_view(self.op_overload)
+
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
     # and run it with a host side proxy executor to address the ABI problem
@@ -3923,7 +4295,7 @@ class FallbackKernel(ExternKernelAlloc):
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
 
-        serializer = GraphModuleSerializer(None, None, None)
+        serializer = GraphModuleSerializer(None, None)
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
@@ -3984,7 +4356,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             exported_args = None
             args = None
-            if config.is_fbcode():
+            if config.is_fbcode() and V.graph.cpp_wrapper:
                 exported_args = self.export_extern_kernel_node()
             else:
                 args = [*self.codegen_args(), *self.codegen_kwargs()]
@@ -4020,6 +4392,15 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = FallbackKernel.find_device(tensor_args, example_output)
         assert device, "Not sure where to find device info"
+
+        def tensor_to_layout(output: torch.Tensor):
+            return FixedLayout(
+                output.device,
+                output.dtype,
+                convert_shape_to_inductor(output.size()),
+                convert_shape_to_inductor(output.stride()),
+            )
+
         packed = FallbackKernel(
             MultiOutputLayout(device),
             kernel,
@@ -4035,14 +4416,14 @@ class FallbackKernel(ExternKernelAlloc):
                     generate_output(output[i], indices + [(type(output), i)])
                     for i in range(len(output))
                 )
+            elif isinstance(output, dict):
+                return {
+                    key: generate_output(val, indices + [(type(output), key)])
+                    for key, val in output.items()
+                }
             elif isinstance(output, torch.Tensor):
                 return MultiOutput(
-                    FixedLayout(
-                        output.device,
-                        output.dtype,
-                        convert_shape_to_inductor(output.size()),
-                        convert_shape_to_inductor(output.stride()),
-                    ),
+                    tensor_to_layout(output),
                     packed,
                     indices,
                 )
@@ -4057,14 +4438,77 @@ class FallbackKernel(ExternKernelAlloc):
                 return None
 
         outputs = generate_output(example_output, [])
-        if isinstance(outputs, (list, tuple)):
-            packed.outputs = outputs
+        if isinstance(outputs, (list, tuple, dict)):
+            packed.outputs = outputs  # type: ignore[assignment]
         else:
             packed.outputs = [outputs]
         return outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
+
+
+@dataclasses.dataclass
+class ComplexView(ExternKernelAlloc):
+    """View a complex number as two dtyped numbers or vice versa"""
+
+    def should_allocate(self):
+        return False
+
+    def has_aliasing(self):
+        return True
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
+
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+    ):
+        super().__init__(
+            layout,
+            tuple(tensor_args),
+            tuple(nontensor_args),
+        )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs: Sequence[Any] = []
+        self.kernel = kernel
+
+    @classmethod
+    def create(cls, kernel, *args, **kwargs):
+        context = V.graph.fake_mode
+        with context:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, *args, **kwargs)
+
+        device = FallbackKernel.find_device(tensor_args, example_output)
+        assert device, "Not sure where to find device info"
+
+        packed = ComplexView(
+            MultiOutputLayout(device), kernel, tensor_args, non_tensor_args
+        )
+
+        layout = FixedLayout(
+            example_output.device,
+            example_output.dtype,
+            convert_shape_to_inductor(example_output.size()),
+            convert_shape_to_inductor(example_output.stride()),
+        )
+        outputs = MultiOutput(layout, packed, [])
+
+        packed.outputs = [outputs]
+        return outputs
 
 
 @dataclasses.dataclass
@@ -4087,6 +4531,8 @@ class MultiOutput(ExternKernel):
                     basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
+            elif itype == dict:
+                return self.codegen_list_tuple_access(f"{basename}['{i}']", indices[1:])
             else:
                 raise AssertionError("non supported index type")
         else:
@@ -4110,6 +4556,12 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
+    def has_aliasing(self):
+        return any(
+            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
+            for inp in self.inputs
+        )
+
 
 def _prepare_convolution_fusion_create(
     cls,
@@ -4121,7 +4573,7 @@ def _prepare_convolution_fusion_create(
     dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding: List[int] = None,
+    output_padding: Optional[List[int]] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -4300,7 +4752,7 @@ def _prepare_linear_fusion_create(
         convert_shape_to_inductor(output_size),
         convert_shape_to_inductor(output_stride),
     )
-    constant_args = []
+    constant_args: List[Any] = []
 
     if bias is not None:
         inputs.append(bias)
@@ -4912,7 +5364,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
             return make_contiguous_strides_for(output_shape)
 
-        indices = []
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
@@ -4928,7 +5379,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                     output_stride,
                 ),
                 packed,
-                indices + [(tuple, i)],
+                [(tuple, i)],
             )
             for i, (output_size, output_stride) in enumerate(
                 zip(output_sizes, output_strides)
@@ -5366,7 +5817,7 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):
-        return self.data.layout
+        return self.data.layout  # type: ignore[attr-defined]
 
     def get_layout(self):
         return self.layout
@@ -5657,7 +6108,7 @@ class LoopBodyBlock:
                 {},
             )
 
-        class CaptureIndexing(V.WrapperHandler):
+        class CaptureIndexing(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "CaptureIndexing"
 
             def load(self, name: str, index: sympy.Expr):
@@ -5703,6 +6154,8 @@ class LoopBodyBlock:
                 Recursively capture the masked out body in another LoopBodyBlock
                 """
 
+                subblock: LoopBodyBlock
+
                 def shim(mask, other):
                     return V.ops.masked(mask, subblock, other)
 
@@ -5720,12 +6173,13 @@ class LoopBodyBlock:
                 Introduce a call_module to update the indexing.
                 """
 
+                var = self.body.add_indirect(size)
+
                 def set_indirect(new_var):
                     self.body.replace_indirect(
                         var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
-                var = self.body.add_indirect(size)
                 tracer.create_proxy(
                     "call_module",
                     self.body.add_submodule(set_indirect, f"set_{var}"),
@@ -5745,7 +6199,9 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        handler = SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        handler: Any = SimplifyIndexing(
+            CaptureIndexing(proxy_ops), self.body.var_ranges
+        )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(handler)
 
@@ -5789,6 +6245,8 @@ class Wait(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
+        from .codegen.wrapper import ReuseLine
+
         wrapper.add_import_once(
             "from torch.distributed._functional_collectives_impl import _wait_tensor"
         )
@@ -5799,7 +6257,7 @@ class Wait(ExternKernelAlloc):
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
         # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
         # to a new name (`self.get_name()`) and `del`s the old name.
-        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+        wrapper.writeline(ReuseLine(wrapper, self.inputs[0], self, delete_old=False))
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):

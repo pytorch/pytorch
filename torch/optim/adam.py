@@ -2,7 +2,7 @@ from typing import List, Optional, Union, Tuple
 
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, params_t, _use_grad_for_differentiable, _get_value,
+from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
                         _capturable_doc, _differentiable_doc, _foreach_doc, _fused_doc,
                         _maximize_doc, _view_as_real)
@@ -13,7 +13,7 @@ __all__ = ['Adam', 'adam']
 
 class Adam(Optimizer):
     def __init__(self,
-                 params: params_t,
+                 params: ParamsT,
                  lr: Union[float, Tensor] = 1e-3,
                  betas: Tuple[float, float] = (0.9, 0.999),
                  eps: float = 1e-8,
@@ -500,8 +500,14 @@ def _multi_tensor_adam(params: List[Tensor],
             else:
                 _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
 
-        # update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
