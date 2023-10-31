@@ -4,7 +4,6 @@ import unittest
 from collections import namedtuple, OrderedDict
 
 import torch
-import torch.utils._pytree as _pytree
 import torch.utils._pytree.api.cxx as cxx_pytree
 import torch.utils._pytree.api.python as py_pytree
 from torch.testing._internal.common_utils import (
