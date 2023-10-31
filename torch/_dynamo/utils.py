@@ -1392,18 +1392,14 @@ def ensure_graph_fake(e, tx):
     return e
 
 
-def get_fake_args_kwargs(node, tx):
+def get_fake_values_from_nodes(tx, nodes):
     def visit(n: torch.fx.Node):
         return n.meta["example_value"]
 
-    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map_only(
-        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
     )
-    kwargs = tree_map_only(
-        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), kwargs
-    )
-    return args, kwargs
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
@@ -1429,7 +1425,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    args, kwargs = get_fake_args_kwargs(node, tx)
+    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
