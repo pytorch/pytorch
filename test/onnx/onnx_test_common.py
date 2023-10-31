@@ -31,7 +31,6 @@ import onnxruntime
 import pytest
 import pytorch_test_common
 import torch
-from torch import export as torch_export
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics
@@ -39,7 +38,7 @@ from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
-_ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
+_ModelType = Union[torch.nn.Module, Callable]
 _InputArgsType = Optional[
     Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
 ]

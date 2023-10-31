@@ -120,11 +120,11 @@ static DimVector make_dim_vector(OptionalIntArrayRef opt_dims, int64_t ndim) {
   }
 }
 
-static DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim, bool allow_empty_dims=false) {
+static DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim) {
   DimMask mask;
   if (opt_dims.has_value()) {
     auto dims = opt_dims.value();
-    if (dims.empty() && !allow_empty_dims) {
+    if (dims.empty()) {
       mask = DimMask().flip();
     } else {
       mask = at::dim_list_to_bitset(dims, ndim);
@@ -351,9 +351,8 @@ namespace at::meta {
 static C10_UNUSED DimVector get_reduction_shape(
     const Tensor& self,
     IntArrayRef dims,
-    bool keepdim,
-    bool allow_empty_dims=false) {
-  auto mask = native::make_dim_mask(dims, self.dim(), allow_empty_dims);
+    bool keepdim) {
+  auto mask = native::make_dim_mask(dims, self.dim());
   return native::shape_from_dim_mask(self, mask, keepdim);
 }
 
@@ -362,11 +361,10 @@ static void resize_reduction(
     const Tensor& self,
     OptionalIntArrayRef opt_dims,
     bool keepdim,
-    ScalarType out_dtype,
-    bool allow_empty_dims=false) {
+    ScalarType out_dtype) {
   DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
   maybe_wrap_dims(dims_, self.dim());
-  auto shape = get_reduction_shape(self, dims_, keepdim, allow_empty_dims);
+  auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);

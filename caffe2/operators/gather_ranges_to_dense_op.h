@@ -45,7 +45,6 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     // Initialize the empty and mismatch counter.
     for (const auto i : c10::irange(OutputSize())) {
       (void)i; // Suppress unused variable warning
-      totalRanges_.push_back(0);
       emptyRanges_.push_back(0);
       mismatchedRanges_.push_back(0);
       mismatchedLengths_.push_back(set<int>());
@@ -53,11 +52,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   }
 
   ~GatherRangesToDenseOp() noexcept override {
-    bool exceedMinObservation = false;
-    for (const auto range : totalRanges_) {
-      exceedMinObservation |= range > minObservation_;
-    }
-    if (exceedMinObservation) {
+    if (totalRanges_ > minObservation_) {
       string debugString;
       if (this->has_debug_def()) {
         debugString =
@@ -67,11 +62,11 @@ class GatherRangesToDenseOp final : public Operator<Context> {
       }
 
       LOG(INFO) << "In GatherRangesToDenseOp:\n"
-                << "  The latest empty ranges for each feature is "
+                << "  Lifetime empty ranges for each feature is "
                 << emptyRanges_ << ".\n"
-                << "  The latest mismatched ranges for each feature is "
+                << "  Lifetime mismatched ranges for each feature is "
                 << mismatchedRanges_ << ".\n"
-                << "  With a total of " << totalRanges_ << " examples for each feature.\n"
+                << "  With a total of " << totalRanges_ << " examples.\n"
                 << debugString;
     }
   }
@@ -178,56 +173,42 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(rangesDataOffset, ranges.numel());
 
     // Check whether the empty and mismatch ratio exceeded the threshold.
-    for (const auto j : c10::irange(OutputSize())) {
-      totalRanges_[j] += batchSize;
-    }
+    totalRanges_ += batchSize;
     for (const auto j : c10::irange(OutputSize())) {
       // Only check when the ratio is not set to allow all mismatches.
-      auto totalRangesTemp = totalRanges_[j];
-      auto emptyRangesTemp = emptyRanges_[j];
-      auto mismatchedRangesTemp = mismatchedRanges_[j];
-      auto mismatchedLengthsTemp = mismatchedLengths_[j];
-      // if one feature triggers ENFORCEMENT failure, reset the counter for this feature to avoid carry-on impact
-      if ((maxMismatchedRatio_ < 1.0 && std::max(totalRangesTemp, minObservation_) * maxMismatchedRatio_ < mismatchedRangesTemp) || (maxEmptyRatio_ < 1.0 && std::max(totalRangesTemp, minObservation_) * maxEmptyRatio_ < emptyRangesTemp)) {
-        totalRanges_[j] = 0;
-        emptyRanges_[j] = 0;
-        mismatchedRanges_[j] = 0;
-        mismatchedLengths_[j].clear();
-      }
-
       if (maxMismatchedRatio_ < 1.0) {
         CAFFE_ENFORCE_GE(
-            std::max(totalRangesTemp, minObservation_) * maxMismatchedRatio_,
-            mismatchedRangesTemp,
+            std::max(totalRanges_, minObservation_) * maxMismatchedRatio_,
+            mismatchedRanges_[j],
             "Ratio of range length mismatch for feature at index ",
             j,
             " is ",
-            (static_cast<double>(mismatchedRangesTemp) /
-             static_cast<double>(totalRangesTemp)),
+            (static_cast<double>(mismatchedRanges_[j]) /
+             static_cast<double>(totalRanges_)),
             " (",
-            mismatchedRangesTemp,
+            mismatchedRanges_[j],
             "/",
-            totalRangesTemp,
+            totalRanges_,
             ") which exceeds ",
             maxMismatchedRatio_,
             ". The incorrect lengths include: ",
-            mismatchedLengthsTemp);
+            mismatchedLengths_[j]);
       }
 
       // Only check when the ratio is not set to allow all examples to be empty.
       if (maxEmptyRatio_ < 1.0) {
         CAFFE_ENFORCE_GE(
-            std::max(totalRangesTemp, minObservation_) * maxEmptyRatio_,
-            emptyRangesTemp,
+            std::max(totalRanges_, minObservation_) * maxEmptyRatio_,
+            emptyRanges_[j],
             "Ratio of empty ranges for feature at index ",
             j,
             " is ",
-            (static_cast<double>(emptyRangesTemp) /
-             static_cast<double>(totalRangesTemp)),
+            (static_cast<double>(emptyRanges_[j]) /
+             static_cast<double>(totalRanges_)),
             " (",
-            emptyRangesTemp,
+            emptyRanges_[j],
             "/",
-            totalRangesTemp,
+            totalRanges_,
             ") which exceeds ",
             maxEmptyRatio_);
       }
@@ -240,7 +221,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
  private:
   vector<int> lengths_;
-  vector<int64_t> totalRanges_;
+  int64_t totalRanges_ = 0;
   vector<int64_t> emptyRanges_;
   vector<int64_t> mismatchedRanges_;
   vector<set<int>> mismatchedLengths_;

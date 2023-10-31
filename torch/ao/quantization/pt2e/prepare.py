@@ -386,10 +386,23 @@ def _maybe_insert_input_and_output_observers_for_node(
     is_qat: bool,
 ):
     this_node_quantization_annotation = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
-    if this_node_quantization_annotation is None:
+    if "val" in node.meta:
+        output_is_a_tensor = (
+            this_node_quantization_annotation is not None and
+            isinstance(node.meta["val"], FakeTensor)
+        )
+    else:
+        output_is_a_tensor = this_node_quantization_annotation is not None
+
+    skip_inserting_input_and_output_observers = (
+        this_node_quantization_annotation is None
+    )
+
+    if skip_inserting_input_and_output_observers:
         return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
+
     _maybe_insert_input_observers_for_node(
         node,
         None,  # qconfig
@@ -399,8 +412,11 @@ def _maybe_insert_input_and_output_observers_for_node(
         is_qat,
     )
 
-    output_is_a_tensor = "val" in node.meta and isinstance(node.meta["val"], FakeTensor)
-    if not output_is_a_tensor:
+    skip_inserting_output_observers = (
+        not output_is_a_tensor
+    )
+
+    if skip_inserting_output_observers:
         return
 
     # this returns the new observer node if it was needed

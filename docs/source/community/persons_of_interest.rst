@@ -271,11 +271,6 @@ PowerPC
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
-AArch64 CPU
-~~~~~~~~~~~~
-
--  Sunita Nadampalli (`snadampal <https://github.com/snadampal>`__)
-
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 

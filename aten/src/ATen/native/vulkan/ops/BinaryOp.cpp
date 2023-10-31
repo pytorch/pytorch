@@ -402,6 +402,13 @@ Tensor add_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
+  if (other_arg.dim() == 0) {
+    return binary_op_scalar(
+        self_arg,
+        other_arg.item(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(add_scalar));
+  }
   return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add));
 }
@@ -437,6 +444,13 @@ Tensor sub_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const Scalar& alpha) {
+  if (other_arg.dim() == 0) {
+    return binary_op_scalar(
+        self_arg,
+        other_arg.item(),
+        c10::optional<Scalar>(-1 * alpha.to<float>()),
+        VK_KERNEL(add_scalar));
+  }
   return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub));
 }
@@ -460,6 +474,13 @@ Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.dim() == 0) {
+    return binary_op_scalar(
+        self_arg,
+        other_arg.item(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar));
+  }
   return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul));
 }
@@ -486,6 +507,13 @@ Tensor& div_scalar_(Tensor& self, const Scalar& other) {
 }
 
 Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
+  if (other_arg.dim() == 0) {
+    return binary_op_scalar(
+        self_arg,
+        1.0 / other_arg.item().to<float>(),
+        c10::optional<Scalar>(),
+        VK_KERNEL(mul_scalar));
+  }
   return binary_op_tensor(
       self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div));
 }
@@ -539,16 +567,6 @@ Tensor& floor_divide_scalar_(Tensor& self, const Scalar& other) {
       VK_KERNEL(floor_mul_scalar_));
 }
 
-Tensor floor_divide_tensor(const Tensor& self, const Tensor& other) {
-  return binary_op_tensor(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(floor_divide));
-}
-
-Tensor& floor_divide_tensor_(Tensor& self, const Tensor& other_arg) {
-  return binary_op_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(floor_divide_));
-}
-
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
@@ -582,12 +600,6 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::floor_divide_.Scalar"),
       TORCH_FN(floor_divide_scalar_));
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::floor_divide"),
-      TORCH_FN(floor_divide_tensor));
-  m.impl(
-      TORCH_SELECTIVE_NAME("aten::floor_divide_.Tensor"),
-      TORCH_FN(floor_divide_tensor_));
 }
 
 #endif /* USE_VULKAN_API */

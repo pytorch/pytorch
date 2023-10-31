@@ -190,19 +190,22 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
     gm.recompile()
     return gm
 
-def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict):
+
+def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
+    new_gm = copy.deepcopy(ep.graph_module)
+
     # TODO Fix the period in params/buffers names later
     # maybe a pass to replace graph signature with fixed names
     param_buffer_name_to_corrected_name = {}
 
-    for name, value in state_dict.items():
-        if name in graph_signature.buffers:
+    for name, value in ep.state_dict.items():
+        if name in ep.graph_signature.buffers:
             if "." in name:
                 new_gm.register_buffer(name.replace(".", "_"), value)
                 param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
             else:
                 new_gm.register_buffer(name, value)
-        if name in graph_signature.parameters:
+        if name in ep.graph_signature.parameters:
             if "." in name:
                 new_gm.register_parameter(name.replace(".", "_"), value)
                 param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
@@ -213,16 +216,16 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
     inp_pos_to_param_buffer_name = {}
     for node in new_gm.graph.nodes:
         if node.op == "placeholder":
-            if node.name in graph_signature.inputs_to_buffers:
-                buffer_name = graph_signature.inputs_to_buffers[node.name]
+            if node.name in ep.graph_signature.inputs_to_buffers:
+                buffer_name = ep.graph_signature.inputs_to_buffers[node.name]
                 if buffer_name in param_buffer_name_to_corrected_name:
                     inp_pos_to_param_buffer_name[
                         count
                     ] = param_buffer_name_to_corrected_name[buffer_name]
                 else:
                     inp_pos_to_param_buffer_name[count] = buffer_name
-            if node.name in graph_signature.inputs_to_parameters:
-                param_name = graph_signature.inputs_to_parameters[node.name]
+            if node.name in ep.graph_signature.inputs_to_parameters:
+                param_name = ep.graph_signature.inputs_to_parameters[node.name]
                 if param_name in param_buffer_name_to_corrected_name:
                     inp_pos_to_param_buffer_name[
                         count
@@ -230,14 +233,6 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
                 else:
                     inp_pos_to_param_buffer_name[count] = param_name
             count += 1
-
-    return inp_pos_to_param_buffer_name
-
-def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
-    new_gm = copy.deepcopy(ep.graph_module)
-    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
-        new_gm, ep.graph_signature, ep.state_dict
-    )
     new_gm = _unlift(
         new_gm,
         inp_pos_to_param_buffer_name,

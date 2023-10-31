@@ -89,7 +89,6 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-            "-Wno-empty-translation-unit",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
@@ -136,7 +135,6 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-            "-Wno-empty-translation-unit",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
@@ -191,7 +189,6 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
-            "-Wno-empty-translation-unit",
         ],
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",

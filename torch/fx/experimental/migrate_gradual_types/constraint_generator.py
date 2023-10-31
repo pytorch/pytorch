@@ -1262,8 +1262,8 @@ class ConstraintGenerator:
             if isinstance(t, torch.Tensor):
                 if len(t.shape) > 0:
                     res = []
-                    for d in t.shape:
-                        res.append(d)
+                    for t in t.shape:
+                        res.append(t)
                     attr_type = TensorType(res)
                     output, counter = gen_tvar(counter)
                     self.symbol_dict[n] = output
