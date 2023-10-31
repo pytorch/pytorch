@@ -517,15 +517,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         num_3x_ops = 0
         num_2x_ops = 0
-        for op_list in ops.values():
-            for op in op_list:
-                assert isinstance(op, cutlass_gemm_op.GemmOperation)
-                filter_res = self.filter_op(op)
-                if (
-                    filter_res is not None
-                    and res.get(filter_res.configuration_name(), None) is None
-                ):
-                    res[filter_res.configuration_name()] = filter_res
+        for op_dict in ops.values():
+            for op_list in op_dict.values():
+                for op in op_list:
+                    assert isinstance(op, cutlass_gemm_op.GemmOperation)
+                    filter_res = self.filter_op(op)
+                    if (
+                        filter_res is not None
+                        and res.get(filter_res.configuration_name(), None) is None
+                    ):
+                        res[filter_res.configuration_name()] = filter_res
         for op in res.values():
             if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
                 num_3x_ops += 1

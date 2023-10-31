@@ -51,31 +51,24 @@ def try_import_cutlass() -> bool:
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
     cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+        inductor_cuda_config.cutlass_dir, "python/cutlass_library"
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
     )
-    dst_dir = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
+    dst_link = os.path.join(tmp_cutlass_py_full_path, "cutlass_library")
 
     if os.path.isdir(cutlass_py_full_path):
         if tmp_cutlass_py_full_path not in sys.path:
-            os.makedirs(dst_dir, exist_ok=True)
-            cutlass_file_names = [
-                file_name
-                for file_name in os.listdir(cutlass_py_full_path)
-                if file_name.endswith(".py")
-            ]
-            cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-            if not os.path.isdir(tmp_cutlass_py_full_path):
-                os.mkdir(tmp_cutlass_py_full_path)
-            for file_name in cutlass_file_names:
-                _gen_cutlass_file(
-                    file_name,
-                    cutlass_module_names,
-                    cutlass_py_full_path,
-                    dst_dir,
-                )
+            if os.path.exists(dst_link):
+                assert os.path.islink(
+                    dst_link
+                ), f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
+                assert os.path.realpath(os.readlink(dst_link)) == os.path.realpath(
+                    cutlass_py_full_path
+                ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
+            else:
+                os.symlink(cutlass_py_full_path, dst_link)
             sys.path.append(tmp_cutlass_py_full_path)
         try:
             import cutlass_library.generator  # type: ignore[import]  # noqa: F401
