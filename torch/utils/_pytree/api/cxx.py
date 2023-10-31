@@ -60,9 +60,9 @@ from .typing import (
     PyTree,
     R,
     S,
-    U,
     T,
     ToDumpableContextFn,
+    U,
     UnflattenFunc,
 )
 

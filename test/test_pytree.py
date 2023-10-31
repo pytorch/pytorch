@@ -41,8 +41,22 @@ class TestGenericPytree(TestCase):
 
             self.assertEqual(inspect.isclass(cxx_api), inspect.isclass(py_api))
             self.assertEqual(inspect.isfunction(cxx_api), inspect.isfunction(py_api))
-            if inspect.isfunction(cxx_api) and name != "register_pytree_node":
-                self.assertEqual(inspect.signature(cxx_api), inspect.signature(py_api))
+            if inspect.isfunction(cxx_api):
+                cxx_signature = inspect.isfunction(cxx_api)
+                py_signature = inspect.isfunction(py_api)
+                # The C++ pytree APIs provide more features than the Python APIs.
+                # The Python APIs are a subset of the C++ APIs.
+                cxx_positional_params = OrderedDict(
+                    (name, param)
+                    for name, param in cxx_signature.parameters.items()
+                    if param.kind
+                    in {
+                        inspect.Parameter.POSITIONAL_ONLY,
+                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    }
+                )
+                py_positional_params = OrderedDict(py_signature.parameters)
+                self.assertEqual(cxx_positional_params, py_positional_params)
 
     @parametrize(
         "pytree_impl",
