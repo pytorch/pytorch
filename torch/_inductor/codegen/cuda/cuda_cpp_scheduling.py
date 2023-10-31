@@ -15,6 +15,8 @@ from ...utils import get_fused_kernel_name, get_kernel_metadata, sympy_product
 from ...virtualized import V
 from ..common import IndentedBuffer
 
+from .cutlass_epilogue_gen import CUTLASSEVTOpNotImplementedError
+
 log = logging.getLogger(__name__)
 _cuda_epilogue_fusion_counter: int = (
     0  # used by unit tests to verify number of fused epilogues
@@ -110,7 +112,7 @@ class CUDACPPScheduling(BaseScheduling):
             CutlassEVTEpilogueArgumentFormatter.ir_to_evt_argument_string(
                 cast(str, cuda_template_buffer.name), [additional_node]
             )
-        except NotImplementedError as e:
+        except CUTLASSEVTOpNotImplementedError as e:
             not_implemented_op = str(e)
             if not_implemented_op.startswith("_op_"):
                 not_implemented_op = not_implemented_op[4:]

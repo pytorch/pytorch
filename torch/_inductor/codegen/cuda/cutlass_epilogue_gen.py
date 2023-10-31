@@ -14,6 +14,10 @@ def _arg_str(a):
     return str(a)
 
 
+class CUTLASSEVTOpNotImplementedError(NotImplementedError):
+    pass
+
+
 class CutlassEVTEpilogueTypeFormatter:
     """
     Codegen class, which provides an entry point to generate
@@ -88,7 +92,7 @@ class CutlassEVTEpilogueTypeFormatter:
                 formatter.aliases[node.name] = result
             res = formatter.getvalue(result)
             if "@sympy_expr" in res:
-                raise NotImplementedError(
+                raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
                 )
             else:
@@ -111,11 +115,11 @@ class CutlassEVTEpilogueTypeFormatter:
             return varname
 
         if name.startswith("_"):
-            raise NotImplementedError(name)
+            raise CUTLASSEVTOpNotImplementedError(name)
         if hasattr(self, f"_op_{name}"):
             return inner
         else:
-            raise NotImplementedError(name)
+            raise CUTLASSEVTOpNotImplementedError(name)
 
     def _op_load(self, name, index_expr):
         # Load an input to an operation. Might be the output of the matmul, the result
@@ -126,7 +130,7 @@ class CutlassEVTEpilogueTypeFormatter:
             return self.aliases[name]
         else:
             # return f"cutlass::epilogue::fusion::Sm90SrcFetch /* :={name} */"
-            raise NotImplementedError(
+            raise CUTLASSEVTOpNotImplementedError(
                 f"Operand {name} not found. Auxiliary inputs not supported yet."
             )
 
@@ -135,7 +139,9 @@ class CutlassEVTEpilogueTypeFormatter:
         if str(dtype) in ("torch.float16", "torch.float32"):
             return f"cutlass::epilogue::fusion::Sm90ScalarBroadcast<ElementAcc> /* value={value}, dtype={dtype} */"
         else:
-            raise NotImplementedError(f"Unsupported dtype for constant: {dtype}")
+            raise CUTLASSEVTOpNotImplementedError(
+                f"Unsupported dtype for constant: {dtype}"
+            )
 
     def _cutlass_binary_functional_op(self, op, a, b):
         # Perform a named operation on two inputs
@@ -179,7 +185,7 @@ class CutlassEVTEpilogueTypeFormatter:
         return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::maximum, ElementAcc, ElementAcc, RoundStyle>,{a}, {const_zero}>"  # noqa: B950
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise NotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError()
 
     # Add more ops here...
     def getvalue(self, result) -> str:
@@ -250,7 +256,7 @@ class CutlassEVTEpilogueArgumentFormatter:
 
             res: str = formatter.getvalue(result)
             if "@sympy_expr" in res:
-                raise NotImplementedError(
+                raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
                 )
             else:
@@ -265,12 +271,12 @@ class CutlassEVTEpilogueArgumentFormatter:
             return line
 
         if name.startswith("_"):
-            raise NotImplementedError(name)
+            raise CUTLASSEVTOpNotImplementedError(name)
 
         if hasattr(self, f"_op_{name}"):
             return inner
         else:
-            raise NotImplementedError(name)
+            raise CUTLASSEVTOpNotImplementedError(name)
 
     def _op_load(self, name, index_expr):
         if name == self.accumulator_node_name:
@@ -278,7 +284,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         elif name in self.aliases:
             return self.aliases[name]
         else:
-            raise NotImplementedError(
+            raise CUTLASSEVTOpNotImplementedError(
                 f"Operand {name} not found. Auxiliary inputs not supported yet."
             )
 
@@ -286,7 +292,9 @@ class CutlassEVTEpilogueArgumentFormatter:
         if str(dtype) in ("torch.float16", "torch.float32"):
             return "{ static_cast<ElementAcc>(" + str(value) + ") }"
         else:
-            raise NotImplementedError(f"Unsupported dtype for constant: {dtype}")
+            raise CUTLASSEVTOpNotImplementedError(
+                f"Unsupported dtype for constant: {dtype}"
+            )
 
     def _cutlass_binary_functional_op(self, op, a, b):
         return f"{{ /*{op}: */ {a}, {b} }}"
@@ -331,7 +339,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         return a
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise NotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError()
 
     def getvalue(self, result) -> str:
         return "{" + str(result) + "}"
