@@ -101,9 +101,11 @@ class elementwise_type_promotion_wrapper:
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Optional[Sequence[str]] = None,
+        result_dtype: Optional[str] = None,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
+        self.result_dtype = result_dtype
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -131,6 +133,9 @@ class elementwise_type_promotion_wrapper:
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)
+
+            if self.result_dtype:
+                result_dtype = bound.arguments[self.result_dtype]
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)

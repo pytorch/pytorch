@@ -5919,6 +5919,7 @@ def log_normal(self, mean=1, std=2, generator=None):
         "std",
     ),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    result_dtype="dtype",
 )
 def normal(
     mean=0,
