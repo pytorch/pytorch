@@ -82,10 +82,6 @@ __all__ = [
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
 
 
-ToStrFunc = Callable[["TreeSpec", List[str]], str]
-MaybeFromStrFunc = Callable[[str], Optional[Tuple[Any, Context, str]]]
-
-
 # A NodeDef holds two callables:
 # - flatten_fn should take the collection and return a flat list of values.
 #   It can also return some context that is used in reconstructing the
@@ -124,8 +120,6 @@ def _register_pytree_node(
     cls: Any,
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
@@ -148,12 +142,6 @@ def _register_pytree_node(
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
     """
-    if to_str_fn is not None or maybe_from_str_fn is not None:
-        warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
-        )
-
     if cls in SUPPORTED_NODES:
         raise ValueError(f"{cls} is already registered as pytree node.")
 
