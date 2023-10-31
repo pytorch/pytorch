@@ -1653,7 +1653,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # only skip codegen if there is a cpu output, not input
-    for arg in pytree.tree_leaves((node.args, node.kwargs)):
+    for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
         if check_skip_condition(arg, node, is_output=False):
             return True
 
@@ -2078,7 +2078,7 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten._scaled_mm.default)
+make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 # TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
