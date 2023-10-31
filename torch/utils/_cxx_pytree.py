@@ -32,7 +32,11 @@ from optree import PyTreeSpec  # direct import for type annotations
 
 __all__ = [
     "PyTree",
-    "PyTreeSpec",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "TreeSpec",
+    "LeafSpec",
     "register_pytree_node",
     "tree_flatten",
     "tree_unflatten",
@@ -46,10 +50,9 @@ __all__ = [
     "tree_any",
     "tree_all_only",
     "tree_any_only",
-    "broadcast_prefix",
-    "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
+    "treespec_pprint",
 ]
 
 
@@ -201,6 +204,9 @@ def register_pytree_node(
         _reverse_args(unflatten_func),
         namespace=namespace,
     )
+
+
+_register_pytree_node = register_pytree_node
 
 
 def tree_flatten(
@@ -798,6 +804,19 @@ def treespec_loads(serialized: str) -> PyTreeSpec:
     dummy_tree = _tree_unflatten([0] * orig_treespec.num_leaves, orig_treespec)
     treespec = tree_structure(dummy_tree)
     return treespec
+
+
+class _DummyLeaf:
+    def __repr__(self) -> str:
+        return "*"
+
+
+def treespec_pprint(treespec: PyTreeSpec) -> str:
+    dummy_tree = tree_unflatten(
+        [_DummyLeaf() for _ in range(treespec.num_leaves)],
+        treespec,
+    )
+    return repr(dummy_tree)
 
 
 class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
