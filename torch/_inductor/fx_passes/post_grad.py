@@ -666,7 +666,7 @@ def reinplace_scatters(graph):
             if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
                 return False
 
-            # # Check for any uses other than current node and copy_ epilogue
+            # Check for any uses other than current node and copy_ epilogue
             if len(mutated_arg.users) > 2:
                 return False
 
