@@ -237,7 +237,7 @@ class TensorVariable(VariableTracker):
         elif name == "device" and self.device is not None:
             result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
-            result = ConstantVariable(self.layout, **options)
+            result = ConstantVariable.create(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
             result = ConstantVariable.create(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:

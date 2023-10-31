@@ -7516,7 +7516,7 @@ def ___make_guard_fn():
             expected_variable = ConstantVariable(device)
             self.assertEqual(expected_variable.python_type(), type(device))
 
-            opt_func = torch._dynamo.optimize("inductor", nopython=True)(fn)
+            opt_func = torch._dynamo.optimize("eager", nopython=True)(fn)
             a = torch.tensor([2, 3], device=device)
             res = opt_func(a)
             self.assertIsInstance(res, torch.Tensor)
@@ -7537,7 +7537,7 @@ def ___make_guard_fn():
         expected_variable = ConstantVariable(dtype)
         self.assertEqual(expected_variable.python_type(), type(dtype))
 
-        opt_func = torch._dynamo.optimize("inductor", nopython=True)(fn)
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(fn)
         a = torch.tensor([2, 3], dtype=dtype)
         res = opt_func(a)
         self.assertIsInstance(res, torch.Tensor)
