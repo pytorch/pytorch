@@ -13,10 +13,44 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import os
+import platform
+import sys
 from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Type, Union
 
-import optree
-from optree import PyTreeSpec  # direct import for type annotations
+import torch
+
+if (torch.USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
+    torch._running_with_deploy() or platform.system() != "Windows"
+):
+    # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
+    # few circumstances:
+    #
+    #   1. You're in a build environment (e.g., fbcode) where
+    #      libtorch_global_deps is not available, but you still need
+    #      to get mkl to link in with RTLD_GLOBAL or it will just
+    #      not work.
+    #
+    #   2. You're trying to run PyTorch under UBSAN and you need
+    #      to ensure that only one copy of libtorch is loaded, so
+    #      vptr checks work properly
+    #
+    # If you're using this setting, you must verify that all the libraries
+    # you load consistently use the same libstdc++, or you may have
+    # mysterious segfaults.
+    #
+    # See also: torch/__init__.py
+    #
+    old_flags = sys.getdlopenflags()
+    sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
+    import optree
+    from optree import PyTreeSpec  # direct import for type annotations
+
+    sys.setdlopenflags(old_flags)
+    del old_flags
+else:
+    import optree
+    from optree import PyTreeSpec  # direct import for type annotations
 
 from .typing import (
     Context,
