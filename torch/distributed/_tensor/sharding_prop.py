@@ -1,6 +1,6 @@
 from functools import lru_cache
 from itertools import chain
-from typing import Callable, cast, Dict, List, Optional
+from typing import Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -59,7 +59,9 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
+    def _propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -107,7 +109,10 @@ class ShardingPropagator:
             return None
 
     def _wrap_output_spec_tensor_meta(
-        self, op: OpOverload, output_spec: OutputSpecType, output_tensor_meta: object
+        self,
+        op: OpOverload,
+        output_spec: OutputSpecType,
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta], Tuple[TensorMeta, ...]],
     ) -> None:
         """
         Wrap the output_spec with the tensor metadata from the output.
@@ -124,9 +129,8 @@ class ShardingPropagator:
             output_tensor_meta = (  # type: ignore[no-redef]
                 [output_tensor_meta]
                 if isinstance(output_tensor_meta, TensorMeta)
-                else list(output_tensor_meta),  # type: ignore[call-overload]
+                else list(output_tensor_meta)
             )
-            output_tensor_meta = cast(List[TensorMeta], output_tensor_meta)
 
             # Validate lengths
             if len(output_spec) != len(output_tensor_meta):
@@ -140,7 +144,9 @@ class ShardingPropagator:
                 zip(output_spec, output_tensor_meta)
             ):
                 if isinstance(output_spec_i, DTensorSpec):
-                    assert isinstance(output_tensor_meta_i, TensorMeta)
+                    assert isinstance(
+                        output_tensor_meta_i, TensorMeta
+                    ), f"ShardingPropagator error: output {i} does not have an associated TensorMeta"
                     output_spec_i.tensor_meta = output_tensor_meta_i
 
     def propagate(self, op_info: OpInfo) -> None:
