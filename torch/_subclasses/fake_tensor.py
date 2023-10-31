@@ -1722,6 +1722,9 @@ class FakeTensorMode(TorchDispatchMode):
                 if not self.allow_non_fake_inputs:
                     if isinstance(x, FakeTensor) and x.fake_mode is not self:
                         raise AssertionError("Mixing fake modes NYI")
+                    import pdb
+
+                    pdb.set_trace()
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
