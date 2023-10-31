@@ -2844,23 +2844,21 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
+    def _get_list_for_jagged_tensor(self, nested_size, requires_grad=True):
+        Ds = nested_size[1:]
+        out = []
+        for s in nested_size[0]:
+            out.append(
+                torch.randn(s, *Ds, requires_grad=requires_grad, dtype=torch.float64)
+            )
+        return out
+
     def _get_example_tensor_lists(self):
         return [
             # (B, *, D) with B=4
-            [
-                torch.randn(2, 5),
-                torch.randn(3, 5),
-                torch.randn(4, 5),
-                torch.randn(6, 5)
-            ],
+            self._get_list_for_jagged_tensor(((2, 3, 4, 6), 5)),
             # (B, *, D_0, D_1) with B=5
-            [
-                torch.randn(2, 5, 6),
-                torch.randn(3, 5, 6),
-                torch.randn(4, 5, 6),
-                torch.randn(5, 5, 6),
-                torch.randn(6, 5, 6),
-            ],
+            self._get_list_for_jagged_tensor(((2, 3, 4, 5, 6), 5, 6)),
         ]
 
     def test_tensor_attributes(self, device):
@@ -2938,6 +2936,61 @@ class TestNestedTensorSubclass(TestCase):
             return buffer_from_jagged(out)
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    def test_binary_pointwise_broadcasting(self, device):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), requires_grad=True)
+        # (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (1, ?, ?) -> (B, j0, ?, ?)
+        # Unsupported: (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)
+        t_sizes = (
+            (4,),
+            (1, 4),
+            (3, 1),
+            (1, 3, 1),
+            (1, 1, 1, 4),
+            # (1, 1, 1, 1, 4), (unsupported todya)
+        )
+
+        def grad_test_func(t, *ts):
+            nt, _ = jagged_from_list(ts, None)
+            out = nt + t
+            return buffer_from_jagged(out)
+
+        for t_size in t_sizes:
+            t = torch.rand(t_size, requires_grad=True, dtype=torch.float64)
+            gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    def test_sum_int_DimList(self, device):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), requires_grad=True)
+
+        reduce_dims = (
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (0, 1, 3),
+            (0, 1, 2),
+            (0, 1, 2, 3),
+        )
+
+        for keepdim in (True, False):
+            for rd in reduce_dims:
+                if (0 in rd) ^ (1 in rd):
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            "sum over ragged dim without also summing over batch dim"):
+                        nt, _ = jagged_from_list(ts, None)
+                        torch.sum(nt, dim=rd, keepdim=keepdim)
+                    continue
+
+                def grad_test_func(*ts):
+                    nt, _ = jagged_from_list(ts, None)
+                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
+                    return buffer_from_jagged(out)
+
+                gradcheck(grad_test_func, inputs=(*ts,), check_batched_grad=False)
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])

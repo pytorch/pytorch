@@ -78,6 +78,37 @@ def raggedness_matches(nt, size):
     return list(nt._size[:end]) == list(size[:end])
 
 
+def squeeze_leading_ones_get_extra(t, nt):
+    # Note: [ Squeezing leading ones ]
+    #
+    # Squeeze leading ones from t, and return the number of extra ones
+    # that need to be unsqueezed after relying on dense broadcasting
+    # Today, we would error if extra != 0 because NT does not yet support
+    # unsqueezing on the 0th dimension.
+    #
+    # We want:
+    #   (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
+    #   (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)  (not yet supported)
+    #
+    # 1) Squeeze extra ones and grab values from NT
+    #   (1, 1, ?, ?) -> (?, ?)   and   (sum(*), ?, ?) -> (B, j0, ?, ?)
+    # 2) Do dense broadcasting:
+    #   (sum(*), ?, ?) + (?, ?) -> (sum(*), ?, ?)
+    # 3) Construct nested tensor
+    #   (sum(*), ?, ?) -> (B, j0, ?, ?)
+    #
+    # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
+    # at step (4).
+    t_shape = t.shape
+    extra = 0
+    for s in t_shape:
+        if s == 1:
+            if t.dim() > nt.dim():
+                extra += 1
+            t = t.squeeze(0)
+    return t, extra
+
+
 def register_func(tables, aten_ops, schema_str):
     if not isinstance(aten_ops, list):
         aten_ops = [aten_ops]
@@ -161,15 +192,17 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # === Handle broadcasting across the batch / ragged dims ===
 
     # Easy case: take advantage of pre-existing broadcasting logic
-    # when NT dim > non-NT dim
-    # ex: (B, j0, D_0, D_1) + (D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, D_0, D_1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, 1, 1) + (D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, 1, 1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
-    if (a_is_nt and a.dim() > b.dim()) or (not a_is_nt and b.dim() > a.dim()):
-        arg1 = a._values if a_is_nt else a
-        arg2 = b._values if not a_is_nt else b
-        return NestedTensor(func(arg1, arg2, *args[2:], **kwargs), **extracted_kwargs)
+    # ex: (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
+    # ex: (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
+    # ex: (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
+    nt, t = (a, b) if a_is_nt else (b, a)
+    # See Note: [ Squeezing leading ones ]
+    t_squeezed, extra = squeeze_leading_ones_get_extra(t, nt)
+    if extra != 0:
+        raise NotImplementedError()
+    if nt.dim() >= t_squeezed.dim() + 2:
+        lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
+        return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
 
     # Harder case: do manual broadcasting over unbound components
     # when NT dim == non-NT dim
@@ -534,6 +567,52 @@ def is_pinned_default(func, *args, **kwargs):
 @register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
 def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
+
+
+@register_jagged_func(
+    torch.ops.aten.sum.dim_IntList, "self: jt, dim: any?, keepdim: any?, dtype: any?"
+)
+def sum_dim_IntList(func, *args, **kwargs):
+    from torch._prims_common import canonicalize_dims
+
+    # sum_dim_IntList can produce a NT or a T depending on whether the ragged dim
+    # is summed over
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    new_kwargs["dim"] = tuple(
+        canonicalize_dims(inp.dim(), s) for s in new_kwargs["dim"]
+    )
+    dims = new_kwargs["dim"]
+    ragged_reduced_away = False
+    batch_dim = 0
+    if inp._ragged_idx in dims:
+        if batch_dim not in dims:
+            raise RuntimeError(
+                "sum(): cannot sum over ragged dim without also summing over batch dim"
+            )
+        ragged_reduced_away = True
+
+    # Simplifying assumption (we may want to generalize in the future)
+    assert batch_dim == 0 and inp._ragged_idx == 1
+
+    if not ragged_reduced_away:
+        new_kwargs["dim"] = tuple(x - 1 for x in new_kwargs["dim"])
+        # sum((B, j0, D1, D2), dim=[2, 3]) -> sum((sum(*), D1, D2), dim=[1, 2])
+        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    else:
+        # We don't assume dims necessarily sorted (maybe we can?)
+        # Ignore the batch dim (if exists), remove the ragged dim (if exists), e.g.:
+        #   sum((B, j0, D1, D2), dim=[0, 1, 3]) -> sum((sum(*), D1, D2), dim=[0, 2])
+        new_kwargs["dim"] = tuple(
+            x - 1 if x != 0 else x for x in new_kwargs["dim"] if x != 1
+        )
+        # Don't wrap because we reduced away the raggedness
+        out = func(inp._values, **new_kwargs)
+        if new_kwargs["keepdim"]:
+            out = out.unsqueeze(0)
+        return out
 
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")

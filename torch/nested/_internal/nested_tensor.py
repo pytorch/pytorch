@@ -97,6 +97,7 @@ class NestedTensor(torch.Tensor):
             )
         self._values = values
         self._offsets = offsets
+        self.requires_grad = kwargs.get("requires_grad", False)
 
     def values(self):
         return self._values
