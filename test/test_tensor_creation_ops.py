@@ -3140,7 +3140,6 @@ class TestRandomTensorCreation(TestCase):
 
     # TODO: add torch.complex64, torch.complex128
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("normal doesn't compile with non-default dtype")
     def test_normal(self, device, dtype):
 
         def helper(self, device, dtype, ptype, t_transform, std_transform):
