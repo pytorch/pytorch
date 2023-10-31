@@ -86,8 +86,8 @@ class Functionalize(_pass.Transform):
                 out = function(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs, _ = pytree.tree_flatten(inputs)
-            flat_inputs_functional, _ = pytree.tree_flatten(inputs_functional)
+            flat_inputs = pytree.tree_leaves(inputs)
+            flat_inputs_functional = pytree.tree_leaves(inputs_functional)
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 if isinstance(input_functional, torch.Tensor):
                     torch._sync(input_functional)
