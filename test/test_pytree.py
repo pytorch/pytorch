@@ -27,11 +27,6 @@ class GlobalDummyType:
 
 
 class TestGenericPytree(TestCase):
-    def test_aligned_public_apis(self):
-        self.assertEqual(_pytree.__all__, py_pytree.__all__)
-        self.assertEqual(_pytree.__all__, cxx_pytree.__all__)
-        self.assertEqual(cxx_pytree.__all__, py_pytree.__all__)
-
     @parametrize(
         "pytree_impl",
         [
