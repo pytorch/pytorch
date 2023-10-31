@@ -1,5 +1,6 @@
 # Owner(s): ["module: pytree"]
 
+import inspect
 import unittest
 from collections import namedtuple, OrderedDict
 
@@ -27,6 +28,22 @@ class GlobalDummyType:
 
 
 class TestGenericPytree(TestCase):
+    def test_aligned_public_apis(self):
+        public_apis = _pytree.__all__
+
+        self.assertEqual(public_apis, py_pytree.__all__)
+        self.assertEqual(public_apis, cxx_pytree.__all__)
+        self.assertEqual(cxx_pytree.__all__, py_pytree.__all__)
+
+        for name in _pytree.__all__:
+            cxx_api = getattr(cxx_pytree, name)
+            py_api = getattr(py_pytree, name)
+
+            self.assertEqual(inspect.isclass(cxx_api), inspect.isclass(py_api))
+            self.assertEqual(inspect.isfunction(cxx_api), inspect.isfunction(py_api))
+            if inspect.isfunction(cxx_api) and name != "register_pytree_node":
+                self.assertEqual(inspect.signature(cxx_api), inspect.signature(py_api))
+
     @parametrize(
         "pytree_impl",
         [
