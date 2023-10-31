@@ -134,7 +134,7 @@ class elementwise_type_promotion_wrapper:
 
             result = fn(**bound.arguments)
 
-            if self.result_dtype:
+            if self.result_dtype and self.result_dtype in bound.arguments:
                 result_dtype = bound.arguments[self.result_dtype]
 
             if isinstance(result, TensorLike):
