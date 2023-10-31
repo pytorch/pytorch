@@ -12,6 +12,7 @@ import random
 import re
 import subprocess
 import sys
+import threading
 import time
 import typing
 import unittest
@@ -186,9 +187,7 @@ class InputGen:
 
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
-        args = pytree.tree_leaves(args)
-        kwargs = pytree.tree_leaves(kwargs)
-        args = args + kwargs
+        args = pytree.arg_tree_leaves(*args, **kwargs)
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
@@ -239,11 +238,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
         output_code_log.setLevel(logging.DEBUG)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
         s = log_capture_string.getvalue()
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
-    return s
+    return result, s
 
 
 def check_model(
@@ -833,7 +832,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
@@ -2599,6 +2598,29 @@ class CommonTemplate:
             check_lowp=False,
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_multi_threading(self):
+        model = torch.nn.Linear(2, 3).eval()
+        inp = torch.randn(4, 2)
+
+        num_run = 3
+
+        def run_weights_sharing_model(m, inp):
+            with torch.no_grad():
+                for i in range(num_run):
+                    y = m(inp)
+
+        numb_instance = 2
+        threads = []
+        compiled_m = torch.compile(model)
+        for i in range(1, numb_instance + 1):
+            thread = threading.Thread(
+                target=run_weights_sharing_model, args=(compiled_m, inp)
+            )
+            threads.append(thread)
+            thread.start()
+        for thread in threads:
+            thread.join()
 
     @unittest.skipIf(config.is_fbcode(), "fbcode triton error, needs debugging")
     def test_adaptive_avg_pool2d_low_prec(self):
@@ -7628,7 +7650,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
-                    for arg in pytree.tree_leaves((args, kwargs)):
+                    for arg in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(arg, torch.Tensor):
                             live_tensors[arg] = True
 
