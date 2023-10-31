@@ -135,7 +135,7 @@ class elementwise_type_promotion_wrapper:
 
             result = fn(**bound.arguments)
 
-            # Override the return_dtype if a dtype arg is present in the function signature
+            # Override the return_dtype if a dtype arg is present and not None
             if "dtype" in bound.arguments:
                 maybe_dtype = bound.arguments["dtype"]
                 if maybe_dtype:  # dtype cannot be None
