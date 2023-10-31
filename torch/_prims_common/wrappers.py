@@ -82,7 +82,7 @@ class elementwise_type_promotion_wrapper:
     """
     Adds elementwise type promotion to a Python reference implementation.
 
-    Takes two kwargs, type_promoting_args, type_promotion_kind.
+    Takes two kwargs, type_promoting_args and type_promotion_kind.
 
     type_promoting_args must be a string Sequence specifiying the argument names of all
     arguments that participate in type promotion (and should be type promoted). If the
