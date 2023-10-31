@@ -192,6 +192,7 @@ if RUN_CPU:
         ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
@@ -267,6 +268,7 @@ if RUN_CUDA:
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
