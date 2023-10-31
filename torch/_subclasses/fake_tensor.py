@@ -511,7 +511,7 @@ def wordaround_stride_incorrect_op(fake_mode, func, *args, **kwargs):
             is_symbolic(x) for x in itertools.chain(args, kwargs.values())
         )
         if not require_dynamic:
-            flat_args, args_spec = pytree.arg_tree_flatten(*args, **kwargs)
+            flat_args, args_spec = pytree.tree_flatten((args, kwargs))
             return run_fallback_kernel(fake_mode, func, flat_args, args_spec, None)
 
     raise UnsupportedOperatorException(func)
