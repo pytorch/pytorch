@@ -8827,7 +8827,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         rightmost_supports_scalarlist: bool = False,
         without_values_kwarg: bool = False,
     ):
-        super().__init__(3 + 1, rightmost_supports_scalar, rightmost_supports_scalarlist)
+        super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist)
         self.without_values_kwarg = without_values_kwarg
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
@@ -9510,7 +9510,7 @@ foreach_binary_op_db: List[OpInfo] = [
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(3, False, False, False),
+        foreach_pointwise_sample_func(4, True, True, False),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
@@ -9526,26 +9526,16 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ),
     ForeachFuncInfo(
         "addcdiv",
-        sample_inputs_func=foreach_pointwise_sample_func(3, False, False, False),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True, False),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
     ),
 ]
 
 foreach_pointwise_without_values_kwarg_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(3, False, False, True),
+        foreach_pointwise_sample_func(4, True, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
@@ -9561,18 +9551,27 @@ foreach_pointwise_without_values_kwarg_op_db: List[ForeachFuncInfo] = [
     ),
     ForeachFuncInfo(
         "addcdiv",
-        sample_inputs_func=foreach_pointwise_sample_func(3, False, False, True),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            # Integer division with addcdiv is no longer supported
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                dtypes=integral_types()),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                dtypes=integral_types()),
         ),
     ),
 ]
