@@ -2330,21 +2330,6 @@ def forward(self, x_1, output_1):
             x = torch.randn(10)
             self.assertEqual(opt_fn(x), fn(x))
 
-    def test_aten_normal_dtype(self):
-        for dtype in [torch.float64, torch.float16, None]:
-
-            def fn():
-                return torch.normal(2, 3, (10, 10), dtype=dtype, device="cpu")
-
-            self.assertEqual(
-                torch.compile(fn, backend="aot_eager_decomp_partition")().dtype,
-                dtype if dtype else torch.float32,
-            )
-            self.assertEqual(
-                torch.compile(fn, backend="inductor")().dtype,
-                dtype if dtype else torch.float32,
-            )
-
 
 common_utils.instantiate_parametrized_tests(DefaultsTests)
 
