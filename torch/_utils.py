@@ -151,7 +151,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 #     serialize the *state_dict* of a model, not the model itself
 #     (since this is more stable to code changes affecting the model
 #     serialization), and the state dict saves "data" only, thus
-#     stripping the the backward hooks.  In some cases, hooks are
+#     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
 #     but DDP already manages readding the hooks!
 #

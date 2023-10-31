@@ -6,12 +6,14 @@ import glob
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -38,7 +40,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
-from tools.stats.export_test_times import TEST_TIMES_FILE
+from tools.stats.import_test_stats import ADDITIONAL_CI_FILES_FOLDER, TEST_TIMES_FILE
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
@@ -182,7 +184,6 @@ TESTS = discover_tests(
         "test_nnapi",
         "test_static_runtime",
         "test_throughput_benchmark",
-        "test_typing",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
         "distributed/launcher/bin/test_script",
@@ -290,6 +291,7 @@ ROCM_BLOCKLIST = [
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
+    "test_jit_cuda_fuser",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -587,12 +589,13 @@ def run_test(
         argv = [test_file + ".py"] + unittest_args
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
-    log_fd, log_path = tempfile.mkstemp(
-        dir=REPO_ROOT / "test" / "test-reports",
-        prefix="{}_".format(test_file.replace("\\", "-").replace("/", "-")),
-        suffix=".log",
-    )
-    os.close(log_fd)
+    if IS_CI:
+        log_fd, log_path = tempfile.mkstemp(
+            dir=REPO_ROOT / "test" / "test-reports",
+            prefix=f"{sanitize_file_name(str(test_module))}_",
+            suffix="_toprint.log",
+        )
+        os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
     should_file_rerun = (
@@ -614,12 +617,15 @@ def run_test(
     )
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
-    with open(log_path, "w") as f:
-        ret_code = retry_shell(
+    with ExitStack() as stack:
+        output = None
+        if IS_CI:
+            output = stack.enter_context(open(log_path, "w"))
+        ret_code, was_rerun = retry_shell(
             command,
             test_directory,
-            stdout=f,
-            stderr=f,
+            stdout=output,
+            stderr=output,
             env=env,
             timeout=timeout,
             retries=2 if should_file_rerun else 0,
@@ -634,8 +640,10 @@ def run_test(
         # comes up in the future.
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    print_log_file(test_module, log_path, failed=(ret_code != 0))
-    os.remove(log_path)
+    if IS_CI:
+        handle_log_file(
+            test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun
+        )
     return ret_code
 
 
@@ -926,33 +934,38 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
-def print_log_file(test: str, file_path: str, failed: bool) -> None:
-    num_lines = sum(1 for _ in open(file_path, "rb"))
+def sanitize_file_name(file: str):
+    return file.replace("\\", ".").replace("/", ".").replace(" ", "_")
+
+
+def handle_log_file(
+    test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
+) -> None:
     test = str(test)
-    n = 100
     with open(file_path, "rb") as f:
+        full_text = f.read().decode("utf-8", errors="ignore")
+
+    if not failed and not was_rerun and "=== RERUNS ===" not in full_text:
+        # If success + no retries (idk how else to check for test level retries
+        # other than reparse xml), print only what tests ran, rename the log
+        # file so it doesn't get printed later, and do not remove logs.
+        new_file = "test/test-reports/" + sanitize_file_name(
+            f"{test}_{os.urandom(8).hex()}_.log"
+        )
+        os.rename(file_path, REPO_ROOT / new_file)
+        print_to_stderr(
+            f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
+        )
+        for line in full_text.splitlines():
+            if re.search("Running .* items in this shard:", line):
+                print_to_stderr(line.strip())
         print_to_stderr("")
-        if failed:
-            if n < num_lines:
-                print_to_stderr(
-                    f"Expand the folded group to see the beginning of the log file of {test}"
-                )
-                print_to_stderr(
-                    f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})"
-                )
-                for _ in range(num_lines - n):
-                    print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
-                print_to_stderr("##[endgroup]")
-            for _ in range(min(n, num_lines)):
-                print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
-            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
-        else:
-            print_to_stderr(f"Expand the folded group to see the log file of {test}")
-            print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read().decode("utf-8", errors="ignore"))
-            print_to_stderr("##[endgroup]")
-            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
-        print_to_stderr("")
+        return
+    # otherwise: print entire file and then remove it
+    print_to_stderr(f"\nPRINTING LOG FILE of {test} ({file_path})")
+    print_to_stderr(full_text)
+    print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})\n")
+    os.remove(file_path)
 
 
 def get_pytest_args(
@@ -1411,7 +1424,9 @@ def get_selected_tests(options) -> List[str]:
     return selected_tests
 
 
-def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
+def download_test_times(
+    file: str = ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE,
+) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
@@ -1646,6 +1661,7 @@ def main():
         aggregated_heuristics = get_test_prioritizations(selected_tests)
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+    test_prioritizations.print_info()
 
     if IS_CI:
         metrics_dict = {
@@ -1681,7 +1697,7 @@ def main():
             )
             return s.strip()
 
-    test_times_dict = download_test_times(TEST_TIMES_FILE)
+    test_times_dict = download_test_times(ADDITIONAL_CI_FILES_FOLDER / TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
     # Each batch will be run sequentially

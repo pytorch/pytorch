@@ -22,6 +22,8 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
     ChunkStorageMetadata,
 )
+from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
     _create_read_items,
@@ -32,7 +34,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
-from torch.distributed._shard.api import _shard_tensor
+from torch.distributed.checkpoint.planner import LoadPlanner
 
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
@@ -100,17 +102,13 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
 
 
 def _alloc_tensor(props: TensorProperties, size: Sequence[int], device_type: str = "cuda") -> torch.Tensor:
-    if device_type == "cpu":
-        device = cast(torch.device, "cpu")
-    else:
-        device = cast(torch.device, _get_device_module(device_type).current_device())
     return torch.empty(
         size=size,
         dtype=props.dtype,
         layout=props.layout,
         requires_grad=props.requires_grad,
         pin_memory=props.pin_memory,
-        device=device,
+        device=cast(torch.device, _get_device_module(device_type).current_device()),
     )
 
 
@@ -216,6 +214,7 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: dist_cp.StorageReader,
+    planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
     Loads a state_dict in conjunction with FSDP sharded optimizer state.
@@ -295,8 +294,12 @@ def load_sharded_optimizer_state_dict(
         if value.size.numel() == 1:
             state_dict[key] = _alloc_tensor(value.properties, value.size, dp_pg_device_type)
         elif dp_pg is None:
-            state_dict[key] = _shard_tensor(
-                _alloc_tensor(value.properties, value.size, dp_pg_device_type), sharding_spec
+            state_dict[key] = _create_chunk_sharded_tensor(
+                _alloc_tensor(value.properties, value.size, dp_pg_device_type),
+                rank=dist.get_rank(),
+                world_size=dist.get_world_size(),
+                num_devices_per_node=device_module.device_count(),
+                pg=_get_default_group(),
             )
         else:
             spec_key = key_path[2]
@@ -341,7 +344,7 @@ def load_sharded_optimizer_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict
-        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else None,
+        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else planner,
     )
 
     state_dict = unflatten_state_dict(state_dict, metadata.planner_data)

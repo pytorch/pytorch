@@ -28,7 +28,9 @@ namespace at::namedinference {
 struct TORCH_API TensorName {
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
       : origin_(origin),
-        name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
+        name_(origin[maybe_wrap_dim(
+            origin_idx,
+            static_cast<int64_t>(origin.size()))]),
         origin_idx_(origin_idx) {}
 
   // op_name is only used for error reporting.

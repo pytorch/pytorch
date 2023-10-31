@@ -27,7 +27,6 @@ from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
-    DeferredLineBase,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -58,6 +57,7 @@ from .triton_utils import config_of, signature_of, signature_to_meta
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
 class TritonPrinter(PythonPrinter):
@@ -93,6 +93,10 @@ class TritonPrinter(PythonPrinter):
         a = self._print(sympy.Max(*expr.args[:mid]))
         b = self._print(sympy.Max(*expr.args[mid:]))
         return f"tl.math.max({a}, {b})"
+
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.abs({self._print(expr.args[0])})"
 
 
 texpr = TritonPrinter().doprint
@@ -819,7 +823,6 @@ class TritonKernel(Kernel):
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
@@ -827,8 +830,6 @@ class TritonKernel(Kernel):
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
-        # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -1245,101 +1246,26 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def indirect_indexing(self, var, size, check=True):
-        # TODO(lezcano) This code should be lifted to codegen/common.py.
-        # This should be easy, as now CSE variables carry bounds info
-        class IndirectAssertLine(DeferredLineBase):
-            def __init__(self, line, var, mask, size_map):
-                self.var = var
-                self.mask = mask
-                self.line = line
-                self.size_map = size_map
+    def generate_assert(self, check):
+        return torch.version.hip is None and super().generate_assert(check)
 
-            def __call__(self):
-                size, size_str = self.size_map[(self.var, self.mask)]
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
 
-                # We assert if we've not been able to prove the bound
-                assert_min = (self.var.bounds.lower >= 0) != sympy.true
-                assert_max = (self.var.bounds.upper < size) != sympy.true
+        if mask_vars:
+            mask = (
+                f"{list(mask_vars)[0]}"
+                if len(mask_vars) == 1
+                else f"({' & '.join(str(v) for v in mask_vars)})"
+            )
+        return mask
 
-                # FooBar interview question
-                if not (assert_min or assert_max):
-                    return None
-                elif assert_min and assert_max:
-                    # The conditions need to be in parens because of Python's operator precedence.
-                    # It'd be less error-prone to use and/or/not, which is suported by triton
-                    cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-                    cond_print = f"0 <= {self.var} < {size_str}"
-                elif assert_min:
-                    cond = f"0 <= {self.var}"
-                    cond_print = cond
-                else:
-                    assert assert_max
-                    cond = f"{self.var} < {size_str}"
-                    cond_print = cond
-
-                if self.mask:
-                    cond = f"({cond}) | ~{self.mask}"
-                return self.line.format(cond=cond, cond_print=cond_print)
-
-            def _new_line(self, line):
-                return IndirectAssertLine(line, self.var, self.mask, self.size_map)
-
-        if var.bounds.lower < 0:
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
-                # Take the negative part of the bound and add size to it
-                # Then take union of that and the positive part
-                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
-                # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:
-                    pos = var.bounds & ValueRanges(0, sympy.oo)
-                    new_bounds = new_bounds | pos
-
-            stm = f"{var} + {self.index_to_str(size)}"
-            # Mixed negative and non-negative
-            if var.bounds.upper >= 0:
-                stm = f"tl.where({var} < 0, {stm}, {var})"
-            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-            new_var.update_on_args("index_wrap", (var,), {})
-            var = new_var
-
-        generate_assert = (
-            (check or config.debug_index_asserts)
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        )
-        if generate_assert:
-            mask_vars = set(var.mask_vars)
-            if self._load_mask:
-                mask_vars.add(self._load_mask)
-
-            mask = ""
-            if mask_vars:
-                mask = (
-                    f"{list(mask_vars)[0]}"
-                    if len(mask_vars) == 1
-                    else f"({' & '.join(str(v) for v in mask_vars)})"
-                )
-
-            # An assertion line may have been written already, if so just
-            # update the max size.
-            map_key = (var, mask)
-            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
-            if existing_size is not None:
-                size = sympy.Min(size, existing_size)
-            else:
-                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
-                self.compute.writeline(
-                    IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
-                )
-
-            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-
-        return sympy_symbol(str(var))
+    @property
+    def assert_function(self):
+        return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -1422,9 +1348,10 @@ class TritonKernel(Kernel):
             dtype = V.graph.get_dtype(name)
             if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
-            if dtype == torch.bool:
+            if dtype == torch.bool and torch.version.hip is None:
                 # Workaround for https://github.com/openai/triton/issues/2151
                 # tl.load returns int8 when loading from pointer to int1
+                # NOTE: Currently causes hangs on bool UTs for ROCm
                 line += ".to(tl.int1)"
 
         if "tmp" in mask:
@@ -1914,7 +1841,7 @@ class TritonKernel(Kernel):
         for numel in self.numels:
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
             if not isinstance(numel_hint, (int, sympy.Integer)):
-                # This default heuristic hint was picked carefuly: it is
+                # This default heuristic hint was picked carefully: it is
                 # large, to ensure that we don't shrink the block size (since
                 # if you don't have many elements, it'd be wasteful to pick a
                 # large block size).  Since we don't know how many elements we
@@ -2180,7 +2107,7 @@ class TritonKernel(Kernel):
         for arg_name in call_args:
             buf = V.graph.get_buffer(arg_name)
             if buf and len(buf.layout.size) == 4:
-                # ignore the tensor if only 1 dimention is non-zero
+                # ignore the tensor if only 1 dimension is non-zero
                 if len([x for x in buf.layout.size if x == 1]) == 3:
                     continue
                 stride_order = ir.get_stride_order(buf.layout.stride)
@@ -2251,16 +2178,38 @@ class TritonScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
 
         if node1.is_reduction() and node2.is_reduction():
-            return numel1 == numel2 and rnumel1 == rnumel2
+            reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
+            if not reduction_can_fuse:
+                fusion_log.debug(
+                    "cannot fuse (triton:1): numel/rnumel mismatch (reduce) (%d, %d), (%d, %d)",
+                    numel1,
+                    numel2,
+                    rnumel1,
+                    rnumel2,
+                )
+            return reduction_can_fuse
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
+                fusion_log.debug(
+                    "cannot fuse (triton:2): numel/rnumel mismatch (non-reduce) (%d, %d), (%d, %d)",
+                    numel1,
+                    numel2,
+                    rnumel1,
+                    rnumel2,
+                )
                 return False
 
             if node1.is_template():
                 # Only allow fusion for TritonTemplates for now.
                 # Fusion for CUDATemplates are not supported.
-                return isinstance(node1.node, TritonTemplateBuffer)
+                is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
+                if not is_triton_template:
+                    fusion_log.debug(
+                        "cannot fuse (triton:3): is not TritonTemplateBuffer %s",
+                        node1,
+                    )
+                return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -2269,13 +2218,22 @@ class TritonScheduling(BaseScheduling):
                 node1.get_nodes() + node2.get_nodes(), numel1, rnumel1
             )
             if config.triton.tiling_prevents_pointwise_fusion:
+                cond = True
                 if len(tiling1) > 2:
                     if len(tiling2) > 2:
-                        return tiling1 == tiling2 == tiling3
+                        cond = tiling1 == tiling2 == tiling3
                     else:
-                        return tiling1 == tiling3
+                        cond = tiling1 == tiling3
                 elif len(tiling2) > 2:
-                    return tiling2 == tiling3
+                    cond = tiling2 == tiling3
+                if not cond:
+                    fusion_log.debug(
+                        "cannot fuse (triton:4): tiling mismatch (%s, %s, %s)",
+                        tiling1,
+                        tiling2,
+                        tiling3,
+                    )
+                    return cond
 
             return True
 
@@ -2286,15 +2244,25 @@ class TritonScheduling(BaseScheduling):
                     TritonKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
+                    fusion_log.debug(
+                        "cannot fuse (triton:5): nodes numel/rnumel incompatibility"
+                    )
                     return False
                 if (
                     config.triton.tiling_prevents_reduction_fusion
                     and not node1.is_template()
                 ):
-                    return self.select_tiling(node1.get_nodes(), numel1) in (
+                    is_reduction_tiling_valid = self.select_tiling(
+                        node1.get_nodes(), numel1
+                    ) in (
                         (numel1, 1),
                         (numel2, rnumel2, 1),
                     )
+                    if not is_reduction_tiling_valid:
+                        fusion_log.debug(
+                            "cannot fuse (triton:6): invalid tiling for reduction"
+                        )
+                    return is_reduction_tiling_valid
                 return True
 
             return numel1 == numel2
@@ -2515,7 +2483,7 @@ class TritonScheduling(BaseScheduling):
             if not any(
                 isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
             ):
-                # We probablly should look what are the nodes inside a foreach
+                # We probably should look what are the nodes inside a foreach
                 # schedule node
                 node_names = [
                     n.get_name()
@@ -2549,7 +2517,7 @@ class TritonScheduling(BaseScheduling):
                     node.mark_run()
 
         kernel_name = self.define_kernel(src_code, node_schedule)
-
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers

@@ -49,7 +49,7 @@ modernize-*,
 performance-*,
 readability-container-size-empty,
 '
-HeaderFilterRegex: '^(c10/|torch/csrc/).*$'
+HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 ...
