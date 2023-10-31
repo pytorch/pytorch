@@ -123,7 +123,7 @@ def save_model_with_external_data(
 
     onnx_model_with_initializers = onnx.ModelProto()  # type: ignore[attr-defined]
     onnx_model_with_initializers.CopyFrom(onnx_model)
-    onnx_input_names = set(input.name for input in onnx_model.graph.input)
+    onnx_input_names = {input.name for input in onnx_model.graph.input}
 
     for path in torch_load_paths:
         state_dict = torch.load(path)
