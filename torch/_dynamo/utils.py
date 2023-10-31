@@ -1411,13 +1411,26 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         If `True`, you must be prepared to deal with such return values, ideally
         by further wrapping them as this graph's fakes.
     """
-    from .exc import (
-        TorchRuntimeError,
-        unimplemented,
-        Unsupported,
-        UserError,
-        UserErrorType,
-    )
+    # from .exc import (
+    #     TorchRuntimeError,
+    #     unimplemented,
+    #     Unsupported,
+    #     UserError,
+    #     UserErrorType,
+    # )
+
+    import importlib
+
+    def some_function(data):
+        exc = importlib.import_module(".exc", package="torch._dynamo")
+
+        if not data:
+            raise exc.TorchRuntimeError("Data is missing.")
+
+
+    def some_function(data):
+        if not data:
+            raise TorchRuntimeError("Data is missing.")
 
     op = node.op
 
