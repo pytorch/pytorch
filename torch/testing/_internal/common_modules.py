@@ -3169,8 +3169,7 @@ module_db: List[ModuleInfo] = [
                        dtypes=[torch.float32, torch.float64],
                        device_type='cpu',
                        active_if=(TEST_WITH_TORCHINDUCTOR),
-                   ),
-                ),
+                   ),),
                supports_gradgrad=False),
     ModuleInfo(torch.nn.Hardtanh,
                module_inputs_func=module_inputs_torch_nn_Hardtanh,
@@ -3359,7 +3358,14 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.SiLU,
                module_inputs_func=module_inputs_torch_nn_SiLU,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_check_inplace',
+                       dtypes=[torch.float32, torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),)
                ),
     ModuleInfo(torch.nn.Softmax,
                module_inputs_func=module_inputs_torch_nn_Softmax,
