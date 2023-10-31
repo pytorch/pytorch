@@ -434,7 +434,9 @@ class MetaConverter:
                                     sizes,
                                     strides,
                                     storage_offset,
-                                ) = sym_sizes_strides_storage_offset(t, source, temp_dynamic_dims, temp_constraint_dims)
+                                ) = sym_sizes_strides_storage_offset(
+                                    t, source, temp_dynamic_dims, temp_constraint_dims
+                                )
                                 return base.as_strided(sizes, strides, storage_offset)
 
                         if safe_is_leaf(t):
