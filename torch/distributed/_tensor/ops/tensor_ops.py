@@ -64,6 +64,11 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         aten.empty_like.default,
         aten.full_like.default,
         aten.ones_like.default,
+        aten.rand_like.default,
+        aten.randn_like.default,
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randint_like.low_dtype_out,
         aten.zeros_like.default,
     ]
 )

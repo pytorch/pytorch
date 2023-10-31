@@ -72,6 +72,10 @@ class DistTensorRandomInitTest(DTensorTestBase):
         )
         self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
         self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
+        self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
+        self._run_init_op(torch.rand_like)
+        self._run_init_op(torch.randn_like)
+        self._run_init_op(torch.randint_like, low=0, high=100)
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
@@ -343,6 +347,50 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 self.assertEqual(
                     local_tensor[self_slice, :], local_tensor[other_slice, :]
                 )
+
+
+# class DistTensorRandomLikeTest(DTensorTestBase):
+#     def _run_like_op(self, init_op, dtype, *args, **kwargs):
+#         device_mesh = self.build_device_mesh()
+#         shard_spec = [Shard(0)]
+#         input_size = (8, 4)
+
+#         # NOTE: currently random initialization on cuda device has different
+#         # behavior from other devices. Unify the test once the behavior is unified.
+#         if not is_rng_supported_mesh(device_mesh):
+#             input_tensor = torch.randn(
+#                 *input_size, dtype=dtype, device=self.device_type
+#             )
+#             dtensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
+#             local_tensor_clone = torch.clone(input_tensor)
+#             torch.manual_seed(self.rank)
+#             local_tensor_clone = init_op(local_tensor_clone, *args, **kwargs)
+#             torch.manual_seed(self.rank)
+#             dtensor = init_op(dtensor, *args, **kwargs)
+#             self.assertEqual(local_tensor_clone, dtensor.to_local())
+#         else:
+#             # create DTensor from Tensor
+#             _tensor = torch.empty(*input_size, device="cuda")
+#             dtensor = distribute_tensor(_tensor, device_mesh, [Shard(1)])
+
+#             # DTensor random init
+#             dtensor = init_op(dtensor, *args, **kwargs)
+#             local_tensor = dtensor.to_local()
+
+#             # compare with local tensors from other ranks
+#             for other_rank in range(self.world_size):
+#                 if self.rank != other_rank:
+#                     slice_idx = [
+#                         slice(input_size[0]),
+#                         slice(
+#                             other_rank * input_size[1], (other_rank + 1) * input_size[1]
+#                         ),
+#                     ]
+#                     # other rank should have a different local tensor
+#                     self.assertNotEqual(dtensor.full_tensor()[slice_idx], local_tensor)
+
+#     @with_comms
+#     def test_init_ops(self):
 
 
 if __name__ == "__main__":
