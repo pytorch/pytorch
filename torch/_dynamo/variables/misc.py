@@ -570,9 +570,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         for arg in args:
-            # as_proxy can return constant values or other non proxy values
-            if isinstance(arg.as_proxy(), torch.fx.Proxy):
-                arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None, **options)
 
