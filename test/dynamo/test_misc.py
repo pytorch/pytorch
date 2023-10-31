@@ -7658,6 +7658,7 @@ def ___make_guard_fn():
             ):
                 r = itertools.cycle(iterator)
                 idx = 0
+                x += 1
                 for i in r:
                     x += i
                     idx += 1
