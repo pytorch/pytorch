@@ -1021,7 +1021,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         for int8_mixed_bf16 in (
             [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
         ):
-            # Totally 6 pattern_matcher_count, 30 pattern_matcher_nodes for linear
+            # Totally 6 pattern_matcher_count, 30 (38 if int8-mixed-bf16) pattern_matcher_nodes for linear
             # 1. Pair of to_int8 and to_fp32 at linear input,
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
