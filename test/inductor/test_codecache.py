@@ -137,7 +137,7 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.float16))
+    @parametrize("dtype", (torch.float32, torch.float64))
     def test_cache_load_model(self, device, dtype):
         """
         Verify that we can populate and load models from the cache.

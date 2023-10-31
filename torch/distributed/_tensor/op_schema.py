@@ -82,7 +82,7 @@ class PlacementStrategy:
                 + ") -> "
             )
         output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        return f"{{{input_specs_str}{output_spec_str}}}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -105,7 +105,7 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        mesh_shape = tuple(self.strategies[0].output_spec.mesh.mesh.shape)
+        mesh_shape = self.strategies[0].output_spec.mesh.shape
         return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
@@ -139,11 +139,10 @@ class TupleStrategy(StrategyType):
         self.childs: Sequence[StrategyType] = childs
 
     def __str__(self) -> str:
-        tuple_strategies_str = "TupleStrategy("
         child_strategies_str = ", ".join(
             [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
         )
-        return f"{tuple_strategies_str}{child_strategies_str})"
+        return f"TupleStrategy({child_strategies_str})"
 
 
 @dataclass
@@ -216,18 +215,16 @@ class OpSchema:
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
                 args_sharding.append(str(arg))
-                mesh_shape = tuple(arg.mesh.mesh.shape)
+                mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
                 arg_spec = arg.strategies[0].output_spec
                 args_sharding.append(str(arg_spec))
-                mesh_shape = tuple(arg_spec.mesh.mesh.shape)
+                mesh_shape = arg_spec.mesh.shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
                 assert isinstance(first_op_strtgy, OpStrategy)
-                mesh_shape = tuple(
-                    first_op_strtgy.strategies[0].output_spec.mesh.mesh.shape
-                )
+                mesh_shape = first_op_strtgy.strategies[0].output_spec.mesh.shape
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))
