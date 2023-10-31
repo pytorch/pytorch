@@ -44,16 +44,13 @@ class TestGenericPytree(TestCase):
             if inspect.isfunction(cxx_api):
                 cxx_signature = inspect.signature(cxx_api)
                 py_signature = inspect.signature(py_api)
+
                 # The C++ pytree APIs provide more features than the Python APIs.
                 # The Python APIs are a subset of the C++ APIs.
                 cxx_positional_params = OrderedDict(
                     (name, param)
                     for name, param in cxx_signature.parameters.items()
-                    if param.kind
-                    in {
-                        inspect.Parameter.POSITIONAL_ONLY,
-                        inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    }
+                    if name in py_signature.parameters
                 )
                 py_positional_params = OrderedDict(py_signature.parameters)
                 self.assertEqual(cxx_positional_params, py_positional_params)
