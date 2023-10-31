@@ -67,7 +67,8 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
-
+# tensors larger than this threshold will not be required to be aligned, to avoid excessive copies
+ALIGNMENT_THRESHOLD = 2**20
 
 @dataclasses.dataclass
 class BoxedBool:
@@ -364,6 +365,9 @@ def compile_fx_inner(
     if cudagraphs is None:
         cudagraphs = BoxedBool(config.triton.cudagraphs)
 
+    if not cudagraphs:
+        align_inputs_fn = align_inputs_creator(example_inputs, range(num_fixed))
+
     # Inputs to fx_codegen_and_compile
     # Anything that affects codegen should go here, so if the signature
     # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
@@ -501,9 +505,12 @@ def compile_fx_inner(
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
+        '''
         new_callable = align_inputs(
             compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
         )
+        '''
+        new_callable = align_inputs_fn(compiled_graph.get_current_callable())
         if new_callable is not compiled_graph.get_current_callable():
             compiled_graph.current_callable = new_callable
 
@@ -668,7 +675,10 @@ def get_input_idxs_to_check(
             )
             and input.device.type == "cuda"
         ):
-            ids_to_check.append(i)
+            if input.numel() * get_dtype_size(input.dtype) > ALIGNMENT_THRESHOLD:
+                input.ignore_alignment = True  # TODO: if it happens to already be aligned, ignore.
+            else:
+                ids_to_check.append(i)
     return ids_to_check
 
 
@@ -692,6 +702,15 @@ def align_inputs(
 ):
     inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
+
+def align_inputs_creator(
+    inputs: List[torch.Tensor],
+    static_input_idxs: Sequence[int] = (),
+):
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    def align_inputs_fn(model):
+        return align_inputs_from_check_idxs(model, inputs_to_check)
+    return align_inputs_fn
 
 
 @dynamo_utils.dynamo_timed

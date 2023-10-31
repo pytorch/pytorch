@@ -230,6 +230,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.init_backend_registration()
 
+        self.inputs_ignore_alignment = set()
+
     @staticmethod
     def decide_layout_opt(gm) -> bool:
         """
@@ -558,6 +560,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
+        if getattr(example, "ignore_alignment", False):
+            self.inputs_ignore_alignment.add(target)
         self.device_types.add(example.device.type)
         self.add_device_idx(example.device.index)
         return tensor
