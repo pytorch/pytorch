@@ -1,10 +1,9 @@
 import logging
-from typing import cast, Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Buffer, IRNode, TensorBox
-from ...scheduler import Scheduler
+from ...ir import IRNode, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -133,48 +132,6 @@ class CUDATemplateKernel(CUDAKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
-
-    @staticmethod
-    def merge_ir_inputs(
-        scheduler: Scheduler, epilogue_nodes: List[ir.ComputedBuffer], template: "CUDATemplate"  # type: ignore[name-defined]
-    ) -> List[IRNode]:
-        """
-        Merge all inputs, including extra inputs from epilogue_nodes.
-
-        Args:
-            scheduler (Scheduler): The scheduler object, used to look up nodes by name.
-            epilogue_nodes (List[ComputedBuffer]): The list of additional epilogue nodes.
-            template (CUDATemplate): The CUDATemplate object.
-
-        Returns:
-        - List[IRNode]: The list of merged input nodes.
-        """
-        # Merge all inputs, including extra inputs from epilogue_nodes
-        # input nodes are not hashable, so we cannot directly place them in sets
-
-        template_input_id_set: Set[str] = {
-            cast(Buffer, irnode).get_name() for irnode in template.input_nodes
-        }
-        intermediate_id_set: Set[str] = {template.name} | {
-            cast(Buffer, n).get_name() for n in epilogue_nodes
-        }
-        covered_input_id_set = set(template_input_id_set) | intermediate_id_set
-        extra_inputs = []
-        for epilogue_node in epilogue_nodes:
-            # IRNodes store no references to their inputs in general
-            # we need to retrieve them indirectly from the current
-            # V.graph.scheduler
-            for node_name in epilogue_node.get_read_names():
-                node = scheduler.name_to_node[node_name]
-                assert hasattr(
-                    node, "node"
-                ), f"Scheduler node {node} does not have a node attribute"
-                irnode = node.node
-                if irnode.get_name() not in covered_input_id_set:
-                    extra_inputs.append(irnode)
-                    covered_input_id_set.add(irnode.get_name())
-        input_nodes = list(template.input_nodes) + extra_inputs
-        return input_nodes
 
     def call_kernel(
         self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
