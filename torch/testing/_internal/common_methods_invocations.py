@@ -13999,6 +13999,43 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float32],
                 active_if=(TEST_WITH_TORCHINDUCTOR)
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_grad",
+                dtypes=[torch.float64, torch.complex128],
+                device_type='cuda',
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_grad",
+                dtypes=[torch.float64],
+                device_type='cpu',
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestBwdGradients",
+                "test_fn_gradgrad",
+                dtypes=[torch.float64, torch.complex128],
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFwdGradients",
+                "test_fn_fwgrad_bwgrad",
+                dtypes=[torch.float64, torch.complex128],
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestFwdGradients",
+                "test_forward_mode_AD",
+                dtypes=[torch.float64, torch.complex128],
+                active_if=(TEST_WITH_TORCHINDUCTOR)
+            ),
         ),
     ),
     BinaryUfuncInfo('nextafter',
