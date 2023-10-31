@@ -439,7 +439,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.skip_model_type_exported_program_test(
+    @pytorch_test_common.skip_model_type_is_exported_program_test(
         "RuntimeError:"
         " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
         " If you need this functionality, please file a github issue."
@@ -476,7 +476,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.skip_model_type_exported_program_test(
+    @pytorch_test_common.skip_model_type_is_exported_program_test(
         "RuntimeError:"
         " Found following user inputs located at [0] are mutated. This is currently banned in the aot_export workflow."
         " If you need this functionality, please file a github issue."
@@ -521,7 +521,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((x2,),)],
         )
 
-    @pytorch_test_common.xfail(
+    @pytorch_test_common.skip_model_type_is_not_exported_program_test(
         "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
         "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
@@ -604,7 +604,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.tensor([1]), torch.randn(3, 4)), model_type=self.model_type
         )
 
-    @pytorch_test_common.skip_model_type_exported_program_test(
+    @pytorch_test_common.skip_model_type_is_exported_program_test(
         "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
         " Github issue: https://github.com/pytorch/pytorch/issues/112443"
     )
@@ -616,7 +616,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),), model_type=self.model_type
         )
 
-    @pytorch_test_common.skip_model_type_exported_program_test(
+    @pytorch_test_common.skip_model_type_is_exported_program_test(
         "AssertionError: AssertionError: original output #1 is BaseModelOutputWithPastAndCrossAttentions("
         " last_hidden_state=FakeTensor(..., size=(2, 128, 16), grad_fn=<ViewBackward0>),"
         " past_key_values=((FakeTensor(..., size=(2, 2, 128, 8), grad_fn=<PermuteBackward0>),"
