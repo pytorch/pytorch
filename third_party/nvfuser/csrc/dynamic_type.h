@@ -2,9 +2,9 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/variant.h>
 #include <cmath>
 #include <iostream>
+#include <variant>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ namespace fuser {
 namespace cuda {
 
 class TORCH_CUDA_CU_API IntOrDouble {
-  c10::variant<double, int64_t> value_;
+  std::variant<double, int64_t> value_;
 
  public:
   IntOrDouble(int64_t i) : value_(i) {}
@@ -21,29 +21,21 @@ class TORCH_CUDA_CU_API IntOrDouble {
   IntOrDouble(size_t i) : value_((int64_t)i) {}
   IntOrDouble() : IntOrDouble(0) {}
 
-  // Avoid using copy constructor of c10::variant as it's
-  // deprecated.
-  IntOrDouble(const IntOrDouble& other) {
-    value_ = other.value_;
-  }
-
-  // Explicitly define copy assignment operator as its implicit definition is
-  // deprecated
-  IntOrDouble& operator=(const IntOrDouble& other) {
-    value_ = other.value_;
-    return *this;
-  }
+  IntOrDouble(const IntOrDouble& other) = default;
+  IntOrDouble& operator=(const IntOrDouble& other) = default;
+  IntOrDouble(IntOrDouble&& other) noexcept = default;
+  IntOrDouble& operator=(IntOrDouble&& other) noexcept = default;
 
   bool is_int() const {
-    return c10::holds_alternative<int64_t>(value_);
+    return std::holds_alternative<int64_t>(value_);
   }
 
   template <typename T>
   T as() const {
     TORCH_CHECK(
-        c10::holds_alternative<T>(value_),
+        std::holds_alternative<T>(value_),
         "The expected dtype and the actual dtype does not match in IntOrDouble");
-    return c10::get<T>(value_);
+    return std::get<T>(value_);
   }
 
   template <typename T>

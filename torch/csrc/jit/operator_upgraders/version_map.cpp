@@ -5,8 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // this flag is used to make sure the elements in the version map
 // are sorted according to when the upgraders are introduced.
@@ -130,5 +129,4 @@ bool get_version_calculator_flag() {
   return calculatePackageVersionBasedOnUpgraders;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

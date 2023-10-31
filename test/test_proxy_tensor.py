@@ -10,9 +10,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -516,10 +515,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -530,10 +526,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -969,6 +962,50 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    # https://github.com/pytorch/pytorch/issues/108195
+    def test_symbolic_repeat_interleave(self):
+        def f(y, x):
+            return y.repeat_interleave(x, dim=1)
+
+        y = torch.tensor([[1, 2], [3, 4]])
+        x = torch.tensor([2, 3])
+        r = str(make_fx(f, tracing_mode="symbolic")(y, x).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, y_1, x_1):
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
+    index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select""")
+
+    @unittest.skip("Need to reenable")
+    def test_repeat_interleave_unbacked_output_size(self):
+        def f(x, y):
+            s = x.sum().item()
+            return y.repeat_interleave(x, dim=0, output_size=s)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor([2, 3]), torch.randn(2)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1, y_1):
+    sum_1 = torch.ops.aten.sum.default(x_1)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
+    index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select"""  # noqa: B950
+        )
+
+    def test_arange_unbacked_output_size(self):
+        def f(x):
+            return torch.arange(0, x)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return arange"""  # noqa: B950
+        )
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]
@@ -1039,10 +1076,26 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_tensor_symfloat(self):
+        def f(a):
+            r = torch.tensor(a.size(0) ** 2.0)
+            assert r.dtype is torch.float
+            return r
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2))
+        r = str(gm.code).strip()
+        # NB: this specializes, which is fine, the point is to make sure the
+        # dtype inference is correct
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    return lift_fresh_copy""")
+        self.assertEqual(gm._tensor_constant0, torch.tensor(4.0))
+
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            constrain_as_size(r)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1050,9 +1103,27 @@ def forward(self, a_1):
             r, """\
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return empty"""  # noqa: B950
+        )
+
+
+    def test_setitem_symint(self):
+        # from moco
+        # https://github.com/pytorch/pytorch/issues/101939
+        def f(x):
+            x[0] = x.size(0)
+            return x
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size = None
+    select = torch.ops.aten.select.int(x_1, 0, 0)
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    return x_1"""  # noqa: B950
         )
 
     def test_dynamic_pointwise_scalar(self):
@@ -1129,7 +1200,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            constrain_as_value(x.shape[0], min=1)
+            torch._constrain_as_value(x.shape[0], min=1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
@@ -1181,7 +1252,7 @@ def forward(self, a_1):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
-                constrain_as_size(s)
+                torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
@@ -1196,9 +1267,9 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
-    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1, min = None, max = None)
-    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2, min = None, max = None)
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1)
+    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2)
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
@@ -1281,15 +1352,17 @@ def forward(self, a_1):
         self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False).shape_env
 
     def test_size_with_tensor(self):
+        # I think I messed up writing this test case originally, I think
+        # I'm supposed to hit an error case, but the code here works in both
+        # eager and tracing
         def f(tensor):
             max_size = torch.tensor([800, 1216], dtype=torch.int64)
             batch_shape = [2] + list(tensor.shape[:-2]) + list(max_size)
             return tensor.new_empty(batch_shape)
 
         a = torch.randn(3, 800, 1199)
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent", lambda: make_fx(f, tracing_mode="symbolic")(a)
-        )
+        f(a)
+        make_fx(f, tracing_mode="symbolic")(a)
 
     def test_expand(self):
         def f(a):
@@ -1326,7 +1399,7 @@ def forward(self, a_1):
         def f(x, offset, as_sym_float=False):
             x0 = x.size()[0]
             if as_sym_float:
-                x0 = sym_float(x0)
+                x0 = torch.sym_float(x0)
             return torch.add(x0, offset)
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
@@ -1532,10 +1605,6 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # FakeTensor fallback doesn't work
-    xfail('_segment_reduce', 'lengths'),
-    # cannot do these as they rely on tensor data
-    xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
@@ -1544,7 +1613,6 @@ symbolic_tensor_failures = {
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('combinations', ''),
-    xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1555,11 +1623,8 @@ symbolic_tensor_failures = {
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
@@ -1570,11 +1635,8 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
@@ -1604,7 +1666,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
 }
 
 inplace_symbolic_tensor_failures = {

@@ -104,7 +104,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
         tests.setUpClass()
         tests.setUp()
         try:
-            code = test_torchinductor.run_and_get_cpp_code(
+            _, code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
@@ -184,8 +184,15 @@ if RUN_CPU:
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_lstm_packed_change_input_sizes",
+            "cpu",
+            test_cpu_repro.CPUReproTests(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
@@ -261,9 +268,11 @@ if RUN_CUDA:
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
+        BaseTest("test_repeat_interleave_2"),
         BaseTest("test_scalar_input"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),
@@ -322,7 +331,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
-        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":

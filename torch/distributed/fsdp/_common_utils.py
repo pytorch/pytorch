@@ -25,7 +25,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
-import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -70,10 +70,10 @@ class _FSDPDeviceHandle:
             try:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
-            except AttributeError:
+            except AttributeError as exc:
                 raise AttributeError(
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
-                )
+                ) from exc
         else:
             self.__backend = backend
 
@@ -92,10 +92,10 @@ class _FSDPDeviceHandle:
     def __getattr__(self, __name: str) -> Any:
         try:
             return getattr(self.__backend, __name)
-        except AttributeError:
+        except AttributeError as exc:
             raise AttributeError(
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
-            )
+            ) from exc
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
@@ -142,6 +142,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._enable_extension: bool = False
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

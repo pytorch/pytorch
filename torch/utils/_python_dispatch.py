@@ -182,7 +182,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs, _ = torch.utils._pytree.tree_flatten(outs)
+    flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:
@@ -192,7 +192,9 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         # plain tensors, we could remove the assert and just not perform the aliasing,
         # but it seems safer to learn more about this case first.
         if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
-            assert type(arg) == type(ret), f"""Called {str(func)} with input of type {type(arg)}
+            ret_list = ret if isinstance(ret, list) else [ret]
+            for r in ret_list:
+                assert type(arg) == type(r), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
         # Need to run under no_dispatch, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
@@ -211,7 +213,12 @@ and output of type {type(ret)}. But expected types to match."""
                 # Example: out = inp.expand(inp.shape[0], inp.shape[0])
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
-                torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
+                if isinstance(ret, list):
+                    for r in ret:
+                        torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape)
+                else:
+                    assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
+                    torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
@@ -226,23 +233,6 @@ and output of type {type(ret)}. But expected types to match."""
             if is_read_only_alias_match(schema_info.args[arg_idx], schema_info.outs[return_idx]):
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
-    # Sigh... the torchscript parser has a bug where alias annotations for Tensor[](a) don't show up properly
-    # See https://github.com/pytorch/pytorch/issues/106173
-    if func.overloadpacket in [
-        torch.ops.aten.chunk,
-        torch.ops.aten.tensor_split,
-        torch.ops.aten.split,
-        torch.ops.aten.split_with_sizes,
-        torch.ops.aten.hsplit,
-        torch.ops.aten.vsplit,
-        torch.ops.aten.dsplit,
-        torch.ops.aten.unbind,
-    ]:
-        assert isinstance(outs, list) and all(isinstance(x, torch.Tensor) for x in outs)
-        for o in outs:
-            # For lists of outputs, need to alias every individual tensor to the input
-            alias_non_inplace_storage(args[0], o)
-
 # This abstracts over the fact that in return_and_correct_aliasing,
 # we sometimes use torchgen schema parsing (for aten ops, since torchscript's schema parsing is sometimes buggy),
 # and sometimes use torchscript schema parsing (for custom ops, for which torchgen parsing is untested).
@@ -250,6 +240,7 @@ and output of type {type(ret)}. But expected types to match."""
 class AliasInfo:
     alias_set: Set[str]
     is_write: bool
+    name: Optional[str]
 
 @dataclass
 class SchemaInfo:
@@ -267,24 +258,40 @@ def get_alias_info(func) -> SchemaInfo:
     # For ATen ops: use torchgen (since torchscript parser doesn't handle alias annotations
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
-        torchgen_schema = torchgen.model.FunctionSchema.parse(str(func._schema))
+        torchgen_schema_str = str(func._schema)
+        assert torchgen_schema_str.startswith("aten::")
+        # remove the aten:: namespace, which is added by the torchscript parser,
+        # and torchgen doesn't know how to handle
+        torchgen_schema_str = torchgen_schema_str[6:]
+        import re
+        # the torchscript parser ends up converting int[2]=1 into int[2]=[1, 1],
+        # which torchgen chokes on.
+        torchgen_schema_str = re.sub(r'=\[[0, ]+\]', '=0', torchgen_schema_str)
+        torchgen_schema_str = re.sub(r'=\[[1, ]+\]', '=1', torchgen_schema_str)
+        # for aten::rot90
+        torchgen_schema_str = torchgen_schema_str.replace("=[0, 1]", "=[0,1]")
+        torchgen_schema = torchgen.model.FunctionSchema.parse(torchgen_schema_str)
         arg_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
-            is_write=a.annotation is not None and a.annotation.is_write
+            is_write=a.annotation is not None and a.annotation.is_write,
+            name=a.name,
         ) for a in torchgen_schema.arguments.flat_all]
         out_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
-            is_write=a.annotation is not None and a.annotation.is_write
+            is_write=a.annotation is not None and a.annotation.is_write,
+            name=a.name,
         ) for a in torchgen_schema.returns]
     else:
         # For non-aten ops, torchgen is untested so we rely on torchscript schema parsing
         arg_schemas = [AliasInfo(
             alias_set=set() if a.alias_info is None else set(a.alias_info.before_set),
-            is_write=a.alias_info is not None and a.alias_info.is_write
+            is_write=a.alias_info is not None and a.alias_info.is_write,
+            name=a.name,
         ) for a in func._schema.arguments]
         out_schemas = [AliasInfo(
             alias_set=set() if a.alias_info is None else set(a.alias_info.before_set),
-            is_write=a.alias_info is not None and a.alias_info.is_write
+            is_write=a.alias_info is not None and a.alias_info.is_write,
+            name=a.name,
         ) for a in func._schema.returns]
     schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
     parsed_schema_map[func] = schema_info
@@ -320,18 +327,24 @@ def return_and_correct_aliasing(func, args, kwargs, out):
             return alias_set[0]
         return None
 
-    def get_arg_idx_from_alias(output_alias):
+    def get_arg_from_alias(output_alias, schema_info, args, kwargs):
+        new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(func, args=args, kwargs=kwargs)
+
         arg_indices = [
             i for i, a in enumerate(schema_info.args)
             if output_alias in a.alias_set
         ]
         # For any dispatcher op with an output alias, we expect it to map to exactly one alias in the schema's input arguments.
         assert len(arg_indices) == 1
-        return arg_indices[0]
+        idx = arg_indices[0]
+        arg_info = schema_info.args[idx]
+        if arg_info.name is not None and arg_info.name in new_kwargs:
+            return new_kwargs[arg_info.name]
+        return new_args[idx]
 
     # Fix up the storages of any outs so that they point to the same storage as the input,
     # if func is a view op.
-    _correct_storage_aliasing(func, schema_info, args, [out] if not isinstance(out, (list, tuple)) else out)
+    _correct_storage_aliasing(func, schema_info, args, (out,) if not isinstance(out, tuple) else out)
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
@@ -342,15 +355,20 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
         # there is only a single argument that gets its metadata mutated.
         assert len(mutated_args) == 1
-        with torch.utils._mode_utils.no_dispatch():
-            # See Note: [Fake Tensor Dispatch Keys]
-            # we're borrowing the way it modifies dispatch key TLS.
-            meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                func(*args, **kwargs)
-            finally:
-                torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+        # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
+        # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
+        # so we don't actually need to update the metadata (and attempting to do so causes errors)
+        from torch._subclasses.functional_tensor import FunctionalTensor
+        if not isinstance(mutated_args[0], FunctionalTensor):
+            with torch.utils._mode_utils.no_dispatch():
+                # See Note: [Fake Tensor Dispatch Keys]
+                # we're borrowing the way it modifies dispatch key TLS.
+                meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+                torch._C._set_meta_in_tls_dispatch_include(True)
+                try:
+                    func(*args, **kwargs)
+                finally:
+                    torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
@@ -363,12 +381,11 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
     if len(func._schema.returns) == 1:
-        arg_idx = get_arg_idx_from_alias(get_write_alias(schema_info.outs[0]))
-        return args[arg_idx]
+        return get_arg_from_alias(get_write_alias(schema_info.outs[0]), schema_info, args, kwargs)
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
     outs_to_return = type(out)([
-        args[get_arg_idx_from_alias(get_write_alias(schema_info.outs[i]))]
+        get_arg_from_alias(get_write_alias(schema_info.outs[i]), schema_info, args, kwargs)
         if get_write_alias(r) is not None else o
         for ((i, r), o) in zip(enumerate(schema_info.outs), out)
     ])

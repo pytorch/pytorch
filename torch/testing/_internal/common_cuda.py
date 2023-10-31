@@ -26,15 +26,22 @@ SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
 SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5))
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
+SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and (not TEST_WITH_ROCM) and (not IS_WINDOWS) and SM80OrLater)
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
+PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+
 if TEST_NUMBA:
-    import numba.cuda
-    TEST_NUMBA_CUDA = numba.cuda.is_available()
+    try:
+        import numba.cuda
+        TEST_NUMBA_CUDA = numba.cuda.is_available()
+    except Exception as e:
+        TEST_NUMBA_CUDA = False
+        TEST_NUMBA = False
 else:
     TEST_NUMBA_CUDA = False
 

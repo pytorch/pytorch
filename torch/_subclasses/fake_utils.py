@@ -1,3 +1,4 @@
+import functools
 import warnings
 from typing import Callable, Union
 
@@ -10,7 +11,6 @@ from torch._subclasses.fake_tensor import (
     UnsupportedFakeTensorException,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
 
 
 aten = torch._ops.ops.aten
@@ -78,10 +78,16 @@ class CrossRefFakeMode(TorchDispatchMode):
             and torch.Tag.inplace_view not in func.tags
             and torch.Tag.data_dependent_output not in func.tags
         ):
+            # Do not import symbolic_shapes at the top of the module as it imports sympy and that's slow
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
             try:
-                with FakeTensorMode() as fake_mode:
+                # TODO: enable_python_dispatcher() here
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
-                        torch.Tensor, fake_mode.from_tensor, (args, kwargs)
+                        torch.Tensor,
+                        functools.partial(fake_mode.from_tensor, static_shapes=True),
+                        (args, kwargs),
                     )
                     with warnings.catch_warnings():
                         fake_r = func(*fake_args, **fake_kwargs)
@@ -94,9 +100,9 @@ class CrossRefFakeMode(TorchDispatchMode):
         )
         r = func(*args, **kwargs)
         if fake_r is not None:
-            r_flat, _ = tree_flatten(r)
-            f_flat, _ = tree_flatten(fake_r)
-            assert len(r_flat) == len(
+            r_flat = pytree.tree_leaves(r)
+            f_flat = pytree.tree_leaves(fake_r)
+            assert len(f_flat) == len(
                 r_flat
             ), f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
 
@@ -121,7 +127,7 @@ class CrossRefFakeMode(TorchDispatchMode):
                 )
 
             for idx, (r_out, fake_out) in enumerate(
-                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+                zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
             ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
@@ -143,9 +149,24 @@ class CrossRefFakeMode(TorchDispatchMode):
 
                     try:
                         torch._prims.utils.compare_tensor_meta(
-                            r_out, fake_out, check_strides=self.check_strides
+                            r_out,
+                            fake_out,
+                            check_strides=self.check_strides,
+                            allow_rhs_unbacked=True,
                         )
                     except Exception as e:
+                        if (
+                            func is aten._scaled_dot_product_flash_attention.default
+                            and idx in (6, 7)
+                            and "Devices" in repr(e)
+                        ):
+                            continue
+                        if (
+                            func is aten._scaled_dot_product_efficient_attention.default
+                            and idx in (2, 3)
+                            and "Devices" in repr(e)
+                        ):
+                            continue
                         error_message = (
                             f"{context} mismatched tensor metadata: {e}"
                             if len(r_flat) == 1

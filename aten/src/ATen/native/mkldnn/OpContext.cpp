@@ -37,7 +37,7 @@ Tensor MkldnnConvOpContext::run(const Tensor& input) {
 }
 
 void MkldnnConvOpContext::run(const Tensor& input, void* output) {
-  return mkldnn::internal::convolution::run(op_context_, input, output);
+  mkldnn::internal::convolution::run(op_context_, input, output);
 }
 
 } // namespace mkldnn

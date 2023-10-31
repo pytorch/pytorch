@@ -1323,7 +1323,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
     def test_in_dims_multiple_inputs(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
-            def forward(input):
+            def forward(x, y):
                 pass
 
             @staticmethod

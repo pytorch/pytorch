@@ -174,6 +174,16 @@ class OptimizeForInferenceTemplate(TestCase):
             def forward(self, x):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
+        class MM2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.t1 = torch.nn.Parameter(torch.rand(10, 10))
+                self.t2 = torch.nn.Parameter(torch.rand(10, 10))
+
+            def forward(self, x):
+                return x @ self.t1, x @ self.t2
+
         class AddMM(MM):
             def __init__(self):
                 super().__init__()
@@ -192,7 +202,12 @@ class OptimizeForInferenceTemplate(TestCase):
                     ]
                 ]
 
-        for mod in [MM().to(self.device), AddMM().to(self.device)][1:]:
+        for mod_fn in [
+            lambda: MM().to(self.device),
+            lambda: MM2().to(self.device),
+            lambda: AddMM().to(self.device),
+        ]:
+            mod = mod_fn()
             inp = torch.rand([10, 10]).to(self.device)
 
             @torch.compile()
@@ -209,6 +224,25 @@ class OptimizeForInferenceTemplate(TestCase):
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
+            mod2 = mod_fn()
+            mod2.t1 = torch.nn.Parameter(torch.rand([10, 15], device=self.device))
+            mod2.t2 = torch.nn.Parameter(torch.rand([10, 20], device=self.device))
+
+            if hasattr(mod2, "b1"):
+                mod2.b1 = torch.nn.Parameter(torch.rand([15], device=self.device))
+                mod2.b2 = torch.nn.Parameter(torch.rand([20], device=self.device))
+
+            # not fused
+            count = 3 if hasattr(mod2, "t3") else 2
+
+            with torch.no_grad():
+                out_eager = mod2(inp)
+                out, code = run_and_get_code(foo, mod2, inp)
+                FileCheck().check_not(kernel_invoke).check_count(
+                    "mm(", count=count, exactly=True
+                ).run(code[0])
+                self.assertEqual(out_eager, out)
+
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)
 
@@ -222,7 +256,7 @@ class OptimizeForInferenceTemplate(TestCase):
             foo(mod, x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
 
@@ -307,8 +341,8 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2

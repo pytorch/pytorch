@@ -23,7 +23,6 @@ def get_rng_state() -> torch.Tensor:
     return default_generator.get_state()
 
 
-@torch._disable_dynamo
 def manual_seed(seed) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers. Returns a
     `torch.Generator` object.
@@ -44,6 +43,9 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
+    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
+        torch.xpu.manual_seed_all(seed)
+
     _seed_custom_device(seed)
 
     return default_generator.manual_seed(seed)
@@ -62,6 +64,9 @@ def seed() -> int:
     import torch.mps
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
+
+    if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
+        torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
