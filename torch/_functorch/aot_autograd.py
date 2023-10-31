@@ -599,8 +599,8 @@ class ViewAndMutationMeta:
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
-    # Whether we are tracing through subclasses
-    # (ideally should remove this)
+    # We're plumbing this is_subclass here is because it's painful to support input mutations
+    # on subclasses, and that info isn't easily available.
     is_subclass: bool = False
 
     num_symints_saved_for_bw: Optional[int] = None
@@ -613,10 +613,17 @@ class ViewAndMutationMeta:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
-        mutated_inp_runtime_indices = [
-            i for i, m in enumerate(self.input_info)
-            if m.mutation_type == MutationType.MUTATED_OUT_GRAPH and not self.is_subclass
-        ]
+
+        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
+        # based on is_subclass argument but this is not easy to do because you would
+        # have to pass around this argument multiple level down.
+        if not self.is_subclass:
+            mutated_inp_runtime_indices = [
+                i for i, m in enumerate(self.input_info)
+                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
+            ]
+        else:
+            mutated_inp_runtime_indices = mutated_inp_indices
 
         mutated_graph_handled_indices = [
             i for i, m in enumerate(self.input_info)
@@ -640,6 +647,12 @@ class ViewAndMutationMeta:
         # of input_info that corresponds to a mutation (data or metadata or both)
         self.mutated_inp_runtime_indices = mutated_inp_runtime_indices
         self.num_mutated_inp_runtime_indices = len(self.mutated_inp_runtime_indices)
+
+        assert (
+            self.num_mutated_graph_handled_indices + self.num_mutated_inp_runtime_indices ==
+            len(mutated_inp_indices)
+        )
+
         # This is pre-computed for perf.
         # It contains the index of every element
         # of output_info that corresponds to an alias (either of an input or intermediate)
@@ -3099,7 +3112,7 @@ def create_runtime_wrapper(
                 )
             else:
                 num_graph_handled = runtime_metadata.num_mutated_graph_handled_indices
-                # We return graph handled inputs in CompiledFunction.forward as we marked them with mark_dirty
+                # autograd.Function requires us to return the mutated inputs as extra outputs to the autograd.Function.forward
                 if num_graph_handled > 0:
                     all_outs = all_outs[:-num_graph_handled]
                 assert (
@@ -3663,11 +3676,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         with track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
             num_inner_fwd_outputs = (
-                inner_meta.num_mutated_inputs
+                inner_meta.num_mutated_inp_runtime_indices
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
-                - inner_meta.num_mutated_graph_handled_indices
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -3997,8 +4009,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             num_mutated_inps = CompiledFunction.metadata.num_mutated_inputs
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = CompiledFunction.metadata.num_mutated_graph_handled_indices
+            num_mutated_runtime_inps = CompiledFunction.metadata.num_mutated_inp_runtime_indices
             expected_grad_outs = (
-                CompiledFunction.metadata.num_outputs + num_mutated_inps + num_intermediate_bases - num_graph_handled_inputs
+                CompiledFunction.metadata.num_outputs + num_mutated_runtime_inps + num_intermediate_bases
             )
 
             if num_graph_handled_inputs > 0:
@@ -4006,8 +4019,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             assert len(flat_args) == expected_grad_outs
             out_info = CompiledFunction.metadata.output_info
 
-            num_mutated_inps_returned = num_mutated_inps - num_graph_handled_inputs
-            assert num_mutated_inps_returned == CompiledFunction.metadata.num_mutated_inp_runtime_indices
+            num_mutated_inps_returned = CompiledFunction.metadata.num_mutated_inp_runtime_indices
 
             inp_tangents, out_tangents, intermediate_base_tangents = (
                 flat_args[0:num_mutated_inps_returned],
