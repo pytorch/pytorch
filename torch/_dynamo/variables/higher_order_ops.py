@@ -1129,6 +1129,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             tracer=tracer,
         )
         post_guards = tx.output.guards
+        if body_lifted_freevars:
+            for freevar in body_lifted_freevars.keys():
+                if "saved_tensor_marked" not in freevar.node.meta:
+                    unimplemented("NYI - freevars in autograd function.")
+
         if always_restore:
             if post_guards - pre_guards:
                 unimplemented("NYI - New guards discovered in a restoring state")
