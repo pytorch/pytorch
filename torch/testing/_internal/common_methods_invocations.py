@@ -2386,7 +2386,7 @@ def _elementwise_type_promo_np(*args, type_promotion_kind):
             return torch.from_numpy(x)
         return x
 
-    flattened = pytree.tree_leaves(args)
+    flattened = pytree.arg_tree_leaves(*args)
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,
