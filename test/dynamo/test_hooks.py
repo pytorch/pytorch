@@ -586,7 +586,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     x.backward(b)
                     self.assertEqual(cnts.frame_count, 1)
                     # X goes to x*2 becaue of mul_
-                    breakpoint()
                     self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
 
 
