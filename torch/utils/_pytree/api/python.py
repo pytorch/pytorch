@@ -247,15 +247,39 @@ SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {
     OrderedDict: NodeDef(OrderedDict, _odict_flatten, _odict_unflatten),
 }
 SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
+    dict: _SerializeNodeDef(
+        dict,
+        f"{dict.__module__}.{dict.__qualname__}",
+        None,
+        None,
+    ),
+    list: _SerializeNodeDef(
+        list,
+        f"{list.__module__}.{list.__qualname__}",
+        None,
+        None,
+    ),
+    tuple: _SerializeNodeDef(
+        tuple,
+        f"{tuple.__module__}.{tuple.__qualname__}",
+        None,
+        None,
+    ),
     namedtuple: _SerializeNodeDef(  # type: ignore[dict-item]
         namedtuple,  # type: ignore[arg-type]
         f"{namedtuple.__module__}.{namedtuple.__qualname__}",
         _namedtuple_serialize,
         _namedtuple_deserialize,
-    )
+    ),
+    OrderedDict: _SerializeNodeDef(
+        OrderedDict,
+        f"{OrderedDict.__module__}.{OrderedDict.__qualname__}",
+        None,
+        None,
+    ),
 }
 SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {
-    f"{namedtuple.__module__}.{namedtuple.__qualname__}": namedtuple  # type: ignore[dict-item]
+    f"{cls.__module__}.{cls.__qualname__}": cls for cls in SUPPORTED_SERIALIZED_TYPES
 }
 
 
