@@ -112,7 +112,6 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isGenerator()) {
     auto generator = val.toGenerator();
     n->ival_(attr::value, generator);
-    n->i_(torch::jit::Symbol::attr("seed"), generator.current_seed());
     n->output()->setType(GeneratorType::get());
   } else if (val.isStream()) {
     // packing into int64_t removed
@@ -202,10 +201,6 @@ c10::optional<IValue> toIValue(const Value* v) {
     return d;
   } else if (type == GeneratorType::get()) {
     auto generator = node->ival(attr::value).toGenerator();
-    auto seed = node->i(torch::jit::Symbol::attr("seed"));
-    // Set the seed that was found at the time of graph construction.
-    // So that the graph is deterministic.
-    generator.set_current_seed(seed);
     return generator;
   } else if (type == StreamObjType::get()) {
     // int64_t packing removed

@@ -2490,7 +2490,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         // TODO return generator object when torchscript supports RNG
         // first-class
-        TORCH_SELECTIVE_SCHEMA("aten::manual_seed.default_(int seed) -> ()"),
+        TORCH_SELECTIVE_SCHEMA("aten::manual_seed(int seed) -> ()"),
         [](Stack& stack) { at::manual_seed(pop(stack).toInt()); },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2514,7 +2514,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::manual_seed.generator(Generator self, int seed) -> Generator"),
+            "aten::manual_seed.generator(Generator(a!) self, int seed) -> Generator(a!)"),
         [](Stack& stack) {
           auto seed = pop(stack).toInt();
           auto generator = pop(stack);
@@ -2523,7 +2523,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::seed(Generator self) -> int"),
+        TORCH_SELECTIVE_SCHEMA("aten::seed(Generator(a!) self) -> int"),
         [](Stack& stack) {
           auto generator = pop(stack);
           auto current_seed = generator.toGenerator().seed();
