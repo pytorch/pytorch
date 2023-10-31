@@ -95,9 +95,6 @@ class NodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
 
 
-SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
-
-
 # _SerializeNodeDef holds the following:
 # - typ: the type of the node (e.g., "Dict", "List", etc)
 # - type_fqn: the fully qualified name of the type, e.g. "collections.OrderedDict"
@@ -110,10 +107,6 @@ class _SerializeNodeDef(NamedTuple):
     type_fqn: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
-
-
-SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
-SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
 def _register_pytree_node(
@@ -250,38 +243,24 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_register_pytree_node(
-    dict,
-    _dict_flatten,
-    _dict_unflatten,
-    _register_cxx_pytree_node=False,
-)
-_register_pytree_node(
-    list,
-    _list_flatten,
-    _list_unflatten,
-    _register_cxx_pytree_node=False,
-)
-_register_pytree_node(
-    tuple,
-    _tuple_flatten,
-    _tuple_unflatten,
-    _register_cxx_pytree_node=False,
-)
-_register_pytree_node(
-    namedtuple,
-    _namedtuple_flatten,
-    _namedtuple_unflatten,
-    to_dumpable_context=_namedtuple_serialize,
-    from_dumpable_context=_namedtuple_deserialize,
-    _register_cxx_pytree_node=False,
-)
-_register_pytree_node(
-    OrderedDict,
-    _odict_flatten,
-    _odict_unflatten,
-    _register_cxx_pytree_node=False,
-)
+SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {
+    dict: NodeDef(dict, _dict_flatten, _dict_unflatten),
+    list: NodeDef(list, _list_flatten, _list_unflatten),
+    tuple: NodeDef(tuple, _tuple_flatten, _tuple_unflatten),
+    namedtuple: NodeDef(namedtuple, _namedtuple_flatten, _namedtuple_unflatten),  # type: ignore[dict-item,arg-type]
+    OrderedDict: NodeDef(OrderedDict, _odict_flatten, _odict_unflatten),
+}
+SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
+    namedtuple: _SerializeNodeDef(  # type: ignore[dict-item]
+        namedtuple,  # type: ignore[arg-type]
+        f"{namedtuple.__module__}.{namedtuple.__qualname__}",
+        _namedtuple_serialize,
+        _namedtuple_deserialize,
+    )
+}
+SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {
+    f"{namedtuple.__module__}.{namedtuple.__qualname__}": namedtuple  # type: ignore[dict-item]
+}
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
