@@ -64,7 +64,9 @@ class AppendOnlyList {
   template <class... Args>
   T* emplace_back(Args&&... args) {
     maybe_grow();
-    if constexpr (std::is_trivially_destructible_v<T>) {
+    if constexpr (
+        std::is_trivially_destructible_v<T> &&
+        std::is_trivially_destructible_v<array_t>) {
       ::new ((void*)next_) T{std::forward<Args>(args)...};
     } else {
       *next_ = T{std::forward<Args>(args)...};
@@ -178,8 +180,7 @@ class AppendOnlyList {
   }
   // TODO: cbegin and cend()
 
-  // TODO: make private
- protected:
+ private:
   void maybe_grow() {
     if (C10_UNLIKELY(next_ == end_)) {
       buffer_last_ = buffer_.emplace_after(buffer_last_);
@@ -193,10 +194,12 @@ class AppendOnlyList {
 
   // We maintain a pointer to the last element of `buffer_` so that we can
   // insert at the end in O(1) time.
-  typename std::forward_list<array_t>::iterator buffer_last_;
   size_t n_blocks_{0};
   T* next_{nullptr};
   T* end_{nullptr};
+
+ protected:
+  typename std::forward_list<array_t>::iterator buffer_last_;
 };
 
 } // namespace impl
