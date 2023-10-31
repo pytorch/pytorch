@@ -17,13 +17,8 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -252,14 +247,9 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # Currently on ROCm we are seeing some slow downs in gcnArch that do not
-        # have optimal NHWC implementations. On ROCm MI200 series we will
-        # default to the enforced last channels behavior, but on non-MI200 series
-        # we will disable the forced layout.
+        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
         if torch.version.hip and torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            if not re.search(r"MI2\d\d", gpu_name):
-                return False
+            return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
         if (
@@ -336,30 +326,6 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
-
-        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
-        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
-        # for more details.
-        #
-        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
-        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
-        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
-        #
-        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
-        #
-        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
-        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
-        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
-        # bringing perf gains.
-        for n in gm.graph.nodes:
-            if n.target in (
-                torch.ops.aten._scaled_dot_product_flash_attention.default,
-                torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            ):
-                log.debug(
-                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
-                )
-                return False
 
         return True
 
@@ -597,7 +563,7 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -737,7 +703,9 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(n):
+        with ir.IRNode.current_origins(origins), self.set_current_node(
+            n
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -925,6 +893,7 @@ class GraphLowering(torch.fx.Interpreter):
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):

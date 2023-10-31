@@ -404,7 +404,6 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   const T* __restrict__ gamma,
   T* dX,
   const int N) {
-
   alignas(sizeof(double)) extern __shared__ char shared_data[];
   T_ACC* reduce_buf = reinterpret_cast<T_ACC*>(&shared_data);
 
@@ -427,15 +426,15 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   }
 
   T_ACC stats_x1{0}, stats_x2{0};
-  unsigned int l = threadIdx.x;
-  unsigned int n_vec_to_read = N / blockDim.x / vec_size;
-  for (unsigned int i = 0; i < n_vec_to_read; ++i) {
+  unsigned int l = threadIdx.x * vec_size;
+  for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
+    unsigned int vec_idx = l / vec_size;
     if (gamma != nullptr) {
-      gamma_vec_reg = gamma_vec_ptr[l];
+      gamma_vec_reg = gamma_vec_ptr[vec_idx];
     }
 
-    X_i_vec_reg = X_i_vec_ptr[l];
-    dY_i_vec_reg = dY_i_vec_ptr[l];
+    X_i_vec_reg = X_i_vec_ptr[vec_idx];
+    dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
@@ -444,13 +443,10 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       stats_x1 += c_loss * gamma_val;
       stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
     }
-
-    l += blockDim.x;
   }
 
   // Tail Loop
-  l = (n_vec_to_read * blockDim.x * vec_size) + threadIdx.x;
-  for (; l < N; l += blockDim.x) {
+  for (; l < N; l++) {
     T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
     const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
     const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
@@ -472,14 +468,15 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
   T_ACC fH = N;
   T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
 
-  l = threadIdx.x;
-  for (unsigned int i = 0; i < n_vec_to_read; ++i) {
+  l = threadIdx.x * vec_size;
+  for (; l + vec_size - 1 < N; l += blockDim.x * vec_size) {
+    unsigned int vec_idx = l / vec_size;
     if (gamma != nullptr) {
-      gamma_vec_reg = gamma_vec_ptr[l];
+      gamma_vec_reg = gamma_vec_ptr[vec_idx];
     }
 
-    X_i_vec_reg = X_i_vec_ptr[l];
-    dY_i_vec_reg = dY_i_vec_ptr[l];
+    X_i_vec_reg = X_i_vec_ptr[vec_idx];
+    dY_i_vec_reg = dY_i_vec_ptr[vec_idx];
 
     for (int k = 0; k < vec_size; ++k) {
       const T_ACC gamma_val = static_cast<T_ACC>(gamma_vec_reg.val[k]);
@@ -493,13 +490,11 @@ __global__ void layer_norm_grad_input_kernel_vectorized(
       dX_i_vec_reg.val[k] = f_grad_input;
     }
 
-    dX_i_vec[l] = dX_i_vec_reg;
-    l += blockDim.x;
+    dX_i_vec[vec_idx] = dX_i_vec_reg;
   }
 
   // Tail Loop
-  l = (n_vec_to_read * blockDim.x * vec_size) + threadIdx.x;
-  for (; l < N; l += blockDim.x){
+  for (; l < N; l += blockDim.x) {
     const T_ACC x = X_i[l];
     const T_ACC dy = dY_i[l];
     T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
@@ -1161,7 +1156,7 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-#if defined __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
     if (M >= 32768) {
       const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
       const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);

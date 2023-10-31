@@ -4,6 +4,7 @@
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     make_input_replicate_1d,
@@ -13,27 +14,28 @@ from torch.distributed.tensor.parallel.style import (
     make_output_reshard_tensor,
     make_output_shard_1d,
     make_output_tensor,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
+    NUM_DEVICES,
 )
 
 
 class TensorParallelStyleTest(DTensorTestBase):
     @property
     def world_size(self):
-        gpu_num = torch.cuda.device_count()
-        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
+        return NUM_DEVICES
 
     def _1d_input_func_check(
         self,
         input_local_tensor,
         expected_local_tensor,
         func,
-        tensor_input_only=False,
         error_msgs="device_mesh is not passed nor can be inferred",
     ) -> None:
         with self.assertRaisesRegex(RuntimeError, error_msgs):
@@ -42,14 +44,16 @@ class TensorParallelStyleTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         # test 1: replicate local tensor
         dtensor = func(input_local_tensor, device_mesh)
-        self.assertEqual(expected_local_tensor, dtensor.to_local())
-        if not tensor_input_only:
-            # test 2: replicate DTensor
-            dtensor = func(dtensor)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
-            # test 3: replicate DTensor with DeviceMesh passed
-            dtensor = func(dtensor, device_mesh)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
+        result = dtensor[0] if isinstance(dtensor, tuple) else dtensor
+        self.assertEqual(expected_local_tensor, result.to_local())
+        # test 2: replicate DTensor
+        dtensor = func(dtensor)
+        result = dtensor[0] if isinstance(dtensor, tuple) else dtensor
+        self.assertEqual(expected_local_tensor, result.to_local())
+        # test 3: replicate DTensor with DeviceMesh passed
+        dtensor = func(dtensor, device_mesh)
+        result = dtensor[0] if isinstance(dtensor, tuple) else dtensor
+        self.assertEqual(expected_local_tensor, result.to_local())
 
     @with_comms
     def test_make_input_replicate_1d(self):
@@ -190,8 +194,8 @@ class TensorParallelStyleTest(DTensorTestBase):
         output = [dtensor]
         with self.assertRaisesRegex(
             RuntimeError,
-            "Tensor parallel module expects DTensor or tensor when layout specified but received"
-            f" {type(output)}!",
+            "Tensor parallel module expects DTensor or tensor"
+            f" when layout specified but received {type(output)}!",
         ):
             func(output, device_mesh)
 
@@ -206,10 +210,10 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.rand(8, 16, device=self.device_type)
         rs = RowwiseParallel()
         self._1d_input_func_check(
-            tensor,
+            [tensor],
             tensor,
             rs._prepare_input,
-            error_msgs="No device mesh is currently active!",
+            error_msgs="No device mesh is currently active",
         )
         # TODO: change output test
         output, dtensor, device_mesh = self._test_prepare_output(
@@ -232,15 +236,65 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
         self._1d_input_func_check(
-            tensor,
+            [tensor],
             tensor,
             cs._prepare_input,
-            error_msgs="No device mesh is currently active!",
+            error_msgs="No device mesh is currently active",
         )
         output, dtensor, device_mesh = self._test_prepare_output(
             cs._prepare_output, [Shard(-1)]
         )
         self.assertEqual(output, dtensor.to_local())
+
+    @with_comms
+    def test_prepare_module_input(self):
+        tensor = torch.rand(8, 16, device=self.device_type)
+        gathered_tensors = [
+            torch.empty_like(tensor) for _ in range(self.world_size)
+        ]
+        dist.all_gather(gathered_tensors, tensor)
+        gathered_tensors = torch.cat(gathered_tensors, dim=0).contiguous()
+        prepare_hook = PrepareModuleInput(input_layouts=[Shard(0)], output_layouts=[Replicate()])
+        self._1d_input_func_check(
+            [tensor],
+            gathered_tensors,
+            prepare_hook._prepare_input,
+            error_msgs="No device mesh is currently active",
+        )
+
+    @with_comms
+    def test_prepare_module_input_multiple_inputs(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x, y):
+                return self.linear(x) + y
+
+        test_mod = TestModule().to(self.device_type)
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel())
+        parallelize_module(
+            test_mod,
+            mesh,
+            PrepareModuleInput(input_layouts=(Shard(0), None), output_layouts=(Replicate(), None))
+        )
+        output = test_mod(
+            torch.randn(2, 8, device=self.device_type),
+            torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
+        )
+        self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
+
+    @with_comms
+    def test_prepare_module_output(self):
+        tensor = torch.rand(8, 16, device=self.device_type)
+        prepare_hook = PrepareModuleOutput(input_layouts=[Replicate()], output_layouts=[Shard(0)])
+        output, dtensor, device_mesh = self._test_prepare_output(
+            prepare_hook._prepare_output, [Replicate()]
+        )
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Shard(0)]).to_local())
 
 
 if __name__ == "__main__":
