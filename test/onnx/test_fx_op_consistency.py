@@ -735,7 +735,7 @@ def _run_test_output_match(
                     atol = None
                 # Run the test
                 test_suite.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-                    model, inputs, rtol=rtol, atol=atol
+                    model, inputs, model_type="torch.nn.Module", rtol=rtol, atol=atol
                 )
 
 
