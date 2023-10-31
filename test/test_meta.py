@@ -7,6 +7,7 @@ import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
@@ -375,8 +376,8 @@ def should_check_strides(func):
     return CheckStrides.SIGNIFICANT
 
 def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
-    flat_meta_rs, _ = tree_flatten(meta_rs)
-    flat_rs, _ = tree_flatten(rs)
+    flat_meta_rs = pytree.tree_leaves(meta_rs)
+    flat_rs = pytree.tree_leaves(rs)
     test_case.assertEqual(len(flat_meta_rs), len(flat_rs))
     for i, meta_r, r in zip(range(len(flat_rs)), flat_meta_rs, flat_rs):
         def test_assert(cond, msg):
@@ -519,7 +520,7 @@ def run_meta_crossref(
         elif func is torch.Tensor.__getitem__:
             # Ensure boolean tensors use original
             assert len(args) == 2
-            flat_args, _ = tree_flatten(args[1])
+            flat_args = pytree.tree_leaves(args[1])
             flat_meta_args, spec = tree_flatten(meta_args[1])
             flat_new_args = []
             for a, ma in zip(flat_args, flat_meta_args):
@@ -627,10 +628,10 @@ meta_function_expected_failures = {
     torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
-    torch.histc : {f64, bf16, f32},
+    torch.histc : {f64, f16, bf16, f32},
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
-    torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
+    torch.kthvalue : {f64, i32, i64, u8, i16, f16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.one_hot : {i64},
@@ -804,7 +805,7 @@ meta_dispatch_expected_failures = {
     aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
-    aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
+    aten.kthvalue.default : {i8, f64, i64, f16, bf16, f32, i32, i16, u8},
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
@@ -841,6 +842,8 @@ meta_dispatch_device_expected_failures['cpu'] = {
     aten._native_batch_norm_legit.default: {bf16, f16},
     aten._native_batch_norm_legit.no_stats: {bf16, f16},
     aten.native_layer_norm.default: {bf16},
+    aten.histc.default: {f16},
+    aten.histc.out: {f16},
 }
 
 meta_dispatch_device_expected_failures['cuda'] = {

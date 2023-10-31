@@ -42,8 +42,8 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
+from torch.utils import _pytree as pytree
 
-from torch.utils._pytree import tree_flatten
 
 from packaging import version
 
@@ -2386,7 +2386,7 @@ def _elementwise_type_promo_np(*args, type_promotion_kind):
             return torch.from_numpy(x)
         return x
 
-    flattened = tree_flatten(args)[0]
+    flattened = pytree.arg_tree_leaves(*args)
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,
@@ -10521,6 +10521,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    OpInfo('unsafe_chunk',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_chunk,
+           check_batched_forward_grad=False,
+           reference_inputs_func=reference_inputs_chunk,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
     OpInfo('clone',
            ref=np.copy,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -10779,8 +10787,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('cross',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cross,
            supports_fwgrad_bwgrad=True,
            supports_out=True,
@@ -11421,7 +11428,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            sample_inputs_func=sample_inputs_isin),
     OpInfo('kthvalue',
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and(torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -11492,8 +11499,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -11526,8 +11532,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -11851,7 +11856,7 @@ op_db: List[OpInfo] = [
            skips=(
            )),
     OpInfo('median',
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
@@ -11860,7 +11865,7 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_median,
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
@@ -16727,7 +16732,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('histc',
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
@@ -17456,8 +17461,7 @@ op_db: List[OpInfo] = [
                    promotes_int_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-1,
                                                   torch.float16: 5e-1}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    sample_inputs_func=sample_inputs_logit),
     OpInfo('where',
            # Currently only the `input` is tested in gradcheck.
@@ -18052,7 +18056,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.grid_sample",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
@@ -18062,7 +18066,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "grid_sampler_2d",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
