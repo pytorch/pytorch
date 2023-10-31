@@ -2,8 +2,8 @@ import torch
 import numpy as np
 
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT
+from torch.ao.quantization.experimental.apot.observer import APoTObserver
+from torch.ao.quantization.experimental.apot.quantizer import quantize_APoT
 
 class LinearAPoT(WeightedQuantizedModule):
     r"""

@@ -1,8 +1,8 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.apot.observer import APoTObserver
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
-from torch.ao.quantization.experimental.fake_quantize_function import fake_quantize_function
+from torch.ao.quantization.experimental.apot.fake_quantize_function import fake_quantize_function
 
 class APoTFakeQuantize(FakeQuantizeBase):
     alpha: Tensor

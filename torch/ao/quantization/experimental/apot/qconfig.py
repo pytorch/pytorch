@@ -2,7 +2,7 @@ import torch
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
-from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
+from torch.ao.quantization.experimental.apot.fake_quantize import APoTFakeQuantize
 
 """
 Default symmetric fake_quant for activations.

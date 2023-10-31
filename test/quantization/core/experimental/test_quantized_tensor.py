@@ -2,8 +2,8 @@
 
 import torch
 import unittest
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT
+from torch.ao.quantization.apot.experimental.observer import APoTObserver
+from torch.ao.quantization.apot.experimental.quantizer import quantize_APoT
 
 class TestQuantizedTensor(unittest.TestCase):
     r""" Tests int_repr on APoTQuantizer with random tensor2quantize

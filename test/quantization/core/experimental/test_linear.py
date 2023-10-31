@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-from torch.ao.quantization.experimental.linear import LinearAPoT
+from torch.ao.quantization.experimental.apot.linear import LinearAPoT
 from torch.nn.modules.linear import Linear
 import unittest
 
