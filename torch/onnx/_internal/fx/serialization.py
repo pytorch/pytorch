@@ -145,6 +145,7 @@ def save_model_with_external_data(
             # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
             # loaded by torch.load.
             if name in onnx_input_names:
+                # Same input name shouldn't be matched again
                 onnx_input_names.remove(name)
             else:
                 for onnx_input_name in onnx_input_names:
