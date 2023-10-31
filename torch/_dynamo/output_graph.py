@@ -40,7 +40,7 @@ from torch._guards import (
 )
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
+from torch.utils.weak import WeakIdKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -56,6 +56,7 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
+    SkipFrame,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -98,6 +99,8 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
+
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -252,10 +255,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
-
-        # Used to maintain an alias between real values variable tracker for tensors we have seen.
-        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
-        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -421,12 +420,19 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def new_subtracer(self, source_target):
+    def subtracer(self, source_target, prior_tracer):
         new_scope_ctx = enter_new_scope()
         try:
+            if prior_tracer:
+                # Lineage MUST stay preserved
+                assert prior_tracer.parent is self.current_tracer
             new_scope_ctx.__enter__()
-            tracer = SubgraphTracer(
-                self, parent=self.current_tracer, source_target=source_target
+            tracer = (
+                prior_tracer
+                if prior_tracer
+                else SubgraphTracer(
+                    self, parent=self.current_tracer, source_target=source_target
+                )
             )
             self.tracers.append(tracer)
             yield tracer
@@ -844,7 +850,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
@@ -1048,6 +1061,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
+        except SkipFrame as e:
+            # The backend compiler has requested that we skip the frame, instead of
+            # aborting execution.
+            raise e
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
@@ -1161,6 +1178,58 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
+
+
+err_epilogue = (
+    "With the current config, we will graph break "
+    "(and fall back to eager-mode PyTorch) on all ops "
+    "that have do not have the 'pt2_compliant_tag'. "
+    "Please see the following doc for how to mark this op as PT2 compliant "
+    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+)
+
+
+def check_pt2_compliant_op(tx, kind, target, args, kwargs):
+    if kind != "call_function":
+        return
+    if not config.only_allow_pt2_compliant_ops:
+        return
+    if isinstance(target, torch._ops.OpOverload):
+        if torch.Tag.pt2_compliant_tag in target.tags:
+            return
+        unimplemented(
+            f"Encountered the torch.ops.OpOverload {target} "
+            f"that is not PT2 compliant. " + err_epilogue
+        )
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        overloads = tuple(target.overloads())
+        # Optimization: Overload resolution is expensive.
+        # If there's only one overload, we know what it will resolve to.
+        if len(overloads) == 1:
+            op = getattr(target, overloads[0])
+            if torch.Tag.pt2_compliant_tag in op.tags:
+                return
+            unimplemented(
+                f"Encountered the non-overloaded "
+                f"torch.ops.OpOverloadPacket {target} "
+                f"that is not PT2 compliant. " + err_epilogue
+            )
+        args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
+            tx, (args, kwargs)
+        )
+        try:
+            overload = torch._C._jit_resolve_packet(
+                target._qualified_op_name, *args, **kwargs
+            )
+        except RuntimeError as e:
+            unimplemented(str(e))
+
+        if torch.Tag.pt2_compliant_tag not in getattr(target, overload).tags:
+            unimplemented(
+                f"Encountered the torch.ops.OpOverloadPacket {target} "
+                f"which resolves to the overload ({overload}) that is "
+                f"not PT2 compliant. " + err_epilogue
+            )
 
 
 class SubgraphTracer(fx.Tracer):
@@ -1394,8 +1463,9 @@ class SubgraphTracer(fx.Tracer):
     def create_node(
         self, op, target, args=None, kwargs=None, name=None, type_expr=None
     ):
+        check_pt2_compliant_op(self.output_graph.current_tx, op, target, args, kwargs)
         if self.parent is not None:
-            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
@@ -1536,7 +1606,7 @@ class SubgraphTracer(fx.Tracer):
 # (possibly nested) SubgraphTracers, one per body function.
 #
 # Mechanically, we do the introspection by:
-# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
+# - Creating a new SubgraphTracer via OutputGraph.subtracer
 # - Executing the body function.
 # This constructs the graph of the body function in the new SubgraphTracer
 # while modifying the state of the OutputGraph. For example:

@@ -355,7 +355,9 @@ Utilities
 ---------
 .. automodule:: torch.nn.utils
 
-From the ``torch.nn.utils`` module
+From the ``torch.nn.utils`` module:
+
+Utility functions to clip parameter gradients.
 
 .. currentmodule:: torch.nn.utils
 .. autosummary::
@@ -363,15 +365,63 @@ From the ``torch.nn.utils`` module
     :nosignatures:
 
     clip_grad_norm_
+    clip_grad_norm
     clip_grad_value_
-    parameters_to_vector
-    vector_to_parameters
-    prune.BasePruningMethod
+
+Utility functions to flatten and unflatten Module parameters to and from a single vector.
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
+    parameters_to_vector
+    vector_to_parameters
+
+Utility functions to fuse Modules with BatchNorm modules.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fuse_conv_bn_eval
+    fuse_conv_bn_weights
+    fuse_linear_bn_eval
+    fuse_linear_bn_weights
+
+Utility functions to convert Module parameter memory formats.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    convert_conv2d_weight_memory_format
+
+Utility functions to apply and remove weight normalization from Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    weight_norm
+    remove_weight_norm
+    spectral_norm
+    remove_spectral_norm
+
+Utility functions for initializing Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    skip_init
+
+Utility classes and functions for pruning Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    prune.BasePruningMethod
     prune.PruningContainer
     prune.Identity
     prune.RandomUnstructured
@@ -388,11 +438,6 @@ From the ``torch.nn.utils`` module
     prune.custom_from_mask
     prune.remove
     prune.is_pruned
-    weight_norm
-    remove_weight_norm
-    spectral_norm
-    remove_spectral_norm
-    skip_init
 
 Parametrizations implemented using the new parametrization functionality
 in :func:`torch.nn.utils.parameterize.register_parametrization`.
@@ -428,7 +473,7 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
-Utility functions to calls a given Module in a stateless manner.
+Utility functions to call a given Module in a stateless manner.
 
 .. autosummary::
     :toctree: generated

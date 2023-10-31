@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# flake8: noqa
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -107,55 +108,6 @@ class TestExport(TestCase):
 
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
-
-    def test_export_preserve_signature(self):
-        class NestedChild(torch.nn.Module):
-            def forward(self, zx, y):
-                return {"x": y["key"] + zx[1], "w": y["key"] * zx[1]}
-
-        class Child1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.nested = NestedChild()
-
-            def forward(self, x, y):
-                z = torch.ones_like(x)
-                xw = self.nested((z, x), y={"key": y})
-                return xw["w"] + z - xw["x"]
-
-        class Child2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x - 1
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.foo = Child1()
-                self.bar = Child2()
-
-            def forward(self, x, y):
-                x = self.foo(x, y)
-                x = self.bar(x)
-                return x
-
-        orig_eager = MyModule()
-        inps = torch.rand(2, 3), torch.rand(2, 3)
-        ep = _export(
-            orig_eager,
-            inps,
-            {},
-            preserve_module_call_signature=("foo.nested", "foo"),
-        )
-        ep._validate()
-        self.assertEqual(len(ep.module_call_graph), 3)
-        # TODO(zhxchen17) unflattener
-        # unflattened = unflatten(export_module)
-        # self.compare_outputs(export_module, unflattened, inps)
-        # unflattened.foo.nested = NestedChild()
-        # self.compare_outputs(export_module, unflattened, inps)
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
@@ -1365,45 +1317,6 @@ class TestExport(TestCase):
         exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
-    def test_lift_constants(self) -> None:
-        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
-
-        def f(x):
-            return x + torch.tensor(3)
-
-        ep = export(f, (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        for node in ep.graph.nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 1)
-        self.assertEqual(len(ep.state_dict), 1)
-
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.tensor(3)
-
-            def forward(self, x):
-                list_tensor = [torch.tensor(3), torch.tensor(4)]
-                return x + self.a + list_tensor[0] + list_tensor[1]
-
-        ep = export(Foo(), (torch.tensor(1),))
-        ep = lift_constant_tensor_pass(ep)
-
-        nodes = list(ep.graph.nodes)
-
-        for node in nodes:
-            self.assertTrue(node.op != "get_attr")
-        self.assertEqual(len(ep.graph_signature.buffers), 3)
-        self.assertEqual(len(ep.state_dict), 3)
-
-        # These constants should be placed after the param/buffers
-        self.assertTrue(
-            nodes[1].name in ep.graph_signature.inputs_to_buffers and
-            nodes[2].name in ep.graph_signature.inputs_to_buffers
-        )
-
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -1525,6 +1438,23 @@ class TestExport(TestCase):
         ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep(inp), torch.nonzero(inp)))
+
+    def test_redundant_asserts(self):
+        def f(x):
+            y = x.item()
+            torch._constrain_as_size(y)
+            return torch.zeros(y)
+
+        ep = export(f, (torch.tensor([3]),))
+        self.assertExpectedInline(str(ep.graph_module.code).strip(), """\
+def forward(self, arg0_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+    ge = _local_scalar_dense >= 0
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
+    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, inf].');  scalar_tensor = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return (zeros,)""")
 
 if __name__ == '__main__':
     run_tests()

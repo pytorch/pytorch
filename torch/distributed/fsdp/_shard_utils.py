@@ -89,8 +89,10 @@ def _gather_state_dict(
                 value = value.to(value.device_mesh.device_type)
             # FSDP all_gather: [Shard(0)] -> [Replicate()]
             # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
-            placements = list(copy.deepcopy(value.placements))
-            placements[-1] = Replicate()
+            # 2D FSDP + TP all_gather:
+            # - [Shard(0), Shard(n)] -> [Replicate(), Replicate()]
+            # - [Shard(0), Replicate()] -> [Replicate(), Replicate()]
+            placements = [Replicate() for _ in value.placements]
             value = value.redistribute(
                 device_mesh=value.device_mesh,
                 placements=placements,
@@ -185,9 +187,29 @@ def _create_chunk_dtensor(
     replicate_placements = [Replicate() for _ in range(device_mesh.ndim)]
     shard_placements = [Replicate() for _ in range(device_mesh.ndim)]
     shard_placements[-1] = DShard(0)  # type: ignore[call-overload]
-    shard_placements = tuple(shard_placements)
 
     return DTensor.from_local(tensor, device_mesh, replicate_placements).redistribute(
         device_mesh=device_mesh,
         placements=shard_placements,
     )
+
+
+def _all_gather_dtensor(
+    tensor: DTensor,
+    parent_mesh: Optional[DeviceMesh],
+) -> torch.Tensor:
+    """
+    All gather a DTensor in its sharded dimension and return the local tensor.
+    """
+    assert parent_mesh is None
+
+    placements = list(copy.deepcopy(tensor.placements))
+    # FSDP placements: [Shard(0)] -> [Replicate()]
+    # HSDP placements: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+    placements[-1] = Replicate()
+    tensor = tensor.redistribute(
+        device_mesh=tensor.device_mesh,
+        placements=placements,
+    )
+
+    return tensor.to_local()

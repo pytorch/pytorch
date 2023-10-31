@@ -58,6 +58,12 @@ class PlacementStrategy:
     output_spec: DTensorSpec
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
+    # redistribute costs for this op placement strategy
+    # we need a nested list to record the cost for each
+    # operand of this operator, and for each operand of
+    # this operator it might have multiple placement strategies
+    redistribute_cost: Optional[List[List[float]]] = None
+
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
 
@@ -65,14 +71,18 @@ class PlacementStrategy:
         if self.input_specs is None:
             input_specs_str = ""
         else:
-            input_specs_str = ", ".join(
-                [
-                    self.pretty_print_placements(spec.placements)
-                    for spec in self.input_specs
-                ]
+            input_specs_str = (
+                "("
+                + ", ".join(
+                    [
+                        self.pretty_print_placements(spec.placements)
+                        for spec in self.input_specs
+                    ]
+                )
+                + ") -> "
             )
         output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -95,7 +105,8 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        return f"OpStrategy: [{strategy_list_str}]"
+        mesh_shape = self.strategies[0].output_spec.mesh.shape
+        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -115,26 +126,23 @@ class OpStrategy(StrategyType):
 class TupleStrategy(StrategyType):
     """
     TupleStrategy represents the output strategy of this op is a tuple
-    of strategy, i.e. If the output of this op is a tuple of tensors, we should
-    return a TupleStrategy that contains a tuple of OpStrategy.
+    of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
+    with possibly different placement strategies, we should return a TupleStrategy that
+    contains a tuple of OpStrategy.
 
-    NOTE: if the output of the op is a List[Tensor], it's likely we should return
-    OpStrategy directly in all cases.
+    NOTE: if the output of the op is a List[Tensor] and they share the same placement
+    strategy, then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Tuple[StrategyType, ...]) -> None:
+    def __init__(self, childs: Sequence[StrategyType]) -> None:
         super().__init__()
-        self.childs: Tuple[StrategyType, ...] = childs
+        self.childs: Sequence[StrategyType] = childs
 
     def __str__(self) -> str:
-        tuple_strategies_str = "TupleStrategy: "
-        child_strategies_str = "\n".join(
-            [
-                f" tuple idx: {idx}, strategy: {str(strat)}"
-                for idx, strat in enumerate(self.childs)
-            ]
+        child_strategies_str = ", ".join(
+            [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
         )
-        return f"{tuple_strategies_str}\n{child_strategies_str}"
+        return f"TupleStrategy({child_strategies_str})"
 
 
 @dataclass
@@ -200,6 +208,36 @@ class OpSchema:
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
         )
+
+    def __str__(self) -> str:
+        args_sharding: List[str] = []
+        mesh_shape = None
+        for arg in self.args_schema:
+            if isinstance(arg, DTensorSpec):
+                args_sharding.append(str(arg))
+                mesh_shape = arg.mesh.shape
+            elif isinstance(arg, OpStrategy):
+                assert len(arg.strategies) == 1
+                arg_spec = arg.strategies[0].output_spec
+                args_sharding.append(str(arg_spec))
+                mesh_shape = arg_spec.mesh.shape
+            elif isinstance(arg, TupleStrategy):
+                first_op_strtgy = arg.childs[0]
+                assert isinstance(first_op_strtgy, OpStrategy)
+                mesh_shape = first_op_strtgy.strategies[0].output_spec.mesh.shape
+                args_sharding.append(str(arg))
+            else:
+                args_sharding.append(str(arg))
+        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)}@ mesh: {mesh_shape})"
+
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
