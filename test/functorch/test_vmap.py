@@ -3778,6 +3778,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             'hypot',
             'igamma',
             'igammac',
+            'index_add',
             'index_copy',
             'lcm',
             'ldexp',
