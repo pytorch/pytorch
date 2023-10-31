@@ -996,8 +996,16 @@ def dict_const_keys(value):
 def const_repr(x, *, local) -> str:
     from .allowed_functions import is_builtin_callable
 
-    if isinstance(x, (tuple, list)):
-        return f"{type(x).__name__}({','.join(const_repr(s, local=local) for s in x)})"
+    if isinstance(x, (list, tuple)):
+        elems_repr = ",".join(const_repr(s, local=local) for s in x)
+        if isinstance(x, list):
+            return f"[{elems_repr}]"
+        else:
+            assert isinstance(x, tuple)
+            if len(x) == 1:
+                return f"({elems_repr},)"
+            else:
+                return f"({elems_repr})"
     elif isinstance(x, enum.Enum):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
