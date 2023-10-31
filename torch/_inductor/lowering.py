@@ -29,7 +29,6 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._pytree import tree_flatten
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
@@ -1640,7 +1639,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         if "val" not in node.meta:
             return False
 
-        for meta in tree_flatten(node.meta["val"])[0]:
+        for meta in pytree.tree_leaves(node.meta["val"]):
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
 
@@ -1654,7 +1653,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # only skip codegen if there is a cpu output, not input
-    for arg in tree_flatten((node.args, node.kwargs))[0]:
+    for arg in pytree.tree_leaves((node.args, node.kwargs)):
         if check_skip_condition(arg, node, is_output=False):
             return True
 
@@ -1807,6 +1806,7 @@ def rand(*args, **kwargs):
     if kwargs.get("generator", None) is not None:
         return fallback_rand_generator(*args, **kwargs)
     elif config.fallback_random:
+        kwargs.pop("generator", None)
         return fallback_rand_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
@@ -1816,6 +1816,7 @@ def randn(*args, **kwargs):
     if kwargs.get("generator", None) is not None:
         return fallback_randn_generator(*args, **kwargs)
     elif config.fallback_random:
+        kwargs.pop("generator", None)
         return fallback_randn_default(*args, **kwargs)
     raise AssertionError("should have been handled in replace_random.py")
 
@@ -2077,7 +2078,7 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
-make_fallback(aten._scaled_mm.default)
+make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 # TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
