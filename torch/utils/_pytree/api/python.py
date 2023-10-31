@@ -194,8 +194,8 @@ def _register_pytree_node(
         else:
             cxx.register_pytree_node(
                 cls,
-                flatten_fn,
-                unflatten_fn,
+                flatten_func,
+                unflatten_func,
                 to_dumpable_context=to_dumpable_context,
                 from_dumpable_context=from_dumpable_context,
                 _register_python_pytree_node=False,
