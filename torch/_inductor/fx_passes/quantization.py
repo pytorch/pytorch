@@ -369,7 +369,6 @@ def _register_quantized_conv_binary_lowering(
 ):
     @register_lowering_pattern(
         pattern,
-        # extra_check=_is_valid_quantized_conv2d_optimization_pattern(output_dtype),
         pass_number=pass_number,
     )
     def qconv_binary(match: Match, *args, **kwargs):
