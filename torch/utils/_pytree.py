@@ -131,7 +131,7 @@ def _register_pytree_node(
 ) -> None:
     """
     Args:
-        typ: the type to register
+        cls: the type to register
         flatten_func: A callable that takes a pytree and returns a flattened
             representation of the pytree and additional context to represent the
             flattened pytree.
@@ -347,9 +347,7 @@ def _tree_flatten_helper(tree: PyTree, leaves: List[Any]) -> TreeSpec:
     child_pytrees, context = flatten_fn(tree)
 
     # Recursively flatten the children
-    children_specs = [
-        _tree_flatten_helper(child, leaves) for child in child_pytrees
-    ]
+    children_specs = [_tree_flatten_helper(child, leaves) for child in child_pytrees]
 
     return TreeSpec(node_type, context, children_specs)
 
