@@ -140,7 +140,7 @@ class FakeSparsity(nn.Module):
 
 # Observers
 class PerChannelNormObserver(UniformQuantizationObserverBase):
-    r"""
+    """
     A custom observer that computes the L2 norm of each channel and stores it in a buffer.
     """
 
