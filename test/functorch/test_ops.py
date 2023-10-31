@@ -766,7 +766,7 @@ class TestOperators(TestCase):
         # RuntimeError:
         # The expanded size of the tensor (1) must match the existing size (2) at non-singleton dimension 2.
         # Target sizes: [2, 2, 1, 2, 5].  Tensor sizes: [2, 1, 1]
-        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32)),
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
         decorate("linalg.householder_product", decorator=runOnRocm),  # works on ROCm
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -1013,7 +1013,7 @@ class TestOperators(TestCase):
 
         # RuntimeError: The expanded size of the tensor (1) must match the existing size (2)
         # at non-singleton dimension 2.  Target sizes: [2, 2, 1, 2, 5].  Tensor sizes: [2, 1, 1]
-        xfail('index_put', 'broadcast', device_type='cuda', dtypes=(torch.float32)),
+        xfail('index_put', 'broadcast', device_type='cuda', dtypes=(torch.float32,)),
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
