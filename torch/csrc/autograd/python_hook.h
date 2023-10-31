@@ -51,7 +51,6 @@ struct PyFunctionTensorPostAccGradHooks : public PostAccumulateGradHook {
       Variable& tensor,
       torch::dynamo::autograd::SwapSavedVariables& saved);
   PyObject* dict;
-  std::vector<int> hook_ids;
 };
 
 } // namespace autograd
