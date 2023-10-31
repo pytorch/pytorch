@@ -445,7 +445,6 @@ class TestNestedTensor(TestCase):
         self.assertEqual(repr(a), expected)
 
     def test_to_padded_tensor_on_empty_tensor(self):
-
         nt = torch.nested.nested_tensor([])
         empty = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(empty, torch.tensor([]))
@@ -539,7 +538,7 @@ class TestNestedTensor(TestCase):
         nt_copy = torch.empty_like(nt)
         nt_copy.copy_(nt)
 
-        for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
+        for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
             self.assertEqual(nt_ub, nt_copy_ub)
 
         nt_error = torch.nested.nested_tensor([torch.tensor([0, 0])])
@@ -554,12 +553,12 @@ class TestNestedTensor(TestCase):
             nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
             nt_copy.copy_(nt, non_blocking=True)
             torch.cuda.current_stream(torch.cuda.current_device()).synchronize()
-            for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
+            for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
                 self.assertEqual(nt_ub, nt_copy_ub)
 
             nt_copy = torch.empty_like(nt, device=torch.device("cpu"))
             nt_copy.copy_(nt, non_blocking=False)
-            for (nt_ub, nt_copy_ub) in zip(nt.unbind(), nt_copy):
+            for nt_ub, nt_copy_ub in zip(nt.unbind(), nt_copy):
                 self.assertEqual(nt_ub, nt_copy_ub)
 
     def test_fill_(self):
@@ -722,7 +721,6 @@ class TestNestedTensor(TestCase):
 
 
 class TestNestedTensorDeviceType(TestCase):
-
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -795,7 +793,7 @@ class TestNestedTensorDeviceType(TestCase):
 
         nt_to = torch._nested_from_padded_and_nested_example(padded, nt)
 
-        for (t1, t2) in zip(nt.unbind(), nt_to.unbind()):
+        for t1, t2 in zip(nt.unbind(), nt_to.unbind()):
             self.assertEqual(t1, t2)
         self.assertEqual(nt.device, nt_to.device)
 
@@ -812,7 +810,7 @@ class TestNestedTensorDeviceType(TestCase):
             nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
             layer_norm = torch.nn.LayerNorm(size, device=device, dtype=dtype)
             nt_result = layer_norm(nt)
-            for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+            for nt_subresult, t in zip(nt_result.unbind(), ts):
                 t_result = layer_norm(t.reshape(1, -1, size).squeeze(0))
                 self.assertEqual(nt_subresult, t_result)
 
@@ -824,7 +822,7 @@ class TestNestedTensorDeviceType(TestCase):
             nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
             layer_norm = torch.nn.LayerNorm(size, device=device, dtype=dtype)
             nt_result = layer_norm(nt)
-            for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+            for nt_subresult, t in zip(nt_result.unbind(), ts):
                 t_result = layer_norm(t.reshape(1, -1, size).squeeze(0))
                 self.assertEqual(nt_subresult, t_result)
 
@@ -846,14 +844,14 @@ class TestNestedTensorDeviceType(TestCase):
                     (size, size, 4), device=device, dtype=dtype
                 )
                 nt_result = layer_norm(nt)
-                for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                for nt_subresult, t in zip(nt_result.unbind(), ts):
                     t_result = layer_norm(t.reshape(1, -1, size, size, 4).squeeze(0))
                     self.assertEqual(nt_subresult, t_result)
 
                 # Test where the normalizing dimensions are not all
                 layer_norm = torch.nn.LayerNorm((size, 4), device=device, dtype=dtype)
                 nt_result = layer_norm(nt)
-                for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                for nt_subresult, t in zip(nt_result.unbind(), ts):
                     t_result = layer_norm(t.reshape(1, -1, size, size, 4).squeeze(0))
                     self.assertEqual(nt_subresult, t_result)
 
@@ -2746,7 +2744,6 @@ class TestNestedTensorAutograd(TestCase):
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     def test_nested_tensor_from_list(self, device):
-
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(10, 2, requires_grad=True, dtype=torch.float64, device=device)
@@ -2957,7 +2954,6 @@ class TestNestedTensorAutograd(TestCase):
         assert torch.autograd.gradcheck(grad_test_func, inputs=(a, b), eps=1e-3)
 
     def test_nested_tensor_linear(self, device):
-
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64, device=device)

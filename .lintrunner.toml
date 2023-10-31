@@ -1544,7 +1544,6 @@ exclude_patterns = [
     'test/test_namedtuple_return_api.py',
     'test/test_native_functions.py',
     'test/test_native_mha.py',
-    'test/test_nestedtensor.py',
     'test/test_nn.py',
     'test/test_nnapi.py',
     'test/test_numba_integration.py',
