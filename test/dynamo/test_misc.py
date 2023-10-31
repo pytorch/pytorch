@@ -342,6 +342,56 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             del torch.ops.mylib.bar2
             del lib
 
+    @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
+    def test_pt2_compliant_overload(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")
+        try:
+            torch.library.define(
+                "mylib::bar3.tensor",
+                "(Tensor x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+            torch.library.define("mylib::bar3.int", "(Tensor x, int dim) -> Tensor")
+
+            torch.library.impl(
+                "mylib::bar3.tensor", "CompositeImplicitAutograd", torch.sin
+            )
+            torch.library.impl(
+                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum
+            )
+
+            def f(x):
+                return torch.ops.mylib.bar3(x)
+
+            def g(x):
+                return torch.ops.mylib.bar3(x, 1)
+
+            def h(x):
+                return torch.ops.mylib.bar3(x, x, x)
+
+            x = torch.randn(3)
+
+            counts = torch._dynamo.testing.CompileCounter()
+            optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+            optimized_g = torch._dynamo.optimize(counts, nopython=True)(g)
+            optimized_h = torch._dynamo.optimize(counts, nopython=True)(h)
+
+            # No error: the overload is PT2 compliant
+            optimized_f(x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
+                y = optimized_g(x)
+
+            # graph break on incorrect parsing
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "failed to"):
+                y = optimized_h(x)
+
+        finally:
+            del torch.ops.mylib.bar3
+            del lib
+
     def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
