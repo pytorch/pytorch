@@ -458,17 +458,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
-            # Failing accuracy and extremal on sm86 (#89609)
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values",
-            ),
         ),
         decorators=[
             DecorateInfo(
@@ -572,8 +561,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "masked.cumsum",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -666,17 +654,6 @@ op_db: List[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
-            # Failing accuracy and extremal on sm86 (#89609)
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values",
-            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -715,17 +692,6 @@ op_db: List[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
-            ),
-            # Failing accuracy and extremal on sm86 (#89609)
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values",
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -866,7 +832,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "masked.median",
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
         supports_out=False,
@@ -978,11 +944,6 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-            ),
-            DecorateInfo(
                 toleranceOverride(
                     {
                         torch.float16: tol(atol=1e-02, rtol=1e-02),
@@ -1035,12 +996,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_correctness",
-                dtypes=(torch.float16,),
-            ),
         ),
         decorators=[
             DecorateInfo(
@@ -1076,8 +1031,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.softmax",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1097,8 +1051,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.log_softmax",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1125,8 +1078,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.softmin",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(

@@ -10,7 +10,10 @@ from sympy import Expr
 import torch
 import torch._inductor as inductor
 from torch._decomp import register_decomposition
-from torch._prims_common import is_integer_dtype
+
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
+from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch.fx.immutable_collections import immutable_dict
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -32,7 +35,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     stable_topological_sort,
 )
-from ..utils import decode_device
+from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
@@ -62,10 +65,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if is_inference and config.reordering:
+    if is_inference and config.reorder_for_locality:
         reorder_for_locality(gm.graph)
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
+
+    if config.post_grad_custom_pre_pass is not None:
+        config.post_grad_custom_pre_pass(gm.graph)
+
     if config.pattern_matcher:
         lazy_init()
 
@@ -77,6 +84,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)
 
+    if config.post_grad_custom_post_pass is not None:
+        config.post_grad_custom_post_pass(gm.graph)
+
     stable_topological_sort(gm.graph)
 
     fake_tensor_updater.incremental_update()
@@ -85,6 +95,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
+
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(
+            "Print graph after recompile in post grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
 
 
 @init_once_fakemode
@@ -275,6 +293,10 @@ def mixed_mm(match: Match, mat1, mat2, mat2_dtype):
 def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
     """Based on a pattern in OPTForCausalLM"""
 
+    if is_integer_dtype(dtype) or is_boolean_dtype(dtype):
+        # cumsum promotes all integral types to int64
+        dtype = torch.int64
+
     def repl(*shape):
         dim_size = shape[dim]
         idx = torch.arange(1, dim_size + 1, device=device, dtype=dtype)
@@ -432,37 +454,6 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.add,
-        CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("inp"),
-    ),
-    pass_number=2,
-)
-@register_lowering_pattern(
-    CallFunction(
-        aten.add,
-        KeywordArg("inp"),
-        CallFunction(aten.mm, Arg(), Arg()),
-    ),
-    pass_number=2,
-)
-def addmm(match, mat1, mat2, inp):
-    if isinstance(inp, ir.TensorBox):
-        inp_shape = inp.get_size()
-        matched = len(inp_shape) <= 2
-        mm_shape = shape_of_mm(mat1, mat2)
-        for i, m in zip(inp_shape, mm_shape):
-            matched &= i == 1 or i == m
-    else:  # inp is a Number
-        matched = False
-    if matched:
-        return L[aten.addmm](inp, mat1, mat2)
-    else:
-        return L[aten.add](inp, L[aten.mm](mat1, mat2))
-
-
 def is_valid_splitwithsizes_cat(match):
     split_nodes = filter_nodes(match.nodes, aten.split_with_sizes)
     cat_nodes = filter_nodes(match.nodes, aten.cat)
@@ -538,10 +529,14 @@ def slice_scatter_noop(self, src, dim=0, start=None, end=None, step=1):
     return False
 
 
+@register_noop_decomp(aten.repeat)
+def repeat_noop(self, repeats):
+    return all(r == 1 for r in repeats)
+
+
 @register_noop_decomp(aten.constant_pad_nd)
 def constant_pad_nd(x, padding, fill_value=0):
-    if all(p == 0 for p in padding):
-        return True
+    return all(p == 0 for p in padding)
 
 
 @register_noop_decomp(torch.ops.prims.convert_element_type)
@@ -635,44 +630,70 @@ def reinplace_scatters(graph):
     for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
-            copy_args_to_copy_nodes[(node.args[0], node.args[1])] = node
+            dst = node.args[0]
+            src = node.args[1]
+            # If the target is a getitem and it indexes a possible clone,
+            # then skip over it
+            if (
+                src.target == operator.getitem
+                and src.args[0].target == triton_kernel_wrapper_functional
+                and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
+            ):
+                src = src.args[0]
+            copy_args_to_copy_nodes[(dst, src)] = node
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
+
+    def can_replace(node, mutated_arg):
+        if get_node_storage(mutated_arg) is None:
+            return False
+        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+        if mutated_arg.op == "placeholder":
+            if not (
+                copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
+            ):
+                return False
+
+            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
+                return False
+
+            # Check for any uses other than current node and copy_ epilogue
+            if len(mutated_arg.users) > 2:
+                return False
+
+            graph.erase_node(copy_node)
+            return True
+        else:
+            # NB: This condition could be relaxed if none of the aliases
+            # are used after this mutation op. But that's trickier.
+            if len(shared_view_nodes) > 1:  # Arg aliases another node
+                return False
+            if len(mutated_arg.users) > 1:  # Arg used somewhere else
+                return False
+            return True
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
     }
+    inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            mutated_arg = node.args[inplaceable_op.mutated_arg]
-            if get_node_storage(mutated_arg) is None:
-                continue
-            shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-            if mutated_arg.op == "placeholder":
-                if not (
-                    copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
-                ):
-                    continue
-
-                if (
-                    len(shared_view_nodes) > 2
-                ):  # Arg aliases another node other than copy_
-                    continue
-
-                # Check for any uses other than current node and copy_ epilogue
-                if len(mutated_arg.users) > 2:
-                    continue
-
-                graph.erase_node(copy_node)
+            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
                 node.target = inplaceable_op.inplace_op
-            else:
-                # NB: This condition could be relaxed if none of the aliases
-                # are used after this mutation op. But that's trickier.
-                if len(shared_view_nodes) > 1:  # Arg aliases another node
-                    continue
-                if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                    continue
-                node.target = inplaceable_op.inplace_op
+        elif node.target in inplaceable_triton_ops:
+            # inplaceable_triton_ops take an additional argument called
+            # tensors_to_clone which contain a list of tensors to clone
+            # This pass iterates over them and sees which ones are safe
+            # to eliminate (i.e. no longer need the clones)
+            tensors_to_clone = []
+            for arg in node.kwargs["tensors_to_clone"]:
+                assert arg in node.kwargs["kwargs"]
+                if not can_replace(node, node.kwargs["kwargs"][arg]):
+                    tensors_to_clone.append(arg)
+            kwargs = dict(node.kwargs)
+            kwargs["tensors_to_clone"] = tensors_to_clone
+            node.kwargs = immutable_dict(kwargs)
 
 
 @register_lowering_pattern(
@@ -763,35 +784,107 @@ def view_to_reshape(gm):
             nd.target = torch.ops.aten.reshape.default
 
 
-def is_pointwise_use(use):
-    if not use.op == "call_function":
+def should_prefer_unfused_addmm(match):
+    inp = match.kwargs["inp"]
+    if not inp.meta["val"].is_cuda:
         return False
 
-    if not (
-        isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
-    ):
-        return False
-
-    if use.target is operator.getitem or use.target.is_view:
-        return all(is_pointwise_use(u) for u in use.users)
-
-    return torch.Tag.pointwise in use.target.tags
+    output = match.output_node()
+    return all(is_pointwise_use(use) for use in output.users)
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, Arg(), Arg(), Arg()),
+    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
     pass_dict=pass_patterns[2],
+    extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
-    if not inp.meta["val"].is_cuda:
-        return
-
-    output = match.output_node()
-    if not all(is_pointwise_use(use) for use in output.users):
-        return
-
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def is_valid_addmm_fusion(match):
+    mat1, mat2 = match.args
+    inp = match.kwargs["inp"]
+
+    if not (
+        isinstance(inp, torch.fx.Node) and isinstance(inp.meta["val"], torch.Tensor)
+    ):
+        return False  # Input is a number
+
+    in_shape = inp.meta["val"].shape
+    mm_shape = mat1.meta["val"].shape[0], mat2.meta["val"].shape[1]
+    matched = is_expandable_to(in_shape, mm_shape)
+    if not matched:
+        return False  # Shape mismatch
+
+    return not should_prefer_unfused_addmm(match)
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(aten.mm, Arg(), Arg()),
+        KeywordArg("inp"),
+    ),
+    pass_dict=pass_patterns[2],
+    extra_check=is_valid_addmm_fusion,
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        KeywordArg("inp"),
+        CallFunction(aten.mm, Arg(), Arg()),
+    ),
+    pass_dict=pass_patterns[2],
+    extra_check=is_valid_addmm_fusion,
+)
+def addmm(match, mat1, mat2, *, inp):
+    def repl(inp, mat1, mat2):
+        return aten.addmm(inp, mat1, mat2)
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
+    return (
+        config.force_fuse_int_mm_with_mul
+        and len(getattr(match.args[2].meta.get("val"), "shape", [])) == 2
+        and getattr(match.args[2].meta.get("val"), "is_cuda", False)
+    )
+
+
+@register_lowering_pattern(
+    CallFunction(
+        prims.convert_element_type.default,
+        CallFunction(
+            aten.mul,
+            CallFunction(
+                aten._int_mm,
+                Arg(),
+                Arg(),
+            ),
+            Arg(),
+        ),
+        Arg(),
+    ),
+    check_shape_cuda_and_fused_int_mm_mul_enabled,
+)
+@register_lowering_pattern(
+    CallFunction(
+        aten.mul,
+        CallFunction(
+            aten._int_mm,
+            Arg(),
+            Arg(),
+        ),
+        Arg(),
+    ),
+    check_shape_cuda_and_fused_int_mm_mul_enabled,
+)
+def fused_int_mm_mul(match: Match, mat1, mat2, mat3, out_dtype=None):
+    return inductor.kernel.mm.tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype)

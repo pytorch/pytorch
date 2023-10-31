@@ -1,30 +1,51 @@
 # Owner(s): ["module: dynamo"]
 
 # from numpy.testing._private.utils import requires_memory
-import pytest
-import torch._numpy as np
-from pytest import raises as assert_raises
-from torch._numpy import histogram, histogramdd
+import functools
 
-# from numpy.lib.histograms import histogram, histogramdd, histogram_bin_edges
-from torch._numpy.testing import (
-    assert_,
-    assert_allclose,
-    assert_almost_equal,
-    assert_array_almost_equal,
-    assert_array_equal,
-    assert_equal,
-    # assert_array_max_ulp, #assert_raises_regex, suppress_warnings,
+from unittest import skipIf
+
+from pytest import raises as assert_raises
+
+skip = functools.partial(skipIf, True)
+
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    slowTest as slow,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+    xpassIfTorchDynamo,
 )
 
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import histogram, histogram_bin_edges, histogramdd
+    from numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        # assert_array_max_ulp, #assert_raises_regex, suppress_warnings,
+    )
+else:
+    import torch._numpy as np
+    from torch._numpy import histogram, histogramdd
+    from torch._numpy.testing import (
+        assert_,
+        assert_allclose,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_equal,
+        # assert_array_max_ulp, #assert_raises_regex, suppress_warnings,
+    )
 
-class TestHistogram:
-    def setup_method(self):
-        pass
 
-    def teardown_method(self):
-        pass
-
+class TestHistogram(TestCase):
     def test_simple(self):
         n = 100
         v = np.random.rand(n)
@@ -182,7 +203,7 @@ class TestHistogram:
         )
         assert_almost_equal(a, [0.2, 0.1, 0.1, 0.075])
 
-    @pytest.mark.xfail(reason="histogram complex weights")
+    @xpassIfTorchDynamo  # (reason="histogram complex weights")
     def test_exotic_weights(self):
         # Test the use of weights that are not integer or floats, but e.g.
         # complex numbers or object types.
@@ -244,7 +265,7 @@ class TestHistogram:
         with assert_raises((RuntimeError, ValueError)):
             np.histogram(vals, range=[0.1, 0.01])
 
-    @pytest.mark.xfail(reason="edge cases")
+    @xpassIfTorchDynamo  # (reason="edge cases")
     def test_bin_edge_cases(self):
         # Ensure that floating-point computations correctly place edge cases.
         arr = np.array([337, 404, 739, 806, 1007, 1811, 2012])
@@ -268,7 +289,7 @@ class TestHistogram:
         with assert_raises((RuntimeError, ValueError)):
             np.histogram(vals, bins=bins)
 
-    @pytest.mark.xfail(reason="no uint64")
+    @xpassIfTorchDynamo  # (reason="no uint64")
     def test_unsigned_monotonicity_check(self):
         # Ensures ValueError is raised if bins not increasing monotonically
         # when bins contain unsigned values (see #9222)
@@ -294,7 +315,7 @@ class TestHistogram:
         np.histogram([np.array(0.5) for i in range(10)] + [0.500000000000001])
         np.histogram([np.array(0.5) for i in range(10)] + [0.5])
 
-    @pytest.mark.xfail(reason="bins='auto'")
+    @xpassIfTorchDynamo  # (reason="bins='auto'")
     def test_some_nan_values(self):
         # gh-7503
         one_nan = np.array([0, 1, np.nan])
@@ -332,7 +353,7 @@ class TestHistogram:
         self.do_signed_overflow_bounds(np.short)
         self.do_signed_overflow_bounds(np.intc)
 
-    @pytest.mark.xfail(reason="int->float conversin loses precision")
+    @xpassIfTorchDynamo  # (reason="int->float conversin loses precision")
     def test_signed_overflow_bounds_2(self):
         self.do_signed_overflow_bounds(np.int_)
         self.do_signed_overflow_bounds(np.longlong)
@@ -375,14 +396,14 @@ class TestHistogram:
         self.do_precision_lower_bound(float_small, float_large)
         self.do_precision_upper_bound(float_small, float_large)
 
-    @pytest.mark.xfail(reason="mixed dtypes")
+    @xpassIfTorchDynamo  # (reason="mixed dtypes")
     def test_precision(self):
         # not looping results in a useful stack trace upon failure
         self.do_precision(np.half, np.single)
         self.do_precision(np.half, np.double)
         self.do_precision(np.single, np.double)
 
-    @pytest.mark.xfail(reason="histogram_bin_edges")
+    @xpassIfTorchDynamo  # (reason="histogram_bin_edges")
     def test_histogram_bin_edges(self):
         hist, e = histogram([1, 2, 3, 4], [1, 2])
         edges = histogram_bin_edges([1, 2, 3, 4], [1, 2])
@@ -398,8 +419,8 @@ class TestHistogram:
         assert_array_equal(edges, e)
 
     # @requires_memory(free_bytes=1e10)
-    @pytest.mark.xfail(reason="pytorch does not support bins = [int, int, array]")
-    @pytest.mark.slow
+    @xpassIfTorchDynamo  # (reason="pytorch does not support bins = [int, int, array]")
+    @slow
     def test_big_arrays(self):
         sample = np.zeros([100000000, 3])
         xbins = 400
@@ -409,8 +430,9 @@ class TestHistogram:
         assert_equal(type(hist), type((1, 2)))
 
 
-@pytest.mark.xfail(reason="TODO")
-class TestHistogramOptimBinNums:
+@xpassIfTorchDynamo  # (reason="TODO")
+@instantiate_parametrized_tests
+class TestHistogramOptimBinNums(TestCase):
     """
     Provide test coverage when using provided estimators for optimal number of
     bins
@@ -677,9 +699,7 @@ class TestHistogramOptimBinNums:
                 msg += f" with datasize of {testlen}"
                 assert_equal(len(a), numbins, err_msg=msg)
 
-    @pytest.mark.parametrize(
-        "bins", ["auto", "fd", "doane", "scott", "stone", "rice", "sturges"]
-    )
+    @parametrize("bins", ["auto", "fd", "doane", "scott", "stone", "rice", "sturges"])
     def test_signed_integer_data(self, bins):
         # Regression test for gh-14379.
         a = np.array([-2, 0, 127], dtype=np.int8)
@@ -692,13 +712,12 @@ class TestHistogramOptimBinNums:
         """
         Check that weighted data raises a TypeError
         """
-        pytest.xpass(reason="passes by chance")
         estimator_list = ["fd", "scott", "rice", "sturges", "auto"]
         for estimator in estimator_list:
             assert_raises(TypeError, histogram, [1, 2, 3], estimator, weights=[1, 2, 3])
 
 
-class TestHistogramdd:
+class TestHistogramdd(TestCase):
     def test_simple(self):
         x = np.array(
             [
@@ -834,13 +853,13 @@ class TestHistogramdd:
             (RuntimeError, ValueError), np.histogramdd, x, bins=[1, 1, 1, [1, 2, 3, -3]]
         )
 
-    @pytest.mark.xfail(reason="pytorch does not support bins = [int, int, array]")
+    @xpassIfTorchDynamo  # (reason="pytorch does not support bins = [int, int, array]")
     def test_bins_error_2(self):
         # mixing scalar (# of bins) and explicit bin arrays, ugh
         x = np.arange(8).reshape(2, 4)
         assert_(np.histogramdd(x, bins=[1, 1, 1, [1, 2, 3, 4]]))
 
-    @pytest.mark.xfail(reason="pytorch does not support bins = [int, int, array]")
+    @xpassIfTorchDynamo  # (reason="pytorch does not support bins = [int, int, array]")
     def test_inf_edges(self):
         # Test using +/-inf bin edges works. See #1788.
         x = np.arange(6).reshape(3, 2)
@@ -891,7 +910,7 @@ class TestHistogramdd:
             range=[[0.0, 1.0], [np.nan, 0.75], [0.25, 0.5]],
         )
 
-    @pytest.mark.xfail(reason="pytorch does not allow equal entries")
+    @xpassIfTorchDynamo  # (reason="pytorch does not allow equal entries")
     def test_equal_edges(self):
         """Test that adjacent entries in an edge array can be equal"""
         x = np.array([0, 1, 2])
@@ -922,7 +941,7 @@ class TestHistogramdd:
     def test_large_integers(self):
         big = 2**60  # Too large to represent with a full precision float
 
-        x = np.array([0], np.int64)
+        x = np.asarray([0], dtype=np.int64)
         x_edges = np.array([-1, +1], np.int64)
         y = big + x
         y_edges = big + x_edges
@@ -978,3 +997,7 @@ class TestHistogramdd:
         )
         H, edges = histogramdd(x, (2, 3, 3))
         assert all(type(e) is np.ndarray for e in edges)
+
+
+if __name__ == "__main__":
+    run_tests()

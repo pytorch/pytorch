@@ -174,10 +174,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(dist_tensor.shape)
-        self.assertEqual(
-            ones_expected,
-            ones_like_dt.redistribute(device_mesh, [Replicate()]).to_local(),
-        )
+        self.assertEqual(ones_expected, ones_like_dt.full_tensor())
 
     @with_comms
     def test_fill_inplace_partial_sum(self):
@@ -188,12 +185,12 @@ class DistTensorOpsTest(DTensorTestBase):
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
         assert dist_tensor.shape == (4, 8)
 
-        torch.fill_(dist_tensor, 42)
-        fill_expected = torch.full(dist_tensor.shape, 42, dtype=input_tensor.dtype)
-        self.assertEqual(
-            fill_expected,
-            dist_tensor.redistribute(device_mesh, [Replicate()]).to_local(),
+        # inplace partial sum should keep partial
+        torch.fill_(dist_tensor, 8)
+        fill_expected = torch.full(
+            dist_tensor.shape, 8 * self.world_size, dtype=input_tensor.dtype
         )
+        self.assertEqual(fill_expected, dist_tensor.full_tensor())
 
     @with_comms
     def test_zeros_like_partial_sum(self):
@@ -206,10 +203,7 @@ class DistTensorOpsTest(DTensorTestBase):
 
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(dist_tensor.shape)
-        self.assertEqual(
-            zeros_expected,
-            zeros_like_dt.redistribute(device_mesh, [Replicate()]).to_local(),
-        )
+        self.assertEqual(zeros_expected, zeros_like_dt.full_tensor())
 
     @with_comms
     def test_zero_inplace(self):
@@ -266,10 +260,7 @@ class DistTensorOpsTest(DTensorTestBase):
         for d_args, d_kwargs in dtc:
             self.assertTrue(dtc.successful())
             d_out = op_call(*d_args, **d_kwargs)
-            self.assertEqual(
-                d_out.redistribute(mesh, [Replicate()] * mesh.ndim).to_local(),
-                out,
-            )
+            self.assertEqual(d_out.full_tensor(), out)
 
     @with_comms
     def test_index(self):
@@ -379,6 +370,18 @@ class DistTensorOpsTest(DTensorTestBase):
                 torch.randint(2, (8, 1)),
                 torch.randint(5, (12, 8, 12)),
             )
+
+    @with_comms
+    def test_where_type_promotion(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))  # 1D mesh
+
+        specs = [[Shard(0)], [Replicate()]]
+        for spec in specs:
+            global_tensor = torch.randn(12, 8)
+            mat = distribute_tensor(global_tensor, mesh, spec)
+            res = torch.where(mat > 0, 1, 0)
+            ref = torch.where(global_tensor > 0, 1, 0)
+            self.assertEqual(res.full_tensor(), ref)
 
 
 if __name__ == "__main__":

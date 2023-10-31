@@ -73,11 +73,11 @@ bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
 
-const std::string ivalue::EnumHolder::qualifiedClassName() const {
+const std::string& ivalue::EnumHolder::qualifiedClassName() const {
   return type_->qualifiedClassName().qualifiedName();
 }
 
-const std::string ivalue::EnumHolder::unqualifiedClassName() const {
+const std::string& ivalue::EnumHolder::unqualifiedClassName() const {
   return type_->qualifiedClassName().name();
 }
 
@@ -144,6 +144,14 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+
+  // This static_assert has to go into some IValue member function; I
+  // chose this one. It's not in the class body because that's in
+  // ivalue.h, which is a very high-fanout header file and we want to
+  // minimize build time.
+  static_assert(
+      kNumTags <= 32,
+      "IValue::isIntrusivePtr needs to be updated because it assumes there are at most 32 tags");
 }
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
@@ -603,7 +611,7 @@ std::ostream& IValue::repr(
       }
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
-                 << d << std::setprecision(orig_prec);
+                 << d << std::setprecision(static_cast<int>(orig_prec));
     }
     case IValue::Tag::ComplexDouble: {
       return printComplex(out, v);
@@ -792,7 +800,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out
         << std::setprecision(std::numeric_limits<double>::max_digits10)
         << v.toDouble()
-        << std::setprecision(orig_prec);
+        << std::setprecision(static_cast<int>(orig_prec));
     } case IValue::Tag::ComplexDouble: {
       return printComplex(out, v);
     } case IValue::Tag::Int:
@@ -853,7 +861,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
 
   }
-  AT_ERROR("Tag not found: ", v.tagKind());
+  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ">";
 }
 
 #undef TORCH_FORALL_TAGS
@@ -1104,9 +1112,9 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        auto tens = sub_value.toTensor();
+        auto const & tens = sub_value.toTensor();
         if (tens.is_sparse()) {
-          // sparse tensors have 2 storages! one for indices one for values
+          // sparse tensors have 2 storages! One for indices one for values
           auto coalesced = tens.coalesce();
           weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
           weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
@@ -1120,26 +1128,25 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
-    List<intrusive_ptr<ivalue::Future>> srcs) {
+    const List<intrusive_ptr<ivalue::Future>>& srcs) {
   struct Ctx {
-    explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
+    explicit Ctx(const List<intrusive_ptr<ivalue::Future>>& srcs)
         : remaining(srcs.size()),
-          srcFutures(std::move(srcs)),
+          srcFutures(srcs),
           asIvalue(srcFutures),
           // No need to pass devices, because dstFuture won't directly contain
           // the value, it will contain the srcFutures (which have no DataPtrs).
           dstFuture(make_intrusive<ivalue::Future>(asIvalue.type())) {}
-    std::atomic<int32_t> remaining{0};
+    std::atomic<size_t> remaining{0};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     IValue asIvalue;
     intrusive_ptr<ivalue::Future> dstFuture;
   };
 
-  auto ctx = std::make_shared<Ctx>(std::move(srcs));
+  auto ctx = std::make_shared<Ctx>(srcs);
   if (ctx->srcFutures.empty()) {
     ctx->dstFuture->markCompleted(ctx->asIvalue);
   } else {
-    auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
 
       std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& fut) {
@@ -1175,13 +1182,13 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
-    List<intrusive_ptr<ivalue::Future>> srcs) {
+    const List<intrusive_ptr<ivalue::Future>>& srcs) {
   if (srcs.empty()) {
     auto res = make_intrusive<ivalue::Future>(NoneType::get());
     res->markCompleted();
     return res;
   }
-  TypePtr typePtr = srcs.get(0)->elementType();
+  const TypePtr& typePtr = srcs.get(0)->elementType();
   const std::vector<c10::Device>& devices = srcs.get(0)->devices();
   for (const auto i : c10::irange(srcs.size())) {
     if (srcs.get(i)->completed()) {
@@ -1199,16 +1206,16 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   struct Ctx {
     explicit Ctx(
-        List<intrusive_ptr<ivalue::Future>> srcs,
+        const List<intrusive_ptr<ivalue::Future>>& srcs,
         TypePtr typePtr,
         std::vector<c10::Device> devices)
-        : srcFutures(std::move(srcs)),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
+        : srcFutures(srcs),
+          dstFuture(make_intrusive<ivalue::Future>(std::move(typePtr), std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;
   };
-  auto ctx = std::make_shared<Ctx>(std::move(srcs), typePtr, devices);
+  auto ctx = std::make_shared<Ctx>(srcs, typePtr, devices);
   std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& src) {
     if (!ctx->done.exchange(true)) {
       intrusive_ptr<ivalue::Future> dst = ctx->dstFuture;
@@ -1227,4 +1234,5 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   return ctx->dstFuture;
 }
+
 } // namespace c10

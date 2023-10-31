@@ -5,8 +5,8 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAStream.h>
+#include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <vector>

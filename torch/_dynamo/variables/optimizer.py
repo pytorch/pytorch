@@ -53,7 +53,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        """This is an optimization to avoid tracing the very slow intialization of the optimizer"""
+        """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
@@ -65,7 +65,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tx.store_global_weakref(self.get_global_name(), self.value)
                 self.create_finalizer(tx)
 
-                return ConstantVariable(None)
+                return ConstantVariable.create(None)
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass
@@ -190,7 +190,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tensor_vars = ListVariable(
                     [self.wrap_tensor(tx, t) for t in py_arg],
                     mutable_local=MutableLocal(),
-                    recursively_contains={},
                 )
                 tx.replace_all(arg, tensor_vars)
 

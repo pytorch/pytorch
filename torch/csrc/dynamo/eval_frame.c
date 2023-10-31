@@ -289,7 +289,7 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
 typedef PyObject FrameState;
 /*
 Our cache resides on the extra scratch space of the code object. The structure
-of the the cache is as follows:
+of the cache is as follows:
 
 -> ExtraState
   -> CacheEntry
@@ -609,6 +609,8 @@ static inline PyObject* call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
 
+// remember to update the type signature for DynamoCallbackFn.__call__ in torch/_dynamo/types.py
+// if this function changes
 #if IS_PYTHON_3_11_PLUS
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   if (frame == NULL) {
@@ -652,6 +654,8 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return Py_None;
   }
   PyObject *f_locals = frame->f_locals;
+  // remember to update the type signature for GuardFn.__call__ in torch/_dynamo/types.py
+  // if this calling convention changes
   PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
@@ -691,7 +695,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   return lookup(e->next, frame, e, index + 1);
 }
 
-inline static PyObject* eval_custom_code(
+inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -829,6 +833,23 @@ inline static PyObject* eval_custom_code(
 
   #endif
 
+  return result;
+}
+
+// This wrapper function adds a profiler event
+inline static PyObject* eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    int throw_flag) {
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  PyObject* result = eval_custom_code_impl(
+    tstate,
+    frame,
+    code,
+    throw_flag
+  );
+  _pytorch_record_function_exit(rf);
   return result;
 }
 

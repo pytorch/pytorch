@@ -591,6 +591,7 @@ class TestSparse(TestSparseBase):
         b = a.to_sparse().to_dense()
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/108667")
     @dtypes(torch.double, torch.cdouble)
     def test_scalar(self, device, dtype):
         # tensor with value
@@ -5078,7 +5079,7 @@ class TestSparseAny(TestCase):
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])
-    def test_as_sparse_gradcheck(self, layout, masked, fast_mode):
+    def test_as_sparse_gradcheck(self, layout, device, masked, fast_mode):
         gradcheck = torch.sparse.as_sparse_gradcheck(torch.autograd.gradcheck)
         sparse_compressed_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
 
@@ -5098,6 +5099,7 @@ class TestSparseAny(TestCase):
                 continue
             for x in self.generate_simple_inputs(
                     layout,
+                    device=device,
                     dtype=torch.float64,
                     # TODO: fix gh-104868  to enable batched samples:
                     enable_batch=layout not in sparse_compressed_layouts,

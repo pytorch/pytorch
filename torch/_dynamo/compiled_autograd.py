@@ -1,11 +1,12 @@
 import contextlib
 import functools
-from typing import List
+from typing import List, Optional
 
 import torch
 from torch._dynamo.external_utils import call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, lazy_format_graph_code
+from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -19,6 +20,9 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.proxy import Proxy
+
+compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 
 
 def maybe_clone(x):
@@ -40,14 +44,14 @@ class AutogradCompilerInstance:
         )
         self.fx_tracer = PythonKeyTracer()
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
-        self.hooks_proxy = None
+        self.hooks_proxy: Optional[Proxy] = None
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
         return self.fake_tensor_mode.from_tensor(x, source=source)
 
     @staticmethod
-    def source(name, idx):
+    def source(name, idx) -> GetItemSource:
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
@@ -99,6 +103,7 @@ class AutogradCompilerInstance:
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]
         proxy = self.proxy_call_hook(
             hook,
@@ -110,6 +115,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def pre_hook(self, inputs, hook_id):
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
@@ -121,6 +127,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def post_hook(self, outputs, inputs, hook_id):
+        assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
@@ -140,9 +147,13 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        return self.compiler_fn(
-            GraphModule(self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd")
+        graph = GraphModule(
+            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
+        compiled_autograd_log.info(
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
+        return self.compiler_fn(graph)
 
     def to_proxy(self, t):
         if t is None:
@@ -161,18 +172,28 @@ class AutogradCompilerInstance:
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
 
 
+compiled_autograd_enabled = False
+
+
 @contextlib.contextmanager
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = True
     with torch.autograd.set_multithreading_enabled(False):
         yield
+    if not prior:
+        compiled_autograd_enabled = False
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
 def disable():
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    compiled_autograd_enabled = False
     yield
+    if prior:
+        compiled_autograd_enabled = True
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

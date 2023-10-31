@@ -17,7 +17,7 @@ from torch import nn
 from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
-from torch._inductor.utils import has_triton
+from torch.utils._triton import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -303,6 +303,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             run_hf_bert_ddp(self, model, inputs, "aot_eager")
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_activation_checkpointing(self):
 
@@ -740,13 +741,13 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         Note: comptime prints the guards before the time they get installed or not installed, so in both cases
         (skip or no skip) the same guards get printed.  The difference is that in the skip case, they show up
         with a special 'guard source' which will cuase them to not be installed.  So all we check for is the expected
-        guard source 'local_nn_module'.
+        guard source 'local_fsdp_module'.
         """
         global GUARDS_FILE
         GUARDS_FILE = StringIO()
 
         for skip_guards, expected_guard_source in (
-            (True, "local_nn_module"),
+            (True, "local_fsdp_module"),
             (False, "local")
         ):
             torch._dynamo.reset()

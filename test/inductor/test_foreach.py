@@ -37,10 +37,19 @@ bin_ops_under_test = [
     torch._foreach_sub,
     torch._foreach_div,
     torch._foreach_maximum,
+    torch._foreach_minimum,
+    torch._foreach_clamp_max,
+    torch._foreach_clamp_min,
     aten._foreach_copy,
 ]
 
-un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
+un_ops_under_test = [
+    torch._foreach_reciprocal,
+    torch._foreach_neg,
+    torch._foreach_sign,
+    torch._foreach_abs,
+    torch._foreach_sqrt,
+]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
@@ -509,6 +518,23 @@ class ForeachTests(TestCase):
         self.check_model_cuda(fn, args)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda()
+    def test_zero_elems(self):
+        def fn(a0, a1, b0, b1):
+            return torch._foreach_add([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(0, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops

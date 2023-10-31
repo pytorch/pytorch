@@ -28,6 +28,7 @@
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
+#include <iostream>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -43,6 +44,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
+#include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
@@ -51,7 +53,6 @@
 #include <torch/csrc/autograd/python_linalg_functions.h>
 #include <torch/csrc/autograd/python_nested_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
-#include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -1239,21 +1240,15 @@ void THCPGraph_init(PyObject* module);
 
 #ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
-namespace torch {
-namespace cuda {
-
+namespace torch::cuda {
 void initModule(PyObject* module);
-
-}
-} // namespace torch
+} // namespace torch::cuda
 #endif
 
 #ifdef USE_ITT
-namespace torch {
-namespace profiler {
+namespace torch::profiler {
 void initIttBindings(PyObject* module);
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler
 #endif
 
 static std::vector<PyMethodDef> methods;
@@ -1522,12 +1517,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias_opt,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_) {
+         c10::SymInt groups_) {
         return at::native::select_conv_backend(
             input,
             weight,
@@ -1537,7 +1532,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             c10::nullopt);
       },
       py::arg("input"),
@@ -1556,12 +1551,12 @@ Call this whenever a new thread is created in order to propagate values from
       [](const at::Tensor& input,
          const at::Tensor& weight,
          const c10::optional<at::Tensor>& bias,
-         at::IntArrayRef stride_,
+         at::SymIntArrayRef stride_,
          at::SymIntArrayRef padding_,
-         at::IntArrayRef dilation_,
+         at::SymIntArrayRef dilation_,
          bool transposed_,
          at::SymIntArrayRef output_padding_,
-         int64_t groups_,
+         c10::SymInt groups_,
          c10::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
         c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
         if (bias_sizes_opt) {
@@ -1576,7 +1571,7 @@ Call this whenever a new thread is created in order to propagate values from
             dilation_,
             transposed_,
             output_padding_,
-            groups_,
+            std::move(groups_),
             ref);
       },
       py::arg("input"),

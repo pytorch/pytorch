@@ -721,8 +721,11 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  TORCH_CHECK(dprops->major >= 9, "torch._scaled_mm is only supported on devices with compute capability >= 9.0)");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -804,7 +807,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       scale_result ? scale_result->data_ptr() : nullptr,
       args.result_ld,
       out_dtype_,
-      amax.data_ptr());
+      amax.data_ptr(),
+      use_fast_accum);
 #else
   TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
 #endif
@@ -818,11 +822,12 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
-          const c10::optional<at::Tensor>& scale_result) {
+          const c10::optional<at::Tensor>& scale_result,
+          bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, out ,amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax);
 }
 
 } // namespace at::native
