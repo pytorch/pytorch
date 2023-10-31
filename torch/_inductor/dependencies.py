@@ -150,7 +150,9 @@ class ReadWrites:
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
-    op_counts: typing.Counter[Any] = None  # type: ignore[assignment]
+    op_counts: typing.Counter[str] = dataclasses.field(
+        default_factory=collections.Counter
+    )
 
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
@@ -177,11 +179,8 @@ class ReadWrites:
         reads = set.union(self.reads, other.reads)
         writes = set.union(self.writes, other.writes)
         index_exprs = set.union(self.index_exprs, other.index_exprs)
-        if self.op_counts is not None:
-            op_counts = collections.Counter(self.op_counts)
-            op_counts.update(other.op_counts or {})
-        else:
-            op_counts = other.op_counts
+        op_counts = collections.Counter(self.op_counts)
+        op_counts.update(other.op_counts)
         return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
 
     @staticmethod
@@ -192,8 +191,7 @@ class ReadWrites:
 
         op_counts: typing.Counter[Any] = collections.Counter()
         for rw in read_writes:
-            if rw.op_counts is not None:
-                op_counts.update(rw.op_counts)
+            op_counts.update(rw.op_counts)
 
         return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
 
