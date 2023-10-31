@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MAXOS, IS_ARM64
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64
 )
 import torch
 import torch.nn as nn
@@ -4185,6 +4185,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
