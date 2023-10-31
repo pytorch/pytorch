@@ -42,7 +42,9 @@ aten = torch.ops.aten
         aten.copy_.default,
         aten.detach.default,
         aten.equal.default,
+        aten.fill_.Scalar,
         aten.is_same_size.default,
+        aten.zero_.default,
     ]
 )
 def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
@@ -60,10 +62,8 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 @register_op_strategy(
     [
         aten.empty_like.default,
-        aten.fill_.Scalar,
         aten.full_like.default,
         aten.ones_like.default,
-        aten.zero_.default,
         aten.zeros_like.default,
     ]
 )
