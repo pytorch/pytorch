@@ -406,7 +406,7 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            if isinstance(speculated_fwd_result, variables.TupleVariable):
+            if isinstance(speculated_fwd_result, (variables.TupleVariable, variables.ListVariable)):
                 bwd_args = [ctx, *speculated_fwd_result.items]
             else:
                 bwd_args = [ctx, speculated_fwd_result]
