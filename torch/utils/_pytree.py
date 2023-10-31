@@ -171,7 +171,10 @@ def _register_pytree_node(
 
     type_fqn = f"{cls.__module__}.{cls.__qualname__}"
     serialize_node_def = _SerializeNodeDef(
-        cls, type_fqn, to_dumpable_context, from_dumpable_context,
+        cls,
+        type_fqn,
+        to_dumpable_context,
+        from_dumpable_context,
     )
     SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
