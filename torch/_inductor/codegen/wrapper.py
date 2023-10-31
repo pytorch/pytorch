@@ -496,10 +496,19 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid = f"{grid[0]}"
+        else:
+            from torch._higher_order_ops.triton_kernel_wrap import grid_fn_code
+
+            grid, code = grid_fn_code(kernel_name, configs, grid)
+            self.header.splice(code, strip=True)
+
         stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
         self.writeline(
-            f"{kernel_name}.run({', '.join(args)}, grid=grid({grid}), stream={stream_name})"
+            f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
 
     def generate_scatter_fallback(
@@ -1302,6 +1311,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
                         """
                     )
+            else:
+                self.prefix.splice(
+                    """
+                        py::gil_scoped_release release;
+                    """
+                )
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
@@ -1630,7 +1645,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_user_defined_triton_kernel(self, kernel_name, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
         raise AssertionError(
             "User defined triton kernels are not supported in CPP mode"
         )
