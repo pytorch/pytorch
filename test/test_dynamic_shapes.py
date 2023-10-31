@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, Mod
 
 aten = torch.ops.aten
@@ -48,7 +48,7 @@ def register_meta(op):
     def decorator(f):
         def add_func(op):
             meta_funcs[op] = f
-        tree_map(add_func, op)
+        pytree.tree_map_(add_func, op)
         return f
     return decorator
 

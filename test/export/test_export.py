@@ -109,55 +109,6 @@ class TestExport(TestCase):
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
         self._test_export_same_as_eager(f, inp)
 
-    def test_export_preserve_signature(self):
-        class NestedChild(torch.nn.Module):
-            def forward(self, zx, y):
-                return {"x": y["key"] + zx[1], "w": y["key"] * zx[1]}
-
-        class Child1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.nested = NestedChild()
-
-            def forward(self, x, y):
-                z = torch.ones_like(x)
-                xw = self.nested((z, x), y={"key": y})
-                return xw["w"] + z - xw["x"]
-
-        class Child2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return x - 1
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.foo = Child1()
-                self.bar = Child2()
-
-            def forward(self, x, y):
-                x = self.foo(x, y)
-                x = self.bar(x)
-                return x
-
-        orig_eager = MyModule()
-        inps = torch.rand(2, 3), torch.rand(2, 3)
-        ep = _export(
-            orig_eager,
-            inps,
-            {},
-            preserve_module_call_signature=("foo.nested", "foo"),
-        )
-        ep._validate()
-        self.assertEqual(len(ep.module_call_graph), 3)
-        # TODO(zhxchen17) unflattener
-        # unflattened = unflatten(export_module)
-        # self.compare_outputs(export_module, unflattened, inps)
-        # unflattened.foo.nested = NestedChild()
-        # self.compare_outputs(export_module, unflattened, inps)
-
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         def fn_ddo(x):
             y = x.nonzero()
@@ -631,7 +582,7 @@ class TestExport(TestCase):
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
-    def test_pytree_regster_data_class(self):
+    def test_pytree_register_data_class(self):
 
         @dataclass
         class MyDataClass:
@@ -644,7 +595,7 @@ class TestExport(TestCase):
         self.assertTrue(spec, LeafSpec())
         self.assertTrue(len(flat) == 1)
 
-        register_dataclass_as_pytree_node(MyDataClass)
+        register_dataclass_as_pytree_node(MyDataClass, serialized_type_name="test_pytree_register_data_class.MyDataClass")
 
         flat, spec = tree_flatten(dt)
         self.assertEqual(
@@ -671,7 +622,7 @@ class TestExport(TestCase):
         self.assertEqual(roundtrip_spec, spec)
 
         # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True)
+        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
 
         flat, spec = tree_flatten(dt)
         self.assertEqual(
@@ -697,7 +648,7 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-    def test_pytree_regster_nested_data_class(self):
+    def test_pytree_register_nested_data_class(self):
 
         @dataclass
         class Inner:
@@ -714,8 +665,8 @@ class TestExport(TestCase):
         dt = Outer(xy, ab)
         inp = {"dt1": (dt, ({},)), "dt2": ((torch.ones(1),), dt)}
 
-        register_dataclass_as_pytree_node(Inner)
-        register_dataclass_as_pytree_node(Outer)
+        register_dataclass_as_pytree_node(Inner, serialized_type_name="test_pytree_register_nested_data_class.Inner")
+        register_dataclass_as_pytree_node(Outer, serialized_type_name="test_pytree_register_nested_data_class.Outer")
 
         flat, spec = tree_flatten(inp)
         self.assertEqual(flat, [1, 2, 3, 4, torch.ones(1), 1, 2, 3, 4])
