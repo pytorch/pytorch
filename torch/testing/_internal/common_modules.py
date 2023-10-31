@@ -18,7 +18,9 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, TEST_WITH_TORCHINDUCTOR, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL,
+    TEST_WITH_ROCM, TEST_WITH_TORCHINDUCTOR, IS_WINDOWS
+)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -3442,7 +3444,14 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Mish,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(skipMPS),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_check_inplace',
+                       dtypes=[torch.float32, torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),)
                ),
     ModuleInfo(torch.nn.RNN,
                train_and_eval_differ=True,
