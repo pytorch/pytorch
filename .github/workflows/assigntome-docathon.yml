@@ -9,16 +9,8 @@ jobs:
   assign:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Dependencies
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - name: Install @octokit/core
-        run: |
-          npm i @octokit/core @octokit/rest
-          npm install cross-fetch
       - name: Check for "/assigntome" in comment
-        uses: actions/github-script@v4
+        uses: actions/github-script@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -28,29 +20,23 @@ jobs:
             if (assignRegex.test(issueComment)) {
               const assignee = context.payload.comment.user.login;
               const issueNumber = context.payload.issue.number;
-              const { Octokit } = require("@octokit/rest");
-              const octokit = new Octokit({
-                auth: process.env.GITHUB_TOKEN,
-                request: {
-                  fetch: require('cross-fetch'),
-                },
-              });
-              const { data: issue } = await octokit.issues.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber
-              });
+              try {
+                const { data: issue } = await octokit.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber
+                });
               const hasLabel = issue.labels.some(label => label.name === 'docathon-h2-2023');
               if (hasLabel) {
                 if (issue.assignee !== null) {
-                  await octokit.issues.createComment({
+                  await github.rest.issues.createComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: issueNumber,
                     body: "The issue is already assigned. Please pick an opened and unnasigned issue with the [docathon-h2-2023 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h2-2023)."
                   });
                 } else {
-                  octokit.issues.addAssignees({
+                  await github.rest.issues.addAssignees({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     issue_number: issueNumber,
@@ -59,7 +45,7 @@ jobs:
                 }
               } else {
                 const commmentMessage = "This issue does not have the correct label. Please pick an opened and unnasigned issue with the [docathon-h2-2023 label](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3Adocathon-h2-2023)."
-                await octokit.issues.createComment({
+                await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issueNumber,
