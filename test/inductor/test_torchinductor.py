@@ -3570,8 +3570,8 @@ class CommonTemplate:
         self.common(
             fn2,
             (
-                torch.randn(8, 8, device="cuda", dtype=torch.float16),
-                torch.randn(8, device="cuda", dtype=torch.float32),
+                torch.randn(8, 8, dtype=torch.float16),
+                torch.randn(8, dtype=torch.float32),
             ),
         )
 
