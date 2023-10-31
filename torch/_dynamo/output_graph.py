@@ -1086,7 +1086,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def example_inputs(self) -> List[torch.Tensor]:
         result = []
         for arg in self.graphargs:
-            result.append(arg.fake_tensor if arg.fake_tensor is not None else arg.example)
+            result.append(
+                arg.fake_tensor
+                if arg.is_tensor and arg.fake_tensor is not None
+                else arg.example
+            )
         return result
 
     def remove_unused_graphargs(self) -> None:
