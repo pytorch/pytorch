@@ -42,8 +42,8 @@ class TestGenericPytree(TestCase):
             self.assertEqual(inspect.isclass(cxx_api), inspect.isclass(py_api))
             self.assertEqual(inspect.isfunction(cxx_api), inspect.isfunction(py_api))
             if inspect.isfunction(cxx_api):
-                cxx_signature = inspect.isfunction(cxx_api)
-                py_signature = inspect.isfunction(py_api)
+                cxx_signature = inspect.signature(cxx_api)
+                py_signature = inspect.signature(py_api)
                 # The C++ pytree APIs provide more features than the Python APIs.
                 # The Python APIs are a subset of the C++ APIs.
                 cxx_positional_params = OrderedDict(
