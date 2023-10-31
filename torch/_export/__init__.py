@@ -28,7 +28,6 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
-from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
@@ -36,8 +35,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
-from torch.export.exported_program import (
-    ExportedProgram,
+from torch.export.graph_signature import (
     ExportGraphSignature,
     _sig_to_specs,
     ArgumentSpec,
@@ -48,6 +46,11 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
     InputSpec
+)
+from torch.export.exported_program import (
+    ExportedProgram,
+    ModuleCallEntry,
+    ModuleCallSignature,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility

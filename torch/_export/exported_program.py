@@ -22,9 +22,12 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
 # Remove when migration is done.
-from torch.export import (
+from torch.export.graph_signature import (
     ExportBackwardSignature,
     ExportGraphSignature,
+)
+
+from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
