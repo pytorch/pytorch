@@ -700,6 +700,7 @@ def mps_ops_modifier(ops):
 
         # Unsupported dtypes
         'dot': [torch.int64],
+        'histc': [torch.float16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
@@ -793,6 +794,8 @@ def mps_ops_modifier(ops):
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
+        # float output for float16 input on MPS
+        'logit': [torch.float16],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -10940,6 +10943,7 @@ class TestConsistency(TestCaseMPS):
         'masked.softmin',
         'nn.functional.kl_div',
         'nn.functional.softmin',
+        'cross', 'linalg.cross',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
