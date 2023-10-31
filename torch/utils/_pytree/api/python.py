@@ -16,6 +16,7 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import inspect
 import json
 import warnings
 from collections import deque, namedtuple, OrderedDict
@@ -122,7 +123,6 @@ def _register_pytree_node(
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
-    _register_cxx_pytree_node: bool = True,
 ) -> None:
     """
     Args:
@@ -173,24 +173,25 @@ def _register_pytree_node(
     SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
 
-    if _register_cxx_pytree_node:
-        import torch
+    import torch
 
-        if torch._running_with_deploy():
-            return
+    if torch._running_with_deploy():
+        return
 
-        try:
-            from . import cxx
-        except ImportError:
-            pass
-        else:
+    try:
+        from . import cxx
+    except ImportError:
+        pass
+    else:
+        current_frame = inspect.currentframe()
+        previous_frame = current_frame.f_back if current_frame is not None else None
+        if previous_frame is not None and inspect.getmodule(previous_frame) is not cxx:
             cxx.register_pytree_node(
                 cls,
                 flatten_func,
                 unflatten_func,
                 to_dumpable_context=to_dumpable_context,
                 from_dumpable_context=from_dumpable_context,
-                _register_python_pytree_node=False,
             )
 
 
