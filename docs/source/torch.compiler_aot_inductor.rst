@@ -10,27 +10,29 @@ AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 AOTInductor is a specialized version of
 `TorchInductor <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-which takes an exported PyTorch model, optimizes it, and generates a shared
-library. These compiled artifacts can be deployed to non-Python environments,
-which are commonly used for inference deployments. AOTInductor is a vital component along the
-`export <https://pytorch.org/docs/main/export.html>`__ path as it provides a way
-to run an exported model without a Python runtime.
+, designed to process exported PyTorch models, optimize them, and produce shared libraries as well
+as other relevant artifacts.
+These compiled artifacts are specifically crafted for deployment in non-Python environments,
+which are frequently employed for inference deployments. AOTInductor plays a pivotal role in the
+`export <https://pytorch.org/docs/main/export.html>`__ path, offering a means to execute an exported
+model independently of a Python runtime.
 
-In this tutorial, you will learn how to take a PyTorch model, export and compile into a shared library,
-and run the model prediction in C++.
+In this tutorial, you will gain insight into the process of taking a PyTorch model, exporting it,
+compiling it into a shared library, and conducting model predictions using C++.
 
 
 Model Compilation
 ---------------------------
 
-With AOTInductor, the model is authored in Python. The following is an example model which shows how
-to call ``aot_compile`` to compile it into a shared library.
+Using AOTInductor, you can still author the model in Python. The following example demonstrates how to
+invoke ``aot_compile`` to transform the model into a shared library.
 
 .. note::
 
-    To run the following script, you need to have at least one CUDA device on your machine.
-    If you do not have a GPU, you can remove the ``.to(device="cuda")`` code
-    in the snippet below and it will generate the model code into a shared library that runs on CPU.
+   To execute the following code, it's essential to have a CUDA-enabled device on your machine.
+   If you do not possess a GPU, you can simply omit the ``.to(device="cuda")`` code within the snippet
+   below. In such a case, the script will compile the model code into a shared library that is optmized
+   for CPU execution.
 
 .. code-block:: python
 
@@ -62,18 +64,20 @@ to call ``aot_compile`` to compile it into a shared library.
     with open("model_so_path.txt", "w") as file:
         file.write(so_path)
 
-In this example, ``Dim`` is used to specify the first dimension of input "x" as dynamic.
-The compiled library path and name are not specified, so the compiled shared library will
-be stored in a temporay directory. To use that path on the C++ side, we write that path into a file which will
-be read in C++ later. The exact ``torch._export.aot_compile`` API can be found
+In this illustrative example, the ``Dim`` parameter is employed to designate the first dimension of
+the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
+resulting in the shared library being stored in a temporay directory.
+To access this path from the C++ side, we save it to a file for later retrieval within the C++ code.
+For comprehensive details on the 'torch._export.aot_compile' API,
+you can refer to the code
 `here <https://github.com/pytorch/pytorch/blob/92cc52ab0e48a27d77becd37f1683fd442992120/torch/_export/__init__.py#L891-L900C9>`__.
 
 
 Inference in C++
 ---------------------------
 
-Next, we write the following C++ file ``inference.cpp`` to load ``model.so`` generated from the last step,
-and perform model prediction in C++.
+Next, we use the following C++ file ``inference.cpp`` to load the shared library generated in the
+previous step, enabling us to conduct model predictions directly within a C++ environment.
 
 .. note::
 
@@ -115,9 +119,9 @@ and perform model prediction in C++.
         return 0;
     }
 
-
-To build the cpp file, you can use the following CMakeLists.txt file, which takes care of invoking
-``python model.py`` to AOT compile the model and compiling ``inference.cpp`` into a binary, ``aot_inductor_example``
+For building the C++ file, you can make use of the provided ``CMakeLists.txt`` file, which
+automates the process of invoking ``python model.py`` for AOT compilation of the model and compiling
+``inference.cpp`` into an executable binary named ``aot_inductor_example``.
 
 .. code-block:: cmake
 
@@ -138,6 +142,11 @@ To build the cpp file, you can use the following CMakeLists.txt file, which take
     set_property(TARGET aot_inductor_example PROPERTY CXX_STANDARD 17)
 
 
+Provided the directory structure resembles the following, you can execute the subsequent commands
+to construct the binary. It is essential to note that the ``CMAKE_PREFIX_PATH`` variable
+is crucial for CMake to locate the LibTorch library, and it should be set to an absolute path.
+Please be mindful that your path may vary from the one illustrated in this example.
+
 .. code-block:: shell
 
     aot_inductor_example/
@@ -145,10 +154,6 @@ To build the cpp file, you can use the following CMakeLists.txt file, which take
         inference.cpp
         model.py
 
-
-Assuming this is how the directory structure looks like, you can run the following commands
-to build and run the binary. Note that ``CMAKE_PREFIX_PATH`` is required for ``cmake`` for find
-``libtorch``, and it is required to use an absolute path. Your path may be different from the one used in this example.
 
 .. code-block:: shell
 
@@ -201,6 +206,11 @@ to build and run the binary. Note that ``CMAKE_PREFIX_PATH`` is required for ``c
     [ 66%] Building CXX object CMakeFiles/aot_inductor_example.dir/inference.cpp.o
     [100%] Linking CXX executable aot_inductor_example
     [100%] Built target aot_inductor_example
+
+After the ``aot_inductor_example`` binary has been generated in the ``build`` directory, executing it will
+display results akin to the following:
+
+.. code-block:: shell
 
     (nightly) [ ~/local/aot_inductor_example/build]$ ./aot_inductor_example
     Result from first inference:
