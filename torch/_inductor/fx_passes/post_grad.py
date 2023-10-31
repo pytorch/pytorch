@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.immutable_collections import immutable_dict
 
-from .. import config, ir, pattern_matcher
+from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -484,8 +484,8 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
+def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same metadata"""
     val1 = node1.meta.get("val")
     val2 = node2.meta.get("val")
     return (
@@ -493,6 +493,8 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val2 is not None
         and val1.size() == val2.size()
         and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
+        and val1.device == val2.device
         and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
 
@@ -505,6 +507,7 @@ def register_noop_decomp(targets, nop_arg=0):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
             (cond, nop_arg)
         )
+        return cond
 
     return register_fun
 
@@ -564,16 +567,22 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp([aten.clone, aten.alias])
+@register_noop_decomp(aten.view)
+def view_noop(arg, size):
+    return arg.shape == size
+
+
+# Note, we also always have a check for identical metadata, which is why these
+# are safe
+@register_noop_decomp([aten.copy], nop_arg=1)
+@register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
 
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
-    Removes aten.clone and aten.alias ops from the graph when it's safe.
-
-    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     input_storages = set()
     output_storages = set()
@@ -607,7 +616,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_layout(node, src) and cond(*args, **kwargs):
+            if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -644,7 +653,7 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def can_replace(node, mutated_arg):
+    def can_inplace(node, mutated_arg):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -674,12 +683,15 @@ def reinplace_scatters(graph):
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+        aten._unsafe_index_put.default: InplaceableOp(
+            inductor_prims._unsafe_index_put_, 0
+        ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
+            if can_inplace(node, node.args[inplaceable_op.mutated_arg]):
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
@@ -689,7 +701,7 @@ def reinplace_scatters(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_replace(node, node.kwargs["kwargs"][arg]):
+                if not can_inplace(node, node.kwargs["kwargs"][arg]):
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
