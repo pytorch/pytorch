@@ -598,6 +598,7 @@ def _register_ops():
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
         "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+        "xla_mark_sharding_dynamo_custom_op(Tensor input, int[] tile_assignment, int[] group_assignment, int[] replication_groups, int sharding_type) -> ()",
     ]
 
     my_module = sys.modules[__name__]

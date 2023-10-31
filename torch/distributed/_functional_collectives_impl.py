@@ -331,3 +331,9 @@ def _all_to_all_single(
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
+
+
+def _xla_mark_sharding_dynamo_custom_op(input: torch.Tensor, tile_assignment: List[int], group_assignment: List[int], replication_groups: List[int], sharding_type: int):
+    # No-op as this is only for PyTorch/XLA
+    pass
+
