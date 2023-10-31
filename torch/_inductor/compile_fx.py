@@ -366,8 +366,7 @@ def compile_fx_inner(
 
     # Inputs to fx_codegen_and_compile
     # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
-    graph_args = [gm, example_inputs]
+    # of fx_codegen_and_compile changes, the dict should be updated accordingly
     graph_kwargs = {
         "cudagraphs": cudagraphs,
         "num_fixed": num_fixed,
@@ -385,11 +384,11 @@ def compile_fx_inner(
 
     if config.fx_graph_cache and not aot_mode:
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, graph_args, graph_kwargs
+            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
         )
     else:
         compiled_graph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
@@ -620,18 +619,8 @@ def fx_codegen_and_compile(
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
-            compiled_graph = CompiledFxGraph(
-                compiled_artifact=compiled_fn,
-                cache_key=graph.cache_key,
-                artifact_path=graph.cache_path,
-                cache_linemap=graph.cache_linemap,
-                device_types=graph.device_types,
-                device_idxs=graph.device_idxs,
-                mutated_inputs=graph.mutated_inputs,
-                mutated_input_idxs=set(graph.mutated_input_idxs),
-                constants=graph.constants,
-                output_strides=output_strides,
-            )
+            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+
     return compiled_graph
 
 
