@@ -2995,7 +2995,8 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_serialization(self, device, dtype, requires_grad):
+    @parametrize("weights_only", [False, True])
+    def test_serialization(self, device, dtype, requires_grad, weights_only):
 
         def compare_metadata(nt1, nt2):
             self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
@@ -3008,7 +3009,7 @@ class TestNestedTensorSubclass(TestCase):
             buffer = io.BytesIO()
             serialized = torch.save(a, buffer)
             buffer.seek(0)
-            b = torch.load(buffer)
+            b = torch.load(buffer, weights_only=weights_only)
             # should be both conceptually equal and metadata equivalent
             self.assertEqual(a, b)
             compare_metadata(a, b)
