@@ -16,6 +16,7 @@ jobs:
       - name: Install @octokit/core
         run: |
           npm i @octokit/core @octokit/rest
+          npm install cross-fetch
       - name: Check for "/assigntome" in comment
         uses: actions/github-script@v4
         env:
@@ -30,6 +31,9 @@ jobs:
               const { Octokit } = require("@octokit/rest");
               const octokit = new Octokit({
                 auth: process.env.GITHUB_TOKEN,
+                request: {
+                  fetch: require('cross-fetch'),
+                },
               });
               const { data: issue } = await octokit.issues.get({
                 owner: context.repo.owner,
