@@ -388,14 +388,18 @@ def extract_input_node_reduction_ranges(  # noqa: F722
 
     from .ir import ComputedBuffer, Loops
 
-    if not isinstance(input_node.data.data, Loops):
+    if isinstance(input_node.data, ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        if hasattr(input_node, "get_size") and hasattr(
-            input_node, "get_reduction_size"
-        ):
-            return (input_node.get_size(), input_node.get_reduction_size())
+        size = input_node.get_size()
+        reduction_size = input_node.get_reduction_size()
+        if len(reduction_size) > 0:
+            return (size, reduction_size)
         else:
             return (None, None)
+
+    if not isinstance(input_node.data.data, Loops):
+        # Other IRNodes do not have reduction_ranges.
+        return (None, None)
 
     # There is one issue: what if there are views / permutations between the input node and its dependent realized nodes?
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
