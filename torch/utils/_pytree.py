@@ -120,11 +120,11 @@ SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
 def _register_pytree_node(
-    typ: Any,
+    cls: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_str_fn: Optional[ToStrFunc] = None,
-    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,
+    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
+    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
@@ -132,12 +132,12 @@ def _register_pytree_node(
 ) -> None:
     """
     Args:
-        typ: the type to register
+        cls: the type to register
         flatten_fn: A callable that takes a pytree and returns a flattened
             representation of the pytree and additional context to represent the
             flattened pytree.
         unflatten_fn: A callable that takes a flattened version of the pytree,
-            additional context, and returns an unflattedn pytree.
+            additional context, and returns an unflattened pytree.
         to_dumpable_context: An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable
             representation. This is used for json serialization, which is being
@@ -153,28 +153,28 @@ def _register_pytree_node(
             "Please use to_dumpable_context and from_dumpable_context instead."
         )
 
-    if typ in SUPPORTED_NODES:
-        raise ValueError(f"{typ} is already registered as pytree node.")
+    if cls in SUPPORTED_NODES:
+        raise ValueError(f"{cls} is already registered as pytree node.")
 
     node_def = NodeDef(
-        typ,
+        cls,
         flatten_fn,
         unflatten_fn,
     )
-    SUPPORTED_NODES[typ] = node_def
+    SUPPORTED_NODES[cls] = node_def
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
-            f"Both to_dumpable_context and from_dumpable_context for {typ} must "
+            f"Both to_dumpable_context and from_dumpable_context for {cls} must "
             "be None or registered."
         )
 
-    type_fqn = f"{typ.__module__}.{typ.__name__}"
+    type_fqn = f"{cls.__module__}.{cls.__qualname__}"
     serialize_node_def = _SerializeNodeDef(
-        typ, type_fqn, to_dumpable_context, from_dumpable_context
+        cls, type_fqn, to_dumpable_context, from_dumpable_context,
     )
-    SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+    SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
+    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
 
     if _register_cxx_pytree_node:
         import torch
@@ -188,7 +188,7 @@ def _register_pytree_node(
             pass
         else:
             _cxx_pytree.register_pytree_node(
-                typ,
+                cls,
                 flatten_fn,
                 unflatten_fn,
                 to_dumpable_context=to_dumpable_context,
