@@ -302,9 +302,10 @@ def _operator_dispatch(
 
     if _is_inplace_op(op_call):
         # inplace op should return self instead of re-wrapping
-        self = cast(dtensor.DTensor, args[0])
-        self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self, op_info.schema, output_sharding
+        if output_sharding.output_spec is not None:
+            return args[0], op_info.schema, output_sharding
+        else:
+            return None, op_info.schema, output_sharding
     elif _is_out_variant_op(op_call):
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (

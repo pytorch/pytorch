@@ -621,7 +621,7 @@ def register_prop_rule_map(
                 input_dtensor_spec.placements,
                 tuple(global_in_shape),
                 rules,
-                tuple(mesh.mesh.shape),
+                mesh.shape,
             )
 
         if shard_out is not None:

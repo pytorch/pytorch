@@ -381,6 +381,10 @@ class DeviceMesh:
     def ndim(self) -> int:
         return self.mesh.ndim
 
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return tuple(self.mesh.shape)
+
     def get_rank(self) -> int:
         return get_rank()
 
