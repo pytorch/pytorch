@@ -171,7 +171,9 @@ class TestViewOps(DTensorTestBase):
 
             self.assertEqual(profiler.num_calls, 0, "Expected no redistribution.")
 
-            full_out = out_dt.full_tensor()
+            full_out = out_dt.redistribute(
+                device_mesh, device_mesh.ndim * [Replicate()]
+            ).to_local()
 
             if dist.get_rank() == 0:
                 self.assertEqual(outputs, full_out)
