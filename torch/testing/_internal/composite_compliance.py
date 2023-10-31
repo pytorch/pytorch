@@ -159,7 +159,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = pytree.tree_leaves(args) + pytree.tree_leaves(kwargs)
+            all_args = pytree.arg_tree_leaves(*args, **kwargs or {})
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
@@ -238,9 +238,9 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # have consistent metadata. If they don't have consistent metadata,
             # that means the operator did something fishy.
             check = partial(check_metadata_consistency, CCT=CompositeCompliantTensor)
-            tree_map(check, args)
-            tree_map(check, kwargs)
-            tree_map(check, rs)
+            pytree.tree_map_(check, args)
+            pytree.tree_map_(check, kwargs)
+            pytree.tree_map_(check, rs)
             return rs
 
     return CompositeCompliantTensor, CompositeCompliantTensorMode()
