@@ -156,9 +156,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        onnx_program = dynamo_export(
-            TopKModel(), x, export_options=self.export_options
-        )
+        onnx_program = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
