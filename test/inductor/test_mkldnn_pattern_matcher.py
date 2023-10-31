@@ -903,27 +903,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
             def __init__(self, use_bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
+                self.linear2 = torch.nn.Linear(4, 4, use_bias)
 
             def forward(self, x):
-                return self.linear(x)
+                return self.linear2(self.linear(x))
 
         bias_list = [True, False]
-        for bias in bias_list:
-            mod = M(bias).eval()
-            v = torch.randn((2, 4))
+        for int8_mixed_bf16 in (
+            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
+        ):
+            for bias in bias_list:
+                mod = M(bias).eval()
+                v = torch.randn((2, 4))
 
-            # Totally pattern_matcher_count 2, pattern_matcher_nodes 8
-            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. dequant-linear pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-            self._test_common(
-                mod,
-                (v,),
-                2,
-                8,
-                check_quantization=True,
-            )
+                # Totally pattern_matcher_count 5, pattern_matcher_nodes 23 (28 if int8-mixed-bf16)
+                # 1. 2 pair of to_int8 and to_fp32 at input matched in pointless_convert pass
+                #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+                # 2. 2 dequant-linear pattern matched in quantization weight prepack
+                #    [convert_element_type_1, sub, mul_1, optional(convert_element_type_3),
+                #     dequantize_per_channel, optional(convert_element_type_9), t, addmm/mm]
+                # 3. qlinear->quant node for int8 output
+                #    [qlinear_pointwise_default_1, optional(convert_element_type_6), mul_2, round_2,
+                #     add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+                self._test_common(
+                    mod,
+                    (v,),
+                    5,
+                    28 if int8_mixed_bf16 else 23,
+                    check_autocast=int8_mixed_bf16,
+                    check_quantization=True,
+                )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -938,29 +947,41 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 super().__init__()
                 self.linear = torch.nn.Linear(4, 4, use_bias)
                 self.unary_fn = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(4, 4, use_bias)
+                self.unary_fn2 = torch.nn.ReLU()
 
             def forward(self, x):
-                return self.unary_fn(self.linear(x))
+                tmp = self.unary_fn(self.linear(x))
+                return self.unary_fn2(self.linear2(tmp))
 
         bias_list = [True, False]
-        for bias in bias_list:
-            mod = M(bias).eval()
-            v = torch.randn((2, 4))
+        for int8_mixed_bf16 in (
+            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
+        ):
+            for bias in bias_list:
+                int8_mixed_bf16 = True
+                mod = M(bias).eval()
+                v = torch.randn((2, 4))
 
-            # Totally pattern_matcher_count 3, pattern_matcher_nodes 10
-            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. dequant-linear pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-            # 3. Quantization fusion in post-grad fusion pass
-            #    [qlinear_pointwise_default, relu]
-            self._test_common(
-                mod,
-                (v,),
-                3,
-                10,
-                check_quantization=True,
-            )
+                # Totally pattern_matcher_count 6, pattern_matcher_nodes 26 (31 if int8-mixed-bf16)
+                # 1. 2 pair of to_int8 and to_fp32 at input matched in pointless_convert pass
+                #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+                # 2. 2 dequant-linear pattern matched in quantization weight prepack
+                #    [convert_element_type_1, sub, mul_1, optional(convert_element_type_3),
+                #     dequantize_per_channel, optional(convert_element_type_2), t, addmm/mm]
+                # 3. Quantization fusion int8 output in post-grad fusion pass
+                #    [qlinear_pointwise_default_1, relu, optional(convert_element_type_6), mul_2,
+                #     round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+                # 4. Quantization fusion fp32/bf16 otuput in post-grad fusion pass
+                #    [qlinear_pointwise_default, relu]
+                self._test_common(
+                    mod,
+                    (v,),
+                    6,
+                    31 if int8_mixed_bf16 else 26,
+                    check_autocast=int8_mixed_bf16,
+                    check_quantization=True,
+                )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -997,30 +1018,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.rand((2, 4))
 
-        # Totally 6 pattern_matcher_count, 30 pattern_matcher_nodes for linear
-        # 1. Pair of to_int8 and to_fp32 at linear input,
-        #    matched in pointless_convert pass at
-        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
-        #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
-        #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #        However when dq has multiple users we will have
-        #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #                                          \-> to_float -> sub -> mul]
-        #        So for now we will discount one pattern here
-        # 2. Dequant pattern matcher for dequant promotion * 1
-        #    [convert_element_type_3, sub_1, mul_3]
-        # 3. Dequant-linear pattern matched in quantization weight prepack * 3
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, permute, addmm]
-        # 4. Quantization fusion in post-grad fusion pass * 1
-        #    [qlinear_pointwise_default, mul_6, round_4, add_3, clamp_min_3, clamp_max_3, convert_element_type_6]
-        self._test_common(
-            mod,
-            (v,),
-            6,
-            30,
-            check_quantization=True,
-        )
+        for int8_mixed_bf16 in (
+            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
+        ):
+            # Totally 6 pattern_matcher_count, 30 pattern_matcher_nodes for linear
+            # 1. Pair of to_int8 and to_fp32 at linear input,
+            #    matched in pointless_convert pass at
+            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #        However when dq has multiple users we will have
+            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #                                          \-> to_float -> sub -> mul]
+            #        So for now we will discount one pattern here
+            # 2. Dequant pattern matcher for dequant promotion * 1
+            #    [convert_element_type_3, sub_1, mul_3, optional(convert_element_type_14)]
+            # 3. Dequant-linear pattern matched in quantization weight prepack * 3
+            #    [convert_element_type_1, sub, mul_1, optional(convert_element_type_default_2),
+            #     dequantize_per_channel, optional(convert_element_type_19), permute, addmm]
+            # 4. Quantization fusion in post-grad fusion pass * 1
+            #    [qlinear_pointwise_default, optional(convert_element_type_8), mul_6,
+            #     round_4, add_3, clamp_min_3, clamp_max_3, convert_element_type_6]
+            self._test_common(
+                mod,
+                (v,),
+                6,
+                38 if int8_mixed_bf16 else 30,
+                check_autocast=int8_mixed_bf16,
+                check_quantization=True,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfRocm
