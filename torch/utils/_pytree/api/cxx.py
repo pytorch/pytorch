@@ -75,8 +75,8 @@ def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
 
 def register_pytree_node(
     cls: Type[Any],
-    flatten_func: FlattenFunc,
-    unflatten_func: UnflattenFunc,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     *,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
@@ -98,14 +98,19 @@ def register_pytree_node(
     Args:
         cls (type): A Python type to treat as an internal pytree node.
         flatten_fn (callable): A function to be used during flattening, taking an instance of ``cls``
-            and returning a triple or optionally a pair, with (1) an iterable for the children to be
-            flattened recursively, and (2) some hashable auxiliary data to be stored in the treespec
-            and to be passed to the ``unflatten_func``, and (3) (optional) an iterable for the tree
-            path entries to the corresponding children. If the entries are not provided or given by
-            :data:`None`, then `range(len(children))` will be used.
+            and returning a pair, with (1) an iterable for the children to be flattened recursively,
+            and (2) some hashable auxiliary data to be stored in the treespec and to be passed to
+            the ``unflatten_fn``.
         unflatten_fn (callable): A function taking two arguments: the auxiliary data that was returned
-            by ``flatten_func`` and stored in the treespec, and the unflattened children. The function
+            by ``flatten_fn`` and stored in the treespec, and the unflattened children. The function
             should return an instance of ``cls``.
+        to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
+            to convert the context of the pytree to a custom json dumpable representation. This is
+            used for json serialization, which is being used in mod:`torch.export` right now.
+        from_dumpable_context (callable, optional): An optional keyword argument to custom specify
+            how to convert the custom json dumpable representation of the context back to the
+            original context. This is used for json deserialization, which is being used in
+            mod:`torch.export` right now.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might register
             a different custom behavior for the same type. (default: :const:`"torch"`)
@@ -198,8 +203,8 @@ def register_pytree_node(
     if not optree.is_structseq_class(cls):
         optree.register_pytree_node(
             cls,
-            flatten_func,
-            _reverse_args(unflatten_func),
+            flatten_fn,
+            _reverse_args(unflatten_fn),
             namespace=namespace,
         )
 
@@ -208,8 +213,8 @@ def register_pytree_node(
 
         python._register_pytree_node(
             cls,
-            flatten_func,
-            unflatten_func,
+            flatten_fn,
+            unflatten_fn,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
             _register_cxx_pytree_node=False,
