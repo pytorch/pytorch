@@ -365,12 +365,16 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        self.assertEqual(
-            id(m.activation_post_process_2), id(m.activation_post_process_3)
-        )
-        self.assertEqual(
-            id(m.activation_post_process_3), id(m.activation_post_process_4)
-        )
+        act_post_processes_pairs = []
+        for n in m.graph.nodes:
+            if n.target in [
+                torch.ops.aten.view.default,
+                torch.ops.aten.hardtanh.default,
+            ]:
+                input_act = getattr(m, n.args[0].target)
+                output_act = getattr(m, list(n.users)[0].target)
+                self.assertTrue(input_act is output_act)
+
         m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
