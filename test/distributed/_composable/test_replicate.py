@@ -38,6 +38,14 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         except OSError:
             pass
 
+    def _init_pg(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+
     def _check_state_dict_parity(self, sd_1, sd_2):
         for k1, k2 in zip(sd_1.keys(), sd_2.keys()):
             self.assertEqual(k1, k2)
@@ -50,6 +58,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         Tests that replicate() on a single module state_dict
         matches local module state_dict.
         """
+        self._init_pg()
         model = Net()
         replicate_model = replicate(deepcopy(model))
         local_sd = model.state_dict()
@@ -61,6 +70,7 @@ class ReplicateStateDictTest(MultiProcessTestCase):
         Tests tha replicate() on multiple submodules matches
         local module state_dict.
         """
+        self._init_pg()
         model = Net()
         replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
@@ -88,7 +98,7 @@ class ReplicateTest(MultiProcessTestCase):
         except OSError:
             pass
 
-    def _compare_module(self, mod, replicate_mod):
+    def _init_pg(self):
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -96,6 +106,7 @@ class ReplicateTest(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
 
+    def _compare_module(self, mod, replicate_mod):
         local_batch_size = 1
         global_batch_size = self.world_size * local_batch_size
         input = torch.randn(global_batch_size, 2)
@@ -135,6 +146,7 @@ class ReplicateTest(MultiProcessTestCase):
             input = input[torch.randperm(global_batch_size)]
 
     def test_replicate_single_module(self):
+        self._init_pg()
         model = Net()
         replicate_model = replicate(deepcopy(model))
         self._compare_module(model, replicate_model)
@@ -151,12 +163,7 @@ class ReplicateTest(MultiProcessTestCase):
                     inp = inp @ kwarg
                 return self.a(inp)
 
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+        self._init_pg()
         torch.cuda.set_device(self.rank)
         model = MyNet().cuda()
         replicate(model, device_id=torch.cuda.current_device())
@@ -166,12 +173,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_replicate_ignore_module(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+        self._init_pg()
         torch.cuda.set_device(self.rank)
         # Seed ensures diff input and thus different local grads across ranks.
         torch.manual_seed(self.rank)
@@ -200,6 +202,7 @@ class ReplicateTest(MultiProcessTestCase):
                 self.assertEqual(grad, g)
 
     def test_replicate_multi_module(self):
+        self._init_pg()
         model = Net()
         replicate_model = deepcopy(model)
         replicate(replicate_model.fc1)
@@ -208,6 +211,7 @@ class ReplicateTest(MultiProcessTestCase):
         self._compare_module(model, replicate_model)
 
     def test_replicate_with_kwargs(self):
+        self._init_pg()
         model = Net()
         replicate_model = replicate(
             deepcopy(model), bucket_cap_mb=1, gradient_as_bucket_view=True
@@ -216,12 +220,7 @@ class ReplicateTest(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     def test_replicate_device_id(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+        self._init_pg()
         model = Net()
         model_cuda = deepcopy(model).cuda()
         model_cuda2 = deepcopy(model_cuda)
@@ -245,12 +244,7 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual([0], replicate_ddp_weakref.device_ids)
 
     def test_replicate_wrong_device_id_type(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+        self._init_pg()
         model = Net()
         with self.assertRaisesRegex(
             RuntimeError, "Expected device_id to be int or torch.device"

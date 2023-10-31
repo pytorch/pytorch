@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import dis
 import functools
 import inspect
@@ -182,7 +183,7 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
-            inspect.getsourcefile(self._orig_mod.forward)
+            self._orig_mod.forward
         ):
             # This may be a torch.nn.* instance in skipfiles.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -362,7 +363,7 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
         if (
-            (filename is None or skipfiles.check(filename))
+            (filename is None or skipfiles.check(fn))
             and (
                 getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
             )
@@ -384,6 +385,15 @@ class _TorchDynamoContext:
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
+            if torch.jit.is_tracing():
+                if config.error_on_nested_jit_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to torch.jit.trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
                 else:
@@ -519,7 +529,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check(frame.f_code.co_filename)
+            or skipfiles.check(frame.f_code)
             or config.disable
         ):
             log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
@@ -817,10 +827,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def run_node(self, n):
         self.current_node = n
-        r = super().run_node(n)
+        result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
-            r.node.meta["val"] = self.current_node.meta["val"]
-        return r
+            result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if self.current_node.op != "output":
+            result_proxy.node._rename(
+                getattr(self.current_node, "name", result_proxy.node.name)
+            )
+        return result_proxy
 
 
 class ExportResult(NamedTuple):
@@ -1188,6 +1202,31 @@ def export(
         # optimize_assert since user program may mutate the inputs.
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
+        for arg in flat_args:
+            prim_types = (
+                torch.Tensor,
+                str,
+                int,
+                float,
+                bool,
+                torch.SymBool,
+                torch.SymInt,
+                torch.SymFloat,
+            )
+            if not isinstance(arg, prim_types) and (arg is not None):
+                if dataclasses.is_dataclass(arg):
+                    raise RuntimeError(
+                        "Dataclasses are supposed to be pytree nodes to be exportable. "
+                        "Please take a look at torch.export.register_dataclass "
+                        "for more information.",
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Argument {str(arg)} has type {type(arg)} but only {prim_types} are allowed. "
+                        f"If it is a container type, please register it as valid pytree type."
+                        f" Please take a look torch.utils._pytree._register_pytree_node"
+                    )
+
         remove_from_cache(f)
         constraint_violation_error = None
         if tracing_mode != "symbolic":
@@ -1218,7 +1257,7 @@ def export(
         if (
             (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
-            and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+            and not skipfiles.check(call_to_inspect)
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
@@ -1286,7 +1325,7 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(
+                    raise UserError(  # noqa: TRY200
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
                         str(e),
                         case_name="cond_operands",

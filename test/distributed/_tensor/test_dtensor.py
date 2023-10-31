@@ -195,6 +195,14 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(local_tensor_with_grad.grad, expected_grad)
 
     @with_comms
+    def test_from_local_negative_dim(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(-1)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        self.assertEqual(sharded_tensor.placements[0].dim, 1)
+
+    @with_comms
     def test_to_local(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = (Shard(0),)
@@ -257,9 +265,20 @@ class DTensorTest(DTensorTestBase):
         )
         local_out.sum().backward()
 
-        replica_grad = sharded_dtensor.grad.redistribute(
-            placements=[Replicate()]
-        ).to_local()
+        replica_grad = sharded_dtensor.grad.full_tensor()
+        self.assertEqual(replica_grad, global_tensor * self.world_size)
+
+    @with_comms
+    def test_full_tensor_grad_hint(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = (Shard(0),)
+        global_tensor = torch.ones(8, 3, requires_grad=True)
+
+        sharded_dtensor = distribute_tensor(global_tensor, device_mesh, shard_spec)
+        local_out = sharded_dtensor.full_tensor(grad_placements=[_Partial()])
+        local_out.sum().backward()
+
+        replica_grad = sharded_dtensor.grad.full_tensor()
         self.assertEqual(replica_grad, global_tensor * self.world_size)
 
     @with_comms

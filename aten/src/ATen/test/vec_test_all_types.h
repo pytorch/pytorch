@@ -949,8 +949,7 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
+        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
             for (const auto k : c10::irange(el_count)) {
                 vals[k] = generator.get();
                 call_filter(filter, vals[k]);
@@ -1009,8 +1008,7 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
+        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
             for (const auto k : c10::irange(el_count)) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
@@ -1075,8 +1073,7 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (const auto trial : c10::irange(trialCount)) {
-            (void)trial; // Suppress unused variable warning
+        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
             for (const auto k : c10::irange(el_count)) {
                 vals0[k] = generator0.get();
                 vals1[k] = generator1.get();
