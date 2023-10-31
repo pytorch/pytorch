@@ -681,7 +681,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 any_ndarray = any(
                     isinstance(x, variables.NumpyNdarrayVariable) for x in args[0].items
                 )
-                if any_ndarray:
+                # we cannot torch.stack non-tensor like
+                all_tensor_like = all(
+                    isinstance(x, variables.TensorVariable) for x in args[0].items
+                )
+                if any_ndarray and all_tensor_like:
                     # Stack FakeTensor
                     stacked = wrap_fx_proxy(
                         tx=tx,
