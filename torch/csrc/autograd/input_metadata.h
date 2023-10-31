@@ -111,7 +111,7 @@ struct InputMetadata {
     // Currently C++ NestedTensors are not expandable (but Python NestedTensors
     // may be). If this support is added then updates to reduce_grad will be
     // needed
-    if (is_nestedness_same(grad) &&
+    if (!is_nestedness_same(grad) &&
         !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
       return false;
     }
