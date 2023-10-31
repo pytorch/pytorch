@@ -46,26 +46,37 @@ class TestModule(torch.nn.Module):
     def f2(self, x, y):
         return x + y
 
-    def subfunc(self, x, y):
-        z = torch.relu(x) + g1_mutation_tuple(x, y)[0]
-        z = z + g1_mutation_tensor(x, x)
-        z = z + g2(x, y)
+    def subfunc1(self, x, y):
+      x.relu_()
+      self.buf.relu_()
+      y = torch.cat(torch.chunk(y, 2))
+      return x, y
+
+    def subfunc2(self, x, y):
+        # z = torch.relu(x) + g1_mutation_tuple(x, y)[0]
+        # z = z + g1_mutation_tensor(x, x)
+        # z = z + g2(x, y)
+        # z = x + y
+        # z = z + g2_read_global_var(x, y)
+        # z = z + self.f_read_param_mutate_param(x)
+        # z = z + torch.tanh(self.weight)
+        # z = z + self.buf
+        # z = z + global_a
+        # z = z + self.f2(x, y)
+        # z = z + global3(x, y)
         z = x + y
-        z = z + g2_read_global_var(x, y)
-        z = z + self.f_read_param_mutate_param(x)
-        z = z + torch.tanh(self.weight)
-        z = z + self.buf
-        z = z + global_a
-        z = z + self.f2(x, y)
-        z = z + global3(x, y)
         return z
 
     def forward(self, x, y):
-        x.relu_()
-        self.buf.relu_()
-        y = torch.cat(torch.chunk(y, 2))
-        z = self.subfunc(x, y)
-        return z
+        x, y = self.subfunc1(x, y)
+        y.relu_()
+        z = self.subfunc2(x, y)
+        z.relu_()
+        # x, y = self.subfunc1(x, y)
+        return x, y, z
+
+
+from torch._lazy_scheduler import Segment, LazyScheduler
 
 
 with (
@@ -77,11 +88,16 @@ with (
 ):
     torch._dynamo.reset()
     m = TestModule()
+    # TODO: implement submodule method tagging
+    Segment._mapping[m.subfunc1] = "subfunc1"
+    Segment._mapping[m.subfunc2] = "subfunc2"
     m = m.to(device)
-    compiled_m = torch.compile(m, backend="aot_eager" if device == "cpu" else "inductor", fullgraph=False, dynamic=False)
     x = torch.randn(4, 4, device=device)
     y = torch.randn(4, 4, device=device)
 
+    lazy_scheduler = LazyScheduler([])
+    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False, dynamic=False)
+
     # ref = m(x, y)
     actual = compiled_m(x, y)
-    # assert torch.allclose(ref, actual)
+    # # assert torch.allclose(ref, actual)

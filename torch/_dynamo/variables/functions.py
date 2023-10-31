@@ -87,9 +87,20 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return tx.inline_user_function_return(
-            self, list(self.self_args()) + list(args), kwargs
+        # breakpoint()
+        self_args_list = list(self.self_args())
+        args = list(args)
+        from torch._lazy_scheduler import Segment
+        method = getattr(tx.output.get_submodule(self_args_list[0].module_key), self.get_function().__name__)
+        if method in Segment._mapping:
+            Segment().tag = Segment._mapping[method]
+        print(f"Segment().tag: {Segment().tag}")
+        ret = tx.inline_user_function_return(
+            self, self_args_list + args, kwargs
         )
+        # move to the next untagged segment
+        Segment().tag = Segment.get_next_unnamed_segment()
+        return ret
 
     def num_parameters(self):
         return len(inspect.signature(self.get_function()).parameters)

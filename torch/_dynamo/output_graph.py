@@ -988,6 +988,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        # for node in gm.graph.nodes:
+        #     node.meta["segment"] = Segment._instance.tag
+        # breakpoint()
         for register_finalizer in self.register_finalizer_fns:
             register_finalizer(gm)
 
@@ -1399,6 +1402,7 @@ class SubgraphTracer(fx.Tracer):
                 ]
 
         if "stack_trace" not in rv.node.meta:
+            # breakpoint()
             frame_summaries: List[traceback.FrameSummary] = []
             while tx:
                 frame_summaries.append(tx.frame_summary())
@@ -1429,6 +1433,10 @@ class SubgraphTracer(fx.Tracer):
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
+        from torch._lazy_scheduler import Segment
+        if Segment().tag is None:
+            Segment().tag = Segment.get_next_unnamed_segment()
+        node.meta['segment'] = Segment().tag
         return node
 
     # Note: we did not override erase_node since
