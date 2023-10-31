@@ -82,7 +82,7 @@ class elementwise_type_promotion_wrapper:
     """
     Adds elementwise type promotion to a Python reference implementation.
 
-    Takes three kwargs, type_promoting_args, type_promotion_kind and use_dtype_as_return_type.
+    Takes two kwargs, type_promoting_args, type_promotion_kind.
 
     type_promoting_args must be a string Sequence specifiying the argument names of all
     arguments that participate in type promotion (and should be type promoted). If the
@@ -92,8 +92,8 @@ class elementwise_type_promotion_wrapper:
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
 
-    use_dtype_as_return_type=True will promote the result to the wrapped function's dtype arg 
-    if it is available and not None.
+    The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
+    not None.
 
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
@@ -104,11 +104,9 @@ class elementwise_type_promotion_wrapper:
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Optional[Sequence[str]] = None,
-        use_dtype_as_return_type: bool = True,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
-        self.use_dtype_as_return_type = use_dtype_as_return_type
 
     def __call__(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
@@ -137,7 +135,8 @@ class elementwise_type_promotion_wrapper:
 
             result = fn(**bound.arguments)
 
-            if self.use_dtype_as_return_type and "dtype" in bound.arguments:
+            # Override the return_dtype if a dtype arg is present in the function signature
+            if "dtype" in bound.arguments:
                 maybe_dtype = bound.arguments["dtype"]
                 if maybe_dtype:  # dtype cannot be None
                     result_dtype = maybe_dtype
