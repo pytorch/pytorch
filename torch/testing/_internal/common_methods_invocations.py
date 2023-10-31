@@ -42,8 +42,8 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
+from torch.utils import _pytree as pytree
 
-from torch.utils._pytree import tree_flatten
 
 from packaging import version
 
@@ -2386,7 +2386,7 @@ def _elementwise_type_promo_np(*args, type_promotion_kind):
             return torch.from_numpy(x)
         return x
 
-    flattened = tree_flatten(args)[0]
+    flattened = pytree.tree_leaves(args)
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,
@@ -10521,6 +10521,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
+    OpInfo('unsafe_chunk',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_chunk,
+           check_batched_forward_grad=False,
+           reference_inputs_func=reference_inputs_chunk,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
     OpInfo('clone',
            ref=np.copy,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -11492,8 +11500,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -11526,8 +11533,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -18052,7 +18058,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.grid_sample",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
@@ -18062,7 +18068,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "grid_sampler_2d",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,

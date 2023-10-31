@@ -442,7 +442,7 @@ class FlattenOutputStep:
 
     def apply(self, model_outputs: Any) -> Sequence[Any]:
         """Flatten the model outputs."""
-        flattened_outputs, _ = pytree.tree_flatten(model_outputs)
+        flattened_outputs = pytree.tree_leaves(model_outputs)
         return flattened_outputs
 
 
