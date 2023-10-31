@@ -4039,6 +4039,37 @@ current work queued on :attr:`stream` are complete.
     unexpectedly. Calling this method lets the allocator know which streams
     have used the tensor.
 
+.. warning::
+
+    This method is most suitable for use cases where you are a providing a
+    function that created a tensor on a side stream, and want users to be able
+    to make use of the tensor without having to think carefully about stream
+    safety when making use of them.  These safety guarantees come at some
+    performance and predictability cost (analogous to the tradeoff between GC
+    and manual memory management), so if you are in a situation where
+    you manage the full lifetime of your tensors, you may consider instead
+    manually managing CUDA events so that calling this method is not necessary.
+    In particular, when you call this method, on later allocations the
+    allocator will poll the recorded stream to see if all operations have
+    completed yet; you can potentially race with side stream computation and
+    non-deterministically reuse or fail to reuse memory for an allocation.
+
+    You can safely use tensors allocated on side streams without
+    :method:`~Tensor.record_stream`; the idea is to manually ensure that that
+    the tensor doesn't get deallocated until it is safe to reuse.  Typically,
+    you can :method:`torch.cuda.Event.synchronize` the side stream before you
+    ``del`` the tensor.  This is not a mechanical change: synchronizing immediately
+    after you queue work on the side stream would defeat the purpose of having
+    a side stream at all.  Instead, the synchronization must be placed at some
+    appropriate, later point in time where you expect the side stream to have
+    finished work.  This point could be identified via profiling.  Note that
+    this approach still implies a device-to-host synchronization, so if the
+    side stream has not actually finished work, you will block until it is
+    finished.  Conversely, if you place the deallocation too late, you will use
+    more memory than is strictly necessary.  For a concrete example of how
+    this guidance can be applied in practice, see this post: `FSDP and
+    CUDACachingAllocator
+    <https://dev-discuss.pytorch.org/t/fsdp-cudacachingallocator-an-outsider-newb-perspective/1486>`_.
 """,
 )
 
