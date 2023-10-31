@@ -98,18 +98,16 @@ def register_pytree_node(
 
     Args:
         cls (type): A Python type to treat as an internal pytree node.
-        flatten_fn (callable): A function to be used during flattening, taking an instance of ``cls``
-            and returning a triple or optionally a pair, with (1) an iterable for the children to be
-            flattened recursively, and (2) some hashable auxiliary data to be stored in the treespec
-            and to be passed to the ``unflatten_func``, and (3) (optional) an iterable for the tree
-            path entries to the corresponding children. If the entries are not provided or given by
-            :data:`None`, then `range(len(children))` will be used.
-        unflatten_fn (callable): A function taking two arguments: the auxiliary data that was returned
-            by ``flatten_func`` and stored in the treespec, and the unflattened children. The function
-            should return an instance of ``cls``.
+        flatten_func (callable): A function to be used during flattening, taking an instance of
+            ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
+            recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
+            passed to the ``unflatten_func``.
+        unflatten_func (callable): A function taking two arguments: the auxiliary data that was
+            returned by ``flatten_func`` and stored in the treespec, and the unflattened children.
+            The function should return an instance of ``cls``.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
-            type registry. This is used to isolate the registry from other modules that might register
-            a different custom behavior for the same type. (default: :const:`"torch"`)
+            type registry. This is used to isolate the registry from other modules that might
+            register a different custom behavior for the same type. (default: :const:`"torch"`)
 
     Example::
 
