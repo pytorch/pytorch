@@ -1545,6 +1545,11 @@ def forward(self):
             3,
             return_graph=True,
         )
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             actual_graph,
             """\
