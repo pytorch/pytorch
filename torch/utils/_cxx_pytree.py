@@ -117,11 +117,11 @@ def register_pytree_node(
             The function should return an instance of ``cls``.
         to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable representation. This is
-            used for json serialization, which is being used in mod:`torch.export` right now.
+            used for json serialization, which is being used in :mod:`torch.export` right now.
         from_dumpable_context (callable, optional): An optional keyword argument to custom specify
             how to convert the custom json dumpable representation of the context back to the
             original context. This is used for json deserialization, which is being used in
-            mod:`torch.export` right now.
+            :mod:`torch.export` right now.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might
             register a different custom behavior for the same type. (default: :const:`"torch"`)
