@@ -70,7 +70,10 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
             continue
         group = node.meta["fusion_meta"].group
         if isinstance(group, tuple):
-            group = group[1]
+            if isinstance(group[1], int):
+                group = (group[1],)
+            else:
+                group = group[1]
 
         # gather meta data
         dtype = None
