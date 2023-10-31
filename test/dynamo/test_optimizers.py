@@ -100,18 +100,24 @@ for opt in optimizers:
 
 
 class MyOptimizer(torch.optim.Optimizer):
-    def __init__(self, params, val):
+    def __init__(self, params):
         super().__init__(params, {})
-        self.val = val
 
-    def _init_group(self):
-        return self.val
+    def _init_group(self, params, group):
+        any_complex = False
+        for p in group["params"]:
+            params.append(p)
+            any_complex |= p.is_complex()
+        return any_complex
 
     def step(self):
-        ret = self._init_group()
-        # Assert that init group can return the actual value
-        assert self.val == ret
-        return ret
+        for group in self.param_groups:
+            params = []
+            any_complex = self._init_group(params, group)
+            if any_complex:
+                params[0] -= 1
+            else:
+                params[0] += 1
 
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
@@ -166,16 +172,21 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
         optimizer.step(fn)
 
     def test_init_group(self):
-        # Test only literals
-        for val in [
-            1,
-            True,
-            [10, False],
-            (0.2, 0.4, True),
-        ]:
-            opt = MyOptimizer([Parameter(torch.randn(10, 5), requires_grad=False)], val)
-            opt_fn = torch.compile(backend="eager", fullgraph=True)(opt.step)
-            opt_fn()
+        for dtype in [torch.float32, torch.cfloat]:
+            tensor = torch.randn(5, 5, dtype=dtype)
+            params = Parameter(tensor.detach().clone(), requires_grad=False)
+            opt_params = Parameter(tensor.detach().clone(), requires_grad=False)
+            print(params, opt_params)
+
+            optim = MyOptimizer([params])
+            optim.step()
+
+            opt_optim = MyOptimizer([opt_params])
+            opt_step = torch.compile(backend="eager", fullgraph=True)(opt_optim.step)
+            opt_step()
+            print(params, opt_params)
+
+            self.assertEqual(params, opt_params)
 
 
 if __name__ == "__main__":
