@@ -1130,9 +1130,7 @@ class Kernel(CodeGen):
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def generate_assert(self, check):
-        return (
-            check or config.debug_index_asserts
-        ) and config.assert_indirect_indexing
+        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
     def load_mask(self, var):
         # only the triton kernel requires mask
