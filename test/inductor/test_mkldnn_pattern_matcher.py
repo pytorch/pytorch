@@ -17,6 +17,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
+    skipIfNoONEDNNBF16,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
@@ -449,7 +450,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # 3. 1 qconv-quant fusion matched in post grad
         #    [qconv2d_pointwise_default_1, optional(convert_element_type_5), mul_2, round_2, add_1,
         #     clamp_min_1, clamp_max_1, convert_element_type_2]
-        for int8_mixed_bf16 in [False, True]:
+        for int8_mixed_bf16 in (
+            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
+        ):
             self._test_common(
                 mod,
                 (v,),
@@ -497,7 +500,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
         #     clamp_min_1, clamp_max_1, convert_element_type_2]
         # 4. Quantization fusion float output in post-grad fusion pass
         #    [qconv2d_pointwise_default, relu]
-        for int8_mixed_bf16 in [False, True]:
+        for int8_mixed_bf16 in (
+            [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
+        ):
             self._test_common(
                 mod,
                 (v,),
@@ -582,6 +587,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_add_int8_mixed_bf16(self):
@@ -738,6 +744,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
     @skipIfRocm
     def test_qconv2d_add_relu_int8_mixed_bf16(self):
