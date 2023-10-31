@@ -661,7 +661,7 @@ class _PyTreeCodeGen(CodeGen):
         self.pytree_info: _PyTreeInfo = pytree_info
 
     def process_inputs(self, *inputs: Any) -> Any:
-        flat_args = pytree.tree_leaves(inputs)
+        flat_args = pytree.arg_tree_leaves(*inputs)
         return flat_args
 
     def process_outputs(self, out: Any) -> Any:

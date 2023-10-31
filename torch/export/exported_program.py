@@ -35,11 +35,11 @@ from .graph_signature import (  # noqa: F401
     ConstantArgument,
     ExportGraphSignature,
     InputKind,
+    InputSpec,
     OutputKind,
+    OutputSpec,
     SymIntArgument,
     TensorArgument,
-    InputSpec,
-    OutputSpec,
 )
 
 
