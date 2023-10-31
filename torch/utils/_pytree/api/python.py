@@ -377,9 +377,7 @@ def _tree_flatten_helper(tree: PyTree, leaves: List[Any]) -> TreeSpec:
     child_pytrees, context = flatten_fn(tree)
 
     # Recursively flatten the children
-    children_specs = [
-        _tree_flatten_helper(child, leaves) for child in child_pytrees
-    ]
+    children_specs = [_tree_flatten_helper(child, leaves) for child in child_pytrees]
 
     return TreeSpec(node_type, context, children_specs)
 
