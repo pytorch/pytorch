@@ -751,6 +751,16 @@ class Reduction(Loops):
                         sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
+                        log.debug(
+                            "Use previous IRNode's range and reduction_ranges instead of split. "
+                            "current ranges: %s, current reduction ranges: %s, current split: %d, "
+                            "new ranges: %s, new reduction ranges: %s",
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
+                        )
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
