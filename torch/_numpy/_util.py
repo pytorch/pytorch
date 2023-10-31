@@ -171,9 +171,17 @@ def typecast_tensors(tensors, target_dtype, casting):
     return tuple(typecast_tensor(t, target_dtype, casting) for t in tensors)
 
 
-def _try_convert_to_tensor(obj):
+def _try_convert_to_tensor(obj, dtype=None):
     try:
-        tensor = torch.as_tensor(obj)
+        try:
+            tensor = torch.as_tensor(obj, dtype=dtype)
+        except (TypeError, ValueError):
+            # is `obj` a list of tensors with nelem>1 ? E.g.:
+            # torch.as_tensor([torch.arange(3), torch.arange(3)])
+            # NB: as_tensor emits a ValueError for floating-point dtypes
+            #     and a TypeEror for integer dtypes
+            tensor = torch.stack(obj)
+            tensor = cast_if_needed(tensor, dtype)
     except Exception as e:
         mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
         raise NotImplementedError(mesg)  # noqa: TRY200
@@ -220,7 +228,7 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
         # Therefore, we treat `tensor.dtype` as a hint, and convert the
         # original object *again*, this time with an explicit dtype.
         torch_dtype = _dtypes_impl.get_default_dtype_for(tensor.dtype)
-        tensor = torch.as_tensor(obj, dtype=torch_dtype)
+        tensor = _try_convert_to_tensor(obj, dtype=torch_dtype)
 
     # type cast if requested
     tensor = cast_if_needed(tensor, dtype)

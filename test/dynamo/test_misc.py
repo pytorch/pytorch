@@ -1743,6 +1743,29 @@ utils_device.CURRENT_DEVICE == None""",
         self.assertEqual(type(r), list)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_array_arrays(self):
+        def fn(x, y):
+            return np.array([x, y])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        for i, (x, y) in enumerate(
+            [
+                (1, 2),
+                (np.arange(3), np.arange(3) + 5),
+                (np.arange(3, dtype=float), np.arange(3, dtype=float) + 5),
+                (np.array([1, 1e12]), np.array([2, 1e12]))
+                # (1, np.array(2)),      # XXX: rework _ndarray.array _tolist logic
+                # ([1, 2], [3, np.array(4)])
+            ]
+        ):
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+
+            self.assertEqual(ref, res)
+            self.assertEqual(cnts.frame_count, i + 1)
+
     def test_numpy_size_attr(self):
         def fn(x):
             return x.size + x
