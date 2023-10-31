@@ -16,7 +16,6 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
-import functools
 import json
 import warnings
 from collections import deque, namedtuple, OrderedDict
@@ -367,9 +366,9 @@ class LeafSpec(TreeSpec):
 _LEAF_SPEC = LeafSpec()
 
 
-def _tree_flatten_helper(tree: PyTree, out_leaves: List[Any]) -> TreeSpec:
+def _tree_flatten_helper(tree: PyTree, leaves: List[Any]) -> TreeSpec:
     if _is_leaf(tree):
-        out_leaves.append(tree)
+        leaves.append(tree)
         return _LEAF_SPEC
 
     node_type = _get_node_type(tree)
@@ -378,7 +377,7 @@ def _tree_flatten_helper(tree: PyTree, out_leaves: List[Any]) -> TreeSpec:
 
     # Recursively flatten the children
     children_specs = [
-        _tree_flatten_helper(child, out_leaves) for child in child_pytrees
+        _tree_flatten_helper(child, leaves) for child in child_pytrees
     ]
 
     return TreeSpec(node_type, context, children_specs)
