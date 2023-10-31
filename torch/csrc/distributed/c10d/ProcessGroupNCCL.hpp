@@ -3,6 +3,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
+#include <queue>
 #include <iostream>
 #include <list>
 #include <mutex>
@@ -61,6 +62,13 @@ enum ErrorHandlingMode {
   TearDown = 1,
   CleanUpOnly = 2,
   SkipCleanUp = 3
+};
+
+struct HeartBeat {
+  int counter_ = 0; // incremented id in the heart beat
+  size_t pg_id_;
+  size_t seq_id_; // as tracked by the process group
+  OpType op_type_; // name of the collective
 };
 
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
@@ -593,6 +601,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::exception_ptr checkForNCCLErrorsInternal(
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
+  // Function that runs as part of a separate thread aside from watchdog
+  // thread because we need to check the heartbeat from watchdog thread
+  // so that when we get stuck in a collective or watchdog itself hangs,
+  // we can dump the debugging information and abort the process.
+  void ncclCommsMonitor();
+
   // Function that runs as part of a separate thread and checks for errors on
   // NCCL communicators. We need a separate thread to check for NCCL errors
   // since we can't rely on the user calling certain methods like wait(),
@@ -691,6 +705,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
+
+  // Mutex to guard heartbeat read/write.
+  std::mutex heartbeatMutex_;
+  std::condition_variable heartBeatCV_;
+
+  // Heartbeat queue to track the status of the watchdog thread.
+  std::queue<HeartBeat> heartbeatQueue_;
+
+  // Monitor thread which checks the heartbeat of Watchdog thread.
+  // If the monitor thread finds there is no heartbeat, it will dump debug info
+  // and then kill the watchdog thread to avoid hang.
+  std::thread ncclCommMonitorThread_;
 
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
@@ -796,6 +822,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
+
+  std::exception_ptr monitorException_ = nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
