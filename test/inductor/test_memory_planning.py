@@ -1,5 +1,17 @@
 # Owner(s): ["module: inductor"]
 
+import sys
+
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_memory_planning yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
 import unittest
 from typing import List
 
@@ -10,16 +22,7 @@ from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._triton import has_triton
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_memory_planning yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

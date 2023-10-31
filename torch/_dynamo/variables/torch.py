@@ -34,7 +34,6 @@ from ..utils import (
     istype,
     product,
     proxy_args_kwargs,
-    specialize_args_kwargs,
     tensortype_to_dtype,
 )
 from .base import VariableTracker
@@ -389,7 +388,6 @@ class TorchVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
             return op
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
