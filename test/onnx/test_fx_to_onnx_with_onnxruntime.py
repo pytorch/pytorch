@@ -596,6 +596,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),), model_type=self.model_type
         )
 
+    @pytorch_test_common.skip_model_type_is_exported_program_test(
+        "Unsupported: {'call_function': ['<built-in function ge>', 'aten._assert_async.msg', '<built-in function le>']}."
+        " Github issue: https://github.com/pytorch/pytorch/issues/112443"
+    )
     def test_operator_with_scalar_output(self):
         def func(x, y):
             return x.item() + y
