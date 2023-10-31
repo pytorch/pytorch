@@ -235,14 +235,14 @@ void PyFunctionTensorPostAccGradHooks::compiled_args(
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     c10::SafePyObject hook_obj(value, getPyInterpreter());
-    hook_ids.emplace_back(args.add_post_acc_grad_hook(std::move(hook_obj)));
+    args.add_post_acc_grad_hook(std::move(hook_obj));
   }
 }
 
 void PyFunctionTensorPostAccGradHooks::apply_with_saved(
     Variable& tensor,
     torch::dynamo::autograd::SwapSavedVariables& saved) {
-  for (const auto hook : hook_ids) {
+  for (const auto hook : saved.get_curr_node_call().post_acc_grad_hooks) {
     THPObjectPtr py_var(THPVariable_Wrap(tensor));
     PyObject_CallMethod(
         saved.get_py_compiler(),
