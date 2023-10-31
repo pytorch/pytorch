@@ -104,7 +104,7 @@ class elementwise_type_promotion_wrapper:
         *,
         type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
         type_promoting_args: Optional[Sequence[str]] = None,
-        use_dtype_as_return_type: bool = False,
+        use_dtype_as_return_type: bool = True,
     ):
         self.type_promoting_arg_names = type_promoting_args
         self.type_promotion_kind = type_promotion_kind
