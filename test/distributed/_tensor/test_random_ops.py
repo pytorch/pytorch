@@ -72,7 +72,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
         )
         self._run_init_op(torch.nn.init.normal_, mean=1.5, std=0.8)
         self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
-        self._run_init_op(torch.nn.init.uniform_, a=0, b=1.2)
         self._run_init_op(torch.rand_like)
         self._run_init_op(torch.randn_like)
         self._run_init_op(torch.randint_like, low=0, high=100)
