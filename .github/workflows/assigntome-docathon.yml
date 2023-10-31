@@ -21,7 +21,7 @@ jobs:
               const assignee = context.payload.comment.user.login;
               const issueNumber = context.payload.issue.number;
               try {
-                const { data: issue } = await octokit.issues.get({
+                const { data: issue } = await github.rest.issues.get({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issueNumber
@@ -51,5 +51,8 @@ jobs:
                   issue_number: issueNumber,
                   body: commmentMessage
                 });
+               }
+              } catch (error) {
+                console.error(error);
               }
             }
