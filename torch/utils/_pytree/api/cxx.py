@@ -13,6 +13,7 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import inspect
 from typing import Any, Callable, Iterable, List, Optional, overload, Tuple, Type, Union
 
 import optree
@@ -82,7 +83,6 @@ def register_pytree_node(
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     namespace: str = "torch",
-    _register_python_pytree_node: bool = True,
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
 
@@ -206,16 +206,17 @@ def register_pytree_node(
             namespace=namespace,
         )
 
-    if _register_python_pytree_node:
-        from . import python
+    from . import python
 
+    current_frame = inspect.currentframe()
+    previous_frame = current_frame.f_back if current_frame is not None else None
+    if previous_frame is not None and inspect.getmodule(previous_frame) is not python:
         python._register_pytree_node(
             cls,
             flatten_func,
             unflatten_func,
             to_dumpable_context=to_dumpable_context,
             from_dumpable_context=from_dumpable_context,
-            _register_cxx_pytree_node=False,
         )
 
 
