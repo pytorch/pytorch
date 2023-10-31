@@ -148,37 +148,6 @@ except ImportError:
     pass
 
 
-err_epilogue = (
-    "With the current config, we will graph break "
-    "(and fall back to eager-mode PyTorch) on all ops "
-    "that have do not have the 'pt2_compliant_tag'. "
-    "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
-)
-
-
-def check_allowed_op(value):
-    if not config.only_allow_pt2_compliant_ops:
-        return
-    if isinstance(value, torch._ops.OpOverload):
-        if torch.Tag.pt2_compliant_tag in value.tags:
-            return
-        unimplemented(
-            f"Encountered the torch.ops.OpOverload {value} "
-            f"that is not PT2 compliant. " + err_epilogue
-        )
-    if isinstance(value, torch._ops.OpOverloadPacket):
-        for overload in value.overloads():
-            op = getattr(value, overload)
-            if torch.Tag.pt2_compliant_tag in op.tags:
-                continue
-            unimplemented(
-                f"Encountered the torch.ops.OpOverloadPacket {value} "
-                f"which has an overload ({overload}) that is not PT2 compliant. "
-                + err_epilogue
-            )
-
-
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -279,7 +248,6 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
-        check_allowed_op(value)
         self.value = value
 
         # the remainder of this is just optional debug checks
