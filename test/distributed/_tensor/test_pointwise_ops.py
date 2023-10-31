@@ -63,7 +63,10 @@ def deepcopy_convert_from_dtensor(val: Any) -> Any:
 
     def f(x):
         if isinstance(x, DTensor):
-            return x.full_tensor()
+            return x.redistribute(
+                device_mesh=x.device_mesh,
+                placements=[Replicate()] * x.device_mesh.ndim,
+            ).to_local()
         return x
 
     return pytree.tree_map(f, [val])[0]

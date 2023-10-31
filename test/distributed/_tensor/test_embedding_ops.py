@@ -110,7 +110,10 @@ class TestEmbeddingOp(DTensorTestBase):
             sharded_embedding.weight,
             **kwargs,
         )
-        self.assertEqual(local_output, sharded_output.full_tensor())
+        self.assertEqual(
+            local_output,
+            sharded_output.redistribute(device_mesh, [Replicate()]).to_local(),
+        )
 
     @with_comms
     def test_sharded_embedding_colwise(self):
