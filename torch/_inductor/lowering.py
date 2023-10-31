@@ -1666,10 +1666,10 @@ def make_fallback(op, layout_constraint=None, warn=True):
         warn
         and bool(os.getenv("CI"))
         and get_decompositions([op])
-        and (
-            not config.fallback_random
-            # if fallback_random, we allow not decomposing random
-            or op not in torch._decomp.decompositions_for_rng.extra_random_decomps
+        # if fallback_random, we allow not decomposing random
+        and not (
+            config.fallback_random
+            and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
