@@ -1121,30 +1121,24 @@ def _generate_dequant_convolution_node_pattern(
 
 def _generate_qconv_weight_prepack_patterns(dtype=torch.float32):
     assert dtype in [torch.float32, torch.bfloat16]
-    if dtype == torch.float32:
-        return (
-            _generate_dequant_convolution_node_pattern(
-                dequantize_per_channel_weight_pattern
-            ),
-            # There is another pattern due to the pass of convert_conv_weights_to_channels_last
-            # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
-            # Depend on some heuristics, it may or may not insert to(channel_last) node
-            # between convolution and dequant_per_channel node
-            _generate_dequant_convolution_node_pattern(
-                dequantize_per_channel_clone_weight_pattern
-            ),
-        )
-    else:
-        return (
-            _generate_dequant_convolution_node_pattern(
-                dequantize_per_channel_to_bf16_weight_pattern,
-                torch.bfloat16,
-            ),
-            _generate_dequant_convolution_node_pattern(
-                dequantize_per_channel_to_bf16_clone_weight_pattern,
-                torch.bfloat16,
-            ),
-        )
+    return (
+        _generate_dequant_convolution_node_pattern(
+            dequantize_per_channel_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_weight_pattern,
+            dtype,
+        ),
+        # There is another pattern due to the pass of convert_conv_weights_to_channels_last
+        # https://github.com/pytorch/pytorch/blob/07107919297db3f8ab37f11c12666b6d6d5f692e/torch/_inductor/freezing.py#L338-L362.
+        # Depend on some heuristics, it may or may not insert to(channel_last) node
+        # between convolution and dequant_per_channel node
+        _generate_dequant_convolution_node_pattern(
+            dequantize_per_channel_clone_weight_pattern
+            if dtype == torch.float32
+            else dequantize_per_channel_to_bf16_clone_weight_pattern,
+            dtype,
+        ),
+    )
 
 
 def _is_valid_dequant_linear_pattern(match):
@@ -1295,36 +1289,27 @@ def _generate_qlinear_weight_prepack_patterns():
 
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
-    # Step 1: Dequant promotion for int8-mixed-fp32/bf16
-    _register_dequant_promotion_pass(
-        dequantize_per_tensor_activation_pattern,
-        pass_number=0,
-        dtype=torch.float32,
-    )  # pass_number=0 to run before weight prepack
-    _register_dequant_promotion_pass(
-        CallFunction(
-            prims.convert_element_type.default,
-            dequantize_per_tensor_activation_pattern,
-            KeywordArg("activation_to_bf16"),
-        ),
-        pass_number=0,
-        dtype=torch.bfloat16,
-    )  # pass_number=0 to run before weight prepack
+    for dtype in [torch.float32, torch.bfloat16]:
+        # Step 1: Dequant promotion for int8-mixed-fp32/bf16
+        _register_dequant_promotion_pass(
+            dequantize_per_tensor_activation_pattern
+            if dtype == torch.float32
+            else CallFunction(
+                prims.convert_element_type.default,
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("activation_to_bf16"),
+            ),
+            pass_number=0,
+            dtype=dtype,
+        )  # pass_number=0 to run before weight prepack
 
-    # Step 2: QConv weight prepack
-    # 2.1: QConv int8-mixed-float32
-    weight_prepack_patterns = _generate_qconv_weight_prepack_patterns()
-    for weight_prepack_pattern in weight_prepack_patterns:
-        # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
-        _register_qconv_weight_prepack_pass(weight_prepack_pattern, pass_number=1)
-
-    # 2.2: QConv int8-mixed-bfloat16
-    weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(torch.bfloat16)
-    for weight_prepack_pattern in weight_prepack_patterns:
-        # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
-        _register_qconv_weight_prepack_pass(
-            weight_prepack_pattern, pass_number=2, dtype=torch.bfloat16
-        )
+        # Step 2: QConv weight prepack
+        weight_prepack_patterns = _generate_qconv_weight_prepack_patterns(dtype)
+        for weight_prepack_pattern in weight_prepack_patterns:
+            # Register to pass_number 1, so we can do dequant promotion in pass_number 0.
+            _register_qconv_weight_prepack_pass(
+                weight_prepack_pattern, pass_number=1, dtype=dtype
+            )
 
     # Step 3: QLinear weight prepack
     weight_prepack_patterns = _generate_qlinear_weight_prepack_patterns()
