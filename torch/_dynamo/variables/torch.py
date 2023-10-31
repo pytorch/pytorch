@@ -351,6 +351,7 @@ class TorchVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        args = list(args)  # Shallow copy the list so we can mutate it
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -677,14 +678,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
             ):
-                all_ndarray = True
-                for x in args[0].items:
-                    if not isinstance(x, variables.NumpyNdarrayVariable):
-                        all_ndarray = False
-                    if x.is_python_constant() and isinstance(
-                        x.as_python_constant(), np.generic
-                    ):
-                        x.value = x.value.item()
+                all_ndarray = all(
+                    isinstance(x, variables.NumpyNdarrayVariable) for x in args[0].items
+                )
                 if all_ndarray and kwargs == {}:
                     # Stack FakeTensor
                     stacked = wrap_fx_proxy(
