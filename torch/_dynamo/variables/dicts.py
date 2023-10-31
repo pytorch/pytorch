@@ -17,7 +17,7 @@ from ..guards import GuardBuilder, make_dupe_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor, iter_contains
 from .base import MutableLocal, VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
 from .tensor import TensorVariable
 
 
@@ -341,7 +341,7 @@ class SetVariable(VariableTracker):
                     "Cannot check Tensor object identity without its fake value"
                 )
             return SetVariable.SetElement(vt, fake_tensor)
-        if isinstance(vt, ConstantVariable):
+        if isinstance(vt, (ConstantVariable, EnumVariable)):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.as_python_constant())

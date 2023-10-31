@@ -7183,6 +7183,36 @@ def ___make_guard_fn():
         foo = torch._dynamo.optimize(counter)(foo)
         result = foo([x, x, x, x, y], y)
 
+    def test_set_of_enum(self):
+        torch._logging.set_logs(graph_breaks=True)
+
+        def count_graph_break_msgs(msgs):
+            return sum(msg.find("Graph break") != -1 for msg in msgs)
+
+        class MyEnum(enum.Enum):
+            A = 1
+            B = 2
+            C = 3
+
+        def fn(x, enum):
+            if enum not in {MyEnum.A, MyEnum.B}:
+                return torch.add(x, 1.0)
+            return torch.mul(x, 2.0)
+
+        x = torch.randn(1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
+            torch._dynamo.config.verbose = True
+            opt_fn(x, MyEnum.A)
+            self.assertEqual(count_graph_break_msgs(log.output), 0)
+
+        self.assertEqual(cnts.op_count, 1)
+
+        # reset logging state
+        torch._logging.set_logs()
+
     def test_set_aliasing_recompiles(self):
         g1 = torch.randn(10)
         g2 = torch.randn(10)
