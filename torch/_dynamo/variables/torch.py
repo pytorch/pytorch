@@ -351,7 +351,6 @@ class TorchVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        args = list(args)  # Shallow copy the list so we can mutate it
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -678,14 +677,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
             ):
-                any_ndarray = any(
-                    isinstance(x, variables.NumpyNdarrayVariable) for x in args[0].items
-                )
-                # we cannot torch.stack non-tensor like
-                all_tensor_like = all(
-                    isinstance(x, variables.TensorVariable) for x in args[0].items
-                )
-                if any_ndarray and all_tensor_like:
+                # torch.LongTensor cannot accept a list of FakeTensors.
+                # So we stack the list of FakeTensors instead.
+                if all(isinstance(x, variables.TensorVariable) for x in args[0].items):
                     # Stack FakeTensor
                     stacked = wrap_fx_proxy(
                         tx=tx,
@@ -696,7 +690,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ),
                         **options,
                     )
-                    args[0] = stacked
+                    args = [stacked]
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
