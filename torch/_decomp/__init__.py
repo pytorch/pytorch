@@ -430,8 +430,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unsafe_split_with_sizes,
             aten._unsafe_view,
             aten.upsample_bilinear2d,
-            # Temporarily disabled decomposition due to worse perfs on cpu/cuda vs eager
-            # aten._upsample_bilinear2d_aa,
+            aten._upsample_bilinear2d_aa,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
             aten.xlogy,

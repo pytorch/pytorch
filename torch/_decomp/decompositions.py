@@ -3155,7 +3155,9 @@ def _upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    return _upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w)
+    return torch.ops.aten._upsample_bilinear2d_aa(
+        input, osize, align_corners, scale_h, scale_w
+    )
 
 
 def _compute_scale(in_size, out_size, align_corners, scale=None):
@@ -3178,18 +3180,18 @@ def _compute_indices_weights_aa(
     support = (interp_size * 0.5) * scale if scale >= 1.0 else interp_size * 0.5
     max_interp_size = int(math.ceil(support)) * 2 + 1
 
-    i = torch.arange(out_size, dtype=torch.long, device=device)
+    i = torch.arange(out_size, dtype=torch.int32, device=device)
 
     center = scale * (i + 0.5)
     invscale = 1.0 / scale if scale >= 1.0 else 1.0
 
     # compute source indices as [xmin, xmin+1, ..., xmin+xsize-1]
-    xmin = torch.clamp((center - support + 0.5).to(torch.long), min=0)
-    xsize = torch.clamp((center + support + 0.5).to(torch.long), max=in_size) - xmin
+    xmin = torch.clamp((center - support + 0.5).to(torch.int32), min=0)
+    xsize = torch.clamp((center + support + 0.5).to(torch.int32), max=in_size) - xmin
     xsize = torch.clamp(xsize, max=max_interp_size)
 
     # compute weights with shape: (out_size, max_interp_size)
-    j = torch.arange(max_interp_size, dtype=torch.long, device=device)
+    j = torch.arange(max_interp_size, dtype=torch.int32, device=device)
     center = center.view(-1, 1)
     xmin = xmin.view(-1, 1)
     xsize = xsize.view(-1, 1)
@@ -3203,48 +3205,26 @@ def _compute_indices_weights_aa(
     return xmin.view(-1), weights
 
 
-def _separable_upsample_bilinear2d_aa_single_dim(
-    in_tensor, out_size, interp_dim, align_corners, scale=None
-):
-    # Assume that in_tensor dtype is float32
-    assert interp_dim % 4 in (2, 3)
-
-    n, c, in_h, in_w = in_tensor.shape
-    interp_size = 2  # bilinear
-    in_size = in_tensor.shape[interp_dim]
-
-    memory_format = utils.suggest_memory_format(in_tensor)
-
-    src_idx_min, weights = _compute_indices_weights_aa(
-        out_size,
-        in_size,
-        scale,
-        interp_size,
-        align_corners,
-        device=in_tensor.device,
+def _upsample_2d_common_check(input, output_size):
+    torch._check(
+        len(output_size) == 2,
+        lambda: f"It is expected output_size equals to 2, but got size {len(output_size)}",
     )
-    max_interp_size = weights.shape[-1]
-    k = torch.arange(max_interp_size, device=in_tensor.device)
-    src_idx_min = src_idx_min.unsqueeze(dim=-1)
+    torch._check(
+        input.ndim == 4,
+        lambda: f"It is expected input ndim equals to 4, but got size {input.ndim}",
+    )
 
-    if interp_dim % 4 == 3:
-        # horizontal pass
-        indices = torch.clamp(src_idx_min + k, max=in_w - 1)
-        in_tensor_selected = in_tensor[:, :, :, indices]
-        sum_dim = -1
-    else:
-        # vertical pass
-        assert interp_dim % 4 == 2
-        indices = torch.clamp(src_idx_min + k, max=in_h - 1)
-        in_tensor_selected = in_tensor[:, :, indices, :]
-        weights = weights.unsqueeze(dim=-1)
-        sum_dim = -2
-
-    # at this point we weights.shape = (out_w, max_interp_size) or (out_h, max_interp_size, 1)
-    # and in_tensor_selected.shape = (N, C, H, out_w, max_interp_size) or (N, C, out_h, max_interp_size, W)
-    output = (weights * in_tensor_selected).sum(dim=sum_dim)
-    output = output.contiguous(memory_format=memory_format)
-    return output
+    input_height, input_width = input.shape[-2:]
+    torch._check(
+        input_height > 0
+        and input_width > 0
+        and output_size[0] > 0
+        and output_size[1] > 0,
+        lambda: f"Input and output sizes should be greater than 0, "
+        "but got input (H: {input_height}, W: {input_width})"
+        f"output (H: {output_size[0]}, W: {output_size[1]})",
+    )
 
 
 @register_decomposition(aten._upsample_bilinear2d_aa.default)
@@ -3257,19 +3237,51 @@ def _upsample_bilinear2d_aa(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    # horizontal pass
-    if output_size[1] != input.shape[-1]:
-        output = _separable_upsample_bilinear2d_aa_single_dim(
-            input, output_size[1], -1, align_corners=align_corners, scale=scales_w
-        )
-    else:
-        output = input
+    _upsample_2d_common_check(input, output_size)
 
-    # vertical pass
-    if output_size[0] != input.shape[-2]:
-        output = _separable_upsample_bilinear2d_aa_single_dim(
-            output, output_size[0], -2, align_corners=align_corners, scale=scales_h
-        )
+    in_h, in_w = input.shape[-2:]
+    interp_size = 2  # bilinear
+
+    memory_format = utils.suggest_memory_format(input)
+
+    src_x_min, x_weights = _compute_indices_weights_aa(
+        output_size[1],
+        in_w,
+        scales_w,
+        interp_size,
+        align_corners,
+        device=input.device,
+    )
+
+    src_y_min, y_weights = _compute_indices_weights_aa(
+        output_size[0],
+        in_h,
+        scales_h,
+        interp_size,
+        align_corners,
+        device=input.device,
+    )
+
+    x_max_interp_size = x_weights.shape[-1]
+    y_max_interp_size = y_weights.shape[-1]
+
+    kx = torch.arange(x_max_interp_size, device=input.device)
+    ky = torch.arange(y_max_interp_size, device=input.device)
+
+    src_x_min = src_x_min.unsqueeze(dim=-1)
+    src_y_min = src_y_min.unsqueeze(dim=-1)
+
+    x_indices = torch.clamp(src_x_min + kx, max=in_w - 1)
+    y_indices = torch.clamp(src_y_min + ky, max=in_h - 1)
+
+    y_indices = y_indices.view(*y_indices.shape, 1, 1)
+    input_selected = input[:, :, y_indices, x_indices]
+
+    # One kernel faster on N=1 and slower with N=4 on cuda
+    y_weights = y_weights.view(output_size[0], y_max_interp_size, 1, 1)
+    x_weights = x_weights.view(1, output_size[1], x_max_interp_size)
+    output = (y_weights * (x_weights * input_selected)).sum(dim=(-1, -3))
+    output = output.contiguous(memory_format=memory_format)
 
     if not input.is_floating_point():
         output = output.round()
@@ -3297,6 +3309,8 @@ def upsample_bilinear2d(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
+    _upsample_2d_common_check(input, output_size)
+
     # get dimensions of original image
     n_batch, n_channels, in_h, in_w = input.shape
 
@@ -3961,6 +3975,8 @@ def upsample_bicubic2d_default(
     scale_h: Optional[float] = None,
     scale_w: Optional[float] = None,
 ) -> Tensor:
+    _upsample_2d_common_check(a, output_size)
+
     N, C, iH, iW = a.shape
     oH, oW = output_size
 

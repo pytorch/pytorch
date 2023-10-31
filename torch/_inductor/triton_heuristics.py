@@ -1114,6 +1114,16 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
                 size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
+    # TODO: Check if this can be helpful in general.
+    # https://github.com/pytorch/pytorch/pull/111656
+    # This brings a speed-up with interpolate bilinear aa=True op on batched input
+    elif reduction_hint == ReductionHint.DEFAULT:
+        configs += [
+            triton_config_reduction(size_hints, xblock, rnumel)
+            for xblock in (256, 512)
+            if rnumel * xblock <= 4096 * 4 and xblock <= xnumel
+        ]
+
     for c in configs:
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
