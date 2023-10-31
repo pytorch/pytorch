@@ -569,7 +569,7 @@ def get_optimizer_state_dict(
     *,
     submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
-) -> Dict[str, ValueType]:
+) -> OptimizerStateType:
     """
     Return the combined state_dict for optimizers.
 
