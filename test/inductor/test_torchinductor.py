@@ -238,11 +238,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
         output_code_log.setLevel(logging.DEBUG)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
         s = log_capture_string.getvalue()
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
-    return s
+    return result, s
 
 
 def check_model(
@@ -832,7 +832,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
