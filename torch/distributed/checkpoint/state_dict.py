@@ -371,7 +371,7 @@ def _load_model_state_dict(
     info: _StateDictInfo,
 ) -> _IncompatibleKeys:
     if not info.handle_model or not state_dict:
-        return
+        return _IncompatibleKeys({}, {})
 
     for key, _ in model.named_parameters():
         fqns = _get_fqns(model, key)
@@ -381,7 +381,8 @@ def _load_model_state_dict(
                 state_dict[fqn_with_ddp_prefix] = state_dict.pop(fqn)
 
     with info.fsdp_context():
-        return (
+        return cast(
+            _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(state_dict, strict=info.strict),
         )
 
@@ -572,7 +573,7 @@ def get_optimizer_state_dict(
     *,
     submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
-) -> Dict[str, ValueType]:
+) -> OptimizerStateType:
     """
     Return the combined state_dict for optimizers.
 
@@ -835,10 +836,8 @@ def set_state_dict(
 
     Returns:
         ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-            * **missing_keys** is a list of str containing the missing keys of
-            the model state_dict.
-            * **unexpected_keys** is a list of str containing the unexpected keys of
-            the model state_Dict.
+            * **missing_keys** is a list of str containing the missing keys of the model state_dict.
+            * **unexpected_keys** is a list of str containing the unexpected keys of the model state_dict.
     """
 
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
