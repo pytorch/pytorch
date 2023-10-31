@@ -335,7 +335,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             def backward(ctx, grad1, grad2):
                 return grad1 + grad2
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return Foo.apply(x)
 
@@ -344,9 +344,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
-        )
 
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):

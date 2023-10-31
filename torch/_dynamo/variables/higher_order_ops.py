@@ -1122,7 +1122,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
-            manually_set_subgraph_inputs=False,
             source_target=self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
@@ -1140,9 +1139,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        # Since, we call `speculate_subgraph` with `manually_set_subgraph_inputs=False`,
-        # all the arguments are lifted.
-        p_args = tuple(arg for arg in body_lifted_freevars.keys())
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
