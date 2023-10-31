@@ -1091,6 +1091,7 @@ class PatternMatcherPass:
                         entry.apply(m, graph, node)
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+
         return count
 
     def clear(self):
