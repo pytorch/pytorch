@@ -85,12 +85,13 @@ Read More
 
    torch.compiler_get_started
    torch.compiler_api
-   torch.compiler_performance_dashboard
    torch.compiler_fine_grain_apis
+   torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
    torch.compiler_profiling_torch_compile
    torch.compiler_faq
    torch.compiler_troubleshooting
+   torch.compiler_performance_dashboard
 
 ..
   _If you want to contribute a developer-level topic

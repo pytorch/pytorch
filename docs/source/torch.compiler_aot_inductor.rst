@@ -13,9 +13,7 @@ AOTInductor is a specialized version of
 , designed to process exported PyTorch models, optimize them, and produce shared libraries as well
 as other relevant artifacts.
 These compiled artifacts are specifically crafted for deployment in non-Python environments,
-which are frequently employed for inference deployments. AOTInductor plays a pivotal role in the
-`export <https://pytorch.org/docs/main/export.html>`__ path, offering a means to execute an exported
-model independently of a Python runtime.
+which are frequently employed for inference deployments on the server side.
 
 In this tutorial, you will gain insight into the process of taking a PyTorch model, exporting it,
 compiling it into a shared library, and conducting model predictions using C++.
@@ -31,7 +29,7 @@ invoke ``aot_compile`` to transform the model into a shared library.
 
    To execute the following code, it's essential to have a CUDA-enabled device on your machine.
    If you do not possess a GPU, you can simply omit the ``.to(device="cuda")`` code within the snippet
-   below. In such a case, the script will compile the model code into a shared library that is optmized
+   below. In such a case, the script will compile the model code into a shared library that is optimized
    for CPU execution.
 
 .. code-block:: python
@@ -109,6 +107,7 @@ previous step, enabling us to conduct model predictions directly within a C++ en
         }
         path_file.close();
 
+        // AOTIModelRunnerCuda dlopens the compiled shared library
         torch::inductor::AOTIModelRunnerCuda runner(model_so.c_str());
         std::vector<torch::Tensor> inputs = {torch::randn({8, 10}).to(at::kCUDA)};
         std::vector<torch::Tensor> outputs = runner.run(inputs);
@@ -160,53 +159,8 @@ Please be mindful that your path may vary from the one illustrated in this examp
 
     (nightly) [ ~/local/aot_inductor_example]$ mkdir build
     (nightly) [ ~/local/aot_inductor_example]$ cd build
-
     (nightly) [ ~/local/aot_inductor_example/build]$ CMAKE_PREFIX_PATH=/home/userid/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
-    -- The C compiler identification is GNU 11.4.1
-    -- The CXX compiler identification is GNU 11.4.1
-    -- Detecting C compiler ABI info
-    -- Detecting C compiler ABI info - done
-    -- Check for working C compiler: /home/userid/local/ccache/lib/cc - skipped
-    -- Detecting C compile features
-    -- Detecting C compile features - done
-    -- Detecting CXX compiler ABI info
-    -- Detecting CXX compiler ABI info - done
-    -- Check for working CXX compiler: /home/userid/local/ccache/lib/c++ - skipped
-    -- Detecting CXX compile features
-    -- Detecting CXX compile features - done
-    -- Found CUDA: /usr/local/cuda-12.1 (found version "12.1")
-    -- The CUDA compiler identification is NVIDIA 12.1.105
-    -- Detecting CUDA compiler ABI info
-    -- Detecting CUDA compiler ABI info - done
-    -- Check for working CUDA compiler: /usr/local/cuda-12.1/bin/nvcc - skipped
-    -- Detecting CUDA compile features
-    -- Detecting CUDA compile features - done
-    -- Found CUDAToolkit: /usr/local/cuda-12.1/include (found version "12.1.105")
-    -- Looking for pthread.h
-    -- Looking for pthread.h - found
-    -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
-    -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
-    -- Found Threads: TRUE
-    -- Caffe2: CUDA detected: 12.1
-    -- Caffe2: CUDA nvcc is: /home/userid/local/ccache/cuda/nvcc
-    -- Caffe2: CUDA toolkit directory: /usr/local/cuda-12.1
-    -- Caffe2: Header version is: 12.1
-    -- /usr/local/cuda-12.1/lib64/libnvrtc.so shorthash is b51b459d
-    -- USE_CUDNN is set to 0. Compiling without cuDNN support
-    -- USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support
-    -- Autodetected CUDA architecture(s):  8.0 8.0 8.0 8.0 8.0 8.0 8.0 8.0
-    -- Added CUDA NVCC flags for: -gencode;arch=compute_80,code=sm_80
-    -- Found Torch: /home/userid/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/lib/libtorch.so
-    -- Configuring done
-    -- Generating done
-    -- Build files have been written to: /home/userid/local/aot_inductor_example/build
-
     (nightly) [ ~/local/aot_inductor_example/build]$ cmake --build . --config Release
-    [ 33%] Generating model_so_path.txt
-    Compiled model into: /tmp/torchinductor_userid/csnavcwn65mvhieu3jsqd2xkbzynhq2qif7rthy5l57qca3e4wwe/c64ucf56t5hvtulhodvu47apn2rcdhjre7ifghsuwovvniggmwd7.so
-    [ 66%] Building CXX object CMakeFiles/aot_inductor_example.dir/inference.cpp.o
-    [100%] Linking CXX executable aot_inductor_example
-    [100%] Built target aot_inductor_example
 
 After the ``aot_inductor_example`` binary has been generated in the ``build`` directory, executing it will
 display results akin to the following:
