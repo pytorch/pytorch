@@ -275,6 +275,123 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 11)
         )
 
+    @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
+    def test_pt2_compliant_ops_are_allowed(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")
+        try:
+            torch.library.define(
+                "mylib::bar",
+                "(Tensor x) -> Tensor",
+                lib=lib,
+                tags=(torch.Tag.pt2_compliant_tag,),
+            )
+            torch.library.impl("mylib::bar", "CompositeImplicitAutograd", torch.sin)
+            assert torch.Tag.pt2_compliant_tag in torch.ops.mylib.bar.default.tags
+
+            def f(x):
+                return torch.ops.mylib.bar(x)
+
+            overload = torch.ops.mylib.bar.default
+
+            def g(x):
+                return overload(x)
+
+            x = torch.randn(3)
+
+            counts = torch._dynamo.testing.CompileCounter()
+            optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+            _ = optimized_f(x)
+
+            optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
+            _ = optimized_g(x)
+        finally:
+            del torch.ops.mylib.bar
+            del lib
+
+    @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
+    def test_non_pt2_compliant_ops_graph_break(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")
+        try:
+            torch.library.define("mylib::bar2", "(Tensor x) -> Tensor")
+            torch.library.impl("mylib::bar2", "CompositeImplicitAutograd", torch.sin)
+            assert torch.Tag.pt2_compliant_tag not in torch.ops.mylib.bar2.default.tags
+
+            def f(x):
+                return torch.ops.mylib.bar2(x)
+
+            overload = torch.ops.mylib.bar2.default
+
+            def g(x):
+                return overload(x)
+
+            x = torch.randn(3)
+
+            counts = torch._dynamo.testing.CompileCounter()
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
+                optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+                y = optimized_f(x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
+                optimized_g = torch._dynamo.optimize(counts, nopython=True)(f)
+                y = optimized_g(x)
+        finally:
+            del torch.ops.mylib.bar2
+            del lib
+
+    @torch._dynamo.config.patch(only_allow_pt2_compliant_ops=True)
+    def test_pt2_compliant_overload(self):
+        lib = torch.library.Library("mylib", "FRAGMENT")
+        try:
+            torch.library.define(
+                "mylib::bar3.tensor",
+                "(Tensor x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
+            torch.library.define("mylib::bar3.int", "(Tensor x, int dim) -> Tensor")
+
+            torch.library.impl(
+                "mylib::bar3.tensor", "CompositeImplicitAutograd", torch.sin
+            )
+            torch.library.impl(
+                "mylib::bar3.int", "CompositeImplicitAutograd", torch.sum
+            )
+
+            def f(x):
+                return torch.ops.mylib.bar3(x)
+
+            def g(x):
+                return torch.ops.mylib.bar3(x, 1)
+
+            def h(x):
+                return torch.ops.mylib.bar3(x, x, x)
+
+            x = torch.randn(3)
+
+            counts = torch._dynamo.testing.CompileCounter()
+            optimized_f = torch._dynamo.optimize(counts, nopython=True)(f)
+            optimized_g = torch._dynamo.optimize(counts, nopython=True)(g)
+            optimized_h = torch._dynamo.optimize(counts, nopython=True)(h)
+
+            # No error: the overload is PT2 compliant
+            optimized_f(x)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported, "not PT2 compliant"
+            ):
+                y = optimized_g(x)
+
+            # graph break on incorrect parsing
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "failed to"):
+                y = optimized_h(x)
+
+        finally:
+            del torch.ops.mylib.bar3
+            del lib
+
     def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
@@ -1682,8 +1799,8 @@ utils_device.CURRENT_DEVICE == None""",
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
         n_iter = torch._dynamo.config.cache_size_limit
-        for _ in range(n_iter):
-            x = random.randint(2, 30)
+        for i in range(n_iter):
+            x = i + 3
             ref = mandelbrot_numpy(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
@@ -4409,7 +4526,6 @@ def fn():
         opt_mod = torch._dynamo.optimize("inductor")(module)
         opt_mod(query, key, value)
 
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/106207")
     def test_generate_tensor_from_list_of_numpy_primitive_type(self):
         # Test sth like torch.LongTensor(list(np.int64, np.int64, ...))
         def fn():

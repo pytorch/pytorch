@@ -2885,7 +2885,7 @@ class TritonScheduling(BaseScheduling):
         wrapped_jit_function = mod.triton_
 
         # call once to trigger the compilation
-        call(wrapped_jit_function.clone_args(*args))
+        call(wrapped_jit_function.clone_args(*args)[0])
 
         launchers = wrapped_jit_function.launchers
         assert len(launchers) == 1
@@ -2895,7 +2895,7 @@ class TritonScheduling(BaseScheduling):
         else:
             # We have to clone the inplace updated arguments to avoid earlier calls
             # generating out of range indices for later calls.
-            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)))
+            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
 
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
