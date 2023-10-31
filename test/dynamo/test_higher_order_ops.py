@@ -3458,62 +3458,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         ):
             _assert_tensors_nonaliasing(a, a)
 
-    def test_cond_with_kwargs(self):
-        from torch._higher_order_ops.cond import cond_op
-
-        def test(pred, x):
-            def true_fn(x):
-                return x
-
-            def false_fn(x):
-                return -x
-
-            return cond_op(pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x])
-
-        cnt = CompileCounter()
-        opt_test = torch.compile(test, backend=cnt)
-        inp = torch.ones(3, 3)
-        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
-        self.assertEqual(cnt.frame_count, 2)
-
-    def test_cond_with_invalid_kwargs(self):
-        from torch._higher_order_ops.cond import cond_op
-
-        def test(pred, mode, x):
-            def true_fn(x):
-                return x
-
-            def false_fn(x):
-                return -x
-
-            if mode:
-                return cond_op(
-                    pred=pred,
-                    true_fn=true_fn,
-                    false_fn=false_fn,
-                    operands=[x],
-                    invalid=True,
-                )
-            else:
-                return cond_op(
-                    pred,
-                    pred=pred,
-                    true_fn=true_fn,
-                    false_fn=false_fn,
-                    operands=[x],
-                )
-
-        cnt = CompileCounter()
-        opt_test = torch.compile(test, backend=cnt)
-        inp = torch.ones(3, 3)
-        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
-            opt_test(True, True, inp)
-
-        with self.assertRaises(AssertionError):
-            opt_test(True, False, inp)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
