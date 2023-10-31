@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.apot.quantizer import quantize_APoT, dequantize_APoT
 
 class fake_quantize_function(torch.autograd.Function):
     @staticmethod

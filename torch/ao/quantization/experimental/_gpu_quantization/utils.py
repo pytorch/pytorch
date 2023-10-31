@@ -103,21 +103,3 @@ def get_model_size_in_bytes(model):
     for b in model.buffers():
         s += b.nelement() * b.element_size()
     return s
-
-
-class IntMMModule(torch.nn.Module):
-    # When profiling with cuda graphs, each user input gets
-    # copied to a static memory address before the cuda graph
-    # is launched. If we profile `torch._int_mm` directly,
-    # this overhead is paid for the weight, which does not match
-    # the real world use case we care about when the weight is not
-    # a user input.  Therefore, we wrap the weight in a module to
-    # remove this profiling overhead.
-
-    def __init__(self, K, N):
-        super().__init__()
-        # weight needs to be transposed for good perf
-        self.register_buffer("weight", torch.ones(N, K, dtype=torch.int8).t())
-
-    def forward(self, x):
-        return safe_int_mm(x, self.weight)

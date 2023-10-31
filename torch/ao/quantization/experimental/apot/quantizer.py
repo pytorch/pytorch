@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 import numpy as np
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float, quant_dequant_util
+from torch.ao.quantization.experimental.apot.apot_utils import float_to_apot, apot_to_float, quant_dequant_util
 
 # class to store APoT quantizer and
 # implement quantize and dequantize
@@ -42,7 +42,7 @@ class APoTQuantizer:
         # convert to APoT int representation for dtype
         tensor2quantize = tensor2quantize.int()
 
-        from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
+        from torch.ao.quantization.experimental.apot.APoT_tensor import TensorAPoT
 
         result = TensorAPoT(self, tensor2quantize)  # type: ignore[assignment]
 

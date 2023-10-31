@@ -131,7 +131,7 @@ def quantize_activation_per_token_absmax(t):
     n_bits = 8
     # if the shape of t is [B, N, K], the shape of scales will be [B, N, 1]
 
-    scales = t.abs().max(dim=-1, keepdim=True)[0]
+    scales = t.abs().amax(dim=-1, keepdim=True)
     if scales.dtype == torch.float16:
         scales = (
             scales.float()

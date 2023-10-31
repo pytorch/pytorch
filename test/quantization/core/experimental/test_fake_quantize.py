@@ -2,10 +2,10 @@
 
 import torch
 import unittest
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
-from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
-from torch.ao.quantization.experimental.fake_quantize_function import fake_quantize_function
+from torch.ao.quantization.experimental.apot.observer import APoTObserver
+from torch.ao.quantization.experimental.apot.quantizer import quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.apot.fake_quantize import APoTFakeQuantize
+from torch.ao.quantization.experimental.apot.fake_quantize_function import fake_quantize_function
 forward_helper = fake_quantize_function.forward
 backward = fake_quantize_function.backward
 from torch.autograd import gradcheck

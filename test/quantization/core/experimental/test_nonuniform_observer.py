@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
-from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.apot.observer import APoTObserver
 import unittest
 import torch
 

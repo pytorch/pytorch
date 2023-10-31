@@ -3,8 +3,8 @@
 import torch
 from torch import quantize_per_tensor
 from torch.ao.quantization.observer import MinMaxObserver
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.apot.observer import APoTObserver
+from torch.ao.quantization.experimental.apot.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
 import unittest
 import random
 
