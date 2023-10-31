@@ -520,7 +520,7 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     """
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
-        @functools.wraps(func)
+        # @functools.wraps(func)  # torch dynamo doesn't support this yet
         def wrapped(x: T) -> Any:
             if isinstance(x, __type_or_types):
                 return func(x)
