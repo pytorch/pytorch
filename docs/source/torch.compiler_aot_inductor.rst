@@ -81,10 +81,11 @@ previous step, enabling us to conduct model predictions directly within a C++ en
 
 .. note::
 
-    Again, you need to have at least one CUDA device to run the following code. If you don't have a GPU,
-    you need to make these changes to run it on CPU: change ``aoti_model_runner_cuda.h`` to ``aoti_model_runner.h``;
-    change ``AOTIModelRunnerCuda`` to ``AOTIModelRunner``; remove ``.to(at::kCUDA)`` from input tensor initializations.
-
+    Once more, it's imperative to have a CUDA-enabled device to execute the subsequent code.
+    In the absence of a GPU, it's necessary to make these adjustments in order to run it on a CPU:
+    1. Modify ``aoti_model_runner_cuda.h`` to ``aoti_model_runner.h``.
+    2. Change ``AOTIModelRunnerCud`` to ``AOTIModelRunner``.
+    3. Eliminate ``.to(at::kCUDA)`` from the initialization of input tensors.
 
 .. code-block:: cpp
 
