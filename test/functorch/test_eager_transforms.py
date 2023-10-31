@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_ARM64
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MAXOS, IS_ARM64
 )
 import torch
 import torch.nn as nn
@@ -23,7 +23,7 @@ import math
 from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -4185,7 +4185,6 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
-    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
@@ -4737,7 +4736,7 @@ def traceable(f):
 class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf(IS_ARM64 or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
