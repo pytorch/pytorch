@@ -1177,9 +1177,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in itertools.chain(
-            pytree.tree_leaves(args), pytree.tree_leaves(kwargs)
-        ):
+        for arg in pytree.arg_tree_leaves(*args, **kwargs):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -1255,8 +1253,8 @@ class FakeTensor(torch.Tensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        pytree.tree_map_(merge_devices, args)
+        pytree.tree_map_(merge_devices, kwargs)
 
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,
@@ -1900,7 +1898,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     tensor_impls = set()
     storages = set()
 
-    for e in pytree.tree_leaves((args, kwargs)):
+    for e in pytree.arg_tree_leaves(*args, **kwargs):
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
                 storages.add(e._typed_storage()._cdata)
