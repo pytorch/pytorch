@@ -14,9 +14,7 @@ from torch._inductor.fx_passes.serialized_patterns.central_index import (
 )
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
-    CallFunction,
     gen_pattern,
-    KeywordArg,
     PatternExpr,
     PatternPrettyPrinter,
 )
@@ -747,6 +745,13 @@ class TestPatternMatcher(TestCase):
         self.common(fn, args, 0, 0)
 
     def test_match_with_mutation(self):
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            KeywordArg,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+
         counter = 0
         test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
