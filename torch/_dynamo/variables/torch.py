@@ -678,10 +678,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
             ):
-                all_ndarray = all(
+                any_ndarray = any(
                     isinstance(x, variables.NumpyNdarrayVariable) for x in args[0].items
                 )
-                if all_ndarray and kwargs == {}:
+                if any_ndarray:
                     # Stack FakeTensor
                     stacked = wrap_fx_proxy(
                         tx=tx,
