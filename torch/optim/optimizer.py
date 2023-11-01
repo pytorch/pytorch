@@ -125,6 +125,12 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
     )
     return fused, foreach
 
+def _view_as_real(params, *state_and_grads):
+    for i, p in enumerate(params):
+        if torch.is_complex(p):
+            params[i] = torch.view_as_real(params[i])
+            for s in state_and_grads:
+                s[i] = torch.view_as_real(s[i])
 
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer

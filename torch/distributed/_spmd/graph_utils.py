@@ -6,6 +6,7 @@ from typing import Callable, cast, Dict, Iterable, List, Set
 
 import torch.fx as fx
 from torch.fx.passes.shape_prop import TensorMetadata
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -100,7 +101,7 @@ def clone_subgraph(
             # TODO: there are many flatten/unflatten in IterGraph that
             # can be simplified with tree_map. Will simplify this in
             # a follow-up PR.
-            original_input, _ = tree_flatten((node.args, node.kwargs))
+            original_input = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             cloned_input, spec = tree_flatten((cloned_node.args, cloned_node.kwargs))
             mapped_cloned_input = []
             for original_input_node, cloned_input_node in zip(
