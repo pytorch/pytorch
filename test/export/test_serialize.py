@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_sym_bool)
+"""
 # Owner(s): ["module: dynamo"]
 import io
 import pathlib
@@ -174,11 +178,11 @@ class TestSerialize(TestCase):
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
-        self.assertEqual(len(node.inputs), 6)
-        self.assertEqual(node.inputs[2].arg.as_bool, False)
-        self.assertEqual(node.inputs[3].arg.as_bool, True)
-        self.assertEqual(node.inputs[4].arg.as_string, "right")
-        self.assertEqual(node.inputs[5].arg.as_none, ())
+        self.assertEqual(len(node.inputs), 4)
+        self.assertEqual(node.inputs[2].name, "right")
+        self.assertEqual(node.inputs[2].arg.as_bool, True)
+        self.assertEqual(node.inputs[3].name, "side")
+        self.assertEqual(node.inputs[3].arg.as_string, "right")
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
@@ -196,13 +200,16 @@ class TestDeserialize(TestCase):
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
 
-        flat_orig_outputs, _ = pytree.tree_flatten(orig_outputs)
-        flat_loaded_outputs, _ = pytree.tree_flatten(loaded_outputs)
+        flat_orig_outputs = pytree.tree_leaves(orig_outputs)
+        flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
 
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
             self.assertEqual(type(orig), type(loaded))
             if isinstance(orig, torch.Tensor):
-                self.assertTrue(torch.allclose(orig, loaded))
+                if orig.is_meta:
+                    self.assertEqual(orig, loaded)
+                else:
+                    self.assertTrue(torch.allclose(orig, loaded))
             else:
                 self.assertEqual(orig, loaded)
 
@@ -236,7 +243,7 @@ class TestDeserialize(TestCase):
                     elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
-                        for v1, v2 in zip(val1, val2):
+                        for v1, v2 in zip(pytree.tree_leaves(val1), pytree.tree_leaves(val2)):
                             self.assertEqual(v1.shape, v2.shape)
                             self.assertEqual(v1.dtype, v2.dtype)
                     else:
@@ -257,7 +264,7 @@ class TestDeserialize(TestCase):
                         false_graph1 = getattr(gm1, node1.args[2].target)
                         false_graph2 = getattr(gm2, node2.args[2].target)
                         _check_graph_nodes(false_graph1, false_graph2)
-                    elif node1.target == torch.ops.map_impl:
+                    elif node1.target == torch.ops.higher_order.map_impl:
                         map_graph1 = getattr(gm1, node1.args[0].target)
                         map_graph2 = getattr(gm2, node2.args[0].target)
                         _check_graph_nodes(map_graph1, map_graph2, False)
@@ -371,6 +378,21 @@ class TestDeserialize(TestCase):
         inputs = (torch.randn(3, 3),)
         self.check_graph(M(), inputs)
 
+    def test_module_meta(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            mod = M()
+
+        inputs = (torch.randn(3, 3, device="meta"),)
+        self.check_graph(mod, inputs)
+
     def test_cond(self):
         from functorch.experimental.control_flow import cond
         inputs = torch.ones(4, 3), torch.zeros(4, 3)
@@ -397,6 +419,24 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
         self.check_graph(g, inputs, _check_meta=False)
+
+    def test_tensor_tensor_list(self):
+        from torch.library import Library
+        lib = Library("_export", "FRAGMENT")
+        lib.define("_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])")
+
+        def _test_tensor_tensor_list_output(x, y):
+            return y, [x]
+
+        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
+        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
+                return a + b[0]
+
+        self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
 
     @parametrize(
         "name,case",

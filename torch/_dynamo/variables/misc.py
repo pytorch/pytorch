@@ -1,4 +1,5 @@
 import collections
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -113,65 +114,7 @@ class SuperVariable(VariableTracker):
         )
         inner_fn, source = self._resolved_getattr_and_source(self, name)
 
-        # This variable is True when it corresponds to user code such as
-        #
-        #   super().__torch_function__(...)
-        #
-        # and the super().__torch_function__ attribute resolves
-        # to torch.Tensor.__torch_function__.
-        is_original_tensor_torch_function = (
-            name == "__torch_function__"
-            # for now, only support one level of inheritance
-            and len(self.objvar.value.__mro__) > 1
-            and self.objvar.value.__mro__[1] == torch.Tensor
-        )
-        if is_original_tensor_torch_function:
-            # Instead of tracing inside torch.Tensor.__torch_function__,
-            # record the `call_function` or `call_method` call into the graph.
-            from . import ConstantVariable, ConstDictVariable, TorchVariable
-            from .builder import wrap_fx_proxy
-
-            original_torch_or_getattr_variable = args[0]
-            new_args = args[2].items
-            # TODO (mlazos): this is a hack to handle kwargs properly for a test
-            # we assume that kwargs is either a dict or None.
-            # Rather than inserting the base torch function impl into the graph
-            # we should trace it properly. We should be able to remove all of this
-            # code starting from "is_original_tensor_torch_function" above.
-            if not isinstance(args[3], ConstantVariable):
-                new_kwargs = args[3].items
-                options = VariableTracker.propagate(self, new_args, new_kwargs)
-            else:
-                new_kwargs = ConstDictVariable(dict(), dict).items
-                options = VariableTracker.propagate(self, new_args, [args[3]])
-            # Disable __torch_function__ here to prevent the clone of the
-            # example tensor from going into the override.
-            with torch._C.DisableTorchFunctionSubclass():
-                if isinstance(args[0], TorchVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_function",
-                            original_torch_or_getattr_variable.value,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                elif isinstance(args[0], GetAttrVariable):
-                    return wrap_fx_proxy(
-                        tx=tx,
-                        proxy=tx.output.create_proxy(
-                            "call_method",
-                            original_torch_or_getattr_variable.name,
-                            *proxy_args_kwargs(new_args, new_kwargs),
-                        ),
-                        **options,
-                    )
-                else:
-                    unimplemented(
-                        f"GetAttrVariable.call_function original __torch_function__ {args}"
-                    )
-        elif inner_fn is object.__init__:
+        if inner_fn is object.__init__:
             return LambdaVariable(identity, **options)
         elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
@@ -225,16 +168,9 @@ class SuperVariable(VariableTracker):
 
             newval = collections.OrderedDict(self.objvar.items)
             newval[k] = args[1]
-
-            new_rec_contains = self.objvar.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self.objvar,
-                self.objvar.modifed(newval, new_rec_contains, **options),
+                self.objvar.modifed(newval, **options),
             )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
@@ -557,34 +493,58 @@ class AutogradFunctionVariable(VariableTracker):
             unimplemented(f"Unsupported method: {name}")
 
 
+@dataclasses.dataclass
+class SavedTensorBox:
+    tensors: List[VariableTracker] = dataclasses.field(default_factory=list)
+
+
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
-        saved_tensors = kwargs.pop("_saved_tensors", [])
+    _nonvar_fields = {
+        "proxy",
+        "inference",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        value,
+        value_type=None,
+        inference=False,
+        proxy=None,
+        saved_tensors=None,
+        **kwargs,
+    ):
         super().__init__(value=value, value_type=value_type, **kwargs)
-        self._saved_tensors = saved_tensors
         self.inference = inference
+        self.proxy = proxy
+        self.saved_tensors = saved_tensors
 
     @staticmethod
     def create(tx):
-        out = tx.output.side_effects.track_object_new(
-            None,
-            torch.autograd.function.FunctionCtx,
-            functools.partial(AutogradFunctionContextVariable, inference=True),
-            {},
-        )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
+        out = tx.output.side_effects.track_object_new(
+            None,
+            torch.autograd.function.FunctionCtx,
+            functools.partial(
+                AutogradFunctionContextVariable,
+                inference=True,
+                proxy=proxy,
+                saved_tensors=SavedTensorBox(),
+            ),
+            {},
+        )
         proxy.node.meta["example_value"] = out.value
-
-        out.proxy = proxy
         return out
 
     def as_proxy(self):
+        if self.proxy is None:
+            unimplemented("proxy not set")
         return self.proxy
 
     def call_method(
@@ -596,19 +556,21 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
+        if self.saved_tensors is None:
+            unimplemented(
+                "save_for_backward only supported on a newly constructed FunctionCtx"
+            )
 
         if not self.inference:
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if not hasattr(self, "_saved_tensors"):
-            self._saved_tensors = []
         for arg in args:
             # as_proxy can return constant values or other non proxy values
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
-            self._saved_tensors.append(arg)
+            self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
@@ -616,8 +578,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
             ).add_options(self)
-        if name == "saved_tensors":
-            return variables.TupleVariable(list(self._saved_tensors))
+        if name == "saved_tensors" and self.saved_tensors is not None:
+            return variables.TupleVariable(list(self.saved_tensors.tensors))
         return super().var_getattr(tx, name)
 
 
@@ -773,21 +735,9 @@ class SkipFilesVariable(VariableTracker):
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
-        elif self.value is collections.OrderedDict and (
-            len(args) == 0
-            or len(args) == 1
-            and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
-        ):
-            if len(args) == 0:
-                args = dict(kwargs) if kwargs else None
-            else:
-                args = args[0]
-
-            return BuiltinVariable.call_dict_helper(
-                tx,
-                collections.OrderedDict,
-                args,
-                **options,
+        elif self.value is collections.OrderedDict:
+            return BuiltinVariable.call_custom_dict(
+                tx, collections.OrderedDict, *args, **kwargs
             )
         elif (
             self.value is collections.defaultdict
@@ -935,16 +885,20 @@ class SkipFilesVariable(VariableTracker):
                 fn, args=rest_args, keywords=kwargs, **options
             )
         elif self.value is itertools.repeat:
-            from .builder import SourcelessBuilder
-
             if len(args) < 2:
-                # We cannot risk infinite generator being consumed to exhaustion by dynamo
-                # (i.e. infinite loop)
-                unimplemented("Infinite repeat is not supported")
+                return variables.RepeatIteratorVariable(
+                    *args, mutable_local=MutableLocal()
+                )
+
+            from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
             )
+        elif self.value is itertools.count:
+            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
+        elif self.value is itertools.cycle:
+            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         else:
             try:
                 path = inspect.getfile(self.value)
