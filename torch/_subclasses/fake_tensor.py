@@ -1919,7 +1919,7 @@ def run_fallback_kernel(
         else:
             return e
 
-    return pytree.tree_map(map_out, out)
+    return pytree.tree_map(map_out, r)
 
 
 # Just for use to allow copying a module to fake tensors,
