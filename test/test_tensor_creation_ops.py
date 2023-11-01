@@ -9,6 +9,7 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+import tempfile
 from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
@@ -20,7 +21,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -2293,30 +2294,32 @@ class TestTensorCreation(TestCase):
     # TODO: this test should be updated
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @suppress_warnings
-    def test_range(self, device):
-        res1 = torch.range(0, 1, device=device)
-        res2 = torch.tensor((), device=device)
-        torch.range(0, 1, device=device, out=res2)
+    @dtypesIfCPU(torch.float, torch.bfloat16, torch.float16)
+    @dtypes(torch.float)
+    def test_range(self, device, dtype):
+        res1 = torch.range(0, 1, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(0, 1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Check range for non-contiguous tensors.
-        x = torch.zeros(2, 3, device=device)
-        torch.range(0, 3, device=device, out=x.narrow(1, 1, 2))
-        res2 = torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=torch.float32)
+        x = torch.zeros(2, 3, device=device, dtype=dtype)
+        torch.range(0, 3, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
+        res2 = torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype)
         self.assertEqual(x, res2, atol=1e-16, rtol=0)
 
         # Check negative
-        res1 = torch.tensor((1, 0), device=device, dtype=torch.float32)
-        res2 = torch.tensor((), device=device)
-        torch.range(1, 0, -1, device=device, out=res2)
+        res1 = torch.tensor((1, 0), device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(1, 0, -1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Equal bounds
-        res1 = torch.ones(1, device=device)
-        res2 = torch.tensor((), device=device)
-        torch.range(1, 1, -1, device=device, out=res2)
+        res1 = torch.ones(1, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(1, 1, -1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
-        torch.range(1, 1, 1, device=device, out=res2)
+        torch.range(1, 1, 1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
     # TODO: this test should be updated
@@ -2834,15 +2837,16 @@ class TestTensorCreation(TestCase):
         device_tensor = torch.arange(0, 10, dtype=dtype, device=device)
         self.assertEqual(cpu_tensor, device_tensor)
 
-    def test_arange_bfloat16(self, device):
-        ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
-        bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
-        self.assertEqual(ref_tensor, bfloat16_tensor)
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_arange_lowp(self, device, dtype):
+        ref_tensor = torch.tensor([0, 1, 2, 3], dtype=dtype, device=device)
+        f16_tensor = torch.arange(0, 4, dtype=dtype, device=device)
+        self.assertEqual(ref_tensor, f16_tensor)
 
         # step=2
-        ref_tensor = torch.tensor([0, 2, 4], dtype=torch.bfloat16, device=device)
-        bfloat16_tensor = torch.arange(0, 6, step=2, dtype=torch.bfloat16, device=device)
-        self.assertEqual(ref_tensor, bfloat16_tensor)
+        ref_tensor = torch.tensor([0, 2, 4], dtype=dtype, device=device)
+        f16_tensor = torch.arange(0, 6, step=2, dtype=dtype, device=device)
+        self.assertEqual(ref_tensor, f16_tensor)
 
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.bfloat16))
@@ -3106,6 +3110,28 @@ class TestTensorCreation(TestCase):
             a.flags.writeable = False
             t = torch.tensor(a)
             self.assertEqual(len(w), 0)
+
+    @onlyCPU
+    @parametrize('shared', [True, False])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_from_file(self, device, shared):
+        dtype = torch.float64
+        t = torch.randn(2, 5, dtype=dtype, device=device)
+        with tempfile.NamedTemporaryFile() as f:
+            t.numpy().tofile(f)
+            t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
+            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertEqual(torch.flatten(t), t_mapped)
+
+            s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
+            self.assertTrue(s.filename == f.name)
+
+    @onlyCPU
+    def test_storage_filename(self, device):
+        t = torch.randn(2, 5, device=device)
+        with self.assertWarnsRegex(UserWarning, "Only storages with data pointers created via at::MapAllocator"):
+            filename = t.storage().filename
+        self.assertIsNone(filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
