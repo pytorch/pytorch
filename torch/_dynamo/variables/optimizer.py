@@ -190,7 +190,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tensor_vars = ListVariable(
                     [self.wrap_tensor(tx, t) for t in py_arg],
                     mutable_local=MutableLocal(),
-                    recursively_contains={},
                 )
                 tx.replace_all(arg, tensor_vars)
 

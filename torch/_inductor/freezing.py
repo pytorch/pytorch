@@ -125,7 +125,7 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0

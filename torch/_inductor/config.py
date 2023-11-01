@@ -39,6 +39,16 @@ inplace_buffers = True
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
+# Enable pooled allocations for non-output tensors
+memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# How to organize memory under memory_planning=True:
+# - "none": do not try to pool storage, just reuse
+# - "intermediates": all non-outputs share storage, outputs each get unique storage
+# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
+# - "combined": a single pool for both intermediates and outputs
+memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
+
 # codegen benchmark harness
 benchmark_harness = True
 
@@ -99,9 +109,6 @@ use_mixed_mm = False
 # Autotune will not compare with normal cast->then->mm option.
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
-
-# TODO: capture whether the graph is from export
-from_export = False
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
@@ -201,6 +208,7 @@ aggressive_fusion = False
 # For each fused kernel in the wrapper, comment with the nodes that get fused.
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -487,8 +495,16 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
+    debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
+
     # Wether to codegen abi compatible model.so
     abi_compatible = is_fbcode()
+
+    # Serialized tree spec for flattening inputs
+    serialized_in_spec = ""
+
+    # Serialized tree spec for flattening outputs
+    serialized_out_spec = ""
 
 
 class cuda:
