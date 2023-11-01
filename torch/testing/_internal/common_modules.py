@@ -3108,7 +3108,14 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.CrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_CrossEntropyLoss,
                skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_cpu_gpu_parity',
+                       dtypes=[torch.float32, torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),)
                ),
     ModuleInfo(torch.nn.GELU,
                module_inputs_func=module_inputs_torch_nn_GELU,
