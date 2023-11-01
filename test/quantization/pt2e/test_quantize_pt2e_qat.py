@@ -636,12 +636,24 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         # Assert that both weight and bias are quantized
         weight_dq = conv_node.args[1]
         bias_dq = conv_node.args[2]
-        self.assertEqual(weight_dq.target, torch.ops.quantized_decomposed.dequantize_per_tensor.default)
-        self.assertEqual(bias_dq.target, torch.ops.quantized_decomposed.dequantize_per_tensor.default)
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
         weight_q = weight_dq.args[0]
         bias_q = bias_dq.args[0]
-        self.assertEqual(weight_q.target, torch.ops.quantized_decomposed.quantize_per_tensor.default)
-        self.assertEqual(bias_q.target, torch.ops.quantized_decomposed.quantize_per_tensor.default)
+        self.assertEqual(
+            weight_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
 
         # Assert that bias scale = weight scale * input scale
         input_dq = conv_node.args[0]
