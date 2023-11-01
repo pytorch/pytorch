@@ -129,6 +129,16 @@ def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
 
 
+class CodeLocation(NamedTuple):
+    filename: str
+    lineno: int
+    funcname: Optional[str]
+
+
+compile_subgraph_loc = None
+compile_subgraph_reason = None
+
+
 @dataclasses.dataclass
 class BlockStackEntry:
     target: Instruction
@@ -396,110 +406,123 @@ def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
-            state = self.copy_graphstate()
-            reason = None
-            try:
-                TracingContext.set_current_loc(
-                    self.f_code.co_filename, self.lineno, self.f_code.co_name
-                )
-                return inner_fn(self, inst)
-            except Unsupported as excp:
-                if self.has_backedge() and self.should_compile_partial_graph():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
-                    )
-                    log.info(msg)
-                    raise exc.SkipFrame(msg) from excp
+            global compile_subgraph_loc, compile_subgraph_reason
 
-                if len(self.states_before_block) > 0:
-                    # We don't support graph break under GenericContextWrappingVariable,
-                    # If there is, we roll back to the checkpoint and fall back.
-                    excp.remove_from_stats()
-                    state = self.states_before_block.pop()
-                    self.restore_graphstate(state)
-                    ctx = state.stack[-1]
-                    assert isinstance(ctx, GenericContextWrappingVariable)
-                    unimplemented(f"Graph break under {ctx}")
-
-                if isinstance(excp, exc.UncapturedHigherOrderOpError):
-                    raise
-
-                if not self.should_compile_partial_graph():
-                    raise
-
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
-                user_stack = excp.real_stack
-                # TODO: Also report the traceback from the parent frame
-                user_stack_formatted = "".join(traceback.format_list(user_stack))
-                frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
-                # torch._dynamo.explain() formats this a little nicer, and presents a slightly
-                # more actionable user code pointer
-                if (
-                    graph_break_log.isEnabledFor(logging.DEBUG)
-                    and not explain
-                    and graph_break_dup_warning_checker.add(frame_loc)
-                ):
-                    graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
-                        user_stack_formatted,
-                    )
-
-                excp.remove_from_stats()
-                excp.add_to_stats("graph_break")
-                reason = GraphCompileReason(excp.msg, user_stack)
-            self.restore_graphstate(state)
-
-            self.output.compile_subgraph(self, reason=reason)
-            cg = PyCodegen(self)
-            cleanup: List[Instruction] = []
-            # Reconstruct the context variables in the block stack
-            for b in self.block_stack:
-                self.output.add_output_instructions(
-                    [
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(cg.code_options, cleanup),
-                    ]
-                )
-
-            if sys.version_info >= (3, 11) and inst.opname == "CALL":
-                kw_names = (
-                    self.kw_names.as_python_constant()
-                    if self.kw_names is not None
-                    else ()
-                )
-                if len(kw_names) > 0:
-                    self.output.add_output_instructions(
-                        [create_instruction("KW_NAMES", argval=kw_names)]
-                    )
-                self.output.add_output_instructions(
-                    create_call_function(inst.arg, False)
-                )
-            else:
-                # copy instruction, but without exception table data
-                assert inst.target is None
-                inst_copy = copy.copy(inst)
-                inst_copy.exn_tab_entry = None
-                self.output.add_output_instructions([inst_copy])
-
-            self.output.add_output_instructions(cleanup)
-
-            if sys.version_info >= (3, 11) and inst.opname == "CALL":
-                # stack effect for PRECALL + CALL is split between the two instructions
-                stack_effect = dis.stack_effect(
-                    dis.opmap["PRECALL"], inst.arg
-                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
-            else:
-                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
-            self.popn(push - stack_effect)
-
-            for _ in range(push):
-                self.push(UnknownVariable())
-            self.output.add_output_instructions(
-                self.create_call_resume_at(self.next_instruction)
+            code_loc = CodeLocation(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
             )
+            if not compile_subgraph_loc == code_loc:
+                state = self.copy_graphstate()
+                reason = None
+                try:
+                    TracingContext.set_current_loc(
+                        self.f_code.co_filename, self.lineno, self.f_code.co_name
+                    )
+                    return inner_fn(self, inst)
+                except Unsupported as excp:
+                    if self.has_backedge() and self.should_compile_partial_graph():
+                        msg = (
+                            "Skipping frame because there is a graph break in a for/while loop\n"
+                            f"{self.frame_summary()}"
+                        )
+                        log.info(msg)
+                        raise exc.SkipFrame(msg) from excp
+
+                    if len(self.states_before_block) > 0:
+                        # We don't support graph break under GenericContextWrappingVariable,
+                        # If there is, we roll back to the checkpoint and fall back.
+                        excp.remove_from_stats()
+                        state = self.states_before_block.pop()
+                        self.restore_graphstate(state)
+                        ctx = state.stack[-1]
+                        assert isinstance(ctx, GenericContextWrappingVariable)
+                        unimplemented(f"Graph break under {ctx}")
+
+                    if isinstance(excp, exc.UncapturedHigherOrderOpError):
+                        raise
+
+                    if not self.should_compile_partial_graph():
+                        raise
+
+                    log.debug(
+                        "break_graph_if_unsupported triggered compile", exc_info=True
+                    )
+
+                    user_stack = excp.real_stack
+                    # TODO: Also report the traceback from the parent frame
+                    user_stack_formatted = "".join(traceback.format_list(user_stack))
+                    frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+                    # torch._dynamo.explain() formats this a little nicer, and presents a slightly
+                    # more actionable user code pointer
+                    if (
+                        graph_break_log.isEnabledFor(logging.DEBUG)
+                        and not explain
+                        and graph_break_dup_warning_checker.add(frame_loc)
+                    ):
+                        graph_break_log.debug(
+                            "Graph break: %s from user code at:\n%s",
+                            excp,
+                            user_stack_formatted,
+                        )
+
+                    excp.remove_from_stats()
+                    excp.add_to_stats("graph_break")
+                    reason = GraphCompileReason(excp.msg, user_stack)
+                    compile_subgraph_loc = code_loc
+                    compile_subgraph_reason = reason
+                    raise exc.RestartAnalysis()
+            else:
+                assert compile_subgraph_loc is not None
+                assert compile_subgraph_reason is not None
+
+                self.output.compile_subgraph(self, reason=compile_subgraph_reason)
+                cg = PyCodegen(self)
+                cleanup: List[Instruction] = []
+                # Reconstruct the context variables in the block stack
+                for b in self.block_stack:
+                    self.output.add_output_instructions(
+                        [
+                            *b.with_context.reconstruct(cg),
+                            *b.resume_fn().try_except(cg.code_options, cleanup),
+                        ]
+                    )
+
+                if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                    kw_names = (
+                        self.kw_names.as_python_constant()
+                        if self.kw_names is not None
+                        else ()
+                    )
+                    if len(kw_names) > 0:
+                        self.output.add_output_instructions(
+                            [create_instruction("KW_NAMES", argval=kw_names)]
+                        )
+                    self.output.add_output_instructions(
+                        create_call_function(inst.arg, False)
+                    )
+                else:
+                    # copy instruction, but without exception table data
+                    assert inst.target is None
+                    inst_copy = copy.copy(inst)
+                    inst_copy.exn_tab_entry = None
+                    self.output.add_output_instructions([inst_copy])
+
+                self.output.add_output_instructions(cleanup)
+
+                if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                    # stack effect for PRECALL + CALL is split between the two instructions
+                    stack_effect = dis.stack_effect(
+                        dis.opmap["PRECALL"], inst.arg
+                    ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
+                else:
+                    stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+                self.popn(push - stack_effect)
+
+                for _ in range(push):
+                    self.push(UnknownVariable())
+                self.output.add_output_instructions(
+                    self.create_call_resume_at(self.next_instruction)
+                )
 
         return wrapper
 
