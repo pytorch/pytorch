@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint
+from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
@@ -27,23 +27,6 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
-# TODO: pull these helpers from AOTAutograd later
-def to_fun(t):
-    if isinstance(t, torch.Tensor):
-        return FunctionalTensor.to_functional(t)
-    return t
-
-
-def from_fun(t):
-    if not isinstance(t, FunctionalTensor):
-        # quick sanity assert
-        if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)
-        return t
-    torch._sync(t)
-    return torch._from_functional_tensor(t.elem)
-
-
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
@@ -52,7 +35,7 @@ class MapWrapper(HigherOrderOperator):
 
 
 map = MapWrapper("map", _deprecated_global_ns=True)
-map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
+map_impl = HigherOrderOperator("map_impl")
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,
@@ -375,11 +358,3 @@ def map_functionalize(ctx, f, num_mapped, *args):
 
         map_return = map_impl(wrapped_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return ctx.wrap_tensors(map_return)
-
-
-# TODO(voz) Make this automatic for keys, this is very ugly atm
-map_impl.fallthrough(DispatchKey.PythonDispatcher)
-map_impl.fallthrough(DispatchKey.PythonTLSSnapshot)
-map_impl.fallthrough(DispatchKey.ADInplaceOrView)
-map_impl.fallthrough(DispatchKey.BackendSelect)
-map_impl.fallthrough(DispatchKey.AutocastCPU)

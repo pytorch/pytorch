@@ -444,6 +444,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
   swap(map, map2);
 
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(readability-container-size-empty)
       map ==
       (ska_ordered::
            order_preserving_flat_hash_map<std::int64_t, std::int64_t>{}));

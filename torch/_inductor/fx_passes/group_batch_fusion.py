@@ -13,6 +13,11 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import (  # type: ignore[import]  # noqa: F401
+        get_everpaste_url,
+    )
+
 try:
     # importing this will register fbgemm lowerings for inductor
     import deeplearning.fbgemm.fbgemm_gpu.fb.inductor_lowerings  # noqa: F401
@@ -31,6 +36,10 @@ MAX_FUSE_SET_SIZE = 300
 MAX_FUSE_SEARCH_DEPTH = 5
 # The maximum tensor size that can go into the fusion group
 MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
+
+# exclude these nodes from BFS
+# excluding get item improves optimizer compilation time by 60s
+SEARCH_EXCLUSIONS = {operator.getitem}
 
 
 class GroupBatchFusionBase:
@@ -67,8 +76,10 @@ class GroupLinearFusion(GroupFusion):
             and len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def _mm_node_can_be_fused(self, node: torch.fx.Node):
@@ -78,8 +89,10 @@ class GroupLinearFusion(GroupFusion):
             len(input_shape) == 2
             and len(weight_shape) == 2
             and all(x % 2 == 0 for x in input_shape + weight_shape)
-            and shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
-            for shape in input_shape + weight_shape
+            and all(
+                shape <= MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR
+                for shape in input_shape + weight_shape
+            )
         )
 
     def match(self, node: torch.fx.Node) -> Optional[Tuple[str, bool]]:
@@ -120,7 +133,7 @@ class GroupLinearFusion(GroupFusion):
 
         with graph.inserting_before(subset[0]):
             fused_mm = graph.call_function(
-                torch.ops.fbgemm.gmm,
+                torch.ops.fbgemm.gmm.default,
                 args=(group_inputs, group_weights, group_biases),
             )
 
@@ -459,6 +472,66 @@ class BatchLayernormFusion(BatchFusion):
             graph.erase_node(node)
 
 
+class BatchReLUFusion(BatchFusion):
+    """
+    Batch relu fusion in pre grad pass.
+    We only fuse the relu if the input is after same split/unbind node.
+    """
+
+    def _getitem_args(self, getitem_node: torch.fx.Node):
+        if getitem_node.target != operator.__getitem__ or (
+            getitem_node.op != "call_function"
+        ):
+            return None
+        return getitem_node.args[0]
+
+    def match(self, node: torch.fx.Node):
+        input = get_arg_value(node, 0, "input")
+        if (
+            CallFunctionVarArgs(torch.nn.functional.relu).match(node)
+            and is_node_meta_valid(node)
+            and self._getitem_args(input) is not None
+        ):
+            group_key = (
+                "batch_relu",
+                self._getitem_args(input),
+                str(input.meta["example_value"].shape),
+            )
+        else:
+            group_key = None
+        return group_key
+
+    def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
+        batch_nodes = []
+        batch_inputs = []
+
+        for node in subset:
+            batch_nodes.append(node)
+            batch_inputs.append(get_arg_value(node, 0, "input"))
+
+        # assume all the nodes to be batched have the same inplace
+        inplace = subset[0].kwargs.get("inplace", False)
+        with graph.inserting_before(subset[0]):
+            stack_inputs = graph.call_function(torch.stack, args=(batch_inputs, 0))
+
+            batch_relu = graph.call_function(
+                torch.nn.functional.relu,
+                args=(stack_inputs,),
+                kwargs={"inplace": inplace},
+            )
+            unbind_relu = graph.call_function(
+                torch.unbind, args=(batch_relu,), kwargs={"dim": 0}
+            )
+            for i, node in enumerate(batch_nodes):
+                with graph.inserting_after(unbind_relu):
+                    getitem = graph.call_function(
+                        operator.getitem, args=(unbind_relu, i)
+                    )
+                node.replace_all_uses_with(getitem)
+                getitem.meta.update(node.meta)
+                graph.erase_node(node)
+
+
 def find_independent_subset_greedy(
     node_list: List[torch.fx.Node],
 ) -> Iterator[List[torch.fx.Node]]:
@@ -513,6 +586,10 @@ def get_fusion_candidates(
     candidate_dict: DefaultDict[Any, List[torch.fx.Node]] = collections.defaultdict(
         list
     )
+
+    if root_node.target in SEARCH_EXCLUSIONS:
+        return candidate_dict
+
     visited_set: Set[torch.fx.Node] = set()
 
     for next_node in root_node.all_input_nodes:
@@ -564,7 +641,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 )
 
 
+def print_graph(graph: torch.fx.Graph, msg: str):
+    if config.is_fbcode():
+        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))  # noqa: F401
+
+
 def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in post grads pass.")
     fusions: List[GroupBatchFusionBase] = []
 
     if config.group_fusion and has_fbgemm:
@@ -572,9 +655,11 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
 
 
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in pre grads pass.")
     fusions: List[GroupBatchFusionBase] = []
     if config.batch_fusion:
         fusions += [
@@ -582,6 +667,8 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
             BatchLinearLHSFusion(),
             BatchLayernormFusion(),
             BatchTanhFusion(),
+            BatchReLUFusion(),
         ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")

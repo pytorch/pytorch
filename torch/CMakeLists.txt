@@ -140,7 +140,7 @@ if(USE_ROCM)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
-      __HIP_PLATFORM_HCC__
+      __HIP_PLATFORM_AMD__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
 endif()
@@ -309,10 +309,6 @@ add_dependencies(torch_python flatbuffers)
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
-endif()
-
-if(NOT MSVC)
-  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
 endif()
 
 # Required workaround for generated sources

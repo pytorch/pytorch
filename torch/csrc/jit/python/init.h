@@ -2,10 +2,8 @@
 
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initJITBindings(PyObject* module);
 
-}
-} // namespace torch
+} // namespace torch::jit

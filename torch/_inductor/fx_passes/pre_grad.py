@@ -31,9 +31,11 @@ merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
+    merge_getitem_cat_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
@@ -72,6 +74,14 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
+
+    if config.is_fbcode():
+        from torch._inductor.fb.utils import get_everpaste_url  # type: ignore[import]
+
+        log.info(
+            "Print graph after recompile in pre grad passes: %s",
+            get_everpaste_url(str(gm.graph)),
+        )
 
     return gm
 
