@@ -2242,7 +2242,7 @@ Keyword args:
 Examples::
 
     >>> A = torch.randn(3, 3).triu_()
-    >>> B = torch.randn(3, 4)
+    >>> b = torch.randn(3, 4)
     >>> X = torch.linalg.solve_triangular(A, B, upper=True)
     >>> torch.allclose(A @ X, B)
     True

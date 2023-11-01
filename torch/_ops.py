@@ -376,7 +376,10 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
+    flat_args, _ = torch.utils._pytree.tree_flatten(args)
+    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
+    flat_all = flat_args + flat_kwargs
+    return flat_all
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):

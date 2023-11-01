@@ -27,7 +27,6 @@ from typing import (
 )
 
 import torch
-from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 
 log = logging.getLogger(__name__)
@@ -151,6 +150,7 @@ class Guard:
     # GRAD_MODE and SHAPE_ENV.
     originating_source: Source
     create_fn: Callable[[GuardBuilderBase, Guard], None]
+    is_volatile: bool = False
 
     # Export only. These values are written to at time of guard check_fn creation.
     guard_types: Optional[List[str]] = None
@@ -761,10 +761,10 @@ class Source:
     def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn) -> Guard:
+    def make_guard(self, fn, is_volatile=False) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
-        return Guard(self, fn)
+        return Guard(self, fn, is_volatile)
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
@@ -788,6 +788,7 @@ def detect_fake_mode(inputs: Any = None):
           have to be flattened)
     """
     from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch.utils._pytree import tree_flatten
 
     fake_modes = []
 
@@ -803,7 +804,7 @@ def detect_fake_mode(inputs: Any = None):
         if isinstance(m, FakeTensorMode):
             fake_modes.append((m, "active fake mode", i))
 
-    flat_inputs = pytree.tree_leaves(inputs)
+    flat_inputs, _ = tree_flatten(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))

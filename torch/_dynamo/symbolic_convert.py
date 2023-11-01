@@ -1065,10 +1065,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
+        if isinstance(it, ListIteratorVariable):
             self.output.guards.update(it.guards)
             try:
-                val, next_iter = it.next_variables(self)
+                val, next_iter = it.next_variables()
+                self.replace_all(it, next_iter)
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
@@ -1078,8 +1079,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left
-        right = right
+        left = left.as_specialized(self)
+        right = right.as_specialized(self)
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
@@ -1313,7 +1314,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                items,
+                [x.as_specialized(self) for x in items],
                 **options,
             )
         )
@@ -2558,12 +2559,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-            if isinstance(
-                tos, (variables.ListIteratorVariable, variables.IteratorVariable)
-            ):
+            if isinstance(tos, ListIteratorVariable):
                 self.output.guards.update(tos.guards)
                 try:
-                    val, next_iter = tos.next_variables(self)
+                    val, next_iter = tos.next_variables()
+                    self.replace_all(tos, next_iter)
                     self.push(val)
                     # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)

@@ -380,9 +380,9 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle, name):
+    def register_hook(self, tensor, hook, handle):
         idx = len(self.tensor_hooks.keys())
-        self.tensor_hooks[idx] = (tensor, hook, handle, name)
+        self.tensor_hooks[idx] = (tensor, hook, handle)
         assert not handle.idx
         handle.idx = idx
 
@@ -394,7 +394,6 @@ class SideEffects:
             tensor,
             hook,
             handle,
-            name,
         ) in self.tensor_hooks.values():
             # Note: [On tensor.register_hook]
             #
@@ -431,7 +430,7 @@ class SideEffects:
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
-            cg.extend_output([cg.create_load_attr(name)])
+            cg.extend_output([cg.create_load_attr("register_hook")])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
             # Let's go over how handles work.

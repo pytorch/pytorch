@@ -90,7 +90,6 @@ from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
-from .inverse_gamma import InverseGamma
 from .kl import _add_kl_info, kl_divergence, register_kl
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
@@ -139,7 +138,6 @@ __all__ = [
     "HalfCauchy",
     "HalfNormal",
     "Independent",
-    "InverseGamma",
     "Kumaraswamy",
     "LKJCholesky",
     "Laplace",

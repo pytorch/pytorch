@@ -24,12 +24,6 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
-from .iter import (
-    CountIteratorVariable,
-    CycleIteratorVariable,
-    IteratorVariable,
-    RepeatIteratorVariable,
-)
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -85,10 +79,6 @@ __all__ = [
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
-    "IteratorVariable",
-    "RepeatIteratorVariable",
-    "CountIteratorVariable",
-    "CycleIteratorVariable",
     "LambdaVariable",
     "ListIteratorVariable",
     "ListVariable",

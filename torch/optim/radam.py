@@ -13,7 +13,6 @@ from .optimizer import (
     _get_value,
     _stack_if_compiling,
     _use_grad_for_differentiable,
-    _view_as_real,
 )
 
 __all__ = ["RAdam", "radam"]
@@ -381,7 +380,13 @@ def _multi_tensor_radam(
             torch._foreach_add_(grouped_state_steps, 1)
 
         if has_complex:
-            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
+            for i in range(len(grouped_params)):
+                if torch.is_complex(grouped_params[i]):
+                    grouped_params[i] = torch.view_as_real(grouped_params[i])
+                    grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                    grouped_exp_avgs[i] = torch.view_as_real(grouped_exp_avgs[i])
+                    grouped_exp_avg_sqs[i] = torch.view_as_real(grouped_exp_avg_sqs[i])
+
 
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1

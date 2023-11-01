@@ -334,9 +334,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
-    dim.__module__ = getattr(
-        inspect.getmodule(inspect.stack()[1][0]), "__name__", "__main__"
-    )
+    dim.__module__ = inspect.getmodule(inspect.stack()[1][0]).__name__  # type: ignore[union-attr]
     return dim
 
 
@@ -354,7 +352,6 @@ def export(
     *,
     constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
-    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -438,21 +435,9 @@ def export(
     from torch._export import export, export__RC__
 
     if constraints is not None:
-        return export(
-            f,
-            args,
-            kwargs,
-            constraints,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
+        return export(f, args, kwargs, constraints)
     else:
-        return export__RC__(
-            f,
-            args,
-            kwargs,
-            dynamic_shapes=dynamic_shapes,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
+        return export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
 
 
 def save(
