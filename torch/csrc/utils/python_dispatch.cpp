@@ -811,6 +811,10 @@ void initDispatchBindings(PyObject* module) {
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
   });
 
+  m.def("_non_sym_sizes", [](const at::Tensor& a) {
+    return a.sizes(); // NB: NOT sym_size
+  });
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
