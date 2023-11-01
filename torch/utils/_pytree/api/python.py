@@ -20,6 +20,7 @@ import inspect
 import json
 import warnings
 from collections import deque, namedtuple, OrderedDict
+from types import MappingProxyType
 from typing import (
     Any,
     Callable,
@@ -143,7 +144,7 @@ def _register_pytree_node(
         flatten_func,
         unflatten_func,
     )
-    SUPPORTED_NODES[cls] = node_def
+    __SUPPORTED_NODES[cls] = node_def
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
@@ -158,8 +159,8 @@ def _register_pytree_node(
         to_dumpable_context,
         from_dumpable_context,
     )
-    SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
+    __SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
+    __SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
 
     try:
         from . import cxx
@@ -239,14 +240,14 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {
+__SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {
     dict: NodeDef(dict, _dict_flatten, _dict_unflatten),
     list: NodeDef(list, _list_flatten, _list_unflatten),
     tuple: NodeDef(tuple, _tuple_flatten, _tuple_unflatten),
     namedtuple: NodeDef(namedtuple, _namedtuple_flatten, _namedtuple_unflatten),  # type: ignore[dict-item,arg-type]
     OrderedDict: NodeDef(OrderedDict, _odict_flatten, _odict_unflatten),
 }
-SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
+__SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
     dict: _SerializeNodeDef(
         dict,
         f"{dict.__module__}.{dict.__qualname__}",
@@ -278,9 +279,12 @@ SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
         None,
     ),
 }
-SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {
-    f"{cls.__module__}.{cls.__qualname__}": cls for cls in SUPPORTED_SERIALIZED_TYPES
+__SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {
+    f"{cls.__module__}.{cls.__qualname__}": cls for cls in __SUPPORTED_SERIALIZED_TYPES
 }
+SUPPORTED_NODES = MappingProxyType(__SUPPORTED_NODES)
+SUPPORTED_SERIALIZED_TYPES = MappingProxyType(__SUPPORTED_SERIALIZED_TYPES)
+SERIALIZED_TYPE_TO_PYTHON_TYPE = MappingProxyType(__SERIALIZED_TYPE_TO_PYTHON_TYPE)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
