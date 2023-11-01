@@ -933,6 +933,51 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(8, 4, 4, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_dup_unbacked_sym_decl(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                abs_1 = torch.ops.aten.abs.default(x)
+                lt = torch.ops.aten.lt.Scalar(abs_1, 0.001)
+                eq = torch.ops.aten.eq.Scalar(lt, 0)
+                index_1 = torch.ops.aten.index.Tensor(x, [eq])
+                sin = torch.ops.aten.sin.default(index_1)
+                index_2 = torch.ops.aten.index.Tensor(x, [eq])
+                div_3 = torch.ops.aten.div.Tensor(sin, index_2)
+                return div_3
+
+        example_inputs = (torch.randn(4, 4, 4, 4).to(self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_run_with_grad_enabled(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, weight, bias):
+                return torch.ops.aten.addmm(bias, weight, x)
+
+        m = Model().to(device=self.device)
+        x = torch.rand(8, 8, device=self.device, requires_grad=True)
+        weight = torch.rand(8, 8, device=self.device, requires_grad=True)
+        bias = torch.rand(8, device=self.device, requires_grad=True)
+        example_inputs = (x, weight, bias)
+
+        expected = m(*example_inputs)
+        expected = pytree.tree_leaves(expected)
+
+        # compiler under no_grad
+        with torch.no_grad():
+            so_path = AOTInductorModelRunner.compile(m, example_inputs)
+
+        # run under grad enabled
+        self.assertTrue(torch.is_grad_enabled())
+
+        optimized = AOTInductorModelRunner.load(self.device, so_path, example_inputs)
+        actual = optimized(example_inputs)
+        actual = pytree.tree_leaves(actual)
+
+        self.assertTrue(same(actual, expected))
+
     def test_repeat_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -944,7 +989,6 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
-
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -963,6 +1007,7 @@ copy_tests(
         "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_cat": TestFailure(("abi_compatible_cpu",)),
         "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
+        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cpu",)),
         "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
         # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
@@ -991,6 +1036,7 @@ copy_tests(
     "abi_compatible_cuda",
     # test_failures, xfail by default, set is_skip=True to skip
     {
+        "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
         # There is a double-free issue which will be fixed in another PR
         "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),

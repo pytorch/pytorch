@@ -751,6 +751,16 @@ class Reduction(Loops):
                         sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
+                        log.debug(
+                            "Use previous IRNode's range and reduction_ranges instead of split. "
+                            "current ranges: %s, current reduction ranges: %s, current split: %d, "
+                            "new ranges: %s, new reduction ranges: %s",
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
+                        )
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
@@ -2427,7 +2437,7 @@ class FlexibleLayout(Layout):
 class AliasedLayout(Layout):
     """Shares the same storage as another tensor"""
 
-    def __init__(self, view: IRNode):
+    def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2718,18 +2728,18 @@ class Buffer(IRNode):
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.size({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         for i, s in enumerate(self.get_stride()):
             if s in symbols_to_define:
                 wrapper.writeline(
-                    f"{wrapper.declare}{s} = {self.get_name()}.stride({i}){wrapper.ending}"
+                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
                 )
                 symbols_to_define.remove(s)
         if (s := self.get_offset()) in symbols_to_define:
             wrapper.writeline(
-                f"{wrapper.declare}{s} = {self.get_name()}.storage_offset(){wrapper.ending}"
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
             )
             symbols_to_define.remove(s)
         assert (
@@ -2745,6 +2755,10 @@ class Buffer(IRNode):
         Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
         """
         return 0
+
+    def should_allocate(self):
+        # Returns False by default.
+        return False
 
 
 class InputBuffer(Buffer):
@@ -3768,18 +3782,27 @@ class ExternKernelAlloc(ExternKernel):
 
 class UserDefinedTritonKernel(ExternKernel):
     def codegen(self, wrapper):
+        from triton.runtime.autotuner import Autotuner
+
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
+        configs = []
+        if isinstance(kernel, Autotuner):
+            configs = kernel.configs
+            kernel = kernel.fn
         new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
+            configs,
             self.codegen_kwargs(),
         )
-        wrapper.define_user_defined_triton_kernel(new_name, kernel, self.kwargs)
+        wrapper.define_user_defined_triton_kernel(
+            new_name, kernel, configs, self.kwargs
+        )
 
     def should_allocate(self):
         return False
@@ -6144,7 +6167,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, add_asserts=True):
+            def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -6154,7 +6177,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, add_asserts)
+                        var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
                 tracer.create_proxy(
