@@ -596,10 +596,9 @@ class ViewAndMutationMeta:
 
     # The grad_enabled mutation that we will emit in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
-    # that intended to be in effect prior to running the graph, in keeping with
-    # the principle of eager-mode behavioural equivalence to compile-time. It is
-    # the responsibility of upstream graph acquisition to reset the ambient grad mode
-    # prior to calling aot_autograd.
+    # that is intended to be in effect prior to running the graph, in keeping with the goal
+    # of eager-mode behavioural equivalence. It is the responsibility of upstream
+    # graph acquisition to reset the ambient grad mode prior to calling aot_autograd.
     grad_enabled_mutation: Optional[bool] = None
 
     def __post_init__(self):
