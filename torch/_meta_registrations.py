@@ -5179,6 +5179,38 @@ def meta__scaled_dot_product_efficient_backward(
     return grad_q, grad_k, grad_v, grad_bias
 
 
+@register_meta([aten._scaled_mm.default])
+def meta_scaled_mm(
+    self: torch.Tensor,
+    mat2: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+    scale_a: Optional[torch.Tensor] = None,
+    scale_b: Optional[torch.Tensor] = None,
+    scale_result: Optional[torch.Tensor] = None,
+    use_fast_accum: bool = False,
+):
+    def is_row_major(stride):
+        return stride[0] > stride[1] and stride[1] == 1
+
+    torch._check(
+        self.dim() == 2 and mat2.dim() == 2,
+        lambda: "inputs must be 2D",
+    )
+    torch._check(
+        is_row_major(self.stride()),
+        lambda: "self must be row_major",
+    )
+    torch._check(
+        not is_row_major(mat2.stride()),
+        lambda: "mat2 must be col_major",
+    )
+
+    return torch.empty(
+        self.size(0), mat2.size(1), dtype=out_dtype, device=self.device
+    ), torch.empty((), dtype=torch.float32, device=self.device)
+
+
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
 @out_wrapper()
 def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
