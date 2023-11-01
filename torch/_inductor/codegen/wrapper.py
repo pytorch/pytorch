@@ -496,10 +496,19 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+        assert len(grid) != 0
+        if len(grid) == 1:
+            grid = f"{grid[0]}"
+        else:
+            from torch._higher_order_ops.triton_kernel_wrap import grid_fn_code
+
+            grid, code = grid_fn_code(kernel_name, configs, grid)
+            self.header.splice(code, strip=True)
+
         stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
         self.writeline(
-            f"{kernel_name}.run({', '.join(args)}, grid=grid({grid}), stream={stream_name})"
+            f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
 
     def generate_scatter_fallback(
@@ -778,7 +787,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count += 1
         return new_name
 
-    def define_user_defined_triton_kernel(self, name, kernel, kwargs):
+    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
         original_name = kernel.__name__
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -788,16 +797,11 @@ class WrapperCodeGen(CodeGen):
             import triton
             import triton.language as tl
             from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import template
+            from torch._inductor.triton_heuristics import user_autotune
             """,
             strip=True,
         )
         compile_wrapper.newline()
-
-        # TODO(oulgen): num_stages and num_warps are default values of
-        # triton.Config. Can we do better? Or ask the user to provide?
-        num_stages = 2
-        num_warps = 4
 
         from ..ir import Buffer
         from .common import SizeArg, TensorArg
@@ -805,9 +809,6 @@ class WrapperCodeGen(CodeGen):
         signature: List[Union[TensorArg, SizeArg]] = []
         constants = {}
         for key, arg in kwargs.items():
-            # Not a real argument
-            if key == "grid":
-                continue
             if (
                 key in kernel.__annotations__
                 and "constexpr" in kernel.__annotations__[key]
@@ -829,12 +830,20 @@ class WrapperCodeGen(CodeGen):
             "configs": [config_of(signature)],
             "kernel_name": name,
         }
+        configs = [
+            {
+                "kwargs": config.kwargs,
+                "num_warps": config.num_warps,
+                "num_stages": config.num_stages,
+            }
+            for config in configs
+        ]
         compile_wrapper.splice(
             f"""
-            @template(
-                num_stages={num_stages},
-                num_warps={num_warps},
-                meta={triton_meta!r}
+            @user_autotune(
+                configs={configs!r},
+                meta={triton_meta!r},
+                filename=__file__
             )
             @triton.jit
             """
@@ -1302,6 +1311,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
                         """
                     )
+            else:
+                self.prefix.splice(
+                    """
+                        py::gil_scoped_release release;
+                    """
+                )
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
@@ -1490,25 +1505,44 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
+            cst_names = V.graph.constants.keys()
             for idx, output in enumerate(output_refs):
-                if config.aot_inductor.abi_compatible:
-                    if output in self.cached_thread_locals:
+                if output in cst_names:
+                    # In some rare cases where we return a constant, we
+                    # have to return a copy of this constant, because
+                    # (1) constants are not owned by the Model instance
+                    # (2) constants remain the same cross inference runs,
+                    #     assuming they are not updated at runtime
+                    # Basically, we cannot release or transfer the ownership
+                    # of any origianl constant to the user.
+                    if config.aot_inductor.abi_compatible:
                         self.wrapper_call.writeline(
-                            f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
-                        )
-                        self.wrapper_call.writeline(
-                            f"aoti_torch_assign_tensors({output}, output_handles[{idx}]);"
+                            f"aoti_torch_clone({output}, &output_handles[{idx}]);"
                         )
                     else:
                         self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = {output}.release();"
+                            f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                            + f"new at::Tensor(std::move({output}.clone())));"
                         )
-
                 else:
-                    self.wrapper_call.writeline(
-                        f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
-                        + f"new at::Tensor({output}));"
-                    )
+                    if config.aot_inductor.abi_compatible:
+                        if output in self.cached_thread_locals:
+                            self.wrapper_call.writeline(
+                                f"aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]);"
+                            )
+                            self.wrapper_call.writeline(
+                                f"aoti_torch_assign_tensors({output}, output_handles[{idx}]);"
+                            )
+                        else:
+                            self.wrapper_call.writeline(
+                                f"output_handles[{idx}] = {output}.release();"
+                            )
+
+                    else:
+                        self.wrapper_call.writeline(
+                            f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                            + f"new at::Tensor({output}));"
+                        )
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
@@ -1630,7 +1664,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_user_defined_triton_kernel(self, kernel_name, args):
+    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
         raise AssertionError(
             "User defined triton kernels are not supported in CPP mode"
         )
