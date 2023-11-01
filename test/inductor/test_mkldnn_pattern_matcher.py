@@ -120,6 +120,9 @@ class TestPatternMatcherBase(TestCase):
         counters.clear()
         torch._dynamo.reset()
         maybe_autocast = contextlib.nullcontext()
+        assert matcher_check_fn is not None or (
+            matcher_count is not None and matcher_nodes is not None
+        )
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
