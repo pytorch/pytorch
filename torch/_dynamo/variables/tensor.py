@@ -630,7 +630,8 @@ class TensorVariable(VariableTracker):
                 # assume hook and size to be empty for now
                 hook_variable = cls([], mutable_local=MutableLocal())
                 size_variable = cls([], mutable_local=MutableLocal())
-                tx.inline_user_function_return(
+                # output of the inline, need to find the corresponding inputs
+                res = tx.inline_user_function_return(
                     user_fn_variable,
                     (gm_variable, input_variable, hook_variable, size_variable),
                     {},
