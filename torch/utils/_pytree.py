@@ -132,13 +132,18 @@ def _register_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
     """
+    Note: The only required arguments are typ, flatten_fn, and unflatten_fn. The
+    other arguments are optional and only needed if someone wants to json
+    serialize their pytree type.
+
     Args:
         typ: the type to register
         flatten_fn: A callable that takes a pytree and returns a flattened
             representation of the pytree and additional context to represent the
             flattened pytree.
         unflatten_fn: A callable that takes a flattened version of the pytree,
-            additional context, and returns an unflattedn pytree.
+            additional context, and returns an unflattend pytree.
+
         serialized_type_name: A keyword argument used to specify the fully qualified
             name used when serializing the tree spec.
         to_dumpable_context: An optional keyword argument to custom specify how
