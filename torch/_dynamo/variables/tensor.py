@@ -216,9 +216,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype)
+            result = ConstantVariable.create(self.dtype)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device)
+            result = ConstantVariable.create(self.device)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout)
         elif name == "is_cuda" and self.device is not None:
@@ -639,7 +639,8 @@ class TensorVariable(VariableTracker):
                     *proxy_args_kwargs([self], {}),
                 ),
             )
-        elif name == "register_hook":
+        elif name in {"register_hook", "register_post_accumulate_grad_hook"}:
+            # Note - do not arbitrarily add hooks here - make sure they match the same contract
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -707,7 +708,8 @@ class TensorVariable(VariableTracker):
                 fn = functools.partial(trace_wrapped, fn=fn)
 
                 def _register_hook_trampoline(tensor):
-                    tensor.register_hook(fn)
+                    hook_callable = getattr(tensor, name)
+                    hook_callable(fn)
                     return tensor
 
                 return wrap_fx_proxy(
@@ -720,7 +722,7 @@ class TensorVariable(VariableTracker):
                     ),
                 )
 
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
