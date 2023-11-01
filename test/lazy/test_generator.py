@@ -41,8 +41,12 @@ class LazyGeneratorTest(TestCase):
 
         torch._lazy.mark_step()
 
-        assert torch.allclose(cpu_t1, lazy_t1.to("cpu")), f"Expected {cpu_t1}, got {lazy_t1.to('cpu')}"
-        assert torch.allclose(cpu_t2, lazy_t2.to("cpu")), f"Expected {cpu_t2}, got {lazy_t2.to('cpu')}"
+        assert torch.allclose(
+            cpu_t1, lazy_t1.to("cpu")
+        ), f"Expected {cpu_t1}, got {lazy_t1.to('cpu')}"
+        assert torch.allclose(
+            cpu_t2, lazy_t2.to("cpu")
+        ), f"Expected {cpu_t2}, got {lazy_t2.to('cpu')}"
 
     @skipIfTorchDynamo("Torch Dynamo does not support torch.Generator type")
     def test_generator_causes_multiple_compiles(self):

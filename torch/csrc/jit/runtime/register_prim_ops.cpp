@@ -2495,13 +2495,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::Generator(*, str? device=None, int? seed=None) -> Generator"),
+            "aten::Generator(*, Device? device=None, int? seed=None) -> Generator"),
         [](Stack& stack) {
           auto seed = pop(stack).toOptional<int64_t>();
-          auto device_str = pop(stack);
-          auto device = c10::Device(
-              device_str.isString() ? device_str.toStringRef() : "cpu");
-          push(stack, at::make_generator_for_device(device, seed));
+          auto device = pop(stack).toOptional<c10::Device>();
+          push(
+              stack,
+              at::make_generator_for_device(
+                  device.value_or(c10::Device("cpu")), seed));
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
