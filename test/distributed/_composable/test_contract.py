@@ -87,7 +87,7 @@ class TestContract(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Check parameters, Composable distributed API implementations cannot modify FQNs",
+            "wrap_module should not change the module structure",
         ):
             wrap_module(model.seq1)
 
