@@ -19,6 +19,7 @@ from typing import (
     Optional,
     OrderedDict,
     Set,
+    Tuple,
     Union,
 )
 
@@ -971,7 +972,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         # State prior to tracing the graph
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
-        current_global_state = {}
+        current_global_state: Dict[str, Tuple[Any, bool]] = {}
         # State at the current time
         self.save_global_state(current_global_state)
         try:
