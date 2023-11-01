@@ -113,7 +113,7 @@ class ConstDictVariable(VariableTracker):
                 return False
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
-    def __init__(self, items, user_cls=dict, **kwargs):
+    def __init__(self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs):
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -595,12 +595,18 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
 
-            from torch._dynamo.variables.builder import SourcelessBuilder
+            def make_var(x):
+                if isinstance(x, VariableTracker):
+                    return x
+                elif ConstantVariable.is_literal(x):
+                    return ConstantVariable.create(x)
+                else:
+                    unimplemented(
+                        "expect VariableTracker or ConstantVariable.is_literal"
+                    )
 
-            # The keys are strings
-            builder = SourcelessBuilder()
             items = {
-                ConstantVariable.create(k): builder(v)
+                ConstantVariable.create(k): make_var(v)
                 for k, v in bound.arguments.items()
             }
         elif not args:
