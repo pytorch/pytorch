@@ -356,15 +356,15 @@ class TensorMeta:
             dtype=dtype,
             sizes=V.graph.sizevars.size_hints(
                 node.get_size(),
-                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
+                fallback=config.unbacked_symint_fallback,
             ),
             strides=V.graph.sizevars.size_hints(
                 node.get_stride(),
-                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
+                fallback=config.unbacked_symint_fallback,
             ),
             offset=V.graph.sizevars.size_hint(
                 node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,  # type: ignore[attr-defined]
+                fallback=config.unbacked_symint_fallback,
             ),
         )
 
@@ -576,7 +576,6 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             "Things need to be fixed to support non-zero workspace_size: "
             "1) max autotune cache needs to store workspace size; "
             "2) memory allocation needs to allocate / deallocate workspace correctly; "
-            "3) CUDATemplateBuffer.workspace_size needs to be set correctly"
         )
 
         # Generate partial function.
