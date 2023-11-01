@@ -233,9 +233,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = ConstantVariable.create(self.dtype, **options)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:

@@ -250,6 +250,9 @@ class TorchVariable(VariableTracker):
 
         self.value = value
 
+        assert not isinstance(
+            value, (torch.dtype, torch.device)
+        ), "should use ConstantVariable"
         # the remainder of this is just optional debug checks
         try:
             self_should_be_none = getattr(self.value, "__self__", None)
