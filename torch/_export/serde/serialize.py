@@ -224,7 +224,13 @@ def serialize_torch_artifact(artifact) -> bytes:
     # on the designated device.
     # For now, we simply move the tensor to cpu before saving.
     # TODO: this should be fixed by deserialization instead.
-    artifact = tree_map_only(torch.Tensor, lambda t: t.cpu(), artifact)
+
+    def _tensor_to_cpu(t: torch.Tensor):
+        if t.is_meta:
+            return t
+        else:
+            return t.cpu()
+    artifact = tree_map_only(torch.Tensor, _tensor_to_cpu, artifact)
     torch.save(artifact, buffer)
     return buffer.getvalue()
 
