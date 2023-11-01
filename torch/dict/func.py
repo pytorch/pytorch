@@ -10,13 +10,15 @@ def set_tensor_dict(  # noqa: F811
     module_dict, module, name: str, tensor: torch.Tensor
 ) -> None:
     """Simplified version of torch.nn.utils._named_member_accessor."""
-    if name in module_dict["_parameters"]:
-        del module_dict["_parameters"][name]  # type: ignore[assignment]
-    was_buffer = name in module_dict["_buffers"]
-    if was_buffer:
-        del module_dict["_buffers"][name]
+    was_buffer = False
+    out = module_dict["_parameters"].pop(name, None)  # type: ignore[assignment]
+    if out is None:
+        out = module_dict["_buffers"].pop(name, None)
+        was_buffer = out is not None
+    if out is None:
+        out = module_dict.pop(name, None)
+
     if isinstance(tensor, nn.Parameter):
-        module_dict.pop(name, None)
         # module.register_parameter(name, tensor)
         for hook in _global_parameter_registration_hooks.values():
             output = hook(module, name, tensor)
@@ -27,3 +29,4 @@ def set_tensor_dict(  # noqa: F811
         module_dict["_buffers"][name] = tensor
     else:
         module_dict[name] = tensor
+    return out

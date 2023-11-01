@@ -16,7 +16,8 @@ from importlib import import_module
 from numbers import Number
 from textwrap import indent
 from typing import Any, Callable, List, Sequence, Tuple, Union, \
-    Iterator, TypeVar, OrderedDict
+    Iterator, TypeVar
+from collections import OrderedDict
 
 import math
 import numpy as np
@@ -33,6 +34,12 @@ T = TypeVar("T", bound="TensorDictBase")
 IndexType = Union[None, int, slice, str, Tensor, List[Any], Tuple[Any, ...]]
 DeviceType = Union[torch.device, str, int]
 NestedKey = Union[str, Tuple[str, ...]]
+
+_KEY_ERROR = 'key "{}" not found in {} with ' "keys {}"
+_LOCK_ERROR = (
+    "Cannot modify locked TensorDict. For in-place modification, consider "
+    "using the `set_()` method and make sure the key is present."
+)
 
 
 def _sub_index(tensor: Tensor, idx: IndexType) -> Tensor:
@@ -764,7 +771,7 @@ def lock_blocked(func):
     @wraps(func)
     def new_func(self, *args, **kwargs):
         if self.is_locked:
-            raise RuntimeError(self.LOCK_ERROR)
+            raise RuntimeError(_LOCK_ERROR)
         return func(self, *args, **kwargs)
 
     return new_func

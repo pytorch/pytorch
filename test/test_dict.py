@@ -9,11 +9,12 @@ from torch.dict import TensorDict, TensorDictBase, TensorDictParams, pad, \
     pad_sequence
 from torch.dict.base import is_tensor_collection
 from torch.dict.tensordict import _getitem_batch_size
-from torch.dict.utils import convert_ellipsis_to_idx
+from torch.dict.utils import convert_ellipsis_to_idx, assert_allclose_td
 from torch.testing._internal.common_utils import TestCase, run_tests, \
     parametrize, instantiate_parametrized_tests
 from torch.utils._pytree import tree_map
 
+TD_BATCH_SIZE = 4
 
 def decompose(td):
     for v in td.values():
@@ -91,17 +92,13 @@ class TestTensorDicts(TestCase):
     def td_params(self):
         return TensorDictParams(self.td_nested)
 
-    @parametrize(
-        "td_type",
-        ["td_device", "td_no_device", "td_nested", "td_params"]
-    )
+    TD_TYPES = ["td_device", "td_no_device", "td_nested", "td_params"]
+
+    @parametrize("td_type", TD_TYPES)
     def test_creation(self, td_type):
         self.assertIsNot(getattr(self, td_type), None)
 
-    @parametrize(
-        "td_type",
-        ["td_device", "td_no_device", "td_nested", "td_params"]
-    )
+    @parametrize("td_type", TD_TYPES)
     def test_squeeze_unsqueeze(self, td_type):
         data = getattr(self, td_type)
         data_u = data.unsqueeze(-1)
@@ -457,7 +454,7 @@ class TestTensorDicts(TestCase):
             KeyError,
             expected_regex=re.escape(
                 "Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide."
-                )
+            )
         ):
             td1.flatten_keys(separator)
 
@@ -465,7 +462,7 @@ class TestTensorDicts(TestCase):
             KeyError,
             expected_regex=re.escape(
                 "Flattening keys in tensordict causes keys [('a', 'b')] to collide."
-                )
+            )
         ):
             td2.flatten_keys(separator)
 
@@ -473,7 +470,7 @@ class TestTensorDicts(TestCase):
             KeyError,
             expected_regex=re.escape(
                 "Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide."
-                )
+            )
         ):
             td3.flatten_keys(separator)
 
@@ -1454,6 +1451,629 @@ class TestTensorDicts(TestCase):
         assert t["a", "b"].shape == torch.Size([2, 3, 1])
         t.update({"a": {"d": [[[1]] * 3] * 2}})
 
+    @parametrize("nested", [False, True])
+    @parametrize("td_type", TD_TYPES)
+    def test_add_batch_dim_cache(self, td_type, nested):
+        td = getattr(self, td_type)
+        if nested:
+            td = TensorDict({"parent": td}, td.batch_size)
+        from torch import vmap
+
+        fun = vmap(lambda x: x)
+        fun(td)
+
+        if td_type == "td_params":
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="leaf Variable that requires grad"
+            ):
+                td.zero_()
+            return
+
+        td.zero_()
+        # this value should be cached
+        std = fun(td)
+        for value in std.values(True, True):
+            assert (value == 0).all()
+
+    @parametrize("inplace", [False, True])
+    @parametrize("td_type", TD_TYPES)
+    def test_apply(self, td_type, inplace):
+        td = getattr(self, td_type)
+        td_c = td.to_tensordict()
+        if inplace and td_type == "td_params":
+            with self.assertRaisesRegex(
+                ValueError,
+                expected_regex="Failed to update"
+            ):
+                td.apply(lambda x: x + 1, inplace=inplace)
+            return
+        td_1 = td.apply(lambda x: x + 1, inplace=inplace)
+        if inplace:
+            for key in td.keys(True, True):
+                assert (td_c[key] + 1 == td[key]).all()
+                assert (td_1[key] == td[key]).all()
+        else:
+            for key in td.keys(True, True):
+                assert (td_c[key] + 1 != td[key]).any()
+                assert (td_1[key] == td[key] + 1).all()
+
+    @parametrize("inplace", [False, True])
+    @parametrize("td_type", TD_TYPES)
+    def test_apply_other(self, td_type, inplace):
+        td = getattr(self, td_type)
+        td_c = td.to_tensordict()
+        if inplace and td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        td_1 = td_set.apply(lambda x, y: x + y, td_c, inplace=inplace)
+        if inplace:
+            for key in td.keys(True, True):
+                assert (td_c[key] * 2 == td[key]).all()
+                assert (td_1[key] == td[key]).all()
+        else:
+            for key in td.keys(True, True):
+                assert (td_c[key] * 2 != td[key]).any()
+                assert (td_1[key] == td[key] * 2).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_assert(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            expected_regex=re.escape(
+                "Converting a tensordict to boolean value is not permitted"
+            ),
+        ):
+            assert td
+
+    @parametrize("td_type", TD_TYPES)
+    def test_broadcast(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        sub_td = td[:, :2].to_tensordict()
+        sub_td.zero_()
+        sub_dict = sub_td.to_dict()
+        if td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        td_set[:, :2] = sub_dict
+        assert (td[:, :2] == 0).all()
+
+    @parametrize("td_type", TD_TYPES)
+    @parametrize("op", ["flatten", "unflatten"])
+    def test_cache(self, td_type, op):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        try:
+            td.lock_()
+        except Exception:
+            return
+        if op == "keys_root":
+            a = list(td.keys())
+            b = list(td.keys())
+            assert a == b
+        elif op == "keys_nested":
+            a = list(td.keys(True))
+            b = list(td.keys(True))
+            assert a == b
+        elif op == "values":
+            a = list(td.values(True))
+            b = list(td.values(True))
+            assert all((_a == _b).all() for _a, _b in zip(a, b))
+        elif op == "items":
+            keys_a, values_a = zip(*td.items(True))
+            keys_b, values_b = zip(*td.items(True))
+            assert all((_a == _b).all() for _a, _b in zip(values_a, values_b))
+            assert keys_a == keys_b
+        elif op == "flatten":
+            a = td.flatten_keys()
+            b = td.flatten_keys()
+            assert a is b
+        elif op == "unflatten":
+            a = td.unflatten_keys()
+            b = td.unflatten_keys()
+            assert a is b
+
+        if td_type != "td_params":
+            assert len(td._cache)
+        td.unlock_()
+        assert td._cache is None
+        for val in td.values(True):
+            if is_tensor_collection(val):
+                assert td._cache is None
+
+    @parametrize("device_cast", get_available_devices())
+    @parametrize("td_type", TD_TYPES)
+    def test_cast_device(self, td_type, device_cast):
+        if not torch.cuda.device_count():
+            self.skipTest("No cuda device detected")
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        td_device = td.to(device_cast)
+
+        for item in td_device.values():
+            assert item.device == device_cast
+        for item in td_device.clone().values():
+            assert item.device == device_cast
+
+        assert td_device.device == device_cast, (
+            f"td_device first tensor device is " f"{next(td_device.items())[1].device}"
+        )
+        assert td_device.clone().device == device_cast
+        if device_cast != td.device:
+            assert td_device is not td
+        assert td_device.to(device_cast) is td_device
+        device = td.device
+        if device is not None:
+            assert td.to(device) is td
+            assert_allclose_td(td, td_device.to(device))
+
+    @parametrize("td_type", TD_TYPES)
+    def test_cast_to(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        td_device = td.to("cpu:1")
+        assert td_device.device == torch.device("cpu:1")
+        td_dtype = td.to(torch.int)
+        assert all(t.dtype == torch.int for t in td_dtype.values(True, True))
+        del td_dtype
+        # device (str), dtype
+        td_dtype_device = td.to("cpu:1", torch.int)
+        assert all(
+            t.dtype == torch.int for t in td_dtype_device.values(True, True)
+        )
+        assert td_dtype_device.device == torch.device("cpu:1")
+        del td_dtype_device
+        # device, dtype
+        td_dtype_device = td.to(torch.device("cpu:1"), torch.int)
+        assert all(
+            t.dtype == torch.int for t in td_dtype_device.values(True, True)
+        )
+        assert td_dtype_device.device == torch.device("cpu:1")
+        del td_dtype_device
+        # example tensor
+        td_dtype_device = td.to(
+            torch.randn(3, dtype=torch.half, device="cpu:1")
+        )
+        assert all(
+            t.dtype == torch.half for t in td_dtype_device.values(True, True)
+        )
+        # tensor on cpu:1 is actually on cpu. This is still meaningful for tensordicts on cuda.
+        assert td_dtype_device.device == torch.device("cpu")
+        del td_dtype_device
+        # example td
+        td_dtype_device = td.to(
+            other=TensorDict(
+                {"a": torch.randn(3, dtype=torch.half, device="cpu:1")},
+                [],
+                device="cpu:1",
+            )
+        )
+        assert all(
+            t.dtype == torch.half for t in td_dtype_device.values(True, True)
+        )
+        assert td_dtype_device.device == torch.device("cpu:1")
+        del td_dtype_device
+        # example td, many dtypes
+        td_nodtype_device = td.to(
+            other=TensorDict(
+                {
+                    "a": torch.randn(3, dtype=torch.half, device="cpu:1"),
+                    "b": torch.randint(10, ()),
+                },
+                [],
+                device="cpu:1",
+            )
+        )
+        assert all(
+            t.dtype != torch.half for t in td_nodtype_device.values(True, True)
+        )
+        assert td_nodtype_device.device == torch.device("cpu:1")
+        del td_nodtype_device
+        # batch-size: check errors (or not)
+        td_dtype_device = td.to(
+            torch.device("cpu:1"), torch.int, batch_size=torch.Size([])
+        )
+        assert all(
+            t.dtype == torch.int for t in td_dtype_device.values(True, True)
+        )
+        assert td_dtype_device.device == torch.device("cpu:1")
+        assert td_dtype_device.batch_size == torch.Size([])
+        del td_dtype_device
+        td_batchsize = td.to(batch_size=torch.Size([]))
+        assert td_batchsize.batch_size == torch.Size([])
+        del td_batchsize
+
+    @parametrize("td_type", TD_TYPES)
+    def test_casts(self, td_type):
+        td = getattr(self, td_type)
+        tdfloat = td.float()
+        assert all(
+            value.dtype is torch.float for value in tdfloat.values(True, True)
+        )
+        tddouble = td.double()
+        assert all(
+            value.dtype is torch.double for value in
+            tddouble.values(True, True)
+        )
+        tdbfloat16 = td.bfloat16()
+        assert all(
+            value.dtype is torch.bfloat16 for value in
+            tdbfloat16.values(True, True)
+        )
+        tdhalf = td.half()
+        assert all(
+            value.dtype is torch.half for value in tdhalf.values(True, True)
+        )
+        tdint = td.int()
+        assert all(
+            value.dtype is torch.int for value in tdint.values(True, True)
+        )
+        tdint = td.type(torch.int)
+        assert all(
+            value.dtype is torch.int for value in tdint.values(True, True)
+        )
+
+    @parametrize("dim", [0, 1])
+    @parametrize("chunks", [1, 2])
+    @parametrize("td_type", TD_TYPES)
+    def test_chunk(self, td_type, dim, chunks):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        if len(td.shape) - 1 < dim:
+            self.skipTest(f"no dim {dim} in td")
+
+        chunks = min(td.shape[dim], chunks)
+        td_chunks = td.chunk(chunks, dim)
+        assert len(td_chunks) == chunks
+        assert sum([_td.shape[dim] for _td in td_chunks]) == td.shape[dim]
+        assert (torch.cat(td_chunks, dim) == td).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_clone_td(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        clone = torch.clone(td)
+        assert (clone == td).all()
+        assert td.batch_size == clone.batch_size
+        assert type(td.clone(recurse=False)) is type(td)
+        assert td.clone(recurse=False).get("a") is td.get("a")
+
+    @parametrize("td_type", TD_TYPES)
+    def test_cpu_cuda(self, td_type):
+        if torch.cuda.device_count() == 0:
+            self.skipTest("no cuda device detected.")
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        td_device = td.cuda()
+        td_back = td_device.cpu()
+        assert td_device.device == torch.device("cuda")
+        assert td_back.device == torch.device("cpu")
+
+    @parametrize("td_type", TD_TYPES)
+    def test_create_nested(self, td_type):
+        td = getattr(self, td_type)
+        with td.unlock_():
+            td.create_nested("root")
+            assert td.get("root").shape == td.shape
+            assert is_tensor_collection(td.get("root"))
+            td.create_nested(("some", "nested", "key"))
+            assert td.get(("some", "nested", "key")).shape == td.shape
+            assert is_tensor_collection(td.get(("some", "nested", "key")))
+        with td.lock_(), self.assertRaises(RuntimeError):
+            td.create_nested("root")
+
+    @parametrize("td_type", TD_TYPES)
+    def test_default_nested(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        default_val = torch.randn(())
+        timbers = td.get(("shiver", "my", "timbers"), default_val)
+        assert timbers == default_val
+
+    @parametrize("td_type", TD_TYPES)
+    def test_delitem(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        del td["a"]
+        assert "a" not in td.keys()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_empty_like(self, td_type):
+        td = getattr(self, td_type)
+        td_empty = torch.empty_like(td)
+        if td_type == "td_params":
+            with self.assertRaisesRegex(
+                ValueError,
+                expected_regex="Failed to update"
+            ):
+                td.apply_(lambda x: x + 1.0)
+            return
+
+        td.apply_(lambda x: x + 1.0)
+        assert type(td) is type(td_empty)
+        assert all(val.any() for val in (td != td_empty).values(True, True))
+
+    @parametrize("td_type", TD_TYPES)
+    def test_enter_exit(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        is_locked = td.is_locked
+        with td.lock_() as other:
+            assert other is td
+            assert td.is_locked
+            with td.unlock_() as other:
+                assert other is td
+                assert not td.is_locked
+            assert td.is_locked
+        assert td.is_locked is is_locked
+
+    @parametrize("td_type", TD_TYPES)
+    def test_entry_type(self, td_type):
+        td = getattr(self, td_type)
+        for key in td.keys(include_nested=True):
+            assert type(td.get(key)) is td.entry_class(key)
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        assert (td == td.to_tensordict()).all()
+        td0 = td.to_tensordict().zero_()
+        assert (td != td0).any()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal_dict(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        assert (td == td.to_dict()).all()
+        td0 = td.to_tensordict().zero_().to_dict()
+        assert (td != td0).any()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal_float(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        if td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        td_set.zero_()
+        assert (td == 0.0).all()
+        td0 = td.clone()
+        if td_type == "td_params":
+            td_set = td0.data
+        else:
+            td_set = td0
+        td_set.zero_()
+        assert (td0 != 1.0).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal_int(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        if td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        td_set.zero_()
+        assert (td == 0).all()
+        td0 = td.to_tensordict().zero_()
+        assert (td0 != 1).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal_other(self, td_type):
+        td = getattr(self, td_type)
+        assert not td == "z"
+        assert td != "z"
+
+    @parametrize("td_type", TD_TYPES)
+    def test_equal_tensor(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        if td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        td_set.zero_()
+        device = td.device
+        assert (td == torch.zeros([], dtype=torch.int, device=device)).all()
+        td0 = td.to_tensordict().zero_()
+        assert (td0 != torch.ones([], dtype=torch.int, device=device)).all()
+
+    @parametrize("td_type", TD_TYPES)
+    def test_exclude(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        td2 = td.exclude("a")
+        assert td2 is not td
+        assert (
+            len(list(td2.keys())) == len(
+            list(td.keys())
+            ) - 1 and "a" not in td2.keys()
+        )
+        assert (
+            len(list(td2.clone().keys())) == len(list(td.keys())) - 1
+            and "a" not in td2.clone().keys()
+        )
+
+        with td.unlock_():
+            td2 = td.exclude("a", inplace=True)
+        assert td2 is td
+
+    @parametrize("nested", [True, False])
+    @parametrize("td_type", TD_TYPES)
+    def test_exclude_missing(self, td_type, nested):
+        td = getattr(self, td_type)
+        if nested:
+            td2 = td.exclude("this key is missing", ("this one too",))
+        else:
+            td2 = td.exclude(
+                "this key is missing",
+            )
+        assert (td == td2).all()
+
+    @parametrize("nested", [True, False])
+    @parametrize("td_type", TD_TYPES)
+    def test_exclude_nested(self, td_type, nested):
+        td = getattr(self, td_type)
+        td.unlock_()  # make sure that the td is not locked
+        td["newnested", "first"] = torch.randn(td.shape)
+        if nested:
+            td2 = td.exclude("a", ("newnested", "first"))
+            assert "a" in td.keys(), list(td.keys())
+            assert "a" not in td2.keys()
+            assert ("newnested", "first") in td.keys(True), list(td.keys(True))
+            assert ("newnested", "first") not in td2.keys(True)
+        else:
+            td2 = td.exclude(
+                "a",
+            )
+            assert "a" in td.keys()
+            assert "a" not in td2.keys()
+        if td_type not in (
+            "td_params",
+        ):
+            assert type(td2) is type(td)
+
+    @parametrize("td_type", TD_TYPES)
+    def test_expand(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        batch_size = td.batch_size
+        expected_size = torch.Size([3, *batch_size])
+
+        new_td = td.expand(3, *batch_size)
+        assert new_td.batch_size == expected_size
+        assert all((_new_td == td).all() for _new_td in new_td)
+
+        new_td_torch_size = td.expand(expected_size)
+        assert new_td_torch_size.batch_size == expected_size
+        assert all((_new_td == td).all() for _new_td in new_td_torch_size)
+
+        new_td_iterable = td.expand([3, *batch_size])
+        assert new_td_iterable.batch_size == expected_size
+        assert all((_new_td == td).all() for _new_td in new_td_iterable)
+
+    @parametrize("td_type", TD_TYPES)
+    def test_fill_(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        if td_type == "td_params":
+            td_set = td.data
+        else:
+            td_set = td
+        new_td = td_set.fill_("a", 0.1)
+        assert (td.get("a") == 0.1).all()
+        assert new_td is td_set
+
+    @parametrize("inplace", [True, False])
+    @parametrize("separator", [",", "-"])
+    @parametrize("td_type", TD_TYPES)
+    def test_flatten_keys(self, td_type, inplace, separator):
+        td = getattr(self, td_type)
+        locked = td.is_locked
+        td.unlock_()
+        nested_nested_tensordict = TensorDict(
+            {
+                "a": torch.zeros(*td.shape, 2, 3),
+            },
+            [*td.shape, 2],
+        )
+        nested_tensordict = TensorDict(
+            {
+                "a": torch.zeros(*td.shape, 2),
+                "nested_nested_tensordict": nested_nested_tensordict,
+            },
+            td.shape,
+        )
+        td["nested_tensordict"] = nested_tensordict
+        if locked:
+            td.lock_()
+
+        if inplace and locked:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                expected_regex="Cannot modify locked TensorDict"
+                ):
+                td_flatten = td.flatten_keys(
+                    inplace=inplace,
+                    separator=separator
+                    )
+            return
+        else:
+            td_flatten = td.flatten_keys(inplace=inplace, separator=separator)
+        for value in td_flatten.values():
+            assert not isinstance(value, TensorDictBase)
+        assert (
+            separator.join(
+                ["nested_tensordict", "nested_nested_tensordict", "a"]
+                )
+            in td_flatten.keys()
+        )
+        if inplace:
+            assert td_flatten is td
+        else:
+            assert td_flatten is not td
+
+    @parametrize("td_type", TD_TYPES)
+    def test_flatten_unflatten(self, td_type):
+        td = getattr(self, td_type)
+        shape = td.shape[:3]
+        td_flat = td.flatten(0, 2)
+        td_unflat = td_flat.unflatten(0, shape)
+        assert (td.to_tensordict() == td_unflat).all()
+        assert td.batch_size == td_unflat.batch_size
+
+    @parametrize("td_type", TD_TYPES)
+    def test_flatten_unflatten_bis(self, td_type):
+        td = getattr(self, td_type)
+        shape = td.shape[1:4]
+        td_flat = td.flatten(1, 3)
+        td_unflat = td_flat.unflatten(1, shape)
+        assert (td.to_tensordict() == td_unflat).all()
+        assert td.batch_size == td_unflat.batch_size
+
+    @parametrize("td_type", TD_TYPES)
+    def test_from_empty(self, td_type):
+        torch.manual_seed(1)
+        td = getattr(self, td_type)
+        new_td = TensorDict({}, batch_size=td.batch_size, device=td.device)
+        for key, item in td.items():
+            new_td.set(key, item)
+        assert_allclose_td(td, new_td)
+        assert td.device == new_td.device
+        assert td.shape == new_td.shape
+
+    @parametrize(
+        "actual_index,expected_index",
+        [
+            (..., (slice(None),) * TD_BATCH_SIZE),
+            ((..., 0), (slice(None),) * (TD_BATCH_SIZE - 1) + (0,)),
+            ((0, ...), (0,) + (slice(None),) * (TD_BATCH_SIZE - 1)),
+            ((0, ..., 0), (0,) + (slice(None),) * (TD_BATCH_SIZE - 2) + (0,)),
+        ],
+    )
+    @parametrize("td_type", TD_TYPES)
+    def test_getitem_ellipsis(self, td_type, actual_index, expected_index):
+        torch.manual_seed(1)
+
+        td = getattr(self, td_type)
+
+        actual_td = td[actual_index]
+        expected_td = td[expected_index]
+        other_expected_td = td.to_tensordict()[expected_index]
+        assert expected_td.shape == _getitem_batch_size(
+            td.batch_size, convert_ellipsis_to_idx(actual_index, td.batch_size)
+        )
+        assert other_expected_td.shape == actual_td.shape
+        assert_allclose_td(actual_td, other_expected_td)
+        assert_allclose_td(actual_td, expected_td)
+
 
 instantiate_parametrized_tests(TestTensorDicts)
 
@@ -1716,14 +2336,14 @@ class TestTensorDictVmap(TestCase):
             lambda td, one: td.set("a", td.get("a") + one),
             in_dims=(0, None),
             out_dims=(0,)
-            )(td, ones)
+        )(td, ones)
         assert td_out.shape == torch.Size([3, 4]), td_out.shape
 
         td_out = torch.vmap(
             lambda td, one: td.set("a", td.get("a") + one),
             in_dims=(0, None),
             out_dims=(1,)
-            )(td, ones)
+        )(td, ones)
         assert td_out.shape == torch.Size([4, 3]), td_out.shape
 
         ones = torch.ones(3, 5)
@@ -1731,14 +2351,14 @@ class TestTensorDictVmap(TestCase):
             lambda td, one: td.set("a", td.get("a") + one),
             in_dims=(1, None),
             out_dims=(1,)
-            )(td, ones)
+        )(td, ones)
         assert td_out.shape == torch.Size([3, 4]), td_out.shape
 
         td_out = torch.vmap(
             lambda td, one: td.set("a", td.get("a") + one),
             in_dims=(1, None),
             out_dims=(0,)
-            )(td, ones)
+        )(td, ones)
         assert td_out.shape == torch.Size([4, 3]), td_out.shape
 
 

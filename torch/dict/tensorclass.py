@@ -26,7 +26,8 @@ from torch.dict.base import (
     TensorDictBase,
 )
 
-from torch.dict.utils import DeviceType, IndexType, is_tensorclass, NestedKey
+from torch.dict.utils import DeviceType, IndexType, is_tensorclass, NestedKey, \
+    _LOCK_ERROR
 from torch import Tensor
 from torch.dict.utils import _get_repr
 
@@ -619,7 +620,7 @@ def _set(self, key: NestedKey, value: Any, inplace: bool = False):
     if isinstance(key, str):
         __dict__ = self.__dict__
         if __dict__["_tensordict"].is_locked:
-            raise RuntimeError(TensorDictBase.LOCK_ERROR)
+            raise RuntimeError(_LOCK_ERROR)
         expected_keys = self.__dataclass_fields__
         if key not in expected_keys:
             raise AttributeError(

@@ -39,7 +39,7 @@ from .utils import (
     int_generator,
     lock_blocked,
     NestedKey,
-    prod, _td_fields, _is_number, _unravel_key_to_tuple,
+    prod, _td_fields, _unravel_key_to_tuple, _KEY_ERROR,
 )
 
 # NO_DEFAULT is used as a placeholder whenever the default is not provided.
@@ -68,25 +68,16 @@ _HEURISTIC_EXCLUDED = (Tensor, tuple, list, set, dict, np.ndarray)
 
 _TENSOR_COLLECTION_MEMO = {}
 
-_LOCK_ERROR = (
-    "Cannot modify locked TensorDict. For in-place modification, consider "
-    "using the `set_()` method and make sure the key is present."
-)
-_KEY_ERROR = 'key "{}" not found in {} with ' "keys {}"
-
 
 class TensorDictBase(MutableMapping):
     """TensorDictBase is an abstract parent class for TensorDicts, a torch.Tensor data container."""
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> T:
-        self = super().__new__(cls)
-        self._safe = kwargs.get("_safe", False)
-        self._lazy = kwargs.get("_lazy", False)
-        self._inplace_set = kwargs.get("_inplace_set", False)
-        self.is_meta = kwargs.get("is_meta", False)
-        self._is_locked = kwargs.get("_is_locked", False)
-        self._cache = None
-        return self
+    _safe = False
+    _lazy = False
+    _inplace_set = False
+    is_meta = False
+    _is_locked = False
+    _cache = None
 
     def __bool__(self) -> bool:
         raise RuntimeError(
@@ -295,13 +286,15 @@ class TensorDictBase(MutableMapping):
 
     # Module interaction
     @staticmethod
-    def from_module(module, as_module: bool = False):
+    def from_module(module, as_module: bool = False, lock: bool = True):
         """Copies the params and buffers of a module in a tensordict.
 
         Args:
             as_module (bool, optional): if ``True``, a :class:`~tensordict.nn.TensorDictParams`
                 instance will be returned which can be used to store parameters
                 within a :class:`torch.nn.Module`. Defaults to ``False``.
+            lock (bool, optional): if ``True``, the resulting tensordict will be locked.
+                Defaults to ``True``.
 
         Examples:
             >>> from torch import nn
@@ -321,8 +314,13 @@ class TensorDictBase(MutableMapping):
         ...
 
     @abc.abstractmethod
-    def to_module(self, module: "nn.Module"):
+    def to_module(self, module: "nn.Module", return_swap: bool = False):
         """Writes the content of a TensorDictBase instance onto a given nn.Module attributes, recursively.
+
+        Args:
+            module (nn.Module): a module to write the parameters into.
+            return_swap (bool, optional): if ``True``, the old parameter configuration
+                will be returned. Defaults to ``False``.
 
         Examples:
             >>> from torch import nn
@@ -3077,6 +3075,13 @@ class TensorDictBase(MutableMapping):
         """
         ...
 
+    def copy(self):
+        """Return a shallow copy of the tensordict (ie, copies the structure but not the data).
+
+        Equivalent to `TensorDictBase.clone(recurse=False)`
+        """
+        return self.clone(recurse=False)
+
     def to_dict(self) -> dict[str, Any]:
         """Returns a dictionary with key-value pairs matching those of the tensordict."""
         return {
@@ -3354,7 +3359,9 @@ class TensorDictBase(MutableMapping):
             >>> model.load_state_dict(dict(model_state_dict.flatten_keys(".")))
         """
         all_leaves = list(self.keys(include_nested=True, leaves_only=True))
-        all_leaves_flat = [separator.join(key) if isinstance(key, tuple) else key for key in all_leaves]
+        all_leaves_flat = [
+            separator.join(key) if isinstance(key, tuple) else key for key in
+            all_leaves]
         if len(set(all_leaves_flat)) < len(set(all_leaves)):
             # find duplicates
             seen = set()
@@ -3368,13 +3375,23 @@ class TensorDictBase(MutableMapping):
                 f"Flattening keys in tensordict causes keys {conflicts} to collide."
             )
         if inplace:
+            # we will need to remove the empty tensordicts later on
+            root_keys = set(self.keys())
             for leaf, leaf_flat in zip(all_leaves, all_leaves_flat):
                 self.rename_key_(leaf, leaf_flat)
+                if isinstance(leaf, str):
+                    root_keys.discard(leaf)
+            self.exclude(*root_keys, inplace=True)
             return self
         else:
             result = self.empty()
             for leaf, leaf_flat in zip(all_leaves, all_leaves_flat):
-                result._set_str(leaf_flat, self.get(leaf), validated=True, inplace=False)
+                result._set_str(
+                    leaf_flat,
+                    self.get(leaf),
+                    validated=True,
+                    inplace=False
+                    )
             return result
 
     @cache  # noqa: B019
@@ -3467,7 +3484,9 @@ class TensorDictBase(MutableMapping):
         for key in self.keys():
             if separator in key[1:-1]:
                 split_key = key.split(separator)
-                to_unflatten[split_key[0]].append((key, separator.join(split_key[1:])))
+                to_unflatten[split_key[0]].append(
+                    (key, separator.join(split_key[1:]))
+                    )
 
         if not inplace:
             out = self.empty()
@@ -3481,7 +3500,9 @@ class TensorDictBase(MutableMapping):
         for key, list_of_keys in to_unflatten.items():
             # if the key is present and either (1) it is not a tensor collection or (2) it is but it's not empty, then we raise an error.
             if key in keys and (
-                not is_tensor_collection(out.get(key)) or not out.get(key).is_empty()
+                not is_tensor_collection(out.get(key)) or not out.get(
+                key
+                ).is_empty()
             ):
                 raise KeyError(
                     "Unflattening key(s) in tensordict will override existing unflattened key"

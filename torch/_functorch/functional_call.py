@@ -5,12 +5,13 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from torch._functorch.utils import exposed_in
+from torch.dict import TensorDictBase
 
 
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
+    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]], TensorDictBase],
     args: Union[Any, Tuple],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
@@ -118,7 +119,7 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
-    if isinstance(parameter_and_buffer_dicts, dict):
+    if isinstance(parameter_and_buffer_dicts, (dict, TensorDictBase)):
         parameters_and_buffers = parameter_and_buffer_dicts
     elif isinstance(parameter_and_buffer_dicts, Sequence):
         if not all(isinstance(d, dict) for d in parameter_and_buffer_dicts):

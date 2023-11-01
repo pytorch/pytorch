@@ -26,8 +26,7 @@ from torch.jit._shape_functions import infer_size_impl
 from torch.utils._pytree import tree_map
 from ._memmap import MemoryMappedTensor
 from .base import TensorDictBase, _is_tensor_collection, CompatibleType, T, \
-    NO_DEFAULT, BEST_ATTEMPT_INPLACE, is_tensor_collection, is_memmap, \
-    _LOCK_ERROR
+    NO_DEFAULT, BEST_ATTEMPT_INPLACE, is_tensor_collection, is_memmap
 from .base import _register_tensor_class
 from .utils import (
     _get_item,
@@ -46,12 +45,13 @@ from .utils import (
     _StringOnlyDict, _get_shape_from_args,
     _set_max_batch_size, _is_shared, _sub_index, _set_item,
     _get_leaf_tensordict, expand_as_right, _clone_value, _unravel_key_to_tuple,
-    _parse_to, _expand_to_match_shape, _is_number,
+    _parse_to, _expand_to_match_shape, _is_number, _LOCK_ERROR,
 )
 
 _register_tensor_class(ftdim.Tensor)
 
 from .base import _ACCEPTED_CLASSES
+
 
 class TensorDict(TensorDictBase):
     """A batched dictionary of tensors.
@@ -135,26 +135,7 @@ class TensorDict(TensorDictBase):
 
     """
 
-    __slots__ = (
-        "_tensordict",
-        "_batch_size",
-        "_is_shared",
-        "_is_memmap",
-        "_device",
-        "_is_locked",
-        "_td_dim_names",
-        "_lock_id",
-        "_locked_tensordicts",
-        "_cache",
-        "_last_op",
-        "__last_op_queue",
-    )
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> TensorDict:
-        cls._is_shared = False
-        cls._is_memmap = False
-        cls._td_dim_names = None
-        return super().__new__(cls, *args, _safe=True, _lazy=False, **kwargs)
+    _td_dim_names = None
 
     def __init__(
         self,
@@ -206,7 +187,7 @@ class TensorDict(TensorDictBase):
                     self.set(key, value)
 
     @staticmethod
-    def from_module(module, as_module: bool = False):
+    def from_module(module, as_module: bool = False, lock: bool = True):
         td_struct = {k: {} for k in dict(module.named_modules()).keys()}
         del td_struct[""]
         td_struct = TensorDict(td_struct, []).unflatten_keys(".")
@@ -219,30 +200,52 @@ class TensorDict(TensorDictBase):
             []
         ).unflatten_keys(".")
         td = td_struct.update(td_params).update(td_buffers)
-        td.lock_()
+        if lock:
+            td.lock_()
         if as_module:
             from .params import TensorDictParams
 
             return TensorDictParams(td, no_convert=True)
         return td
 
-    def to_module(self, module):
+    def to_module(self, module, return_swap: bool = False):
         from .func import set_tensor_dict
 
         __base__setattr__ = nn.Module.__setattr__
         # we use __dict__ directly to avoid the getattr/setattr overhead whenever we can
         __dict__ = module.__dict__
+        out = None
+        has_set_device = False
+        if return_swap:
+            # this could break if the device and batch-size are not congruent.
+            # For batch-size it is a minor issue (unlikely that a td with batch-size
+            # is passed with to_module) but for the device it could be a problem.
+            out = self.empty()
 
         for key, value in self.items():
             cls = value.__class__
             if _is_tensor_collection(cls) or issubclass(cls, dict):
-                value.to_module(__dict__["_modules"][key])
+                local_out = value.to_module(
+                    __dict__["_modules"][key],
+                    return_swap=return_swap
+                    )
             else:
                 if module.__class__.__setattr__ is __base__setattr__:
-                    set_tensor_dict(__dict__, module, key, value)
+                    local_out = set_tensor_dict(__dict__, module, key, value)
                 else:
+                    if return_swap:
+                        local_out = getattr(module, key)
                     # use specialized __setattr__ if needed
                     setattr(module, key, value)
+            if return_swap:
+                # we don't want to do this op more than once
+                if not has_set_device and out.device is not None and local_out.device is not None and local_out.device != out.device:
+                    has_set_device = True
+                    # map out to the local_out device
+                    out = out.to(device=local_out.device)
+                out._set_str(key, local_out, inplace=False, validated=True)
+
+        return out
 
     def __ne__(self, other: object) -> T | bool:
         if _is_tensorclass(other):
@@ -353,12 +356,7 @@ class TensorDict(TensorDictBase):
         if isinstance(value, (TensorDictBase, dict)):
             indexed_bs = _getitem_batch_size(self.batch_size, index)
             if isinstance(value, dict):
-                value = TensorDict(
-                    value,
-                    batch_size=indexed_bs,
-                    device=self.device,
-                    _run_checks=False
-                )
+                value = self.empty(recurse=True)[index].update(value)
             if value.batch_size != indexed_bs:
                 # try to expand
                 try:
@@ -1307,6 +1305,8 @@ class TensorDict(TensorDictBase):
         # these checks are not perfect, tuples that are not tuples of strings or empty
         # tuples could go through but (1) it will raise an error anyway and (2)
         # those checks are expensive when repeated often.
+        if old_key == new_key:
+            return self
         if not isinstance(old_key, (str, tuple)):
             raise TypeError(
                 f"Expected old_name to be a string or a tuple of strings but found {type(old_key)}"
@@ -1706,6 +1706,20 @@ class TensorDict(TensorDictBase):
             return self.clone()
         return self
 
+    def empty(self, recurse=False) -> T:
+        if not recurse:
+            return TensorDict(
+                device=self.device,
+                batch_size=self.batch_size,
+                source={},
+                # names=self.names if self._has_names() else None,
+                names=self._td_dim_names,
+                _run_checks=False,
+                _is_memmap=self._is_memmap,
+                _is_shared=self._is_shared,
+            )
+        return super().empty(recurse=recurse)
+
     def select(
         self,
         *keys: NestedKey,
@@ -1774,15 +1788,13 @@ class TensorDict(TensorDictBase):
         )
 
     def __getstate__(self):
-        return {
-            slot: getattr(self, slot)
-            for slot in self.__slots__
-            if slot not in ("_last_op", "_cache", "__last_op_queue")
-        }
+        result = {key: val for key, val in self.__dict__.items() if
+                  key not in ("_last_op", "_cache", "__last_op_queue")}
+        return result
 
     def __setstate__(self, state):
-        for slot, value in state.items():
-            setattr(self, slot, value)
+        for key, value in state.items():
+            setattr(self, key, value)
         self._cache = None
         self.__last_op_queue = None
         self._last_op = None
@@ -1814,11 +1826,11 @@ class _SubTensorDict(TensorDictBase):
     """A TensorDict that only sees an index of the stored tensors.
 
     """
-
-    def __new__(cls, *args: Any, **kwargs: Any) -> _SubTensorDict:
-        cls._is_shared = False
-        cls._is_memmap = False
-        return super().__new__(cls, _safe=False, _lazy=True, _inplace_set=True)
+    _is_shared = False
+    _is_memmap = False
+    _lazy = True
+    _inplace_set = True
+    _safe = False
 
     def __init__(
         self,
@@ -1939,7 +1951,7 @@ class _SubTensorDict(TensorDictBase):
                 "_SubTensorDict.set_(...) or cloning your tensordict first."
             )
         elif not inplace and self.is_locked:
-            raise RuntimeError(TensorDictBase.LOCK_ERROR)
+            raise RuntimeError(_LOCK_ERROR)
         return inplace
 
     def _set_str(

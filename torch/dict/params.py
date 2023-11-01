@@ -787,7 +787,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
-    def to_module(self, module: nn.Module):
+    def to_module(self, module: nn.Module, return_swap: bool=False):
         ...
 
     @_fallback
