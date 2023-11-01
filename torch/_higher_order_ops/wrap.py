@@ -1,6 +1,5 @@
 import inspect
 import logging
-import itertools
 
 import torch
 from torch._ops import HigherOrderOperator
