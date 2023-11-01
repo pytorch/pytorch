@@ -1559,7 +1559,7 @@ class AotCodeCache:
 
         (
             specified_output_path,
-            specified_output_so_name,
+            specified_so_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
 
         key, input_path = write(
@@ -1569,7 +1569,9 @@ class AotCodeCache:
             specified_dir=specified_output_path,
         )
 
-        if key not in cls.cache:
+        if key not in cls.cache or (
+            specified_so_name and cls.cache[key] != config.aot_inductor.output_path
+        ):
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
@@ -1584,7 +1586,7 @@ class AotCodeCache:
 
                 output_so = (
                     config.aot_inductor.output_path
-                    if specified_output_so_name
+                    if specified_so_name
                     else os.path.splitext(input_path)[0] + ".so"
                 )
 
