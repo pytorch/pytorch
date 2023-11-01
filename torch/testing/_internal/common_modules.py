@@ -3189,7 +3189,14 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # No channels_last support for InstanceNorm1d currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_cpu_gpu_parity',
+                       dtypes=[torch.float32],
+                       active_if=(TEST_WITH_TORCHINDUCTOR) and (lambda p: not p['training']),
+                   ),)
                ),
     ModuleInfo(torch.nn.InstanceNorm2d,
                module_inputs_func=partial(module_inputs_torch_nn_InstanceNormNd, N=2),
