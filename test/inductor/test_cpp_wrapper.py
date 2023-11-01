@@ -104,7 +104,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
+            code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
