@@ -287,7 +287,7 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with file_name.open("wb") as stream:
+            with open(file_name, "wb") as stream:
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
@@ -342,9 +342,7 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self.path = Path(path)
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
@@ -440,8 +438,7 @@ class FileSystemWriter(StorageWriter):
         metadata.storage_data = storage_md
         with (self.path / ".metadata.tmp").open("wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
-            if self.sync_files:
-                os.fsync(metadata_file.fileno())
+            os.fsync(metadata_file.fileno())
 
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
@@ -449,9 +446,7 @@ class FileSystemWriter(StorageWriter):
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        if not isinstance(path, Path):
-            path = Path(path)
-        self.path = path
+        self.path = Path(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo):

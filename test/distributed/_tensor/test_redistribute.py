@@ -277,7 +277,9 @@ class MultiDimRedistributeTest(DTensorTestBase):
                     dt2 = dt.redistribute(device_mesh, outputs)
 
                     # replicate and then get first shard
-                    local_full = dt2.full_tensor()
+                    local_full = dt2.redistribute(
+                        device_mesh, device_mesh.ndim * [Replicate()]
+                    ).to_local()
 
                     if torch.distributed.get_rank() == 0:
                         self.assertEqual(local_full.shape, full_tensor.shape)

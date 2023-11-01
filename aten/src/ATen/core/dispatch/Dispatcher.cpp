@@ -265,6 +265,15 @@ AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
 
 }
 
+c10::optional<std::pair<const char*, const char*>> Dispatcher::getAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found == abstractImplPyStubsSingleton().end()) {
+    return c10::nullopt;
+  }
+  return found->second;
+}
+
 RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
   const OperatorName& op_name,
   const char* pymodule,

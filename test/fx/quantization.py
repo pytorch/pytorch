@@ -266,7 +266,7 @@ class Quantizer:
                 if n.name in env or e.name in quant_env:
                     return load_arg(n, quantized=False)
                 else:
-                    return copy_recursive(n)
+                    return copy_recusive(n)
             r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
             return r
 

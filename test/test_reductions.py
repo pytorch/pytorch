@@ -2982,14 +2982,13 @@ class TestReductions(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @onlyCPU
-    @dtypes(torch.bfloat16, torch.half)
-    def test_histc_lowp(self, device, dtype):
+    def test_histc_bfloat16(self, device):
         actual = torch.histc(
-            torch.tensor([1, 2, 1], dtype=dtype, device=device), bins=4, min=0, max=3)
+            torch.tensor([1, 2, 1], dtype=torch.bfloat16, device=device), bins=4, min=0, max=3)
         self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=dtype, device=device),
+            torch.tensor([0, 2, 1, 0], dtype=torch.bfloat16, device=device),
             actual)
-        self.assertEqual(actual.dtype, dtype)
+        self.assertEqual(actual.dtype, torch.bfloat16)
 
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters

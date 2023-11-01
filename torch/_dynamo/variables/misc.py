@@ -885,20 +885,16 @@ class SkipFilesVariable(VariableTracker):
                 fn, args=rest_args, keywords=kwargs, **options
             )
         elif self.value is itertools.repeat:
-            if len(args) < 2:
-                return variables.RepeatIteratorVariable(
-                    *args, mutable_local=MutableLocal()
-                )
-
             from .builder import SourcelessBuilder
+
+            if len(args) < 2:
+                # We cannot risk infinite generator being consumed to exhaustion by dynamo
+                # (i.e. infinite loop)
+                unimplemented("Infinite repeat is not supported")
 
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.repeat), args, kwargs
             )
-        elif self.value is itertools.count:
-            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
-        elif self.value is itertools.cycle:
-            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
         else:
             try:
                 path = inspect.getfile(self.value)

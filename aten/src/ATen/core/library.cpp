@@ -128,13 +128,6 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   }
   switch (rv) {
     case _RegisterOrVerify::REGISTER:
-      registrars_.emplace_back(
-        c10::Dispatcher::singleton().registerDef(
-          std::move(schema),
-          debugString(file_, line_),
-          tags
-        )
-      );
       if (impl_abstract_pystub_.has_value()) {
         registrars_.emplace_back(
           c10::Dispatcher::singleton().registerAbstractImplPyStub(
@@ -143,6 +136,13 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
             impl_abstract_pystub_->second)
         );
       }
+      registrars_.emplace_back(
+        c10::Dispatcher::singleton().registerDef(
+          std::move(schema),
+          debugString(file_, line_),
+          tags
+        )
+      );
       break;
     case _RegisterOrVerify::VERIFY:
       c10::Dispatcher::singleton().waitForDef(schema);

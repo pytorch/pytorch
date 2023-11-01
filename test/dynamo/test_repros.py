@@ -1633,35 +1633,31 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
-    def test_longtensor_list(self):
-        for partition in [0, 5, 10]:
+    # AssertionError: ABCMeta
+    @unittest.expectedFailure
+    def test_numpy_list(self):
+        @torch._dynamo.disable
+        def rand_gen():
+            return list(np.array([random.randint(5, 10) for _ in range(10)]))
 
-            @torch._dynamo.disable
-            def rand_gen():
-                rand_vals = [random.randint(5, 10) for _ in range(10)]
-                # List of tensors mixed with np.arrays
-                return list(np.array(rand_vals[:partition])) + [
-                    torch.tensor(val) for val in rand_vals[partition:]
-                ]
+        def fn(x):
+            random_list = rand_gen()
+            z = torch.LongTensor(random_list)
+            return x * z
 
-            def fn(x):
-                random_list = rand_gen()
-                z = torch.LongTensor(random_list)
-                return x * z
+        x = torch.ones(10) * 2
 
-            x = torch.ones(10) * 2
+        random.seed(0)
+        ref0 = fn(x)
+        ref1 = fn(x)
 
-            random.seed(0)
-            ref0 = fn(x)
-            ref1 = fn(x)
+        random.seed(0)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        res0 = opt_fn(x)
+        res1 = opt_fn(x)
 
-            random.seed(0)
-            opt_fn = torch._dynamo.optimize("eager")(fn)
-            res0 = opt_fn(x)
-            res1 = opt_fn(x)
-
-            self.assertTrue(same(ref0, res0))
-            self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref0, res0))
+        self.assertTrue(same(ref1, res1))
 
     def test_primtorch(self):
         @torch._dynamo.optimize("eager")

@@ -683,18 +683,16 @@ class ListIteratorVariable(VariableTracker):
         self.items = items
         self.index = index
 
-    def next_variables(self, tx):
+    def next_variables(self):
         assert self.mutable_local
         if self.index >= len(self.items):
             raise StopIteration()
-        next_iter = ListIteratorVariable(
+        return self.items[self.index].add_options(self), ListIteratorVariable(
             self.items,
             self.index + 1,
             mutable_local=MutableLocal(),
             **VariableTracker.propagate([self]),
         )
-        tx.replace_all(self, next_iter)
-        return self.items[self.index].add_options(self), next_iter
 
     def as_python_constant(self):
         if self.index > 0:

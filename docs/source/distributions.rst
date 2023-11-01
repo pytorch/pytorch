@@ -167,15 +167,6 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
-:hidden:`InverseGamma`
-~~~~~~~~~~~~~~~~~~~~~~
-
-.. currentmodule:: torch.distributions.inverse_gamma
-.. autoclass:: InverseGamma
-    :members:
-    :undoc-members:
-    :show-inheritance:
-
 :hidden:`Kumaraswamy`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -424,7 +415,6 @@ Probability distributions - torch.distributions
 .. py:module:: torch.distributions.half_cauchy
 .. py:module:: torch.distributions.half_normal
 .. py:module:: torch.distributions.independent
-.. py:module:: torch.distributions.inverse_gamma
 .. py:module:: torch.distributions.kumaraswamy
 .. py:module:: torch.distributions.laplace
 .. py:module:: torch.distributions.lkj_cholesky

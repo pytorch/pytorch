@@ -4,7 +4,9 @@ import traceback
 import torch
 import weakref
 import functools
+import inspect
 import re
+import warnings
 
 __all__ = [
     'Library',
@@ -419,7 +421,6 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     source = torch._library.utils.get_source(_stacklevel + 1)
     frame = inspect.stack()[_stacklevel]
     caller_module_name = inspect.getmodule(frame[0]).__name__
-    torch._C._dispatch_record_abstract_impl_module(caller_module_name);
 
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
@@ -452,17 +453,19 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         maybe_pystub = torch._C._dispatch_pystub(
             op._schema.name,
             op._schema.overload_name)
+        # TODO(rzou): The following are warnings for now, while we figure out
+        # fbgemm co-dev. In a couple of days we will flip these to be errors.
         if not maybe_pystub:
-            raise RuntimeError(
+            warnings.warn(
                 f"Operator '{qualname}' was defined in C++ and has a Python "
                 f"abstract impl. In this situation, it is required to have a "
                 f"C++ `m.impl_abstract_pystub` call, but we could not find one."
-                f"Please add it to the C++ TORCH_LIBRARY block the operator was "
-                f"defined in."
-            return func(*args, **kwargs)
-        pystub_module, _ = maybe_pystub
+                f"Please add a call to `m.impl_abstract_pystub(\"{actual_module_name}\");` "
+                f"to the C++ TORCH_LIBRARY block the operator was "
+                f"defined in.")
+        pystub_module = maybe_pystub[0]
         if actual_module_name != pystub_module:
-            raise RuntimeError(
+            warnings.warn(
                 f"Operator '{qualname}' specified that its python abstract impl "
                 f"is in the Python module '{mod_name}' but it was actually found "
                 f"in '{actual_module_name}'. Please either move the abstract impl "
