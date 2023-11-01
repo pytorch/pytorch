@@ -48,7 +48,7 @@ class ModelType(Enum):
     FSDP_TP = auto()
 
 
-class TestFSDP(DTensorTestBase):
+class TestE2ELoadAndSave(DTensorTestBase):
     def _create_model(self, compile, model_type):
         dummy_model = TestDummyModel().cuda()
 
@@ -101,35 +101,36 @@ class TestFSDP(DTensorTestBase):
     def test_e2e(self, compile, model_type):
         # first create and save a checkpoint
         model, optim = self._create_model(compile, model_type)
-        model_state_dict_0, optim_state_dict = get_state_dict(model, optimizers=optim)
+        model_state_dict_0, optim_state_dict_0 = get_state_dict(model, optimizers=optim)
 
         DCP.save_state_dict(
-            state_dict={"model": model_state_dict_0, "optimizer": optim_state_dict},
+            state_dict={"model": model_state_dict_0, "optimizer": optim_state_dict_0},
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
         # load the checkpoint, starting with a new model
         model, optim = self._create_model(compile, model_type)
-        model_state_dict_1, optim_state_dict = get_state_dict(model, optimizers=optim)
+        model_state_dict_1, optim_state_dict_1 = get_state_dict(model, optimizers=optim)
 
         # sanity check, since we have not done any loading, state dicts should differ
-        assert not self._equal_state_dict(model_state_dict_0, model_state_dict_1)
+        self.assertFalse(self._equal_state_dict(model_state_dict_0, model_state_dict_1))
 
         DCP.load_state_dict(
-            {"model": model_state_dict_1, "optimizer": optim_state_dict},
+            {"model": model_state_dict_1, "optimizer": optim_state_dict_1},
             storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
         set_state_dict(
             model,
             optimizers=optim,
             model_state_dict=model_state_dict_1,
-            optim_state_dict=optim_state_dict,
+            optim_state_dict=optim_state_dict_1,
         )
 
         # state dict should be the same following loading
-        assert self._equal_state_dict(model_state_dict_0, model_state_dict_1)
+        self.assertTrue(self._equal_state_dict(model_state_dict_0, model_state_dict_1))
+        self.assertEqual(optim_state_dict_0, optim_state_dict_1)
 
 
-instantiate_parametrized_tests(TestFSDP)
+instantiate_parametrized_tests(TestE2ELoadAndSave)
 if __name__ == "__main__":
     run_tests()
