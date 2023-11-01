@@ -57,15 +57,13 @@ def _get_quantized_conv2d_bn_pattern_example_inputs_kwargs(
     Optional example inputs for both `_quantized_qat_conv2d_bn_pattern`
     and `_folded_quantized_qat_conv2d_bn_pattern`, expressed as kwargs.
 
-    Note that weight_scale and weight_zero_point are only used when
-    `is_per_channel` is True. This is because for per tensor quantization,
-    scale and zero point are hard coded into quantize/dequantize ops
-    in the pattern.
     """
     kwargs = {}
+    # Per tensor quantization uses literals to represent scale and zero
+    # point, so there is no need to include them here as kwargs
     if is_per_channel:
-        kwargs["weight_scale"] = torch.tensor([1], dtype=torch.float)
-        kwargs["weight_zero_point"] = torch.tensor([0], dtype=torch.int)
+        kwargs["scale"] = torch.tensor([1], dtype=torch.float)
+        kwargs["zero_point"] = torch.tensor([0], dtype=torch.int)
     if has_bias:
         kwargs["conv_bias"] = torch.randn(1)
     if is_cuda:
@@ -192,6 +190,30 @@ def _get_input_output_quantized_filter():
 
     return _input_output_quantized_filter
 
+def _append_qdq(x, is_per_channel, kwargs):
+    """
+    Helper function to append q-dq ops after `x`, using dummy values for the qparams
+    and qmin/qmax. We use dummy values here because we match with `ignore_literals=True`
+    and will manually replace these values after subgraph rewriting.
+
+    Return the dq node.
+    """
+    # Dummy args to be passed into q-dq ops
+    per_channel_axis = 0
+    scale = kwargs["scale"] if is_per_channel else 1.0
+    zp = kwargs["zero_point"] if is_per_channel else 0
+    qmin = -127
+    qmax = 127
+    dtype = torch.int8
+
+    qd = torch.ops.quantized_decomposed
+    if is_per_channel:
+        x = qd.quantize_per_channel(x, scale, zp, per_channel_axis, qmin, qmax, dtype)
+        x = qd.dequantize_per_channel(x, scale, zp, per_channel_axis, qmin, qmax, dtype)
+    else:
+        x = qd.quantize_per_tensor(x, scale, zp, qmin, qmax, dtype)
+        x = qd.dequantize_per_tensor(x, scale, zp, qmin, qmax, dtype)
+    return x
 
 def _get_quantized_qat_conv2d_bn_pattern(
     is_per_channel: bool,
@@ -208,9 +230,6 @@ def _get_quantized_qat_conv2d_bn_pattern(
     """
     # TODO: allow setting eps
     bn_eps = 1e-5
-    weight_quant_min = -127
-    weight_quant_max = 127
-    per_channel_axis = 0
 
     def _quantized_qat_conv2d_bn_pattern(
         x: torch.Tensor,
@@ -228,22 +247,7 @@ def _get_quantized_qat_conv2d_bn_pattern(
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
         scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
-        if is_per_channel:
-            scaled_weight = torch.ops.quantized_decomposed.quantize_per_channel(
-                scaled_weight, kwargs['weight_scale'], kwargs['weight_zero_point'], per_channel_axis,
-                weight_quant_min, weight_quant_max, torch.int8,
-            )
-            scaled_weight = torch.ops.quantized_decomposed.dequantize_per_channel(
-                scaled_weight, kwargs['weight_scale'], kwargs['weight_zero_point'], per_channel_axis,
-                weight_quant_min, weight_quant_max, torch.int8,
-            )
-        else:
-            scaled_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
-                scaled_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
-            )
-            scaled_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                scaled_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
-            )
+        scaled_weight = _append_qdq(scaled_weight, is_per_channel, kwargs)
         if has_bias:
             zero_bias = torch.zeros_like(kwargs["conv_bias"], dtype=x.dtype)
             x = F.conv2d(x, scaled_weight, zero_bias)
@@ -272,9 +276,6 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
     """
     # TODO: allow setting eps
     bn_eps = 1e-5
-    weight_quant_min = -127
-    weight_quant_max = 127
-    per_channel_axis = 0
 
     def _folded_quantized_qat_conv2d_bn_pattern(
         x: torch.Tensor,
@@ -285,22 +286,7 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(
         bn_running_var: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        if is_per_channel:
-            conv_weight = torch.ops.quantized_decomposed.quantize_per_channel(
-                conv_weight, kwargs['weight_scale'], kwargs['weight_zero_point'], per_channel_axis,
-                weight_quant_min, weight_quant_max, torch.int8,
-            )
-            conv_weight = torch.ops.quantized_decomposed.dequantize_per_channel(
-                conv_weight, kwargs['weight_scale'], kwargs['weight_zero_point'], per_channel_axis,
-                weight_quant_min, weight_quant_max, torch.int8,
-            )
-        else:
-            conv_weight = torch.ops.quantized_decomposed.quantize_per_tensor(
-                conv_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
-            )
-            conv_weight = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                conv_weight, 1.0, 0, weight_quant_min, weight_quant_max, torch.int8,
-            )
+        conv_weight = _append_qdq(conv_weight, is_per_channel, kwargs)
         if has_bias:
             x = F.conv2d(x, conv_weight, kwargs["conv_bias"])
         else:
@@ -373,8 +359,8 @@ def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node
 
         {name: (original_node, replacement_node)}
 
-    The returned map must contain entries for "conv", "bn", "getitem" as names,
-    and may optionally contain an entry for "relu".
+    The returned map must contain entries for "conv", "conv_weight", "conv_input",
+    "bn", "getitem" as names, and may optionally contain an entry for "relu".
     """
     def _get_nodes(nodes: List[Node]) -> Tuple[Node, Node, Node, Optional[Node]]:
         """
@@ -407,11 +393,40 @@ def _get_conv_bn_getitem_relu_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node
     o_conv, o_bn, o_getitem, o_relu = _get_nodes(original_nodes)
     r_conv, r_bn, r_getitem, r_relu = _get_nodes(r.replacements)
 
+    # Extract conv input and weight
+    # Note: here we extract the original nodes indirectly through the pattern nodes
+    # because the args of the original nodes are no longer available after replacement
+    (p_conv, _, _, _) = _get_nodes(list(r.nodes_map.keys()))
+    (p_conv_input, p_conv_weight, *_) = p_conv.args
+    (r_conv_input, r_conv_weight, *_) = r_conv.args
+    assert isinstance(p_conv_input, Node)
+    assert isinstance(p_conv_weight, Node)
+    assert isinstance(r_conv_input, Node)
+    assert isinstance(r_conv_weight, Node)
+    o_conv_input = r.nodes_map[p_conv_input]
+    o_conv_weight = r.nodes_map[p_conv_weight]
+
+    # Extract conv bias
+    if len(p_conv.args) > 2 and len(r_conv.args) > 2:
+        p_conv_bias = p_conv.args[2]
+        r_conv_bias = r_conv.args[2]
+        assert isinstance(p_conv_bias, Node)
+        assert isinstance(r_conv_bias, Node)
+        o_conv_bias = r.nodes_map[p_conv_bias]
+    else:
+        o_conv_bias = None
+        r_conv_bias = None
+
+    # Create the mapping from original node to replacement node
     mapping = {
         "conv": (o_conv, r_conv),
+        "conv_input": (o_conv_input, r_conv_input),
+        "conv_weight": (o_conv_weight, r_conv_weight),
         "bn": (o_bn, r_bn),
         "getitem": (o_getitem, r_getitem),
     }
+    if o_conv_bias is not None:
+        mapping["conv_bias"] = (o_conv_bias, r_conv_bias)
     if o_relu is not None:
         assert r_relu is not None
         mapping["relu"] = (o_relu, r_relu)
