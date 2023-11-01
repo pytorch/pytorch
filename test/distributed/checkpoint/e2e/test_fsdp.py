@@ -1,4 +1,7 @@
 # Owner(s): ["oncall: distributed"]
+
+from enum import auto, Enum
+
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
@@ -6,6 +9,8 @@ import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.api import ShardingStrategy
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -37,12 +42,46 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(8, 8, device="cuda")
 
 
-class TestFSDP(DTensorTestBase):
-    def _create_model(self, device_mesh=None):
-        dummy_model = TestDummyModel()
+class ModelType(Enum):
+    FSDP = auto()
+    HSDP = auto()
+    FSDP_TP = auto()
 
-        model = FSDP(dummy_model.cuda(), device_mesh=device_mesh, use_orig_params=True)
+
+class TestFSDP(DTensorTestBase):
+    def _create_model(self, compile, model_type):
+        dummy_model = TestDummyModel().cuda()
+
+        assert model_type in ModelType, f"{model_type} is not supported."
+        if model_type == ModelType.FSDP:
+            device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+            model = FSDP(
+                dummy_model,
+                device_mesh=device_mesh,
+                use_orig_params=True,
+            )
+        elif model_type == ModelType.HSDP:
+            device_mesh = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            model = FSDP(
+                dummy_model,
+                device_mesh=device_mesh,
+                use_orig_params=True,
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            )
+        elif model_type == ModelType.FSDP_TP:
+            mesh_2d = init_device_mesh(
+                self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            )
+            tp_mesh = mesh_2d["tp"]
+            dp_mesh = mesh_2d["dp"]
+            model = parallelize_module(dummy_model, tp_mesh, PairwiseParallel())
+            model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
+
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
+
+        if compile:
+            model = torch.compile(model)
+
         model(model.get_input()).sum().backward()
         optim.step()
 
@@ -57,29 +96,28 @@ class TestFSDP(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_e2e(self):
-        checkpoint_dir = self.temp_dir
-
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(device_mesh)
-
+    @parametrize("compile", [True, False])
+    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
+    def test_e2e(self, compile, model_type):
+        # first create and save a checkpoint
+        model, optim = self._create_model(compile, model_type)
         model_state_dict_0, optim_state_dict = get_state_dict(model, optimizers=optim)
+
         DCP.save_state_dict(
             state_dict={"model": model_state_dict_0, "optimizer": optim_state_dict},
-            storage_writer=DCP.FileSystemWriter(checkpoint_dir),
+            storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
         # load the checkpoint, starting with a new model
-        model, optim = self._create_model(device_mesh)
-
+        model, optim = self._create_model(compile, model_type)
         model_state_dict_1, optim_state_dict = get_state_dict(model, optimizers=optim)
 
-        # sanity check, since we have not done any loading, the models should be different
+        # sanity check, since we have not done any loading, state dicts should differ
         assert not self._equal_state_dict(model_state_dict_0, model_state_dict_1)
 
         DCP.load_state_dict(
             {"model": model_state_dict_1, "optimizer": optim_state_dict},
-            storage_reader=DCP.FileSystemReader(checkpoint_dir),
+            storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
         set_state_dict(
             model,
@@ -88,9 +126,10 @@ class TestFSDP(DTensorTestBase):
             optim_state_dict=optim_state_dict,
         )
 
-        # model state dict should be the same after loading
+        # state dict should be the same following loading
         assert self._equal_state_dict(model_state_dict_0, model_state_dict_1)
 
 
+instantiate_parametrized_tests(TestFSDP)
 if __name__ == "__main__":
     run_tests()
