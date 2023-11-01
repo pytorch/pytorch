@@ -50,8 +50,8 @@ def try_import_cutlass() -> bool:
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
 
-    cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "python/cutlass_library"
+    cutlass_py_full_path = os.path.abspath(
+        os.path.join(inductor_cuda_config.cutlass_dir, "python/cutlass_library")
     )
     tmp_cutlass_py_full_path = os.path.abspath(
         os.path.join(cache_dir(), "torch_cutlass_library")
@@ -68,6 +68,7 @@ def try_import_cutlass() -> bool:
                     cutlass_py_full_path
                 ), f"Symlink at {dst_link} does not point to {cutlass_py_full_path}"
             else:
+                os.makedirs(tmp_cutlass_py_full_path, exist_ok=True)
                 os.symlink(cutlass_py_full_path, dst_link)
             sys.path.append(tmp_cutlass_py_full_path)
         try:

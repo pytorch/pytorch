@@ -236,7 +236,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
                 )
         else:
             ops_evt = []
-        log.warning(
+        log.debug(
             "Added %d cutlass gemm configs and %d fuseable gemm configs.",
             len(ops),
             len(ops_evt),
