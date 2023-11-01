@@ -94,6 +94,19 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res, _ = fn(input)
         self.assertFalse(res)
 
+    def test_torch_function_state_nested(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                with torch._C.DisableTorchFunctionSubclass():
+                    x = x + 1
+                # Should reset to the outer state (disabled) after exiting ctx manager
+                return torch._C._is_torch_function_enabled(), torch.add(x, 1.0)
+
+        input = torch.ones(2, 2)
+        res, _ = fn(input)
+        self.assertFalse(res)
+
     def test_torch_function_state_tracing(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
