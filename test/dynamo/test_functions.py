@@ -1925,6 +1925,37 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
+    def test_triton_kernel_caching(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def add_in_loop(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            for i in range(4):
+                x = add_in_loop(x, y)
+            return x
+
+        t1 = torch.ones(5, device="cuda")
+        t2 = torch.ones(5, device="cuda")
+
+        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        self.assertEqual(test, torch.tensor([5.0, 5.0, 5.0, 5.0, 5.0], device="cuda"))
+        # Enable after fixing
+        # self.assertTrue("add_kernel_autotuned_1.run" not in code)
+
+    @requires_cuda()
+    @requires_triton()
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
