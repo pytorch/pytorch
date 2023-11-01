@@ -20,6 +20,7 @@ import torch
 
 from torch.multiprocessing.reductions import ForkingPickler
 
+from .base import _register_tensor_class
 
 class MemoryMappedTensor(torch.Tensor):
     _filename: str | Path
@@ -273,3 +274,4 @@ def reduce_memmap(memmap_tensor):
 
 
 ForkingPickler.register(MemoryMappedTensor, reduce_memmap)
+_register_tensor_class(MemoryMappedTensor)

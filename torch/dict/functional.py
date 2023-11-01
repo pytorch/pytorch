@@ -5,8 +5,9 @@ import warnings
 from typing import TypeVar, Sequence
 
 import torch
-from .base import TensorDict, _is_tensor_collection
+from .base import _is_tensor_collection
 from .utils import _shape, DeviceType, _check_keys
+from .tensordict import TensorDict
 
 T = TypeVar("T", bound="TensorDictBase")
 

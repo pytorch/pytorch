@@ -7,32 +7,26 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
-from numbers import Number
-from textwrap import indent
-
-import math
 import time
-
-import warnings
 from collections import defaultdict
 from collections.abc import KeysView
 from copy import copy
 from functools import wraps
 from importlib import import_module
+from numbers import Number
+from textwrap import indent
 from typing import Any, Callable, List, Sequence, Tuple, Union, \
-    Iterator, TypeVar
+    Iterator, TypeVar, OrderedDict
 
+import math
 import numpy as np
-import torch
-from functorch import dim as ftdim
-
 from packaging.version import parse
-from torch import Tensor
-
-
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 
-from torch.dict._memmap import MemoryMappedTensor
+import torch
+from torch import Tensor
+from torch._C import _disabled_torch_function_impl
+from torch.nn.parameter import _ParameterMeta
 
 T = TypeVar("T", bound="TensorDictBase")
 
@@ -58,90 +52,6 @@ def _sub_index(tensor: torch.Tensor, idx: IndexType) -> torch.Tensor:
         idx1 = idx[1:]
         return _sub_index(_sub_index(tensor, idx0), idx1)
     return tensor[idx]
-
-
-def _getitem_batch_size(batch_size, index):
-    """Given an input shape and an index, returns the size of the resulting indexed tensor.
-
-    This function is aimed to be used when indexing is an
-    expensive operation.
-    Args:
-        shape (torch.Size): Input shape
-        items (index): Index of the hypothetical tensor
-
-    Returns:
-        Size of the resulting object (tensor or tensordict)
-
-    Examples:
-        >>> idx = (None, ..., None)
-        >>> torch.zeros(4, 3, 2, 1)[idx].shape
-        torch.Size([1, 4, 3, 2, 1, 1])
-        >>> _getitem_batch_size([4, 3, 2, 1], idx)
-        torch.Size([1, 4, 3, 2, 1, 1])
-    """
-    if not isinstance(index, tuple):
-        if isinstance(index, int):
-            return batch_size[1:]
-        if isinstance(index, slice) and index == slice(None):
-            return batch_size
-        index = (index,)
-    # index = convert_ellipsis_to_idx(index, batch_size)
-    # broadcast shapes
-    shapes_dict = {}
-    look_for_disjoint = False
-    disjoint = False
-    bools = []
-    for i, idx in enumerate(index):
-        boolean = False
-        if isinstance(idx, (range, list)):
-            shape = len(idx)
-        elif isinstance(idx, (torch.Tensor, np.ndarray)):
-            if idx.dtype == torch.bool or idx.dtype == np.dtype("bool"):
-                shape = torch.Size([idx.sum()])
-                boolean = True
-            else:
-                shape = idx.shape
-        elif isinstance(idx, slice):
-            look_for_disjoint = not disjoint and (len(shapes_dict) > 0)
-            shape = None
-        else:
-            shape = None
-        if shape is not None:
-            if look_for_disjoint:
-                disjoint = True
-            shapes_dict[i] = shape
-        bools.append(boolean)
-    bs_shape = None
-    if shapes_dict:
-        bs_shape = torch.broadcast_shapes(*shapes_dict.values())
-    out = []
-    count = -1
-    for i, idx in enumerate(index):
-        if idx is None:
-            out.append(1)
-            continue
-        count += 1 if not bools[i] else idx.ndim
-        if i in shapes_dict:
-            if bs_shape is not None:
-                if disjoint:
-                    # the indices will be put at the beginning
-                    out = list(bs_shape) + out
-                else:
-                    # if there is a single tensor or similar, we just extend
-                    out.extend(bs_shape)
-                bs_shape = None
-            continue
-        elif isinstance(idx, (int, ftdim.Dim)):
-            # could be spared for efficiency
-            continue
-        elif isinstance(idx, slice):
-            batch = batch_size[count]
-            out.append(len(range(*idx.indices(batch))))
-    count += 1
-    if batch_size[count:]:
-        out.extend(batch_size[count:])
-    return torch.Size(out)
-
 
 
 def convert_ellipsis_to_idx(
@@ -175,14 +85,19 @@ def convert_ellipsis_to_idx(
         idx = (...,)
 
     num_ellipsis = sum(_idx is Ellipsis for _idx in idx)
-    if num_dims < (len(idx) - num_ellipsis - sum(item is None for item in idx)):
-        raise RuntimeError("Not enough dimensions in TensorDict for index provided.")
+    if num_dims < (
+        len(idx) - num_ellipsis - sum(item is None for item in idx)):
+        raise RuntimeError(
+            "Not enough dimensions in TensorDict for index provided."
+        )
 
     start_pos, after_ellipsis_length = None, 0
     for i, item in enumerate(idx):
         if item is Ellipsis:
             if start_pos is not None:
-                raise RuntimeError("An index can only have one ellipsis at most.")
+                raise RuntimeError(
+                    "An index can only have one ellipsis at most."
+                )
             else:
                 start_pos = i
         if item is not Ellipsis and start_pos is not None:
@@ -203,7 +118,7 @@ def convert_ellipsis_to_idx(
     ellipsis_end = start_pos + ellipsis_length
     new_index += (slice(None),) * (ellipsis_end - ellipsis_start)
 
-    new_index += idx[start_pos + 1 : start_pos + 1 + after_ellipsis_length]
+    new_index += idx[start_pos + 1: start_pos + 1 + after_ellipsis_length]
 
     if len(new_index) != num_dims:
         raise RuntimeError(
@@ -405,10 +320,10 @@ def _is_shared(tensor: torch.Tensor) -> bool:
         if torch._C._functorch.is_batchedtensor(tensor):
             return None
         return tensor.is_shared()
+    from functorch import dim as ftdim
     if isinstance(tensor, ftdim.Tensor):
         return None
     else:
-        print(type(tensor))
         return tensor.is_shared()
 
 
@@ -615,9 +530,11 @@ class implement_for:
 
     @staticmethod
     def check_version(version, from_version, to_version):
-        return (from_version is None or parse(version) >= parse(from_version)) and (
-            to_version is None or parse(version) < parse(to_version)
-        )
+        return (from_version is None or parse(version) >= parse(
+            from_version
+        )) and (
+                   to_version is None or parse(version) < parse(to_version)
+               )
 
     @staticmethod
     def get_class_that_defined_method(f):
@@ -666,7 +583,11 @@ class implement_for:
             try:
                 # check that backends don't conflict
                 version = self.import_module(self.module_name)
-                if self.check_version(version, self.from_version, self.to_version):
+                if self.check_version(
+                    version,
+                    self.from_version,
+                    self.to_version
+                ):
                     do_set = True
                 if not do_set:
                     return implementations[func_name]
@@ -676,7 +597,11 @@ class implement_for:
         else:
             try:
                 version = self.import_module(self.module_name)
-                if self.check_version(version, self.from_version, self.to_version):
+                if self.check_version(
+                    version,
+                    self.from_version,
+                    self.to_version
+                ):
                     do_set = True
             except ModuleNotFoundError:
                 return unsupported
@@ -739,8 +664,6 @@ def cache(fun):
         >>> print(timeit.timeit("set(td.all_keys())", globals={'td': td}))
         0.88
     """
-    from ._memmap import MemoryMappedTensor as MemoryMappedTensor
-
     @wraps(fun)
     def newfun(_self: "TensorDictBase", *args, **kwargs):
         if not _self.is_locked:
@@ -752,7 +675,7 @@ def cache(fun):
         key = _make_cache_key(args, kwargs)
         if key not in cache:
             out = fun(_self, *args, **kwargs)
-            if not isinstance(out, (Tensor, MemoryMappedTensor)):
+            if not isinstance(out, Tensor):
                 # we don't cache tensors to avoid filling the mem and / or
                 # stacking them from their origin
                 cache[key] = out
@@ -896,6 +819,8 @@ def _parse_to(*args, **kwargs):
         elif len(dtypes) == 1:
             dtype = list(dtypes)[0]
     return device, dtype, non_blocking, convert_to_format, batch_size
+
+
 class _ErrorInteceptor:
     """Context manager for catching errors and modifying message.
 
@@ -930,6 +855,7 @@ class _ErrorInteceptor:
             self.exc_msg is None or self.exc_msg in str(exc_value)
         ):
             exc_value.args = (self._add_key_to_error_msg(str(exc_value)),)
+
 
 def _nested_keys_to_dict(keys: Iterator[NestedKey]) -> dict[str, Any]:
     nested_keys = {}
@@ -980,6 +906,8 @@ def _get_leaf_tensordict(
             tensordict = tensordict.get(key[0])
         key = key[1:]
     return tensordict, key[0]
+
+
 def assert_allclose_td(
     actual: T,
     expected: T,
@@ -990,7 +918,9 @@ def assert_allclose_td(
 ) -> bool:
     """Compares two tensordicts and raise an exception if their content does not match exactly."""
     from torch.dict.base import _is_tensor_collection
-    if not _is_tensor_collection(actual.__class__) or not _is_tensor_collection(
+    if not _is_tensor_collection(
+        actual.__class__
+    ) or not _is_tensor_collection(
         expected.__class__
     ):
         raise TypeError("assert_allclose inputs must be of TensorDict type")
@@ -1020,6 +950,7 @@ def assert_allclose_td(
             input1, input2, rtol=rtol, atol=atol, equal_nan=equal_nan, msg=msg
         )
     return True
+
 
 def _get_repr(tensor: Tensor) -> str:
     s = ", ".join(
@@ -1084,6 +1015,7 @@ def _td_fields(td: T, keys=None) -> str:
         4 * " ",
     )
 
+
 def _check_keys(
     list_of_tensordicts: Sequence["TensorDictBase"],
     strict: bool = False,
@@ -1134,6 +1066,7 @@ def _expand_to_match_shape(
         )
         return out
 
+
 def _set_max_batch_size(source: T, batch_dims=None):
     """Updates a tensordict with its maximium batch size."""
     tensor_data = list(source.values())
@@ -1154,7 +1087,9 @@ def _set_max_batch_size(source: T, batch_dims=None):
             source.batch_size = batch_size
             return
         for tensor in tensor_data[1:]:
-            if tensor.dim() <= curr_dim or tensor.size(curr_dim) != curr_dim_size:
+            if tensor.dim() <= curr_dim or tensor.size(
+                curr_dim
+            ) != curr_dim_size:
                 source.batch_size = batch_size
                 return
         if batch_dims is None or len(batch_size) < batch_dims:
@@ -1173,11 +1108,12 @@ def _clone_value(value: "CompatibleType", recurse: bool) -> "CompatibleType":
 
 
 def _is_number(item):
-    if isinstance(item, (Number, ftdim.Dim)):
-        return True
     if isinstance(item, Tensor) and item.ndim == 0:
         return True
     if isinstance(item, np.ndarray) and item.ndim == 0:
+        return True
+    from functorch import dim as ftdim
+    if isinstance(item, (Number, ftdim.Dim)):
         return True
     return False
 
@@ -1199,10 +1135,13 @@ def _broadcast_tensors(index):
         if isinstance(tensor, (range, list, np.ndarray, torch.Tensor))
     }
     if tensors:
-        shape = torch.broadcast_shapes(*[tensor.shape for tensor in tensors.values()])
+        shape = torch.broadcast_shapes(
+            *[tensor.shape for tensor in tensors.values()]
+        )
         tensors = {i: tensor.expand(shape) for i, tensor in tensors.items()}
         index = tuple(
-            idx if i not in tensors else tensors[i] for i, idx in enumerate(index)
+            idx if i not in tensors else tensors[i] for i, idx in
+            enumerate(index)
         )
     return index
 
@@ -1227,11 +1166,13 @@ def _get_shape_from_args(*args, kwarg_name='size', **kwargs):
         if len(kwargs):
             raise TypeError(
                 f"Either the kwarg `{kwarg_name}`, a single shape argument or a sequence of integers can be passed. Got args={args} and kwargs={kwargs}."
-                )
+            )
     else:
         size = kwargs.pop(kwarg_name, None)
         if size is None:
-            raise TypeError(f"Either the kwarg `{kwarg_name}`, a single shape argument or a sequence of integers can be passed. Got args={args} and kwargs={kwargs}.")
+            raise TypeError(
+                f"Either the kwarg `{kwarg_name}`, a single shape argument or a sequence of integers can be passed. Got args={args} and kwargs={kwargs}."
+            )
     return size
 
 
@@ -1262,3 +1203,49 @@ def unravel_key(key):
     if len(result) == 1:
         return result[0]
     return result
+
+
+class Buffer(torch.Tensor, metaclass=_ParameterMeta):
+    r"""A kind of Tensor that is to be considered a module buffer.
+
+    Args:
+        data (Tensor): buffer tensor.
+        requires_grad (bool, optional): if the buffer requires gradient. See
+            :ref:`locally-disable-grad-doc` for more details. Default: `False`
+    """
+
+    def __new__(cls, data=None, requires_grad=False):
+        if data is None:
+            data = torch.empty(0)
+        if type(data) is torch.Tensor or type(data) is Buffer:
+            # For ease of BC maintenance, keep this path for standard Tensor.
+            # Eventually (tm), we should change the behavior for standard Tensor to match.
+            return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+        # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
+        t = data.detach().requires_grad_(requires_grad)
+        t._is_buffer = True
+        return t
+
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(
+                self.data.clone(memory_format=torch.preserve_format),
+                self.requires_grad
+            )
+            memo[id(self)] = result
+            return result
+
+    def __repr__(self):
+        return "Buffer containing:\n" + super(Buffer, self).__repr__()
+
+    def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        return (
+            torch._utils._rebuild_parameter,
+            (self.data, self.requires_grad, OrderedDict()),
+        )
+
+    __torch_function__ = _disabled_torch_function_impl

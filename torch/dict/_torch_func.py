@@ -14,16 +14,9 @@ from typing import (
 
 import torch
 from torch import Tensor
-from .base import TensorDictBase, TensorDict, NO_DEFAULT
+from .base import TensorDictBase, NO_DEFAULT
+from .tensordict import TensorDict
 from .utils import DeviceType, _check_keys, _ErrorInteceptor
-
-from torch.jit._shape_functions import infer_size_impl
-
-from torch._C._functorch import (
-            _add_batch_dim,
-            _remove_batch_dim,
-            is_batchedtensor,
-        )
 
 
 def implements_for_td(torch_function: Callable) -> Callable[
@@ -258,7 +251,7 @@ def _cat(
                         torch.cat(
                             [td.get(key) for td in list_of_tensordicts],
                             dim
-                            )
+                        )
                     )
         return out
 
@@ -306,7 +299,7 @@ def _stack(
                 )
         return TensorDict(
             out,
-            batch_size=torch.Size(batch_size),
+            batch_size=torch.Size(result_batch_size),
             device=device,
             _run_checks=False,
         )
