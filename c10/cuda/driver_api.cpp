@@ -36,7 +36,7 @@ void* DriverAPI::get_nvml_handle() {
   static c10::once_flag once;
   static void* handle_1;
   c10::call_once(
-      once, [] {handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);});
+      once, [] { handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY); });
   return handle_1;
 }
 
