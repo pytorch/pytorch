@@ -346,7 +346,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_5
       build_environment: linux-binary-manywheel
@@ -367,7 +367,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Setup ROCm
@@ -407,7 +407,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -424,7 +424,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_5
     secrets:
@@ -446,7 +446,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_6
       build_environment: linux-binary-manywheel
@@ -467,7 +467,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
     steps:
       - name: Setup ROCm
@@ -507,7 +507,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -524,7 +524,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-rocm5_6
     secrets:
@@ -844,7 +844,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_5
       build_environment: linux-binary-manywheel
@@ -865,7 +865,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm
@@ -905,7 +905,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -922,7 +922,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_5
     secrets:
@@ -944,7 +944,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_6
       build_environment: linux-binary-manywheel
@@ -965,7 +965,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
     steps:
       - name: Setup ROCm
@@ -1005,7 +1005,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1022,7 +1022,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-rocm5_6
     secrets:
@@ -1342,7 +1342,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_5
       build_environment: linux-binary-manywheel
@@ -1363,7 +1363,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
@@ -1403,7 +1403,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1420,7 +1420,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_5
     secrets:
@@ -1442,7 +1442,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_6
       build_environment: linux-binary-manywheel
@@ -1463,7 +1463,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Setup ROCm
@@ -1503,7 +1503,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1520,7 +1520,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-rocm5_6
     secrets:
@@ -1840,7 +1840,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_5
       build_environment: linux-binary-manywheel
@@ -1861,7 +1861,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Setup ROCm
@@ -1901,7 +1901,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1918,7 +1918,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_5
     secrets:
@@ -1940,7 +1940,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_6
       build_environment: linux-binary-manywheel
@@ -1961,7 +1961,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Setup ROCm
@@ -2001,7 +2001,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -2018,7 +2018,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-rocm5_6
     secrets:

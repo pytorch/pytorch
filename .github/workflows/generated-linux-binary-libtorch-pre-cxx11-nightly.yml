@@ -792,7 +792,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_5-shared-with-deps-pre-cxx11
@@ -814,7 +814,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -855,7 +855,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -872,7 +872,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_5-shared-with-deps-pre-cxx11
@@ -895,7 +895,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_5-static-with-deps-pre-cxx11
@@ -917,7 +917,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -958,7 +958,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -975,7 +975,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_5-static-with-deps-pre-cxx11
@@ -998,7 +998,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-shared-with-deps-pre-cxx11
@@ -1020,7 +1020,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -1061,7 +1061,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1078,7 +1078,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-shared-with-deps-pre-cxx11
@@ -1101,7 +1101,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-static-with-deps-pre-cxx11
@@ -1123,7 +1123,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
     steps:
@@ -1164,7 +1164,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+          docker-image: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1181,7 +1181,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
       build_name: libtorch-rocm5_6-static-with-deps-pre-cxx11
