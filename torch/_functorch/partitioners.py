@@ -79,7 +79,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         elif node.op == 'placeholder':
             env[node] = InvalidNode
         elif node.op == 'call_function':
-            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
             if any(all_args):
                 env[node] = InvalidNode
@@ -124,7 +124,7 @@ def _is_fwd_seed_offset(node):
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
+    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs

@@ -15,9 +15,9 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
-import torch.utils._pytree as pytree
 from torch._C import DispatchKeySet, DispatchKey
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
@@ -459,8 +459,8 @@ class TestPythonRegistration(TestCase):
         if mutable_result is None:
             flat_mutable_result = []
         else:
-            flat_mutable_result, _ = pytree.tree_flatten(mutable_result)
-        flat_functional_result, _ = pytree.tree_flatten(functional_result)
+            flat_mutable_result = pytree.tree_leaves(mutable_result)
+        flat_functional_result = pytree.tree_leaves(functional_result)
         assert len(flat_functional_result) > len(flat_mutable_result)
         self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
 
@@ -2096,9 +2096,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
-    return ((sym_size, sym_size_1), (sym_size, sym_size_1))""")
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
+    return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""")
 
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
@@ -2196,16 +2196,16 @@ class TestWrapperSubclassAliasing(TestCase):
 
         result_test = op(*args_subclass, **kwargs_subclass)
 
-        args_ref_flat, _ = pytree.tree_flatten((args, kwargs))
+        args_ref_flat = pytree.arg_tree_leaves(*args, **kwargs)
         args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
 
-        args_test_flat, _ = pytree.tree_flatten((args_subclass, kwargs_subclass))
+        args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))
         args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
 
-        result_ref_flat, _ = pytree.tree_flatten(result_ref)
+        result_ref_flat = pytree.tree_leaves(result_ref)
         result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
 
-        result_test_flat, _ = pytree.tree_flatten(result_test)
+        result_test_flat = pytree.tree_leaves(result_test)
         result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
