@@ -98,12 +98,12 @@ class SymNode:
             self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
 
-        from torch.fx.experimental.validator import translation_validation_enabled
-
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if translation_validation_enabled() else None
+        self.fx_node = (
+            fx_node if self.shape_env._translation_validation_enabled else None
+        )
 
     def with_shape_env(self, shape_env: "ShapeEnv") -> "SymNode":
         return SymNode(
