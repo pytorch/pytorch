@@ -31,13 +31,7 @@ import torch._logging
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    Source,
-    TracingContext,
-)
+from torch._guards import Checkpointable, Guard, Source, TracingContext
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
@@ -112,23 +106,16 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 class OutputGraphState(NamedTuple):
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
-    guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
-            if k == "guard_state":
-                r = self.guard_state.diff(other.guard_state)
-                if r is not None:
-                    return r
-                continue
-            elif k == "side_effects":
+            if k == "side_effects":
                 r = self.side_effects.diff(other.side_effects)
                 if r is not None:
                     return r
@@ -139,11 +126,6 @@ class OutputGraphState(NamedTuple):
             if sv != ov:
                 return f"{prefix}{k} mismatch: {sv} != {ov}"
         return None
-
-    # Back compat .guards api
-    @property
-    def guards(self):
-        return self.guard_state.dynamo_guards
 
 
 @functools.lru_cache(None)
@@ -502,20 +484,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.param_name_to_source is not None
-        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         module_state = self.tracing_context.module_context.copy_graphstate()
         global_state = self.tracing_context.global_context.copy_graphstate()
         state = OutputGraphState(
             dict(self.input_source_to_var),
             list(self.tracked_fakes),
-            guards_graph_state,
             module_state,
             list(self.register_finalizer_fns),
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
         )
         self.timestamp += 1
         return state
@@ -525,16 +504,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         (
             self.input_source_to_var,
             self.tracked_fakes,
-            guards_state,
             module_state,
             self.register_finalizer_fns,
             global_state,
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
         ) = state
-        self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
         self.tracing_context.global_context.restore_graphstate(global_state)
 
