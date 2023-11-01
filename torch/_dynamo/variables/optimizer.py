@@ -36,9 +36,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
-            if "capturable" in group:
-                group["capturable"] = True
-
             for p in group["params"]:
                 mark_static_address(p, guard=False)
 
