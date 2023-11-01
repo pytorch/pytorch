@@ -29,7 +29,6 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        # torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
         self.net3 = nn.Linear(32, 64)
