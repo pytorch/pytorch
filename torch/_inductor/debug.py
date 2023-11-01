@@ -306,9 +306,10 @@ class DebugContext:
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
+        debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
-                get_debug_dir(),
+                debug_dir,
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
