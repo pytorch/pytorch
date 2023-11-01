@@ -702,7 +702,7 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 raise
 
             soft_fail = isinstance(e, Unsupported)
-            if not config.suppress_errors and not soft_fail:
+            if not soft_fail:
                 raise
 
             # Suppress the error.  NB: It's very important to do the
