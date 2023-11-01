@@ -171,17 +171,73 @@ def typecast_tensors(tensors, target_dtype, casting):
     return tuple(typecast_tensor(t, target_dtype, casting) for t in tensors)
 
 
+############ 
+seq = (list, tuple)
+
+def is_highD_ndarray(obj):
+    from ._ndarray import ndarray
+
+    return isinstance(obj, ndarray) and obj.shape != ()
+
+
+def is_1D_list(obj):
+    return (isinstance(obj, seq) and
+            not any(isinstance(elem, seq) or is_highD_ndarray(elem) for elem in obj)
+            )
+
+def _oneD_to_tens(lst, dtype):
+    """Convert a 1D list of scalars or 0D tensors to a tensor.
+
+    Bend over backwards to avoid calling `.item()`.
+    """
+    if lst == [] or lst == ():
+        return torch.Tensor([])
+
+    from ._ndarray import ndarray
+
+    lst = [elem.tensor if isinstance(elem, ndarray) else elem for elem in lst]
+
+ #   breakpoint()
+
+#    if lst != []:
+#        # XXX: strange @ ndarray_to_tensors
+#        lst = ndarrays_to_tensors(*lst)
+#        if isinstance(lst, seq):
+#            lst = list(lst)
+
+    assert isinstance(lst, seq)
+    assert not isinstance(lst[0], seq)
+    parts, idx = [], 0
+    for j, elem in enumerate(lst):
+        if isinstance(elem, torch.Tensor):
+            if idx != j:
+                parts.append(torch.as_tensor(lst[idx:j], dtype=dtype))
+            idx=j
+    parts.append(torch.as_tensor(lst[idx:], dtype=dtype))
+    return torch.cat(parts)
+
+
+def _to_tensor(obj, dtype):
+    from ._ndarray import ndarray
+
+    if isinstance(obj, ndarray):
+        obj = obj.tensor
+
+    if isinstance(obj, torch.Tensor):
+        return obj
+    elif _dtypes_impl.is_scalar_or_symbolic(obj):
+        return torch.as_tensor(obj, dtype=dtype)
+    elif is_1D_list(obj):
+        return _oneD_to_tens(obj, dtype)
+    else:
+      # breakpoint()
+        return torch.stack([_to_tensor(elem, dtype) for elem in obj])
+########################
+
+
 def _try_convert_to_tensor(obj, dtype=None):
     try:
-        try:
-            tensor = torch.as_tensor(obj, dtype=dtype)
-        except (TypeError, ValueError):
-            # is `obj` a list of tensors with nelem>1 ? E.g.:
-            # torch.as_tensor([torch.arange(3), torch.arange(3)])
-            # NB: as_tensor emits a ValueError for floating-point dtypes
-            #     and a TypeEror for integer dtypes
-            tensor = torch.stack(obj)
-            tensor = cast_if_needed(tensor, dtype)
+        tensor = _to_tensor(obj, dtype) #torch.as_tensor(obj, dtype=dtype)
     except Exception as e:
         mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
         raise NotImplementedError(mesg)  # noqa: TRY200

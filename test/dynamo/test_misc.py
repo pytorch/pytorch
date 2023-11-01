@@ -1755,7 +1755,8 @@ utils_device.CURRENT_DEVICE == None""",
                 (1, 2),
                 (np.arange(3), np.arange(3) + 5),
                 (np.arange(3, dtype=float), np.arange(3, dtype=float) + 5),
-                (np.array([1, 1e12]), np.array([2, 1e12]))
+                (np.array([1, 1e12]), np.array([2, 1e12])),
+                (np.float64(1), np.float64(2)),
                 # (1, np.array(2)),      # XXX: rework _ndarray.array _tolist logic
                 # ([1, 2], [3, np.array(4)])
             ]

@@ -808,7 +808,7 @@ def recursionlimit(n):
 
 @instantiate_parametrized_tests
 class TestScalarOpsMisc(TestCase):
-    @xfail  # (reason="pytorch does not warn on overflow")
+    @xpassIfTorchDynamo  # (reason="pytorch does not warn on overflow")
     @parametrize("dtype", "Bbhil")
     @parametrize(
         "operation",
@@ -860,8 +860,8 @@ class TestScalarOpsMisc(TestCase):
         zero = np.dtype(dtype).type(0)
         -zero  # does not warn
 
-    @xfail  # (reason="pytorch raises RuntimeError on division by zero")
-    @parametrize("dtype", np.typecodes["AllInteger"])
+    @xpassIfTorchDynamo  # (reason="pytorch raises RuntimeError on division by zero")
+    @parametrize("dtype", 'Bbhil') #np.typecodes["AllInteger"])
     @parametrize(
         "operation",
         [

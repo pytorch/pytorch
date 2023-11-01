@@ -1191,7 +1191,7 @@ class TestNonIntegerArrayLike(TestCase):
 class TestMultipleEllipsisError(TestCase):
     """An index can only have a single ellipsis."""
 
-    @xfail  # (
+    @xpassIfTorchDynamo  # (
     #    reason=(
     #        "torch currently consumes multiple ellipsis, no bother raising "
     #        "here. See https://github.com/pytorch/pytorch/issues/59787#issue-917252204"

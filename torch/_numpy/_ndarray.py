@@ -471,6 +471,8 @@ class ndarray:
         return self.tensor.__dlpack_device__()
 
 
+# ### array(...) helpers
+
 def _tolist(obj):
     """Recursively convert tensors into lists."""
     a1 = []
@@ -506,8 +508,8 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
         return obj
 
     # lists of ndarrays: [1, [2, 3], ndarray(4)] convert to lists of lists
-    if isinstance(obj, (list, tuple)):
-        obj = _tolist(obj)
+ #   if isinstance(obj, (list, tuple)):
+ #       obj = _tolist(obj)
 
     # is obj an ndarray already?
     if isinstance(obj, ndarray):

@@ -1436,7 +1436,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="clamp not supported for complex")
+    @xpassIfTorchDynamo  # (reason="clamp not supported for complex")
     def test_clip_complex(self):
         # Address Issue gh-5354 for clipping complex arrays
         # Test native complex input without explicit min/max
@@ -1835,7 +1835,7 @@ class TestClip(TestCase):
         actual = np.clip(arr, amin, amax)
         assert_equal(actual, expected)
 
-    @xfail  # (reason="np.maximum(..., dtype=) needs implementing")
+    @xpassIfTorchDynamo  # (reason="np.maximum(..., dtype=) needs implementing")
     @given(
         data=st.data(),
         arr=hynp.arrays(

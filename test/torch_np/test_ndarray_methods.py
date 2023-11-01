@@ -662,21 +662,42 @@ class TestIter(TestCase):
         assert_equal(lst[0], np.arange(5))
 
 
+
+cases = [  # input, expected
+    ([], np.array([])),
+    (1, np.array(1)),
+    ([1, 2, 3], np.array([1, 2, 3])), 
+    ([np.array(1), np.array(2)], np.array([1, 2])),
+    ([1, np.array(2), 3], np.array([1, 2, 3])), 
+    ([1, np.array(2), np.array(3), 4], np.array([1, 2, 3, 4])),
+    ([np.array(1), 2, 3, np.array(4), 5], np.array([1, 2, 3, 4, 5])),
+
+    ([np.float64(1), np.float64(2)], np.array([1., 2.])),
+
+    ([[1, 2], [3, 4]], np.array([[1, 2], [3, 4]])),
+    ([[1, 2], [3, np.array(4)]], np.array([[1, 2], [3, 4]])),
+
+    ([[1, 2], np.array([3, 4])], np.array([[1, 2], [3, 4]])),
+    ([np.array([1, 2]), np.array([3, 4])], np.array([[1, 2], [3, 4]])),
+    ([np.array([1, 2]), [3, 4]],  np.array([[1, 2], [3, 4]])),
+
+    ([[ [np.array([1, 2])], [[3, 4]] ]], np.array([[ [[1, 2]], [[3, 4]] ]])),
+    ([np.array([[1, 2], [3, 4]]), [[5, 6], [7, 8]]], np.array([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])),
+]
+
+
+@instantiate_parametrized_tests
 class TestArray(TestCase):
-    def test_nested_0D(self):
-        a = np.array([1, 2, np.array(3)])
-        assert_equal(a, [1, 2, 3])
 
-        a = np.array([[1, 2], [3, np.array(4)]])
-        assert_equal(a, [[1, 2], [3, 4]])
+    @parametrize("inputs, expected", cases)
+    def test_array_ctor(self, inputs, expected):
+    #    breakpoint()
+        res = np.array(inputs)
+        assert_equal(res, expected)
 
-    def test_array_of_arrays_0D(self):
-        a = np.array([np.array(1), np.array(2)])
-        assert_equal(a, [1, 2])
-
-    def test_array_of_arrays_1D(self):
-        a = np.array([np.array([1, 2]), np.array([3, 4])])
-        assert_equal(a, [[1, 2], [3, 4]])
+        if TEST_WITH_TORCHDYNAMO:
+            ref = np.asarray( numpy.array(inputs) )
+            assert_equal(res, ref)
 
 
 if __name__ == "__main__":

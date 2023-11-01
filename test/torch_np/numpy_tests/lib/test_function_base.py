@@ -844,13 +844,13 @@ class TestDiff(TestCase):
         assert_raises(np.AxisError, diff, x, append=0, axis=3)
 
 
-@xpassIfTorchDynamo  # (reason="TODO: implement")
 @instantiate_parametrized_tests
 class TestDelete(TestCase):
     def setUp(self):
         self.a = np.arange(5)
         self.nd_a = np.arange(5).repeat(2).reshape(1, 5, 2)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def _check_inverse_of_slicing(self, indices):
         a_del = delete(self.a, indices)
         nd_a_del = delete(self.nd_a, indices, axis=1)
@@ -859,6 +859,7 @@ class TestDelete(TestCase):
         xor = setxor1d(nd_a_del[0, :, 0], self.nd_a[0, indices, 0])
         assert_array_equal(xor, self.nd_a[0, :, 0], err_msg=msg)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_slices(self):
         lims = [-6, -2, 0, 1, 2, 4, 5]
         steps = [-3, -1, 1, 3]
@@ -868,6 +869,7 @@ class TestDelete(TestCase):
                     s = slice(start, stop, step)
                     self._check_inverse_of_slicing(s)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_fancy(self):
         self._check_inverse_of_slicing(np.array([[0, 1], [2, 1]]))
         with pytest.raises(IndexError):
@@ -893,6 +895,7 @@ class TestDelete(TestCase):
         self._check_inverse_of_slicing(0)
         self._check_inverse_of_slicing(-4)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_0d(self):
         a = np.array(1)
         with pytest.raises(np.AxisError):
@@ -900,6 +903,7 @@ class TestDelete(TestCase):
         with pytest.raises(TypeError):
             delete(a, [], axis="nonsense")
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_array_order_preserve(self):
         # See gh-7113
         k = np.arange(10).reshape(2, 5, order="F")
@@ -910,12 +914,14 @@ class TestDelete(TestCase):
         assert_equal(m.flags.c_contiguous, k.flags.c_contiguous)
         assert_equal(m.flags.f_contiguous, k.flags.f_contiguous)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_index_floats(self):
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([1.0, 2.0]))
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([], dtype=float))
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     @parametrize(
         "indexer", [subtest(np.array([1]), name="array([1])"), subtest([1], name="[1]")]
     )
@@ -928,6 +934,7 @@ class TestDelete(TestCase):
         nd_a_del = delete(self.nd_a, np.array([1]), axis=1)
         assert_equal(nd_a_del_int, nd_a_del)
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_single_item_array_non_int(self):
         # Special handling for integer arrays must not affect non-integer ones.
         # If `False` was cast to `0` it would delete the element:
@@ -1265,13 +1272,13 @@ class TestTrimZeros(TestCase):
         assert isinstance(res, list)
 
 
-@xpassIfTorchDynamo  # (reason="TODO: implement")
 class TestExtins(TestCase):
     def test_basic(self):
         a = np.array([1, 3, 2, 1, 2, 3, 3])
         b = extract(a > 1, a)
         assert_array_equal(b, [3, 2, 2, 3, 3])
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_place(self):
         # Make sure that non-np.ndarray objects
         # raise an error instead of doing nothing
@@ -1297,6 +1304,7 @@ class TestExtins(TestCase):
         place(a, [0, 1], "9")
         assert_array_equal(a, ["12", "9"])
 
+    @xpassIfTorchDynamo  # (reason="TODO: implement")
     def test_both(self):
         a = rand(10)
         mask = a > 0.5

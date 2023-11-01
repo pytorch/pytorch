@@ -2128,6 +2128,7 @@ class TestMultiDot(TestCase):
         assert out is ret
         assert_almost_equal(out, A.dot(B).dot(C).dot(D))
 
+    @xpassIfTorchDynamo  # (reason="_multi_dot_chain_order is from numpy only")
     def test_dynamic_programming_logic(self):
         # Test for the dynamic programming part
         # This test is directly taken from Cormen page 376.

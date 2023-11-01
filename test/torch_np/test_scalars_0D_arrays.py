@@ -63,6 +63,8 @@ class TestArrayScalars(TestCase):
         # Our scalars follow 0D array behavior (because they are 0D arrays)
         lst = [1, 2, 3]
 
+###        breakpoint()
+
         product = value * lst
         assert isinstance(product, np.ndarray)
         assert product.shape == (3,)

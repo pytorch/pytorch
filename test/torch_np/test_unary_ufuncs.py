@@ -13,136 +13,136 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestUnaryUfuncs(TestCase):
     def test_absolute(self):
-        assert_allclose(np.absolute(0.5), absolute(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.absolute(0.5).item(), absolute(0.5), atol=1e-14, check_dtype=False)
 
     def test_arccos(self):
-        assert_allclose(np.arccos(0.5), arccos(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arccos(0.5).item(), arccos(0.5), atol=1e-14, check_dtype=False)
 
     def test_arccosh(self):
-        assert_allclose(np.arccosh(1.5), arccosh(1.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arccosh(1.5).item(), arccosh(1.5), atol=1e-14, check_dtype=False)
 
     def test_arcsin(self):
-        assert_allclose(np.arcsin(0.5), arcsin(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arcsin(0.5).item(), arcsin(0.5), atol=1e-14, check_dtype=False)
 
     def test_arcsinh(self):
-        assert_allclose(np.arcsinh(0.5), arcsinh(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arcsinh(0.5).item(), arcsinh(0.5), atol=1e-14, check_dtype=False)
 
     def test_arctan(self):
-        assert_allclose(np.arctan(0.5), arctan(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arctan(0.5).item(), arctan(0.5), atol=1e-14, check_dtype=False)
 
     def test_arctanh(self):
-        assert_allclose(np.arctanh(0.5), arctanh(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.arctanh(0.5).item(), arctanh(0.5), atol=1e-14, check_dtype=False)
 
     def test_cbrt(self):
-        assert_allclose(np.cbrt(0.5), cbrt(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.cbrt(0.5).item(), cbrt(0.5), atol=1e-14, check_dtype=False)
 
     def test_ceil(self):
-        assert_allclose(np.ceil(0.5), ceil(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.ceil(0.5).item(), ceil(0.5), atol=1e-14, check_dtype=False)
 
     def test_conjugate(self):
         assert_allclose(
-            np.conjugate(0.5), conjugate(0.5), atol=1e-14, check_dtype=False
+            np.conjugate(0.5).item(), conjugate(0.5), atol=1e-14, check_dtype=False
         )
 
     def test_cos(self):
-        assert_allclose(np.cos(0.5), cos(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.cos(0.5).item(), cos(0.5), atol=1e-14, check_dtype=False)
 
     def test_cosh(self):
-        assert_allclose(np.cosh(0.5), cosh(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.cosh(0.5).item(), cosh(0.5), atol=1e-14, check_dtype=False)
 
     def test_deg2rad(self):
-        assert_allclose(np.deg2rad(0.5), deg2rad(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.deg2rad(0.5).item(), deg2rad(0.5), atol=1e-14, check_dtype=False)
 
     def test_degrees(self):
-        assert_allclose(np.degrees(0.5), degrees(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.degrees(0.5).item(), degrees(0.5), atol=1e-14, check_dtype=False)
 
     def test_exp(self):
-        assert_allclose(np.exp(0.5), exp(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.exp(0.5).item(), exp(0.5), atol=1e-14, check_dtype=False)
 
     def test_exp2(self):
-        assert_allclose(np.exp2(0.5), exp2(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.exp2(0.5).item(), exp2(0.5), atol=1e-14, check_dtype=False)
 
     def test_expm1(self):
-        assert_allclose(np.expm1(0.5), expm1(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.expm1(0.5).item(), expm1(0.5), atol=1e-14, check_dtype=False)
 
     def test_fabs(self):
-        assert_allclose(np.fabs(0.5), fabs(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.fabs(0.5).item(), fabs(0.5), atol=1e-14, check_dtype=False)
 
     def test_floor(self):
-        assert_allclose(np.floor(0.5), floor(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.floor(0.5).item(), floor(0.5), atol=1e-14, check_dtype=False)
 
     def test_isfinite(self):
-        assert_allclose(np.isfinite(0.5), isfinite(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.isfinite(0.5).item(), isfinite(0.5), atol=1e-14, check_dtype=False)
 
     def test_isinf(self):
-        assert_allclose(np.isinf(0.5), isinf(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.isinf(0.5).item(), isinf(0.5), atol=1e-14, check_dtype=False)
 
     def test_isnan(self):
-        assert_allclose(np.isnan(0.5), isnan(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.isnan(0.5).item(), isnan(0.5), atol=1e-14, check_dtype=False)
 
     def test_log(self):
-        assert_allclose(np.log(0.5), log(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.log(0.5).item(), log(0.5), atol=1e-14, check_dtype=False)
 
     def test_log10(self):
-        assert_allclose(np.log10(0.5), log10(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.log10(0.5).item(), log10(0.5), atol=1e-14, check_dtype=False)
 
     def test_log1p(self):
-        assert_allclose(np.log1p(0.5), log1p(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.log1p(0.5).item(), log1p(0.5), atol=1e-14, check_dtype=False)
 
     def test_log2(self):
-        assert_allclose(np.log2(0.5), log2(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.log2(0.5).item(), log2(0.5), atol=1e-14, check_dtype=False)
 
     def test_logical_not(self):
         assert_allclose(
-            np.logical_not(0.5), logical_not(0.5), atol=1e-14, check_dtype=False
+            np.logical_not(0.5).item(), logical_not(0.5), atol=1e-14, check_dtype=False
         )
 
     def test_negative(self):
-        assert_allclose(np.negative(0.5), negative(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.negative(0.5).item(), negative(0.5), atol=1e-14, check_dtype=False)
 
     def test_positive(self):
-        assert_allclose(np.positive(0.5), positive(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.positive(0.5).item(), positive(0.5), atol=1e-14, check_dtype=False)
 
     def test_rad2deg(self):
-        assert_allclose(np.rad2deg(0.5), rad2deg(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.rad2deg(0.5).item(), rad2deg(0.5), atol=1e-14, check_dtype=False)
 
     def test_radians(self):
-        assert_allclose(np.radians(0.5), radians(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.radians(0.5).item(), radians(0.5), atol=1e-14, check_dtype=False)
 
     def test_reciprocal(self):
         assert_allclose(
-            np.reciprocal(0.5), reciprocal(0.5), atol=1e-14, check_dtype=False
+            np.reciprocal(0.5).item(), reciprocal(0.5), atol=1e-14, check_dtype=False
         )
 
     def test_rint(self):
-        assert_allclose(np.rint(0.5), rint(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.rint(0.5).item(), rint(0.5), atol=1e-14, check_dtype=False)
 
     def test_sign(self):
-        assert_allclose(np.sign(0.5), sign(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.sign(0.5).item(), sign(0.5), atol=1e-14, check_dtype=False)
 
     def test_signbit(self):
-        assert_allclose(np.signbit(0.5), signbit(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.signbit(0.5).item(), signbit(0.5), atol=1e-14, check_dtype=False)
 
     def test_sin(self):
-        assert_allclose(np.sin(0.5), sin(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.sin(0.5).item(), sin(0.5), atol=1e-14, check_dtype=False)
 
     def test_sinh(self):
-        assert_allclose(np.sinh(0.5), sinh(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.sinh(0.5).item(), sinh(0.5), atol=1e-14, check_dtype=False)
 
     def test_sqrt(self):
-        assert_allclose(np.sqrt(0.5), sqrt(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.sqrt(0.5).item(), sqrt(0.5), atol=1e-14, check_dtype=False)
 
     def test_square(self):
-        assert_allclose(np.square(0.5), square(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.square(0.5).item(), square(0.5), atol=1e-14, check_dtype=False)
 
     def test_tan(self):
-        assert_allclose(np.tan(0.5), tan(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.tan(0.5).item(), tan(0.5), atol=1e-14, check_dtype=False)
 
     def test_tanh(self):
-        assert_allclose(np.tanh(0.5), tanh(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.tanh(0.5).item(), tanh(0.5), atol=1e-14, check_dtype=False)
 
     def test_trunc(self):
-        assert_allclose(np.trunc(0.5), trunc(0.5), atol=1e-14, check_dtype=False)
+        assert_allclose(np.trunc(0.5).item(), trunc(0.5), atol=1e-14, check_dtype=False)
 
 
 if __name__ == "__main__":
