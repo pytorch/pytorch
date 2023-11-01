@@ -606,19 +606,16 @@ class TORCH_API Library final {
     return _def(std::move(s), nullptr, tags, rv);
   }
 
-  /// Declares that an operator (given by name) has an abstract impl in a
-  /// Python module (pymodule). If the abstract impl was not yet imported,
-  /// we will warn about it.
+  /// Declares that for all operators that are subsequently def'ed, their
+  /// abstract impls may be found in the given Python module (pymodule).
+  /// This registers some help text that is used if the abstract impl
+  /// cannot be found.
   ///
   /// Args:
-  /// - name: the name of the operator
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
-  Library& impl_abstract_pystub(const char* name, const char* pymodule, const char* context = "") {
-    at::OperatorName opname = _parseNameForLib(name);
-    registrars_.emplace_back(
-      c10::Dispatcher::singleton().registerAbstractImplPyStub(opname, pymodule, context)
-      );
+  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
+    impl_abstract_pystub_ = {pymodule, context};
     return *this;
   }
 
@@ -839,6 +836,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
+  c10::optional<std::pair<const char*, const char*>> impl_abstract_pystub_;
   const char* file_;
   uint32_t line_;
 

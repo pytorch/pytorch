@@ -135,6 +135,14 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
           tags
         )
       );
+      if (impl_abstract_pystub_.has_value()) {
+        registrars_.emplace_back(
+          c10::Dispatcher::singleton().registerAbstractImplPyStub(
+            schema.operator_name(),
+            impl_abstract_pystub_->first,
+            impl_abstract_pystub_->second)
+        );
+      }
       break;
     case _RegisterOrVerify::VERIFY:
       c10::Dispatcher::singleton().waitForDef(schema);
