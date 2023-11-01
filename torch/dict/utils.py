@@ -305,6 +305,14 @@ def _ndimension(tensor: torch.Tensor) -> int:
 
 
 def _shape(tensor: torch.Tensor) -> torch.Size:
+    if tensor.is_nested:
+        shape = []
+        for i in range(tensor.ndim):
+            try:
+                shape.append(tensor.size(i))
+            except RuntimeError:
+                shape.append(-1)
+        return torch.Size(shape)
     return tensor.shape
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 import torch.cuda
+from functorch.dim import tree_map
 from torch import multiprocessing as mp
 from torch import nn
 from torch.dict import TensorDict, TensorDictBase, TensorDictParams, pad, \
@@ -1774,6 +1775,53 @@ class TestTensorDictVmap(TestCase):
         td_out = torch.vmap(lambda td, one: td.set("a", td.get("a") + one), in_dims=(1, None), out_dims=(0,))(td, ones)
         assert td_out.shape == torch.Size([4, 3]), td_out.shape
 
+class TestPyTree(TestCase):
+    def test_pytree_map(self):
+        td = TensorDict({"a": {"b": {"c": 1}, "d": 1}, "e": 1}, [])
+        td = tree_map(lambda x: x + 1, td)
+        assert (td == 2).all()
+
+    def test_pytree_map_batch(self):
+        td = TensorDict(
+            {
+                "a": TensorDict(
+                    {
+                        "b": TensorDict({"c": torch.ones(2, 3, 4)}, [2, 3]),
+                        "d": torch.ones(2),
+                    },
+                    [2],
+                ),
+                "e": 1,
+            },
+            [],
+        )
+        td = tree_map(lambda x: x + 1, td)
+        assert (td == 2).all()
+        assert td.shape == torch.Size([])
+        assert td["a"].shape == torch.Size([2])
+        assert td["a", "b"].shape == torch.Size([2, 3])
+        assert td["a", "b", "c"].shape == torch.Size([2, 3, 4])
+
+    def test_pytree_vs_apply(self):
+        td = TensorDict(
+            {
+                "a": TensorDict(
+                    {
+                        "b": TensorDict({"c": torch.ones(2, 3, 4)}, [2, 3]),
+                        "d": torch.ones(2),
+                    },
+                    [2],
+                ),
+                "e": 1,
+            },
+            [],
+        )
+        td_pytree = tree_map(lambda x: x + 1, td)
+        td_apply = td.apply(lambda x: x + 1)
+        assert (td_apply == td_pytree).all()
+        for v1, v2 in zip(td_pytree.values(True), td_apply.values(True)):
+            # recursively checks the shape, including for the nested tensordicts
+            assert v1.shape == v2.shape
 
 if __name__ == '__main__':
     run_tests()

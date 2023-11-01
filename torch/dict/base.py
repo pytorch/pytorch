@@ -1634,7 +1634,7 @@ class TensorDictBase(MutableMapping):
 
     def get_item_shape(self, key: NestedKey):
         """Returns the shape of the entry, possibly avoiding recurring to :meth:`~.get`."""
-        return self.get(key).shape
+        return _shape(self.get(key))
 
     def update(
         self,
