@@ -102,6 +102,13 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     retstmnt;                                    \
   }
 
+/** To be called inside a HANDLE_TH_ERRORS..END_HANDLE_TH_ERRORS_* block
+ * before returning a value / where no further warnings can occur.
+ * Avoids throwing an error in the destructor which triggers a bug in GCC 12+
+ * See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112301
+ */
+#define FLUSH_TH_ERRORS __enforce_warning_buffer.process_warnings();
+
 #define END_HANDLE_TH_ERRORS_PYBIND                                 \
   }                                                                 \
   catch (...) {                                                     \
@@ -360,6 +367,9 @@ struct PyWarningHandler {
     in_exception_ = true;
   }
 
+  // Trigger processing of warnings
+  TORCH_PYTHON_API void process_warnings();
+
  private:
   InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
@@ -367,26 +377,40 @@ struct PyWarningHandler {
 };
 
 namespace detail {
+
+template<bool release_gil>
+struct conditional_gil_scoped_release: pybind11::gil_scoped_release{};
+
+template<>
+struct conditional_gil_scoped_release<false>{
+  conditional_gil_scoped_release() {
+    // suppress `unused variable` error messages at call sites
+    (void) (this != (this + 1));
+  }
+};
+
 template <typename Func, size_t i>
 using Arg = typename invoke_traits<Func>::template arg<i>::type;
 
-template <typename Func, size_t... Is>
+template <bool release_gil, typename Func, size_t... Is>
 auto wrap_pybind_function_impl_(
     Func&& f,
     std::index_sequence<Is...>,
-    bool release_gil) {
+    std::bool_constant<release_gil>) {
   using result_type = typename invoke_traits<Func>::result_type;
   namespace py = pybind11;
 
   // f=f is needed to handle function references on older compilers
-  return [f = std::forward<Func>(f),
-          release_gil](Arg<Func, Is>... args) -> result_type {
+  return [f = std::forward<Func>(f)](Arg<Func, Is>... args) -> result_type {
     HANDLE_TH_ERRORS
-    if (release_gil) {
-      py::gil_scoped_release no_gil;
-      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    conditional_gil_scoped_release<release_gil> no_gil;
+    if constexpr (std::is_void_v<result_type>) {
+      c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+      FLUSH_TH_ERRORS
     } else {
-      return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+      auto res = c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+      FLUSH_TH_ERRORS
+      return res;
     }
     END_HANDLE_TH_ERRORS_PYBIND
   };
@@ -399,7 +423,7 @@ template <typename Func>
 auto wrap_pybind_function(Func&& f) {
   using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, false);
+      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, std::false_type{});
 }
 
 // Wrap a function with TH error, warning handling and releases the GIL.
@@ -408,7 +432,7 @@ template <typename Func>
 auto wrap_pybind_function_no_gil(Func&& f) {
   using traits = invoke_traits<Func>;
   return torch::detail::wrap_pybind_function_impl_(
-      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, true);
+      std::forward<Func>(f), std::make_index_sequence<traits::arity>{}, std::true_type{});
 }
 
 } // namespace torch

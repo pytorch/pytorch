@@ -293,6 +293,10 @@ PyObject* map_warning_to_python_type(const c10::Warning& warning) {
 /// NOLINTNEXTLINE(bugprone-exception-escape)
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::WarningUtils::set_warning_handler(prev_handler_);
+  process_warnings();
+}
+
+void PyWarningHandler::process_warnings() {
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
   if (!warning_buffer.empty()) {
