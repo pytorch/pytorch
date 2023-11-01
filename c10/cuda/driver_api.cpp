@@ -1,5 +1,6 @@
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
 #include <iostream>
@@ -7,11 +8,11 @@ namespace c10 {
 namespace cuda {
 
 namespace {
+
 DriverAPI create_driver_api() {
   void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
   TORCH_INTERNAL_ASSERT(handle_0);
-  void* handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-
+  void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
 #define LOOKUP_LIBCUDA_ENTRY(name)                       \
@@ -30,6 +31,14 @@ DriverAPI create_driver_api() {
   return r;
 }
 } // namespace
+
+void* DriverAPI::get_nvml_handle() {
+  static c10::once_flag once;
+  static void* handle_1;
+  c10::call_once(
+      once, [] {handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);});
+  return handle_1;
+}
 
 DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();

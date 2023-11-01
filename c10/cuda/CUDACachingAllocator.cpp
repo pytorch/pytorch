@@ -791,11 +791,8 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 static std::string reportProcessMemoryInfo(int device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
-  static c10::once_flag once;
-  static void* handle_1;
-  c10::call_once(
-      once, [] {handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY);});
-  if (!handle_1) {
+  void* nvml_handle = DriverAPI::get_nvml_handle();
+  if (!nvml_handle) {
     return "";
   }
   static c10::once_flag nvml_init;

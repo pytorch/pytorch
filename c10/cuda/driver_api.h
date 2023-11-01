@@ -42,6 +42,7 @@ struct DriverAPI {
   C10_NVML_DRIVER_API(CREATE_MEMBER)
 #undef CREATE_MEMBER
   static DriverAPI* get();
+  static void* get_nvml_handle();
 };
 
 } // namespace cuda
