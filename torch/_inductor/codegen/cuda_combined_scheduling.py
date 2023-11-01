@@ -1,6 +1,6 @@
 from typing import List
 
-from ..scheduler import BaseSchedulerNode, BaseScheduling, Scheduler
+from ..scheduler import BaseSchedulerNode, BaseScheduling, Scheduler, SchedulerNode
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 
 from .triton import TritonScheduling
@@ -48,7 +48,7 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
             return self._cuda_cpp_scheduling.codegen_template(

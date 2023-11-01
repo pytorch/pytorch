@@ -4,7 +4,7 @@ import re
 from typing import cast, Dict, List, Optional, Tuple
 
 from ...config import cuda as inductor_cuda_config
-from ...ir import Buffer, FixedLayout, IRNode, Layout
+from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
 
 from . import cutlass_utils
@@ -620,27 +620,30 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]
-        template_node: Optional[Buffer] = None,
+        template_buffer_node: Optional[CUDATemplateBuffer] = None,
         epilogue_nodes: Optional[List[IRNode]] = None,
+        **kwargs,
     ) -> str:
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
             assert self.can_fuse_epilogue and CUTLASSGemmTemplate.supports_evt(
                 op
             ), "op does not support EVT epilogue fusion"
             assert (
-                template_node is not None
-            ), "Output node is required for epilogue fusion"
+                template_buffer_node is not None
+            ), "Template node is required for epilogue fusion"
             assert isinstance(
-                template_node, Buffer
-            ), f"Output node has to be a Buffer, is type {type(template_node)}"
+                template_buffer_node, CUDATemplateBuffer
+            ), f"Template node has to be a CUDATemplateBuffer, is type {type(template_buffer_node)}"
             assert (
-                template_node.name is not None
+                template_buffer_node.name is not None
             ), "Output node has to be a Buffer with a name"
             # This is the name of the output of the Matmul, before epilogues are applied.
             # it is not necessarily materialized in global memory if we have an epilogue
-            template_output_node_name = template_node.name
-        else:
-            template_output_node_name = None  # template_node is actually optional
+
+        template_output_node_name = (
+            template_buffer_node.name if template_buffer_node is not None else None
+        )
+
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library.library as cutlass_lib  # type: ignore[import]
@@ -648,8 +651,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert isinstance(
             op, cutlass_gemm_op.GemmOperation
         ), "op argument is required and has to be an instance of GemmOperation"
-        if template_node is not None:
-            self.output_node = template_node
+        if template_buffer_node is not None:
+            self.output_node = template_buffer_node
         if epilogue_nodes is not None and len(epilogue_nodes) > 0:
             self.output_node = cast(Buffer, epilogue_nodes[-1])
 

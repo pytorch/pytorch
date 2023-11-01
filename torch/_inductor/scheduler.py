@@ -835,7 +835,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_or_aliased_buffer_names(self) -> Set[str]:
         return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
 
-    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+    def get_nodes(self) -> List[SchedulerNode]:
         return self.snodes
 
     def __repr__(self):
@@ -2090,7 +2090,7 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         """
         Given a template node, generate a kernel.

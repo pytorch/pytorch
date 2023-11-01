@@ -133,7 +133,7 @@ class CUDACPPScheduling(BaseScheduling):
         nodes = fused_node.get_nodes()
         template_node = fused_node.get_template_node()
         nodes.remove(template_node)
-        return nodes
+        return [n.node for n in nodes]
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -184,7 +184,7 @@ class CUDACPPScheduling(BaseScheduling):
         return kernel_name
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues
@@ -194,9 +194,9 @@ class CUDACPPScheduling(BaseScheduling):
         assert self.is_cuda_cpp_template(
             template_node
         ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"
+        template_node = cast(SchedulerNode, template_node)
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
-        template_node = cast(SchedulerNode, template_node)
         ctb: CUDATemplateBuffer = cast(CUDATemplateBuffer, template_node.node)
         epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
         assert all(

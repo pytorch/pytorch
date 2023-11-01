@@ -1,3 +1,4 @@
+import functools
 import itertools
 import logging
 from typing import List, Optional
@@ -100,16 +101,31 @@ class CUDATemplate(KernelTemplate):
             extra_args=extra_args,
             source_code=code,
         )
-        cuda_template_buffer = CUDATemplateBuffer(
-            template=self,
-            workspace_size=0,
-            **kwargs,
-        )
+
+        def make_kernel_render(
+            template_node: CUDATemplateBuffer,
+            epilogue_nodes: Optional[List[IRNode]] = None,
+        ):
+            kernel = CUDATemplateKernel(
+                kernel_name="KERNEL_NAME",
+            )
+            render = functools.partial(
+                self.render,
+                kernel=kernel,
+                template_buffer_node=template_node,
+                epilogue_nodes=epilogue_nodes,
+                **kwargs,  # includes "op" argument in case of CUTLASSGemmTemplate
+            )
+            return kernel, render
+
         return CUDATemplateCaller(
             kernel_hash_name,
             self.name,
+            self.input_nodes,
+            self.output_node.get_layout(),
+            make_kernel_render,
             bmreq,
-            cuda_template_buffer,
+            self,
         )
 
     def header(self) -> IndentedBuffer:

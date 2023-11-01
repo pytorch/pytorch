@@ -1,9 +1,9 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import IRNode, TensorBox
+from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -291,16 +291,17 @@ class CUDATemplateCaller(ChoiceCaller):
         self,
         name: str,
         category: str,
+        input_nodes: List[Buffer],
+        layout: Layout,
+        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template_buffer: "CUDATemplateBuffer",  # type: ignore[name-defined]
+        template: "CUDATemplate",  # type: ignore[name-defined]
     ):
-        super().__init__(
-            name, template_buffer.template.input_nodes, template_buffer.layout
-        )
+        super().__init__(name, input_nodes, layout)
         self.category = category
+        self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
-
-        self.template_buffer = template_buffer
+        self.template = template
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
@@ -321,4 +322,12 @@ class CUDATemplateCaller(ChoiceCaller):
         )
 
     def output_node(self) -> TensorBox:
-        return TensorBox.create(self.template_buffer)
+        return TensorBox.create(
+            CUDATemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                make_kernel_render=self.make_kernel_render,
+                workspace_size=self.bmreq.workspace_size,
+                template=self.template,
+            )
+        )
