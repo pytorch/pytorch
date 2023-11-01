@@ -1030,6 +1030,40 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
+    def test_stack_tahn_unbind_merge(self):
+        def stack_tahn_unbind(x):
+            l1_out = torch.split(x, [20, 20, 20, 10, 10, 20, 20], 1)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            stack = torch.stack(tensors=(item0, item1, item2), dim=0)
+            cat_1 = torch.cat((item3, item4), 1)
+            cat_2 = torch.cat((item5, item6), 1)
+            tanh = torch.tanh(stack)
+            unbind = torch.unbind(tanh, 0)
+            return torch.cat((unbind[0], unbind[1], torch.cat((cat_1, cat_2), 1)), 1)
+
+        args = [
+            torch.randn(50, 120),
+        ]
+        for fn, expected_stack_tahn_unbind_merged in [
+            (stack_tahn_unbind, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["stack_tahn_unbind_merged"],
+                expected_stack_tahn_unbind_merged,
+            )
+            counters.clear()
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
