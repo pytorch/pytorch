@@ -3,6 +3,7 @@ from collections import OrderedDict
 from functools import wraps
 from typing import Callable, Dict, List, Optional, Sequence, Set, Type, Union
 
+import torch
 import torch.nn as nn
 from torch.distributed._composable_state import _State
 
@@ -236,9 +237,9 @@ def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
     }
     for candidate_module in modules:
         is_root_module = True
-        for module, modules in module_to_modules.items():
+        for module, _modules in module_to_modules.items():
             is_child_module = (
-                candidate_module is not module and candidate_module in modules
+                candidate_module is not module and candidate_module in _modules
             )
             if is_child_module:
                 is_root_module = False
