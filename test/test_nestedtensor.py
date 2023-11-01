@@ -2848,21 +2848,32 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
-    def _get_list_for_jagged_tensor(self, nested_size, requires_grad=True):
+    def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
         out = []
         for s in nested_size[0]:
             out.append(
-                torch.randn(s, *Ds, requires_grad=requires_grad, dtype=torch.float64)
+                torch.randn(s, *Ds, requires_grad=requires_grad, device=device, dtype=torch.float64)
             )
         return out
 
     def _get_example_tensor_lists(self):
         return [
             # (B, *, D) with B=4
-            self._get_list_for_jagged_tensor(((2, 3, 4, 6), 5)),
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(4, 5),
+                torch.randn(6, 5)
+            ],
             # (B, *, D_0, D_1) with B=5
-            self._get_list_for_jagged_tensor(((2, 3, 4, 5, 6), 5, 6)),
+            [
+                torch.randn(2, 5, 6),
+                torch.randn(3, 5, 6),
+                torch.randn(4, 5, 6),
+                torch.randn(5, 5, 6),
+                torch.randn(6, 5, 6),
+            ],
         ]
 
     def test_tensor_attributes(self, device):
@@ -2943,7 +2954,7 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_binary_pointwise_broadcasting(self, device):
         # (B, j0, 3, 4)
-        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), requires_grad=True)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
         # (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
         # (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
         # (B, j0, ?, ?) + (1, ?, ?) -> (B, j0, ?, ?)
@@ -2954,7 +2965,7 @@ class TestNestedTensorSubclass(TestCase):
             (3, 1),
             (1, 3, 1),
             (1, 1, 1, 4),
-            # (1, 1, 1, 1, 4), (unsupported todya)
+            # (1, 1, 1, 1, 4), (unsupported today)
         )
 
         def grad_test_func(t, *ts):
@@ -2963,12 +2974,13 @@ class TestNestedTensorSubclass(TestCase):
             return buffer_from_jagged(out)
 
         for t_size in t_sizes:
-            t = torch.rand(t_size, requires_grad=True, dtype=torch.float64)
+            t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
             gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
 
-    def test_sum_int_DimList(self, device):
+    @parametrize("keepdim", [False, True])
+    def test_sum_int_DimList(self, device, keepdim):
         # (B, j0, 3, 4)
-        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), requires_grad=True)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device=device, requires_grad=True)
 
         # Check shape correctness
         reduce_dims = (
@@ -2981,25 +2993,24 @@ class TestNestedTensorSubclass(TestCase):
             ((0, 1, 2), (4,), (1, 1, 1, 4)),
             ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
         )
-        for keepdim in (True, False):
-            for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
-                if (0 in rd) ^ (1 in rd):
-                    with self.assertRaisesRegex(
-                            RuntimeError,
-                            "sum over ragged dim without also summing over batch dim"):
-                        nt, _ = jagged_from_list(ts, None)
-                        out = torch.sum(nt, dim=rd, keepdim=keepdim)
-                    continue
+        for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
+            if (0 in rd) ^ (1 in rd):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "applying over the ragged dimension, but not the batch dimension"):
+                    nt, _ = jagged_from_list(ts, None)
+                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
+                continue
 
-                nt, _ = jagged_from_list(ts, None)
-                out = torch.sum(nt, dim=rd, keepdim=keepdim)
-                ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-                self.assertEqual(len(out.shape), len(ref_shape))
-                for o, r in zip(out.shape, ref_shape):
-                    if r is not None:
-                        self.assertEqual(o, r)
-                    else:
-                        self.assertTrue(isinstance(o, torch.SymInt))
+            nt, _ = jagged_from_list(ts, None)
+            out = torch.sum(nt, dim=rd, keepdim=keepdim)
+            ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
+            self.assertEqual(len(out.shape), len(ref_shape))
+            for o, r in zip(out.shape, ref_shape):
+                if r is not None:
+                    self.assertEqual(o, r)
+                else:
+                    self.assertTrue(isinstance(o, torch.SymInt))
 
         # Check values correctness
         # raggedness not reduced
@@ -3007,7 +3018,8 @@ class TestNestedTensorSubclass(TestCase):
         out = torch.sum(nt, dim=(2, 3), keepdim=keepdim)
         out_ref = torch.sum(nt.values(), dim=(1, 2))
         self.assertIsInstance(out, NestedTensor)
-        self.assertTrue(torch.allclose(out.values(), out_ref))
+        # flatten to avoid having to replicate unsqueeze logic depending on keepdim
+        self.assertTrue(torch.allclose(out.values().view(-1), out_ref.view(-1)))
 
         # raggedness reduced away
         nt, _ = jagged_from_list(ts, None)

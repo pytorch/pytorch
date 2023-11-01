@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
             torch.jagged,
             values.device,
             False,
-            False,
+            kwargs.get("requires_grad", False),
             "sizes",
             False,
             True,  # dispatch_layout
@@ -97,7 +97,6 @@ class NestedTensor(torch.Tensor):
             )
         self._values = values
         self._offsets = offsets
-        self.requires_grad = kwargs.get("requires_grad", False)
 
     def values(self):
         return self._values

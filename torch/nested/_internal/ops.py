@@ -10,16 +10,34 @@ __all__: List[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
-def _wrap_jagged_dim(ndim, dim, op_name):
+# Simplifying assumption: we assume that the batch dim is always the left-most
+# dim, and the ragged dim is always the second dim.
+def _wrap_jagged_dim(ndim, dim, op_name, allow_ragged=False):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped < 2:
+    # Technically we can also map 0 -> 0, but we can add it later if we need it
+    if wrapped < 2 and not (allow_ragged and wrapped == 1):
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
     return wrapped - 1
 
+def _wrap_jagged_dims(ndim, dims, op_name):
+    # ex: (2, 3, 4) -> (1, 2, 3)
+    # ex: (0, 1, 4) -> (0, 3)
+    zero_in_dims = 0 in dims
+    one_in_dims = 1 in dims
+    if zero_in_dims ^ one_in_dims:
+        apply, not_apply= ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
+        raise RuntimeError(
+            f"{op_name}(): applying over the {apply} dimension, but not the {not_apply}"
+            " dimension is not supported for NestedTensor"
+        )
+    return tuple(
+        _wrap_jagged_dim(ndim, d, op_name, allow_ragged=True)
+        for d in dims if d != 0
+    ), zero_in_dims
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
@@ -199,7 +217,7 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # See Note: [ Squeezing leading ones ]
     t_squeezed, extra = squeeze_leading_ones_get_extra(t, nt)
     if extra != 0:
-        raise NotImplementedError()
+        raise NotImplementedError("NYI: broadcasting NT with T with larger dim")
     if nt.dim() >= t_squeezed.dim() + 2:
         lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
         return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
@@ -573,41 +591,18 @@ def is_same_size_default(func, *args, **kwargs):
     torch.ops.aten.sum.dim_IntList, "self: jt, dim: any?, keepdim: any?, dtype: any?"
 )
 def sum_dim_IntList(func, *args, **kwargs):
-    from torch._prims_common import canonicalize_dims
-
-    # sum_dim_IntList can produce a NT or a T depending on whether the ragged dim
-    # is summed over
+    # sum_dim_IntList can produce a NT or a T depending on whether the ragged dims
+    # are reduced away.
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
-    new_kwargs["dim"] = tuple(
-        canonicalize_dims(inp.dim(), s) for s in new_kwargs["dim"]
-    )
-    dims = new_kwargs["dim"]
-    ragged_reduced_away = False
-    batch_dim = 0
-    if inp._ragged_idx in dims:
-        if batch_dim not in dims:
-            raise RuntimeError(
-                "sum(): cannot sum over ragged dim without also summing over batch dim"
-            )
-        ragged_reduced_away = True
-
-    # Simplifying assumption (we may want to generalize in the future)
-    assert batch_dim == 0 and inp._ragged_idx == 1
+    assert inp._ragged_idx == 1
+    new_kwargs["dim"], ragged_reduced_away = _wrap_jagged_dims(inp.dim(), new_kwargs["dim"], "sum")
 
     if not ragged_reduced_away:
-        new_kwargs["dim"] = tuple(x - 1 for x in new_kwargs["dim"])
-        # sum((B, j0, D1, D2), dim=[2, 3]) -> sum((sum(*), D1, D2), dim=[1, 2])
         return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
     else:
-        # We don't assume dims necessarily sorted (maybe we can?)
-        # Ignore the batch dim (if exists), remove the ragged dim (if exists), e.g.:
-        #   sum((B, j0, D1, D2), dim=[0, 1, 3]) -> sum((sum(*), D1, D2), dim=[0, 2])
-        new_kwargs["dim"] = tuple(
-            x - 1 if x != 0 else x for x in new_kwargs["dim"] if x != 1
-        )
         # Don't wrap because we reduced away the raggedness
         out = func(inp._values, **new_kwargs)
         if new_kwargs["keepdim"]:
