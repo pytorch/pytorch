@@ -22,6 +22,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     guard_scalar,
     GuardOnDataDependentSymNode,
+    is_symbolic,
     SymTypes,
 )
 
@@ -158,7 +159,9 @@ class TensorVariable(VariableTracker):
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple([int(s) for s in value.size()])
+            props["size"] = tuple(
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
