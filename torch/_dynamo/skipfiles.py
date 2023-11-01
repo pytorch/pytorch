@@ -182,6 +182,7 @@ LEGACY_MOD_INLINELIST = {
 if torch.distributed.is_available():
     LEGACY_MOD_INLINELIST |= {
         "torch.distributed._tensor.api",
+        "torch.distributed._tensor.device_mesh",
         "torch.distributed._device_mesh",
         "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
         "torch.distributed.tensor.parallel._data_parallel_utils",
