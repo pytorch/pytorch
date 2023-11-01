@@ -1906,21 +1906,22 @@ def forward(self, x_1, output_1):
             output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
 
+            tmp = torch.add(x, 1)
             grid = (x.numel(),)
             add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
 
-            return output
+            return output, tmp
 
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
         torch_add = t1 + t2
-        test, (code,) = run_and_get_code(
+        (test, _), codes = run_and_get_code(
             torch.compile(call_triton_add, dynamic=dynamic), t1, t2
         )
         self.assertEqual(torch_add, test)
-        self.assertTrue("aten.copy" not in code)
-        self.assertTrue("aten.clone" not in code)
+        self.assertTrue("aten.copy" not in codes[0])
+        self.assertTrue("aten.clone" not in codes[0])
 
     @requires_cuda()
     @requires_triton()

@@ -1133,7 +1133,12 @@ class Scheduler:
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_node = {n.get_name(): n for n in self.nodes}
+        self.name_to_node = {}
+        for n in self.nodes:
+            self.name_to_node[n.get_name()] = n
+            for i in range(1, len(n.get_mutations())):
+                self.name_to_node[n.get_name() + f"_{i}"] = n
+
         self.name_to_fused_node = None  # set in fuse_nods()
 
         # mutation_real_name: Maps back to the original name for codegen
@@ -1315,8 +1320,8 @@ class Scheduler:
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
-            # a node will mutate either 0 or 1 buffers
-            for alt_name in node.get_mutations():
+            for i, alt_name in enumerate(node.get_mutations()):
+                node_name = node.get_name() + ("" if i == 0 else f"_{i}")
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
@@ -1324,7 +1329,7 @@ class Scheduler:
                 for other_node in name_to_users[alt_name]:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
-                    known_dep_node_names = dep_closure(node.get_name())
+                    known_dep_node_names = dep_closure(node_name)
                     if other_name not in known_dep_node_names:
                         # If this node already directly or indirectly depends on other_node,
                         # we don't need to insert an extra dep.
@@ -1339,10 +1344,11 @@ class Scheduler:
             node.update_mutated_names(self.mutation_renames)
 
             # update our renaming scheme for the next iteration
-            for alt_name in node.get_mutations():
-                self.mutation_renames[rename(alt_name)] = node.get_name()
-                self.mutation_renames[alt_name] = node.get_name()
-                self.mutation_real_name[node.get_name()] = self.mutation_real_name.get(
+            for i, alt_name in enumerate(node.get_mutations()):
+                node_name = node.get_name() + ("" if i == 0 else f"_{i}")
+                self.mutation_renames[rename(alt_name)] = node_name
+                self.mutation_renames[alt_name] = node_name
+                self.mutation_real_name[node_name] = self.mutation_real_name.get(
                     alt_name, alt_name
                 )
 
@@ -1477,9 +1483,14 @@ class Scheduler:
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
+                if dep.name == node.get_name():
+                    # Avoid cycles
+                    continue
                 ancestors.add(dep.name)
                 ancestors |= name_to_ancestors[dep.name]
             name_to_ancestors[node.get_name()] = ancestors
+            for i in range(1, len(node.get_mutations())):
+                name_to_ancestors[node.get_name() + f"_{i}"] = ancestors
             node.ancestors = ancestors
 
         for order, node in enumerate(self.nodes):
