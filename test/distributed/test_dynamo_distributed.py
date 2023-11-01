@@ -31,6 +31,9 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
 )
 import torch._dynamo.logging
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
+)
 from torch._dynamo.comptime import comptime
 
 def reset_rng_state():
@@ -415,6 +418,10 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
+    @unittest.skipIf(
+        PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Inaccurate results with fused SDPA kernels"
+    )
     def test_hf_bert_fsdp(self):
 
         def apply_fsdp(model, wrap_policy):

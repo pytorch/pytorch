@@ -7553,6 +7553,23 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
 
+    def test_default_args_device_dtype(self):
+        class Foo:
+            def __init__(
+                self,
+                dtype: torch.dtype = torch.float16,
+                device: torch.device = torch.device("cpu"),
+            ) -> None:
+                self.value = torch.tensor(10, dtype=dtype, device=device)
+
+        def fn():
+            return Foo().value + 1
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(fn)
+        ref = fn()
+        res = opt_func()
+        self.assertEqual(ref, res)
+
     def test_torch_device_python_type(self):
         for device, device_type, index in [
             ("cpu", "cpu", None),
