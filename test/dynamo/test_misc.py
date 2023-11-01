@@ -1716,6 +1716,19 @@ utils_device.CURRENT_DEVICE == None""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_readonly(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x
+
+        x = np.broadcast_to(np.arange(3), (2, 3))
+        self.assertFalse(x.flags.writeable)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            y = fn(x)
+        self.assertTrue(y.flags.writeable)  # XXX: differs from numpy
+
     def test_numpy_tolist(self):
         def fn(x):
             return x.tolist()

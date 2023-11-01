@@ -1148,8 +1148,16 @@ class VariableBuilder:
 
         from torch._numpy import _util
 
+        readonly = not value.flags.writeable
+        if readonly:
+            value.flags.writeable = True
+
         try:
             tensor_value = _util._try_convert_to_tensor(value)
+            if readonly:
+                from torch._prims_common import clone_preserve_strides
+
+                tensor_value = clone_preserve_strides(tensor_value)
         except NotImplementedError as e:
             # failed to convert to tensor, graph break
             unimplemented(str(e))
