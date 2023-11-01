@@ -17,7 +17,6 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
-from torch._dynamo import compiled_autograd
 
 from torch._dynamo.variables.base import VariableTracker
 
@@ -776,8 +775,7 @@ class TensorVariable(VariableTracker):
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                return_none = name == "register_post_accumulate_grad_hook"
-                fn = functools.partial(trace_wrapped, fn=fn, return_none=return_none)
+                fn = functools.partial(trace_wrapped, fn=fn)
 
                 def _register_hook_trampoline(tensor):
                     hook_callable = getattr(tensor, name)

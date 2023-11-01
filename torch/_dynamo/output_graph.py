@@ -681,25 +681,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         assert not isinstance(source, ParamBufferSource)
 
-        if is_dynamic_nn_module(target) and getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
-            name = "_".join(map(str, names))
-            base = name
-            for i in itertools.count():
-                if name not in self.nn_modules:
-                    self.nn_modules[name] = target
-                    break
-                name = f"{base}_{i}"
-            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
-            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
-            vt = variables.nn_module.FSDPManagedNNModuleVariable(
-                target,
-                name,
-                **options,
-            )
-            return self.side_effects.track_object_existing(source, target, vt)
-
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
             if not self.is_root_tracer():

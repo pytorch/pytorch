@@ -7,7 +7,7 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..bytecode_transformation import create_call_function, create_rot_n, create_instruction
+from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..source import (
     AttrSource,
@@ -654,7 +654,6 @@ class FunctoolsPartialVariable(VariableTracker):
         codegen.extend_output(create_call_function(3, True))
         print(codegen._output)
         return []
-
 
     def as_python_constant(self):
         if self.original:

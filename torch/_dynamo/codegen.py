@@ -28,7 +28,6 @@ from .variables.tensor import (
     UnspecializedPythonVariable,
 )
 from .variables.torch_function import TensorWithTFOverrideVariable
-from .variables.constant import ConstantVariable
 
 
 @dataclasses.dataclass
@@ -135,13 +134,6 @@ class PyCodegen:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
-
-            # import os
-            # gpu_id = int(os.environ["LOCAL_RANK"])
-            # if gpu_id == 0:
-            #     for i, instruction in enumerate(output):
-            #         print(f"{i}. {instruction}")
-
 
         elif isinstance(value, NNModuleVariable):
             parts = value.module_key.split(".")

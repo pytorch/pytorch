@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 
 
 import torch
+
 if torch.distributed.is_available():
     import torch.distributed._functional_collectives_impl
 import torch._functorch.deprecated as deprecated_func
@@ -250,6 +251,7 @@ def _allowed_function_ids() -> Dict[int, str]:
 
     if config.trace_distributed and torch.distributed.is_available():
         import torch.distributed._functional_collectives_impl as fci
+
         for f in [
             fci._all_gather_into_tensor,
             fci._all_reduce,

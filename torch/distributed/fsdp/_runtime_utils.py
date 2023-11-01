@@ -1,6 +1,5 @@
 import functools
 import logging
-import os
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, no_type_check, Optional, Set, Tuple
 
@@ -1477,7 +1476,7 @@ def _register_post_backward_reshard_only_hook(
     hands = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard, state, handle)
     )
-    handle.flat_param._post_backward_hook_handle = hands # type: ignore[attr-defined, assignment]
+    handle.flat_param._post_backward_hook_handle = hands  # type: ignore[attr-defined, assignment]
 
 
 @no_type_check

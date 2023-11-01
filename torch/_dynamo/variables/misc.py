@@ -915,8 +915,7 @@ class SkipFilesVariable(VariableTracker):
             args[1].mutable_local = MutableLocal()
             return tx.replace_all(args[1], args[1])
         elif self.value is cast:
-            unimplemented(
-                f"Cast with {args}")
+            unimplemented(f"Cast with {args}")
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(

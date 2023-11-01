@@ -1157,9 +1157,7 @@ class FlatParamHandle:
                     dtype=unsharded_param_dtype,
                 )
                 flat_param._padded_unsharded_size = flat_param._full_param_padded.size()
-                _free_storage(
-                    flat_param._full_param_padded
-                )
+                _free_storage(flat_param._full_param_padded)
 
                 if self._uses_param_mixed_precision:
                     # For parameter mixed precision, we maintain a full precision
@@ -1169,9 +1167,7 @@ class FlatParamHandle:
                         device=self.device,
                         dtype=flat_param.dtype,  # full precision
                     )
-                    _free_storage(
-                        flat_param._full_prec_full_param_padded
-                    )
+                    _free_storage(flat_param._full_prec_full_param_padded)
 
     ###################
     # UNSHARD/RESHARD #
@@ -1306,9 +1302,7 @@ class FlatParamHandle:
             # so we should free it here to ensure a new all-gather for the next
             # forward/backward computation to persist the modifications.
             if flat_param._full_param_padded.untyped_storage().size() > 0:
-                _free_storage(
-                    flat_param._full_param_padded
-                )
+                _free_storage(flat_param._full_param_padded)
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
         return unsharded_flat_param

@@ -4,7 +4,6 @@ from torch.autograd import Variable
 
 from dataclasses import dataclass
 from typing import Any, no_type_check
-from torch.distributed.utils import _free_storage
 
 @dataclass
 class _AllreduceUpcastHookState:

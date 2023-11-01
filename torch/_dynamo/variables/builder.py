@@ -1561,7 +1561,9 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         elif istype(example_value, set):
-            return SetVariable(self.tx, unpacked, mutable_local=MutableLocal(), **options)
+            return SetVariable(
+                self.tx, unpacked, mutable_local=MutableLocal(), **options
+            )
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"

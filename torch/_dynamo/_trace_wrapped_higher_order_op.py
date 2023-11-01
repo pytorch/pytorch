@@ -7,10 +7,6 @@ from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-import logging
-
-log = logging.getLogger(__name__)
-
 
 __all__ = ["trace_wrapped"]
 
@@ -45,8 +41,8 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
-def trace_wrapped(*args, fn, return_none=False):
-    return _trace_wrapped_op(*args, fn=fn, return_none=return_none)
+def trace_wrapped(*args, fn):
+    return _trace_wrapped_op(*args, fn=fn)
 
 
 _trace_wrapped_op = HigherOrderOperator("trace_wrapped")
@@ -60,26 +56,20 @@ def _assert_meta(grad, size, stride, dtype):
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(mode, *args, fn, return_none):
+def inner_trace(mode, *args, fn):
     import torch
-
-    log.warning("trace_wrapped %s", fn)
 
     assert len(args) == 1
     grad = args[0]
     assert isinstance(grad, torch.Tensor)
 
     def self_invoke(*args):
-        return _trace_wrapped_op(*args, fn=fn, return_none=return_none)
+        return _trace_wrapped_op(*args, fn=fn)
 
     proxy_args = (mode.tracer.unwrap_proxy(grad),)
-
     out_proxy = mode.tracer.create_proxy(
-        "call_function", self_invoke, proxy_args, {}, name=f"trace_wrapped{'_acc' if return_none else ''}"
+        "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
     )
-    if return_none:
-        print("RETURN NON TIME!")
-        print(out_proxy, fn)
     grad = torch.zeros_like(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
 
@@ -101,18 +91,16 @@ def inner_trace(mode, *args, fn, return_none):
     )
     grad = torch.empty_like(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
-    # if return_none:
-    # return grad
     return grad
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
-def inner_fake(*args, fn, return_none):
+def inner_fake(*args, fn):
     raise RuntimeError("This op should never be invoked here")
 
 
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _trace_wrapped_op_dense(*args, fn, return_none):
+def _trace_wrapped_op_dense(*args, fn):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(*args)
@@ -124,7 +112,7 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 
 
 @_trace_wrapped_op.py_functionalize_impl
-def _trace_wrapped_functionalized(ctx, *args, fn, return_none):
+def _trace_wrapped_functionalized(ctx, *args, fn):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn, return_none=return_none))
+        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn))

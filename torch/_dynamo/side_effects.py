@@ -425,7 +425,7 @@ class SideEffects:
             #  - For tensors without sources:
             #    - We graph break
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
-            # assert tensor.source, "Hooks on non input tensors NYI - should not get here"
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
             cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
