@@ -35,7 +35,7 @@ DeviceType = Union[torch.device, str, int]
 NestedKey = Union[str, Tuple[str, ...]]
 
 
-def _sub_index(tensor: torch.Tensor, idx: IndexType) -> torch.Tensor:
+def _sub_index(tensor: Tensor, idx: IndexType) -> Tensor:
     """Allows indexing of tensors with nested tuples.
 
      >>> sub_tensor1 = tensor[tuple1][tuple2]
@@ -43,7 +43,7 @@ def _sub_index(tensor: torch.Tensor, idx: IndexType) -> torch.Tensor:
      >>> assert torch.allclose(sub_tensor1, sub_tensor2)
 
     Args:
-        tensor (torch.Tensor): tensor to be indexed.
+        tensor (Tensor): tensor to be indexed.
         idx (tuple of indices): indices sequence to be used.
 
     """
@@ -162,9 +162,9 @@ def infer_size_impl(shape: list[int], numel: int) -> list[int]:
     return out
 
 
-def _unwrap_value(value: torch.Tensor) -> torch.Tensor:
+def _unwrap_value(value: Tensor) -> Tensor:
     # batch_dims = value.ndimension()
-    if not isinstance(value, torch.Tensor):
+    if not isinstance(value, Tensor):
         out = value
     elif is_batchedtensor(value):
         out = get_unwrapped(value)
@@ -198,9 +198,9 @@ else:
 
 
 def expand_as_right(
-    tensor: torch.Tensor | "TensorDictBase",
-    dest: torch.Tensor | "TensorDictBase",
-) -> torch.Tensor | "TensorDictBase":
+    tensor: Tensor | "TensorDictBase",
+    dest: Tensor | "TensorDictBase",
+) -> Tensor | "TensorDictBase":
     """Expand a tensor on the right to match another tensor shape.
 
     Args:
@@ -235,8 +235,8 @@ def expand_as_right(
 
 
 def expand_right(
-    tensor: torch.Tensor, shape: Sequence[int]
-) -> torch.Tensor:
+    tensor: Tensor, shape: Sequence[int]
+) -> Tensor:
     """Expand a tensor on the right to match a desired shape.
 
     Args:
@@ -297,14 +297,16 @@ def is_seq_of_nested_key(seq: Sequence[NestedKey]) -> bool:
     return False
 
 
-def _ndimension(tensor: torch.Tensor) -> int:
-    if isinstance(tensor, torch.Tensor):
+def _ndimension(tensor: Tensor) -> int:
+    if isinstance(tensor, Tensor):
         return tensor.ndimension()
     else:
         return tensor.ndimension()
 
 
-def _shape(tensor: torch.Tensor) -> torch.Size:
+def _shape(tensor: Tensor) -> torch.Size:
+    if not isinstance(tensor, Tensor):
+        return tensor.shape
     if tensor.is_nested:
         shape = []
         for i in range(tensor.ndim):
@@ -316,15 +318,15 @@ def _shape(tensor: torch.Tensor) -> torch.Size:
     return tensor.shape
 
 
-def _device(tensor: torch.Tensor) -> torch.device:
-    if isinstance(tensor, torch.Tensor):
+def _device(tensor: Tensor) -> torch.device:
+    if isinstance(tensor, Tensor):
         return tensor.device
     else:
         return tensor.device
 
 
-def _is_shared(tensor: torch.Tensor) -> bool:
-    if isinstance(tensor, torch.Tensor):
+def _is_shared(tensor: Tensor) -> bool:
+    if isinstance(tensor, Tensor):
         if torch._C._functorch.is_batchedtensor(tensor):
             return None
         return tensor.is_shared()
@@ -335,34 +337,34 @@ def _is_shared(tensor: torch.Tensor) -> bool:
         return tensor.is_shared()
 
 
-def _is_meta(tensor: torch.Tensor) -> bool:
-    if isinstance(tensor, torch.Tensor):
+def _is_meta(tensor: Tensor) -> bool:
+    if isinstance(tensor, Tensor):
         return tensor.is_meta
     else:
         return tensor.is_meta
 
 
-def _dtype(tensor: torch.Tensor) -> torch.dtype:
-    if isinstance(tensor, torch.Tensor):
+def _dtype(tensor: Tensor) -> torch.dtype:
+    if isinstance(tensor, Tensor):
         return tensor.dtype
     else:
         return tensor.dtype
 
 
-def _get_item(tensor: torch.Tensor, index: IndexType) -> torch.Tensor:
-    if isinstance(tensor, torch.Tensor):
+def _get_item(tensor: Tensor, index: IndexType) -> Tensor:
+    if isinstance(tensor, Tensor):
         return tensor[index]
     else:
         return tensor[index]
 
 
 def _set_item(
-    tensor: torch.Tensor, index: IndexType, value: torch.Tensor, *, validated
-) -> torch.Tensor:
+    tensor: Tensor, index: IndexType, value: Tensor, *, validated
+) -> Tensor:
     # the tensor must be validated
     if not validated:
         raise RuntimeError
-    if isinstance(tensor, torch.Tensor):
+    if isinstance(tensor, Tensor):
         tensor[index] = value
         return tensor
         return tensor
@@ -371,8 +373,8 @@ def _set_item(
         return tensor
 
 
-def _requires_grad(tensor: torch.Tensor) -> bool:
-    if isinstance(tensor, torch.Tensor):
+def _requires_grad(tensor: Tensor) -> bool:
+    if isinstance(tensor, Tensor):
         return tensor.requires_grad
     else:
         return tensor.requires_grad
@@ -672,6 +674,7 @@ def cache(fun):
         >>> print(timeit.timeit("set(td.all_keys())", globals={'td': td}))
         0.88
     """
+
     @wraps(fun)
     def newfun(_self: "TensorDictBase", *args, **kwargs):
         if not _self.is_locked:
@@ -1138,9 +1141,9 @@ def _expand_index(index, batch_size):
 def _broadcast_tensors(index):
     # tensors and range need to be broadcast
     tensors = {
-        i: tensor if isinstance(tensor, Tensor) else torch.tensor(tensor)
+        i: tensor if isinstance(tensor, Tensor) else Tensor(tensor)
         for i, tensor in enumerate(index)
-        if isinstance(tensor, (range, list, np.ndarray, torch.Tensor))
+        if isinstance(tensor, (range, list, np.ndarray, Tensor))
     }
     if tensors:
         shape = torch.broadcast_shapes(
@@ -1213,7 +1216,7 @@ def unravel_key(key):
     return result
 
 
-class Buffer(torch.Tensor, metaclass=_ParameterMeta):
+class Buffer(Tensor, metaclass=_ParameterMeta):
     r"""A kind of Tensor that is to be considered a module buffer.
 
     Args:
@@ -1225,10 +1228,10 @@ class Buffer(torch.Tensor, metaclass=_ParameterMeta):
     def __new__(cls, data=None, requires_grad=False):
         if data is None:
             data = torch.empty(0)
-        if type(data) is torch.Tensor or type(data) is Buffer:
+        if type(data) is Tensor or type(data) is Buffer:
             # For ease of BC maintenance, keep this path for standard Tensor.
             # Eventually (tm), we should change the behavior for standard Tensor to match.
-            return torch.Tensor._make_subclass(cls, data, requires_grad)
+            return Tensor._make_subclass(cls, data, requires_grad)
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)

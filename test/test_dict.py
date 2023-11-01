@@ -3,39 +3,16 @@ from __future__ import annotations
 import re
 
 import torch.cuda
-from functorch.dim import tree_map
 from torch import multiprocessing as mp
 from torch import nn
 from torch.dict import TensorDict, TensorDictBase, TensorDictParams, pad, \
     pad_sequence
 from torch.dict.base import is_tensor_collection
-from torch.dict.utils import convert_ellipsis_to_idx
 from torch.dict.tensordict import _getitem_batch_size
+from torch.dict.utils import convert_ellipsis_to_idx
 from torch.testing._internal.common_utils import TestCase, run_tests, \
     parametrize, instantiate_parametrized_tests
-
-
-class raises:
-    def __init__(
-        self,
-        _self: TestCase,
-        error_type: Exception,
-        match: str | None = None
-    ):
-        self._self = _self
-        self.error_type = error_type
-        self.match = match
-
-    def __enter__(self):
-        self._ctx = self._self.assertRaises(self.error_type)
-        return self._ctx.__enter__()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        result = self._ctx.__exit__(exc_type, exc_val, exc_tb)
-        if self.match is not None:
-            err_str = self._ctx.exception.args[0]
-            self._self.assertTrue(re.match(self.match, err_str))
-        return result
+from torch.utils._pytree import tree_map
 
 
 def decompose(td):
@@ -165,10 +142,9 @@ class TestTensorDicts(TestCase):
         td.batch_size = (3,)
 
         # incompatible size
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "the tensor a has shape torch.Size([3, 4, 5, 6]) which is incompatible with the batch-size torch.Size([3, 5])"
             )
         ):
@@ -181,10 +157,9 @@ class TestTensorDicts(TestCase):
         td[torch.tensor([1, 2])]
         td[:]
         td[[1, 2]]
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             IndexError,
-            match="too many indices for tensor of dimension 1",
+            expected_regex="too many indices for tensor of dimension 1",
         ):
             td[:, 0]
 
@@ -196,10 +171,9 @@ class TestTensorDicts(TestCase):
         td.batch_size = torch.Size([3, 4, 5])
 
         td.set("c", torch.randn(3, 4, 5, 6))
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "batch dimension mismatch, got self.batch_size=torch.Size([3, 4, 5]) and value.shape=torch.Size([3, 4, 2])"
             )
         ):
@@ -297,10 +271,9 @@ class TestTensorDicts(TestCase):
             {"a": TensorDict({"b": torch.rand(1, 2)}, [1, 2]),
              "c": torch.rand(1)}, [1]
         )
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             NotImplementedError,
-            match="TensorDict does not support membership checks with the `in` keyword",
+            expected_regex="TensorDict does not support membership checks with the `in` keyword",
         ):
             "random_string" in td  # noqa: B015
 
@@ -323,24 +296,21 @@ class TestTensorDicts(TestCase):
             torch.randn(4, 5)
         )  # No exception because set_ ignores the lock
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("a", torch.randn(4, 5))
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("b", torch.randn(4, 5))
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("b", torch.randn(4, 5), inplace=True)
 
@@ -483,67 +453,65 @@ class TestTensorDicts(TestCase):
              "a": {"b": {"c": torch.zeros(3)}}}, []
         )
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape("Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide.")
+            expected_regex=re.escape(
+                "Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide."
+                )
         ):
             td1.flatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape("Flattening keys in tensordict causes keys [('a', 'b')] to collide.")
+            expected_regex=re.escape(
+                "Flattening keys in tensordict causes keys [('a', 'b')] to collide."
+                )
         ):
             td2.flatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape("Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide.")
+            expected_regex=re.escape(
+                "Flattening keys in tensordict causes keys [('a', 'b', 'c')] to collide."
+                )
         ):
             td3.flatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Unflattening key(s) in tensordict will override existing unflattened key"
             ),
         ):
             td1.unflatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Unflattening key(s) in tensordict will override existing unflattened key"
             ),
         ):
             td2.unflatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Unflattening key(s) in tensordict will override existing unflattened key"
             ),
         ):
             td3.unflatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Unflattening key(s) in tensordict will override existing unflattened key"
             ),
         ):
             td4.unflatten_keys(separator)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Unflattening key(s) in tensordict will override existing unflattened key"
             ),
         ):
@@ -569,10 +537,9 @@ class TestTensorDicts(TestCase):
             ("d", "g", "h"): torch.ones(3, 4, 5),
         }
         if batch_dims and batch_size:
-            with raises(
-                self,
+            with self.assertRaisesRegex(
                 ValueError,
-                match="Cannot pass both batch_size and batch_dims"
+                expected_regex="Cannot pass both batch_size and batch_dims"
             ):
                 TensorDict.from_dict(
                     data,
@@ -675,26 +642,23 @@ class TestTensorDicts(TestCase):
         assert ("a", "b", "c") in tensordict.keys(include_nested=True)
         assert ("a", "c", "b") not in tensordict.keys(include_nested=True)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             TypeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Nested membership checks with tuples of strings is only supported when setting"
             )
         ):
             ("a", "b", "c") in tensordict.keys()  # noqa: B015
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             TypeError,
-            match="TensorDict keys are always strings."
+            expected_regex="TensorDict keys are always strings."
         ):
             42 in tensordict.keys()  # noqa: B015
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             TypeError,
-            match="TensorDict keys are always strings."
+            expected_regex="TensorDict keys are always strings."
         ):
             ("a", 42) in tensordict.keys()  # noqa: B015
 
@@ -763,24 +727,21 @@ class TestTensorDicts(TestCase):
             torch.randn(4, 5)
         )  # No exception because set_ ignores the lock
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("a", torch.randn(4, 5))
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("b", torch.randn(4, 5))
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="Cannot modify locked TensorDict"
+            expected_regex="Cannot modify locked TensorDict"
         ):
             td.set("b", torch.randn(4, 5), inplace=True)
 
@@ -876,27 +837,27 @@ class TestTensorDicts(TestCase):
         }
         td1 = TensorDict(batch_size=(4, 5, 6), source=d)
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(1, 1, 0)
             _ = td2.shape
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(3, 2, 1, 0)
             _ = td2.shape
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(2, -1, 0)
             _ = td2.shape
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(2, 3, 0)
             _ = td2.shape
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(2, -4, 0)
             _ = td2.shape
 
-        with raises(self, ValueError):
+        with self.assertRaises(ValueError):
             td2 = td1.permute(2, 1)
             _ = td2.shape
 
@@ -1150,64 +1111,57 @@ class TestTensorDicts(TestCase):
     def test_split_with_invalid_arguments(self):
         td = TensorDict({"a": torch.zeros(2, 1)}, [])
         # Test empty batch size
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match="TensorDict with empty batch size is not splittable"
+            expected_regex="TensorDict with empty batch size is not splittable"
         ):
             td.split(1, 0)
 
         td = TensorDict({}, [3, 2])
 
         # Test invalid split_size input
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             TypeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "split(): argument 'split_size' must be int or list of ints"
-                )
-            ):
+            )
+        ):
             td.split("1", 0)
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             TypeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "split(): argument 'split_size' must be int or list of ints"
-                )
-            ):
+            )
+        ):
             td.split(["1", 2], 0)
 
         # Test invalid split_size sum
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Split method expects split_size to sum exactly to 3 (tensor's size at dimension 0), but got split_size=[]"
-                )
+            )
         ):
             td.split([], 0)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Split method expects split_size to sum exactly to 3 (tensor's size at dimension 0), but got split_size=[1, 1]"
-                )
+            )
         ):
             td.split([1, 1], 0)
 
         # Test invalid dimension input
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             IndexError,
-            match=re.escape("Dimension out of range")
-            ):
+            expected_regex=re.escape("Dimension out of range")
+        ):
             td.split(1, 2)
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             IndexError,
-            match=re.escape("Dimension out of range")
-            ):
+            expected_regex=re.escape("Dimension out of range")
+        ):
             td.split(1, -3)
 
     def test_split_with_negative_dim(self):
@@ -1243,20 +1197,18 @@ class TestTensorDicts(TestCase):
         assert (std_control.get("key2") == std2.get("key2")).all()
 
         # write values
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Calling `_SubTensorDict.set(key, value, inplace=False)` is prohibited for existing tensors. Consider calling _SubTensorDict.set_(...) or cloning your tensordict first."
-                )
+            )
         ):
             std_control.set("key1", torch.randn(1, device=device))
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "Calling `_SubTensorDict.set(key, value, inplace=False)` is prohibited for existing tensors. Consider calling _SubTensorDict.set_(...) or cloning your tensordict first."
-                )
+            )
         ):
             std_control.set(
                 "key2",
@@ -1326,10 +1278,9 @@ class TestTensorDicts(TestCase):
         td1 = TensorDict({"sub": sub1}, [2])
         td2 = TensorDict({"sub": sub2}, [2])
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             RuntimeError,
-            match='tensors on different devices at key "sub" / "a"'
+            expected_regex='tensors on different devices at key "sub" / "a"'
         ):
             torch.cat([td1, td2], 0)
 
@@ -1423,7 +1374,7 @@ class TestTensorDicts(TestCase):
         td.set("key1", torch.randn(4, 5))
         assert td.device == torch.device(device)
         # by default inplace:
-        with raises(self, RuntimeError):
+        with self.assertRaises(RuntimeError):
             td.set("key1", torch.randn(5, 5, device=device))
 
         # robust to dtype casting
@@ -1437,10 +1388,9 @@ class TestTensorDicts(TestCase):
         )
         assert td.get("key_device").device == torch.device(device)
 
-        with raises(
-            self,
+        with self.assertRaisesRegex(
             KeyError,
-            match=re.escape(
+            expected_regex=re.escape(
                 "key \"smartypants\" not found in TensorDict with keys"
             )
         ):
@@ -1762,18 +1712,35 @@ class TestTensorDictVmap(TestCase):
     def test_vmap(self):
         td = TensorDict({"a": torch.zeros(3, 4, 5)}, batch_size=[3, 4])
         ones = torch.ones(4, 5)
-        td_out = torch.vmap(lambda td, one: td.set("a", td.get("a") + one), in_dims=(0, None), out_dims=(0,))(td, ones)
+        td_out = torch.vmap(
+            lambda td, one: td.set("a", td.get("a") + one),
+            in_dims=(0, None),
+            out_dims=(0,)
+            )(td, ones)
         assert td_out.shape == torch.Size([3, 4]), td_out.shape
 
-        td_out = torch.vmap(lambda td, one: td.set("a", td.get("a") + one), in_dims=(0, None), out_dims=(1,))(td, ones)
+        td_out = torch.vmap(
+            lambda td, one: td.set("a", td.get("a") + one),
+            in_dims=(0, None),
+            out_dims=(1,)
+            )(td, ones)
         assert td_out.shape == torch.Size([4, 3]), td_out.shape
 
         ones = torch.ones(3, 5)
-        td_out = torch.vmap(lambda td, one: td.set("a", td.get("a") + one), in_dims=(1, None), out_dims=(1,))(td, ones)
+        td_out = torch.vmap(
+            lambda td, one: td.set("a", td.get("a") + one),
+            in_dims=(1, None),
+            out_dims=(1,)
+            )(td, ones)
         assert td_out.shape == torch.Size([3, 4]), td_out.shape
 
-        td_out = torch.vmap(lambda td, one: td.set("a", td.get("a") + one), in_dims=(1, None), out_dims=(0,))(td, ones)
+        td_out = torch.vmap(
+            lambda td, one: td.set("a", td.get("a") + one),
+            in_dims=(1, None),
+            out_dims=(0,)
+            )(td, ones)
         assert td_out.shape == torch.Size([4, 3]), td_out.shape
+
 
 class TestPyTree(TestCase):
     def test_pytree_map(self):
@@ -1822,6 +1789,7 @@ class TestPyTree(TestCase):
         for v1, v2 in zip(td_pytree.values(True), td_apply.values(True)):
             # recursively checks the shape, including for the nested tensordicts
             assert v1.shape == v2.shape
+
 
 if __name__ == '__main__':
     run_tests()
