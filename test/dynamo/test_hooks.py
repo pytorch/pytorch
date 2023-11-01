@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import functools
 
 import torch
@@ -554,6 +555,38 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             hook = functools.partial(pre_hook, k=2)
             h(x).sum().backward()
             self.assertEqual(orig_grad * 2, x.grad)
+
+    def test_post_acc_grad_hook(self):
+        for backend in ["eager", "aot_eager", "inductor"]:
+            for compiled_bwd in [False, True]:
+                torch._dynamo.reset()
+
+                def hook(input_t):
+                    input_t.mul_(2)
+
+                x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
+                y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+
+                def fn(x, y):
+                    x.register_post_accumulate_grad_hook(hook)
+                    return x * y
+
+                cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                torch._dynamo.optimize(cnts, nopython=True)(fn)(x, y)
+
+                compiled_bwd_ctx = (
+                    compiled_autograd.enable(
+                        torch.compile(backend=backend, fullgraph=True)
+                    )
+                    if compiled_bwd
+                    else contextlib.nullcontext()
+                )
+                with compiled_bwd_ctx:
+                    b = torch.zeros(3, requires_grad=True)
+                    x.backward(b)
+                    self.assertEqual(cnts.frame_count, 1)
+                    # X goes to x*2 becaue of mul_
+                    self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
 
 
 if __name__ == "__main__":
