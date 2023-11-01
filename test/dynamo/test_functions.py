@@ -1956,6 +1956,28 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
+    def test_triton_kernel_dependancies(self):
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            output2 = torch.zeros_like(output)
+            add_kernel_autotuned[grid](output, y, output2, n_elements)
+            output3 = torch.add(output2, 1)
+            return output3
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+        torch_result = call_triton(t1, t2)
+        compiled_result = torch.compile(call_triton)(t1, t2)
+        self.assertEqual(torch_result, compiled_result)
+
+    @requires_cuda()
+    @requires_triton()
     @common_utils.parametrize("grad", [False, True])
     def test_triton_kernel_multi_kernel(self, grad):
         @triton.jit
