@@ -117,7 +117,9 @@ class ConstDictVariable(VariableTracker):
                 return False
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
-    def __init__(self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs):
+    def __init__(
+        self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
+    ):
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
@@ -403,11 +405,17 @@ class DictView(VariableTracker):
         assert self.kv in ("keys", "values")
         assert isinstance(dv_dict, ConstDictVariable)
         self.dv_dict = dv_dict
-        self.guards.update(VariableTracker.propagate(self.view_items)["guards"])
+        self.guards.update(VariableTracker.propagate(self.view_items_vt)["guards"])
 
     @property
     def view_items(self):
         return getattr(self.dv_dict.items, self.kv)()
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        # Implement in the subclasses
+        raise NotImplementedError()
 
     def unpack_var_sequence(self, tx):
         def unwrap(x):
@@ -439,7 +447,12 @@ class DictKeys(DictView):
 
     @property
     def set_items(self):
-        return set(self.dv_dict.items.keys())
+        return set(self.view_items)
+
+    @property
+    def view_items_vt(self):
+        # Returns an iterable of the unpacked items
+        return [x.vt for x in self.view_items]
 
     def python_type(self):
         return dict_keys
@@ -460,6 +473,10 @@ class DictKeys(DictView):
 class DictValues(DictView):
     # DictValues is an iterable but cannot be compared.
     kv = "values"
+
+    @property
+    def view_items_vt(self):
+        return list(self.view_items)
 
     def python_type(self):
         return dict_values
