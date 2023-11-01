@@ -36,7 +36,7 @@ def is_hashable_python_var(x):
     from ..allowed_functions import is_builtin_callable
 
     return (
-        variables.ConstantVariable.is_literal(x)
+        ConstantVariable.is_literal(x)
         or isinstance(x, (Tensor, enum.Enum, MethodWrapperType))
         or is_builtin_callable(x)
         or (isinstance(x, tuple) and all(is_hashable_python_var(e) for e in x))
@@ -150,6 +150,19 @@ class ConstDictVariable(VariableTracker):
     def python_type(self):
         return self.user_cls
 
+    def __contains__(self, obj):
+        # If it's literal we wrap it for you
+        if ConstantVariable.is_literal(obj):
+            obj = ConstantVariable.create(obj)
+
+        if isinstance(obj, VariableTracker):
+            key = ConstDictVariable._HashableTracker(obj)
+            return key in self.items
+        else:
+            # If it's hashable and it's not a constant, you should wrap it first!
+            assert not is_hashable_python_var(x)
+            return False
+
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
@@ -187,7 +200,6 @@ class ConstDictVariable(VariableTracker):
         from . import ConstantVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-        val = self.items
         Hashable = ConstDictVariable._HashableTracker
 
         arg_hashable = args and is_hashable(args[0])
@@ -204,7 +216,7 @@ class ConstDictVariable(VariableTracker):
             return SetVariable(val.keys(), mutable_local=MutableLocal())
         elif name == "values":
             assert not (args or kwargs)
-            return TupleVariable(list(val.values()), **options)
+            return TupleVariable(list(self.items.values()), **options)
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items), **options)
@@ -212,7 +224,7 @@ class ConstDictVariable(VariableTracker):
             assert not kwargs and len(args) == 2
             k = Hashable(args[0])
 
-            newval = collections.OrderedDict(val)
+            newval = collections.OrderedDict(self.items)
             newval[k] = args[1]
 
             return tx.replace_all(
@@ -228,7 +240,7 @@ class ConstDictVariable(VariableTracker):
             # missing item, return the default value
             return args[1].add_options(options)
         elif name == "pop" and arg_hashable and self.mutable_local:
-            newval = collections.OrderedDict(val)
+            newval = collections.OrderedDict(self.items)
             result = newval.pop(Hashable(args[0]))
             tx.replace_all(self, self.modifed(newval, **options))
             return result.add_options(options)
@@ -238,7 +250,7 @@ class ConstDictVariable(VariableTracker):
             and isinstance(args[0], ConstDictVariable)
             and self.mutable_local
         ):
-            newval = collections.OrderedDict(val)
+            newval = collections.OrderedDict(self.items)
             newval.update(args[0].items)
             result = self.modifed(newval, **options)
             return tx.replace_all(self, result)
@@ -373,6 +385,30 @@ class SetVariable(ConstDictVariable):
         raise RuntimeError("Illegal to getitem on a set")
 
 
+def _is_matching_transformers_cls(cls) -> bool:
+    if not cls.__module__.startswith("transformers."):
+        return False
+
+    try:
+        from transformers.file_utils import ModelOutput
+
+        return issubclass(cls, ModelOutput)
+    except ImportError:
+        return False
+
+
+def _is_matching_diffusers_cls(cls) -> bool:
+    if not cls.__module__.startswith("diffusers."):
+        return False
+
+    try:
+        from diffusers.utils import BaseOutput
+
+        return issubclass(cls, BaseOutput)
+    except ImportError:
+        return False
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -388,20 +424,27 @@ class DataClassVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once():
-        from transformers.file_utils import ModelOutput
-
-        for obj in ModelOutput.__dict__.values():
-            if callable(obj):
-                skip_code(obj.__code__)
-
-    @staticmethod
-    def is_matching_cls(cls):
         try:
             from transformers.file_utils import ModelOutput
 
-            return issubclass(cls, ModelOutput)
+            for obj in ModelOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
         except ImportError:
-            return False
+            pass
+
+        try:
+            from diffusers.utils import BaseOutput
+
+            for obj in BaseOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
+        except ImportError:
+            pass
+
+    @staticmethod
+    def is_matching_cls(cls):
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -483,9 +526,9 @@ class DataClassVariable(ConstDictVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            index = args[0].as_python_constant()
-            if isinstance(index, str):
-                return self.items[index].add_options(options)
+            val = args[0]
+            if val.python_type() == str:
+                return self.getitem_const(val)
             else:
                 return (
                     self.call_method(tx, "to_tuple", [], {})
@@ -500,9 +543,9 @@ class DataClassVariable(ConstDictVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        if name in self.items:
+        if name in self:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
+                tx, "__getitem__", [ConstantVariable.create(name)], {}
             )
         elif not self.include_none:
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
@@ -517,26 +560,19 @@ class DataClassVariable(ConstDictVariable):
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            # True if using default OrderedDict.__init__ and did not implement __post_init__
-            if (
-                issubclass(cls, collections.OrderedDict)
-                and cls.__init__ is collections.OrderedDict.__init__
-                and not hasattr(cls, "__post_init__")
-            ):
-                return True
-            # hack for HF usecase:
-            #   assume dataclass annotation for ModelOutput subclass
-            #   assume self.create is AA to ModelOutput.__post_init__
-            # for non-HF usecase:
-            #   check __module__ string to avoid costy HF import
-            if cls.__module__ != "transformers.modeling_outputs":
-                return False
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
+        # True if using default OrderedDict.__init__ and did not implement __post_init__
+        if (
+            issubclass(cls, collections.OrderedDict)
+            and cls.__init__ is collections.OrderedDict.__init__
+            and not hasattr(cls, "__post_init__")
+        ):
+            return True
+        # hack for HF usecase:
+        #   assume dataclass annotation for ModelOutput subclass
+        #   assume self.create is AA to ModelOutput.__post_init__
+        # for non-HF usecase:
+        #   check __module__ string to avoid costy HF import
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -561,23 +597,18 @@ class CustomizedDictVariable(ConstDictVariable):
             # @dataclass CustomDict(a=1, b=2)
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
-            raw_items = bound.arguments
+            if not all(
+                ConstantVariable.is_literal(val) for val in bound.arguments.values()
+            ):
+                unimplemented("expect defaults to be literals")
+
+            make_const = ConstantVariable.create
+            items = {make_const(k): make_const(v) for k, v in bound.arguments.items()}
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
-            raw_items = args[0].items
+            items = args[0].items
         else:
             unimplemented("custome dict init with args/kwargs unimplemented")
-
-        items = collections.OrderedDict()
-        for key in raw_items.keys():
-            val = raw_items[key]
-            key = ConstantVariable.create(key)
-            if isinstance(val, VariableTracker):
-                items[key] = val
-            elif variables.ConstantVariable.is_literal(val):
-                items[key] = variables.ConstantVariable.create(val)
-            else:
-                unimplemented("expect VariableTracker or ConstantVariable.is_literal")
 
         return cls(items, user_cls, **options)
 
@@ -631,9 +662,9 @@ class CustomizedDictVariable(ConstDictVariable):
         unimplemented("custom dict: call_method unimplemented name=%s", name)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        if name in self.items:
+        if name in self:
             return self.call_method(
-                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
+                tx, "__getitem__", [ConstantVariable.create(name)], {}
             )
         super().var_getattr(tx, name)
 

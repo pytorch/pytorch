@@ -37,6 +37,35 @@ from typing import (
 )
 
 
+__all__ = [
+    "PyTree",
+    "Context",
+    "FlattenFunc",
+    "UnflattenFunc",
+    "DumpableContext",
+    "ToDumpableContextFn",
+    "FromDumpableContextFn",
+    "TreeSpec",
+    "LeafSpec",
+    "register_pytree_node",
+    "tree_flatten",
+    "tree_unflatten",
+    "tree_leaves",
+    "tree_structure",
+    "tree_map",
+    "tree_map_",
+    "tree_map_only",
+    "tree_map_only_",
+    "tree_all",
+    "tree_any",
+    "tree_all_only",
+    "tree_any_only",
+    "treespec_dumps",
+    "treespec_loads",
+    "treespec_pprint",
+]
+
+
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -142,6 +171,9 @@ def _register_pytree_node(
     )
     SUPPORTED_SERIALIZED_TYPES[typ] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = typ
+
+
+register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -297,43 +329,56 @@ class LeafSpec(TreeSpec):
         return "*"
 
 
+# All leaves are equivalent, so represent with a single object to save on
+# object construction time
+_LEAF_SPEC = LeafSpec()
+
+
+def _tree_flatten_helper(pytree: PyTree, out_leaves: List[Any]) -> TreeSpec:
+    if _is_leaf(pytree):
+        out_leaves.append(pytree)
+        return _LEAF_SPEC
+
+    node_type = _get_node_type(pytree)
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+    child_pytrees, context = flatten_fn(pytree)
+
+    # Recursively flatten the children
+    children_specs = [
+        _tree_flatten_helper(child, out_leaves) for child in child_pytrees
+    ]
+
+    return TreeSpec(node_type, context, children_specs)
+
+
 def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
+    leaves: List[Any] = []
+    spec = _tree_flatten_helper(pytree, leaves)
+    return leaves, spec
+
+
+def _tree_leaves_helper(pytree: PyTree, out_leaves: List[Any]) -> None:
     if _is_leaf(pytree):
-        return [pytree], LeafSpec()
+        out_leaves.append(pytree)
+        return
 
     node_type = _get_node_type(pytree)
     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, context = flatten_fn(pytree)
+    child_pytrees, _ = flatten_fn(pytree)
 
     # Recursively flatten the children
-    result: List[Any] = []
-    children_specs: List[TreeSpec] = []
     for child in child_pytrees:
-        flat, child_spec = tree_flatten(child)
-        result += flat
-        children_specs.append(child_spec)
-
-    return result, TreeSpec(node_type, context, children_specs)
+        _tree_leaves_helper(child, out_leaves)
 
 
 def tree_leaves(pytree: PyTree) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    if _is_leaf(pytree):
-        return [pytree]
-
-    node_type = _get_node_type(pytree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, context = flatten_fn(pytree)
-
-    # Recursively flatten the children
-    result: List[Any] = []
-    for child in child_pytrees:
-        result += tree_leaves(child)
-
-    return result
+    leaves: List[Any] = []
+    _tree_leaves_helper(pytree, leaves)
+    return leaves
 
 
 def tree_structure(pytree: PyTree) -> TreeSpec:
