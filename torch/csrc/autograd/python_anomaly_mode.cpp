@@ -87,7 +87,6 @@ void _print_stack(
     PyObject* stack,
     const std::string& current_node_name,
     bool is_parent) {
-  LOG(WARNING) << "_print_stack";
   if (!stack) {
     TORCH_WARN(
         "Error detected in ",
@@ -110,7 +109,6 @@ void _print_stack(
     throw python_error();
   }
 
-  LOG(WARNING) << "printing anomaly";
   if (!is_parent) {
     TORCH_WARN(
         "Error detected in ",

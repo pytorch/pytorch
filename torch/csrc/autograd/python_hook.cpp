@@ -206,7 +206,6 @@ void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
 PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
     PyObject* dict)
     : dict(dict) {
-  std::cout << "PyFunctionTensorPostAccGradHooks hook" << std::endl;
   Py_INCREF(dict);
 }
 
@@ -221,7 +220,6 @@ PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
 
 auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
     -> void {
-  std::cout << "PyFunctionTensorPostAccGradHooks op" << std::endl;
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, THPVariable_Wrap(tensor));

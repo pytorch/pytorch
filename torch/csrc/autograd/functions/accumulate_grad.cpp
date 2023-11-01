@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -10,7 +9,6 @@
 #include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <cstdint>
-#include <iostream>
 #include <stdexcept>
 #include <utility>
 
@@ -78,7 +76,6 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
     hook->compiled_args(args);
   }
 }
-
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& grads,
     SwapSavedVariables& saved) {

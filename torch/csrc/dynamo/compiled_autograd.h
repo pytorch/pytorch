@@ -4,7 +4,6 @@
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
-#include <iostream>
 #include <typeindex>
 #include <vector>
 
@@ -357,18 +356,9 @@ class CompiledNodeArgs {
     for (auto& i : fn->post_hooks()) {
       i->compiled_args(*this);
     }
-    for (auto& i : fn->post_hooks()) {
-      i->compiled_args(*this);
-    }
-    if (fn->tensor_post_acc_grad_hooks() != nullptr) {
-      std::cout << "compiled_args tensor_post_acc_grad_hooks?" << std::endl;
-      fn->tensor_post_acc_grad_hooks()->compiled_args(*this);
-    }
-
     collect_size(_node_call.tensor_pre_hooks.size());
     collect_size(_node_call.pre_hooks.size());
     collect_size(_node_call.post_hooks.size());
-    collect_size(_node_call.post_acc_grad_hooks.size());
     for (const auto& h : _node_call.tensor_pre_hooks) {
       collect_size(h.second); // index
     }

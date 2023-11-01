@@ -48,12 +48,6 @@
 
 #include <torch/custom_class.h>
 
-namespace c10 {
-
-void SetGlobalRank(int64_t);
-
-}
-
 namespace {
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
