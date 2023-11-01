@@ -14,6 +14,7 @@ collection support for PyTorch APIs.
 
 import functools
 import inspect
+import warnings
 from typing import (
     Any,
     Callable,
@@ -26,6 +27,11 @@ from typing import (
     TypeVar,
     Union,
 )
+
+import torch
+
+if torch._running_with_deploy() or True:
+    warnings.warn("C++ Pytree utilities do not work with torch::deploy.")
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
