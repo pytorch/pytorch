@@ -4,7 +4,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
 import copy
-import dataclasses
 import functools
 import inspect
 import math
@@ -2196,9 +2195,9 @@ def forward(self, x):
             return t.x + t.y
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Dataclasses are supposed to be pytree nodes to be exportable. "
-            "Please take a look at torch.export.register_dataclass for more information",
+            AssertionError,
+            "graph-captured input #1, of type .*Tensor.*, "
+            "is not among original inputs of types: .*Tensors",
         ):
             torch._dynamo.export(
                 f, Tensors(x=torch.randn(10), y=torch.randn(10)), aten_graph=False
@@ -4238,25 +4237,6 @@ def forward(self, x):
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
-
-    def test_not_registered_dataclass(self):
-        @dataclasses.dataclass
-        class Input:
-            foo: torch.Tensor
-
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, input: Input):
-                return input.foo + input.foo
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Dataclasses are supposed to be pytree nodes to be exportable. "
-            "Please take a look at torch.export.register_dataclass for more information.",
-        ):
-            gm, _ = torch._dynamo.export(Mod())(Input(foo=torch.ones(2, 3)))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
