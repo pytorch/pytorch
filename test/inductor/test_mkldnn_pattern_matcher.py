@@ -959,7 +959,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             [False, True] if torch.ops.mkldnn._is_mkldnn_bf16_supported() else [False]
         ):
             for bias in bias_list:
-                int8_mixed_bf16 = True
                 mod = M(bias).eval()
                 v = torch.randn((2, 4))
 
