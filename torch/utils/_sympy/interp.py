@@ -14,7 +14,16 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
+from .functions import (
+    CleanDiv,
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+    ModularIndexing,
+    Pow,
+    TrueDiv,
+    Where,
+)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -22,12 +31,6 @@ from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import (
-        IsNonOverlappingAndDenseIndicator,
-        Pow,
-        TrueDiv,
-    )
-
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
     # TODO default to some decompositions if the interpreter doesn't have them
