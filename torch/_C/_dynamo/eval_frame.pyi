@@ -1,6 +1,9 @@
 import types
+from typing import NewType
 
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
+
+_PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
