@@ -44,33 +44,33 @@ def query_changed_files() -> List[str]:
     return lines
 
 
-def normalize_ratings(rankings: Dict[str, float], max_value: float) -> Dict[str, float]:
+def normalize_ratings(ratings: Dict[str, float], max_value: float) -> Dict[str, float]:
     # Assumes all rankings are >= 0
     # Don't modify in place
-    min_ranking = min(rankings.values())
-    assert min_ranking >= 0
-    max_ranking = max(rankings.values())
-    if max_ranking == 0:
+    min_rating = min(ratings.values())
+    assert min_rating >= 0
+    max_rating = max(ratings.values())
+    if max_rating == 0:
         # Nothing got a meaningful ranking
         return {}
-    normalized_ranking = {}
-    for tf, rank in rankings.items():
-        normalized_ranking[tf] = rank / max_ranking * max_value
-    return normalized_ranking
+    normalized_ratings = {}
+    for tf, rank in ratings.items():
+        normalized_ratings[tf] = rank / max_rating * max_value
+    return normalized_ratings
 
 
-def get_rankings_for_tests(file: Union[str, Path]) -> Dict[str, float]:
+def get_ratings_for_tests(file: Union[str, Path]) -> Dict[str, float]:
     path = REPO_ROOT / file
     if not os.path.exists(path):
         print(f"could not find path {path}")
-        return []
+        return {}
     with open(path) as f:
         test_file_ratings = cast(Dict[str, Dict[str, float]], json.load(f))
     try:
         changed_files = query_changed_files()
     except Exception as e:
         warn(f"Can't query changed test files due to {e}")
-        return []
+        return {}
     ratings: Dict[str, float] = defaultdict(float)
     for file in changed_files:
         for test_file, score in test_file_ratings.get(file, {}).items():
@@ -79,6 +79,6 @@ def get_rankings_for_tests(file: Union[str, Path]) -> Dict[str, float]:
 
 
 def get_correlated_tests(file: Union[str, Path]) -> List[str]:
-    ratings = get_rankings_for_tests(file)
+    ratings = get_ratings_for_tests(file)
     prioritize = sorted(ratings, key=lambda x: -ratings[x])
     return prioritize

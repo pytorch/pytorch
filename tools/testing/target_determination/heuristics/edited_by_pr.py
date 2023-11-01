@@ -25,7 +25,7 @@ class EditedByPR(HeuristicInterface):
 
         return test_rankings
 
-    def get_test_rankings(self, tests: List[str]) -> Dict[str, float]:
+    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
         critical_tests = _get_modified_tests()
         return {test: 1 for test in critical_tests if test in tests}
 

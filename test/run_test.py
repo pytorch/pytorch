@@ -47,8 +47,8 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
-    get_test_prioritizations,
     get_experimental_rankings,
+    get_test_prioritizations,
 )
 
 from tools.testing.test_run import TestRun
