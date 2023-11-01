@@ -1257,6 +1257,44 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
 
+    def test_unbacked_unify_guard(self):
+        def f(x, y):
+            z = torch.zeros(x.item())
+            torch._check(z.size(0) == y.size(0))  # refines i0 = s0
+            if z.size(0) == 4:
+                return y * 2
+            else:
+                return y + 2
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
+    return add""")  # noqa: B950
+
+    def test_unbacked_unify_guard_transitivity(self):
+        def f(x1, x2, y):
+            z1 = torch.zeros(x1.item())
+            z2 = torch.zeros(x2.item())
+            torch._check(z1.size(0) == z2.size(0))  # refines i0 = i1
+            torch._check(z2.size(0) == y.size(0))  # refines i0 = s0
+            if z1.size(0) == 4:
+                return y * 2
+            else:
+                return y + 2
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x1_1, x2_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
+    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
+    return add""")  # noqa: B950
+
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
             # tolist not directly supported atm

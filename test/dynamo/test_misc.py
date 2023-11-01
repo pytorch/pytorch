@@ -8144,6 +8144,9 @@ ShapeEnv not equal: field values don't match:
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
   > Right: {}
+==> divisible: values don't match.
+  >  Left: {Mod(i0, 3)}
+  > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, i0, mod}
   > Right: {i0}
