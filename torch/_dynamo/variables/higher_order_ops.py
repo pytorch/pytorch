@@ -1129,6 +1129,8 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             tracer=tracer,
         )
         post_guards = tx.output.guards
+        if body_lifted_freevars:
+            unimplemented("NYI - freevars in autograd function.")
 
         if always_restore:
             if post_guards - pre_guards:

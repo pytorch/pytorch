@@ -345,6 +345,33 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, Foo.apply(x))
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_graph_break_if_lifted_free_variable(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
+        delta = torch.randn(3)
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), (x + delta).clone()
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 + grad2
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3, requires_grad=True)
+        result = f(x)
+
+        self.assertEqual(result, Foo.apply(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(
+            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        )
+
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
             @staticmethod
