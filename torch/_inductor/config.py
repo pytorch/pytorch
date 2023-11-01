@@ -552,6 +552,10 @@ class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
+    # Save debug information to a temporary directory
+    # If not specified, a temp directory will be created by system
+    debug_dir = None
+
     # Save python logger call >=logging.DEBUG
     debug_log = False
 
