@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
+    tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_loads,
@@ -1455,6 +1456,70 @@ def forward(self, arg0_1):
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return (zeros,)""")
+
+    def test_non_arg_name_dynamic_shapes_api(self):
+        def foo(a, b):
+            return a.sum() + b.sum()
+
+        dim = torch.export.Dim("dim")
+        ep = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, {0: dim}))
+
+        test_inp = (torch.randn(4, 4), torch.randn(7, 4))
+        self.assertEqual(ep(*test_inp), foo(*test_inp))
+
+        ep_v2 = torch.export.export(foo, (torch.randn(4, 4), torch.randn(4, 4)), dynamic_shapes=(None, None))
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1.shape\[0\] is specialized at 4"):
+            ep_v2(*test_inp)
+
+    def test_non_arg_name_dynamic_shapes_api_with_kwarg(self):
+        def foo(a, b, kw1, kw2):
+            return a.sum() + b.sum() + kw1.sum() - kw2.sum()
+
+        dim = torch.export.Dim("dim")
+        dim_for_kw1 = torch.export.Dim("dim_for_kw1")
+        ep = torch.export.export(
+            foo,
+            (torch.randn(4, 4), torch.randn(4, 4)),
+            {"kw2": torch.ones(4, 4), "kw1": torch.zeros(4, 4)},
+            # We are specifying dynamism on the first kwarg even though user passed in
+            # different order
+            dynamic_shapes=(None, {0: dim}, {0: dim_for_kw1}, None))
+
+        test_inp = (torch.randn(4, 4), torch.randn(7, 4))
+        test_kwargs = {"kw2": torch.ones(4, 4), "kw1": torch.zeros(9, 4)}
+        # This should work even if the kwarg order are flipped.
+        self.assertEqual(ep(*test_inp, **test_kwargs), foo(*test_inp, **test_kwargs))
+
+    def test_non_arg_name_dynamic_shapes_api_with_container_type(self):
+        def foo(a, b):
+            return a[0].sum() + a[1].sum() + b.sum()
+
+        inp_a = (torch.randn(4, 4), torch.randn(4, 4))
+        inp_b = torch.randn(4, 4)
+        inp = (inp_a, inp_b)
+
+        count = 0
+        def dynamify_inp(x):
+            # Mark the second input a[1] dynamic
+            nonlocal count
+            if count == 1:
+                dim = torch.export.Dim("dim", min=3)
+                count += 1
+                return {0: dim}
+            count += 1
+            return None
+
+        dynamic_shapes = tree_map(dynamify_inp, inp)
+
+        ep = torch.export.export(foo, inp, dynamic_shapes=dynamic_shapes)
+
+        test_inp = ((torch.randn(4, 4), torch.randn(2, 4)), torch.randn(4, 4))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Input arg1_1.shape\[0\] is outside of specified dynamic range \[3, inf\]"
+        ):
+            ep(*test_inp)
+
 
 if __name__ == '__main__':
     run_tests()
