@@ -124,6 +124,23 @@ def get_cpp_op_schema(kernel):
     return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
 
 
+def user_defined_kernel_grid_fn_code(name, configs, grids):
+    output = IndentedBuffer()
+
+    fn_name = f"grid_wrapper_for_{name}"
+    output.writeline(f"def {fn_name}(meta):")
+    with output.indent():
+        if len(grids) == 1:
+            output.writeline(f"return {grids[0]}")
+        else:
+            assert len(grids) == len(configs)
+            for grid, c in zip(grids, configs):
+                guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
+                guards = " and ".join(guards)
+                output.writeline(f"if {guards}: return {grid}")
+    return fn_name, output.getvalue()
+
+
 @dataclasses.dataclass
 class SymbolicCallArg:
     inner: Any
@@ -504,14 +521,10 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        assert len(grid) != 0
-        if len(grid) == 1:
-            grid = f"{grid[0]}"
-        else:
-            from torch._higher_order_ops.triton_kernel_wrap import grid_fn_code
-
-            grid, code = grid_fn_code(kernel_name, configs, grid)
-            self.header.splice(code, strip=True)
+        grid, code = user_defined_kernel_grid_fn_code(kernel_name, configs, grid)
+        # Must happen after free symbols are already codegened
+        with self.prefix.indent():
+            self.prefix.splice(code)
 
         stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
         self.writeline(
