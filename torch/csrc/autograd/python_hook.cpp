@@ -220,17 +220,6 @@ PyFunctionTensorPostAccGradHooks::~PyFunctionTensorPostAccGradHooks() {
   }
 }
 
-void PyFunctionTensorPostAccGradHooks::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key = nullptr, *value = nullptr;
-  Py_ssize_t pos = 0;
-  std::cout << "POST GRAD ACC HOOK COMPILED_ARG PRE_ITER" <<std::endl;
-  while (PyDict_Next(dict, &pos, &key, &value)) {
-    Py_INCREF(value);
-    std::cout << "POST GRAD ACC HOOK COMPILED_ARG" <<std::endl;
-    args.add_post_acc_grad_hook(c10::SafePyObject(value, getPyInterpreter()));
-  }
-}
-
 auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
     -> void {
   std::cout << "PyFunctionTensorPostAccGradHooks op" <<std::endl;
@@ -238,8 +227,8 @@ auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
   THPObjectPtr tup(PyTuple_New(1));
   PyTuple_SET_ITEM(tup.get(), 0, THPVariable_Wrap(tensor));
   bool returned_none = !_call_hooks(dict, tup.get());
-  // TORCH_CHECK(
-      // returned_none, "Tensor post accumulate grad hooks should return None.");
+  TORCH_CHECK(
+      returned_none, "Tensor post accumulate grad hooks should return None.");
 }
 
 void PyFunctionTensorPostAccGradHooks::compiled_args(

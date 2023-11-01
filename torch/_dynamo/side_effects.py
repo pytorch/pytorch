@@ -396,7 +396,6 @@ class SideEffects:
             handle,
             name,
         ) in self.tensor_hooks.values():
-            print("TENSOR?", tensor.source, hook_name)
             # Note: [On tensor.register_hook]
             #
             # register_hook on a tensor, AKA backward hooks, have slightly nuanced differences in how they are implemented

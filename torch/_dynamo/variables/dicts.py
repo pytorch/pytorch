@@ -335,6 +335,7 @@ class SetVariable(VariableTracker):
 
     def __init__(
         self,
+        tx,
         items: List[VariableTracker],
         regen_guards=True,
         **kwargs,
@@ -345,7 +346,8 @@ class SetVariable(VariableTracker):
         assert all(isinstance(x, VariableTracker) for x in items)
 
         self.items = []
-        self._add(items)
+        self._add(tx, items)
+        self.tx = tx
 
         # Sometimes, we know that we have passed in the guards from the items in the set
         if regen_guards:
@@ -365,7 +367,7 @@ class SetVariable(VariableTracker):
         ] + create_call_function(1, True)
 
     # Note - this is only used for producing a set
-    def _as_set_element(self, vt):
+    def _as_set_element(self, tx, vt):
         from .base import VariableTracker
         from .misc import MethodWrapperVariable
         from .tensor import TensorVariable
@@ -383,21 +385,24 @@ class SetVariable(VariableTracker):
             return SetVariable.SetElement(vt, vt.value)
         if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.as_python_constant())
+        if isinstance(vt, variables.UserDefinedObjectVariable):
+            return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, variables.NNModuleVariable):
+            return SetVariable.SetElement(vt, tx.output.get_submodule(vt.module_key))
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
-    @property
-    def _underlying_items(self):
+    def _underlying_items(self, tx):
         underlying_items = set()
         for current_item in self.items:
             assert (
                 current_item not in underlying_items
             ), "Items modeling set invariant violated"
-            underlying_items.add(self._as_set_element(current_item))
+            underlying_items.add(self._as_set_element(tx, current_item))
         return underlying_items
 
-    def _add(self, item):
-        underlying_items = self._underlying_items
+    def _add(self, tx, item):
+        underlying_items = self._underlying_items(tx)
 
         if isinstance(item, (list, set)):
             items_to_add = item
@@ -405,7 +410,7 @@ class SetVariable(VariableTracker):
             items_to_add = [item]
 
         for item_to_add in items_to_add:
-            set_element = self._as_set_element(item_to_add)
+            set_element = self._as_set_element(tx, item_to_add)
             if set_element not in underlying_items:
                 underlying_items.add(set_element)
                 self.items.append(set_element.vt)
@@ -437,7 +442,8 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                self._add(item),
+                tx,
+                self._add(tx, item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
@@ -451,7 +457,7 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(items, regen_guards=False, **options),
+                SetVariable(tx, items, regen_guards=False, **options),
             )
             return result
         elif name == "__len__":

@@ -399,10 +399,6 @@ class CompiledNodeArgs {
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
-<<<<<<< HEAD
-    std::cout << "Adding post_acc_grad_hooks" << std::endl;
-=======
->>>>>>> ef1f08c5a03635bee1f770d215f138542584f051
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
