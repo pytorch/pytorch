@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 
 import torch
 from torch.testing._internal.common_utils import run_tests, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, TemporaryDirectoryName
 from typing import Any, Optional, Tuple, Union
 
 try:
@@ -113,7 +113,7 @@ class TestTensorClass(TestCase):
         with self.assertRaisesRegex(
             TypeError,
             expected_regex=re.escape(
-                "MyData.__init__() missing 1 required positional arguments: 'z'"
+                "MyData.__init__() missing 1 required positional argument: 'z'"
                 )
             ):
             self.MyData(
@@ -1611,23 +1611,24 @@ class TestTensorClass(TestCase):
         assert isinstance(cmemmap.y.x, MemoryMappedTensor)
         assert cmemmap.z == "foo"
 
-    def test_from_memmap(self, tmpdir):
-        td = TensorDict(
-            {
-                ("a", "b", "c"): 1,
-                ("a", "d"): 2,
-            },
-            [],
-        ).expand(10)
-        td.memmap_(tmpdir)
+    def test_from_memmap(self):
+        with TemporaryDirectoryName() as tmpdir:
+            td = TensorDict(
+                {
+                    ("a", "b", "c"): 1,
+                    ("a", "d"): 2,
+                },
+                [],
+            ).expand(10)
+            td.memmap_(tmpdir)
 
-        @tensorclass
-        class MyClass:
-            a: TensorDictBase
+            @tensorclass
+            class MyClass:
+                a: TensorDictBase
 
-        tc = MyClass.load_memmap(tmpdir)
-        assert isinstance(tc.a, TensorDict)
-        assert tc.batch_size == torch.Size([10])
+            tc = MyClass.load_memmap(tmpdir)
+            assert isinstance(tc.a, TensorDict)
+            assert tc.batch_size == torch.Size([10])
 
     def test_from_dict(self):
         td = TensorDict(
