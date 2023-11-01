@@ -24,10 +24,10 @@ from tools.testing.test_run import TestRun, TestRuns
 @total_ordering
 class Relevance(Enum):
     HIGH = 4
-    PROBABLE = 3
-    UNRANKED = 2
+    NONE = 3  # Not yet supported. Needs more infra to be usable
+    PROBABLE = 2
     UNLIKELY = 1  # Not yet supported. Needs more infra to be usable
-    NONE = 0  # Not yet supported. Needs more infra to be usable
+    UNRANKED = 0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Relevance):
@@ -44,10 +44,10 @@ class Relevance(Enum):
     @staticmethod
     def priority_traversal() -> Iterator["Relevance"]:
         yield Relevance.HIGH
-        yield Relevance.PROBABLE
-        yield Relevance.UNRANKED
-        yield Relevance.UNLIKELY
         yield Relevance.NONE
+        yield Relevance.PROBABLE
+        yield Relevance.UNLIKELY
+        yield Relevance.UNRANKED
 
 
 METRIC_RELEVANCE_GROUP = "relevance_group"
