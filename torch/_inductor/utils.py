@@ -22,12 +22,10 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Generic,
     Iterable,
     List,
     NamedTuple,
     Optional,
-    Protocol,
     Set,
     TypeVar,
     Union,
@@ -379,20 +377,7 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
-RV = TypeVar("RV", covariant=True)
-
-
-# FIXME this should take in a ParamSpec too
-class CachedFunction(Generic[RV], Protocol):
-    @staticmethod
-    def clear_cache(self) -> None:
-        ...
-
-    def __call__(self, *args, **kwargs) -> RV:
-        ...
-
-
-def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
+def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -401,12 +386,7 @@ def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
             setattr(self, key, fn(self))
         return getattr(self, key)
 
-    def clear_cache(self):
-        if hasattr(self, key):
-            delattr(self, key)
-
-    wrapper.clear_cache = clear_cache  # type: ignore[attr-defined]
-    return wrapper  # type: ignore[return-value]
+    return wrapper
 
 
 def aggregate_origins(node_schedule):
