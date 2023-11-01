@@ -645,7 +645,7 @@ class DataClassVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self:
             return self.call_method(
-                tx, "__getitem__", [ConstantVariable.create(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         elif not self.include_none:
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
@@ -690,22 +690,20 @@ class CustomizedDictVariable(ConstDictVariable):
                 if hasattr(fn, "__code__"):
                     skip_code(fn.__code__)
 
-        def dict_to_vars(d):
-            if not all(ConstantVariable.is_literal(val) for val in d.values()):
-                unimplemented("expect defaults to be literals")
-
-            # The keys are strings
-            make_const = ConstantVariable.create
-            return {make_const(k): make_const(v) for k, v in d.items()}
-
         if dataclasses.is_dataclass(user_cls):
             # @dataclass CustomDict(a=1, b=2)
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
-            items = dict_to_vars(bound.arguments)
+
+            if not all(ConstantVariable.is_literal(val) for val in d.values()):
+                unimplemented("expect defaults to be literals"),
+
+            # The keys are strings
+            make_const = ConstantVariable.create
+            items = {make_const(k): make_const(v) for k, v in bound.arguments.items()}
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
-            items = dict_to_vars(kwargs or {})
+            items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             items = args[0].items
@@ -766,7 +764,7 @@ class CustomizedDictVariable(ConstDictVariable):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self:
             return self.call_method(
-                tx, "__getitem__", [ConstantVariable.create(name)], {}
+                tx, "__getitem__", [variables.ConstantVariable.create(name)], {}
             )
         super().var_getattr(tx, name)
 
