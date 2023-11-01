@@ -34,7 +34,6 @@ from ..utils import (
     istype,
     product,
     proxy_args_kwargs,
-    specialize_args_kwargs,
     tensortype_to_dtype,
 )
 from .base import VariableTracker
@@ -149,37 +148,6 @@ except ImportError:
     pass
 
 
-err_epilogue = (
-    "With the current config, we will graph break "
-    "(and fall back to eager-mode PyTorch) on all ops "
-    "that have do not have the 'pt2_compliant_tag'. "
-    "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
-)
-
-
-def check_allowed_op(value):
-    if not config.only_allow_pt2_compliant_ops:
-        return
-    if isinstance(value, torch._ops.OpOverload):
-        if torch.Tag.pt2_compliant_tag in value.tags:
-            return
-        unimplemented(
-            f"Encountered the torch.ops.OpOverload {value} "
-            f"that is not PT2 compliant. " + err_epilogue
-        )
-    if isinstance(value, torch._ops.OpOverloadPacket):
-        for overload in value.overloads():
-            op = getattr(value, overload)
-            if torch.Tag.pt2_compliant_tag in op.tags:
-                continue
-            unimplemented(
-                f"Encountered the torch.ops.OpOverloadPacket {value} "
-                f"which has an overload ({overload}) that is not PT2 compliant. "
-                + err_epilogue
-            )
-
-
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
@@ -280,9 +248,11 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
-        check_allowed_op(value)
         self.value = value
 
+        assert not isinstance(
+            value, (torch.dtype, torch.device)
+        ), "should use ConstantVariable"
         # the remainder of this is just optional debug checks
         try:
             self_should_be_none = getattr(self.value, "__self__", None)
@@ -389,7 +359,6 @@ class TorchVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
             return op
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
@@ -576,8 +545,10 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        # TODO: These special cases shouldn't be necessary; we should
+        # generically support torch.ops that return int
         elif (
-            self.value is torch.ops.aten.sym_size
+            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -585,7 +556,7 @@ class TorchVariable(VariableTracker):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is torch.ops.aten.sym_stride
+            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -671,18 +642,27 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 """
                 log.warning(msg)
                 raise unimplemented(msg)
-            # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
-            # as FX symbolic trace doesn't support numpy int/float as base types.
+            # torch.LongTensor cannot accept a list of FakeTensors.
+            # So we stack the list of FakeTensors instead.
             if (
                 np
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
-                and args[0].is_python_constant()
+                and len(args[0].items) > 1
+                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
             ):
-                for x in args[0].items:
-                    if isinstance(x.value, np.generic):
-                        x.value = x.value.item()
+                # Stack FakeTensor
+                stacked = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.stack,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
+                args = [stacked]
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
