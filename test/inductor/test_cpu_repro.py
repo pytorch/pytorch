@@ -2267,8 +2267,10 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
+        code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        # def and use
+        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -2531,6 +2533,52 @@ class CPUReproTests(TestCase):
                 (v,),
             )
             assert metrics.generated_kernel_count == 0
+
+    @config.patch(implicit_fallbacks=True)
+    def test_aten_normal_dtype(self):
+        for dtype in [torch.float64, torch.float16, None]:
+
+            def fn():
+                return torch.normal(2, 3, (10, 10), dtype=dtype, device="cpu")
+
+            self.assertEqual(
+                torch.compile(fn, backend="aot_eager_decomp_partition")().dtype,
+                dtype if dtype else torch.float32,
+            )
+            self.assertEqual(
+                torch.compile(fn, backend="inductor")().dtype,
+                dtype if dtype else torch.float32,
+            )
+
+    def test_group_norm_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.group_norm = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.group_norm(x)
+
+        metrics.reset()
+        mod = M().eval()
+        x = torch.randn(2, 32, 32, 32)
+        with torch.no_grad():
+            self.common(mod, (x,))
+            # 2 generated kernels (one for var_mean, the other for result)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_int_div_vec(self):
+        def fn(x, y, mode):
+            return torch.div(x, y, rounding_mode=mode)
+
+        x = torch.randint(1, 100, (32, 32))
+        y = torch.randint(1, 100, (32, 32))
+        for mode in [None, "trunc", "floor"]:
+            with torch.no_grad():
+                metrics.reset()
+                self.common(fn, (x, y, mode))
+                # TODO: support vectorization for int div
+                assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if __name__ == "__main__":

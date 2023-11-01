@@ -1,4 +1,5 @@
 #include <c10/core/DeviceType.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -88,6 +89,14 @@ int32_t aoti_torch_dtype_int64() {
 
 int32_t aoti_torch_dtype_bool() {
   return (int32_t)c10::ScalarType::Bool;
+}
+
+bool aoti_torch_grad_mode_is_enabled() {
+  return c10::GradMode::is_enabled();
+}
+
+void aoti_torch_grad_mode_set_enabled(bool enabled) {
+  return c10::GradMode::set_enabled(enabled);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
@@ -304,6 +313,15 @@ AOTITorchError aoti_torch_assign_tensors(
     at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
     at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
     *dst_tensor = *src_tensor;
+  });
+}
+
+AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = self_tensor->clone();
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *ret = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });
 }
 
