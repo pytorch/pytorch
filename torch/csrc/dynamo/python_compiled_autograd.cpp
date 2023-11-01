@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
@@ -104,7 +105,6 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
-    output_grad_targets.clear();
     compiled_fn = nullptr;
   }
 
@@ -208,9 +208,6 @@ struct CacheNode {
   std::vector<SizeInput> expected_sizes;
 
   THPObjectPtr compiled_fn;
-  // Maps each return value of compiled_fn to an input index.  After the graph
-  // runs we do: `inputs[output_grad_targets[i]].mutable_grad() = outputs[i]`
-  std::vector<size_t> output_grad_targets;
 };
 
 struct InputBuffers : public std::unordered_map<Node*, InputBuffer> {
@@ -423,8 +420,9 @@ variable_list compiled_autograd(
         inputs = THPVariable_UnpackList(pyinputs);
       }
 
-      SwapSavedVariables saved(compiler_call, state);
+      SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
+
       saved.debug_asserts();
       saved.before(call.node->next_edges());
       validate_outputs(
@@ -463,7 +461,6 @@ variable_list compiled_autograd(
     }
 
     cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
-    cache->output_grad_targets = std::move(state.output_grad_targets);
     state.debug_asserts();
   } // End cache miss region
 
@@ -482,21 +479,8 @@ variable_list compiled_autograd(
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
-  if (accumulate_grad) {
-    TORCH_INTERNAL_ASSERT(outputs.size() == cache->output_grad_targets.size());
-    for (const auto i : c10::irange(outputs.size())) {
-      // Here we set the `var.grad = ...` for each call to
-      // `saved.assign_mutable_grad(var, ...)`.  For the case on inplace grad
-      // accumuation there will be an `add_` op in the graph and no return
-      // value.
-      compiler_call.tensor_args.inputs[cache->output_grad_targets[i]]
-          .mutable_grad() = outputs[i];
-    }
-    return variable_list();
-  } else {
-    TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-    return outputs;
-  }
+  TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
+  return outputs;
 }
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
