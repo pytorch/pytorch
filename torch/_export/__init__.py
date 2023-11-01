@@ -82,7 +82,7 @@ def _process_dynamic_shapes(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> Optional[List[Constraint]]:
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return None
@@ -209,6 +209,8 @@ def _process_dynamic_shapes(
         signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
         combined_args = signature.bind(*args, **kwargs).arguments
 
+    # This means user didn't specify dynamic shapes with argument names.
+    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
@@ -229,15 +231,17 @@ def export__RC__(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     API for exporting with dynamic shape specifications instead of constraints.
     It should be considered "release candidate" (RC), meant to replace `export`.
 
-    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
-    argument names of `f` to dynamic shape specifications, as follows:
+    Here, `dynamic_shapes` is expected to be a dict from
+    argument names of `f` to dynamic shape specifications OR a tuple where each element
+    corresponds to the original order of the arguments defined in the function signature
+    ,as follows:
     - The dynamic shape of a tensor argument can be specified as:
       - Either a dict from dynamic dimension indices to Dim types. It is not
         required to include static dimension indices in this dict, but when

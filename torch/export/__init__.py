@@ -353,7 +353,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
@@ -412,8 +412,13 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-        dynamic_shapes: Should be a dict from argument names of ``f`` to their dynamic shape specifications,
-         as follows. The dynamic shape of a tensor argument can be specified as either
+        dynamic_shapes: Should either be:
+         1) a dict from argument names of ``f`` to their dynamic shape specifications,
+         2) a tuple that specifies dynamic shape specifications for each input in original order.
+         If you are specifying dynamism on keyword args, you will need to pass them in the order that
+         is defined in the original function signature.
+
+         The dynamic shape of a tensor argument can be specified as either
          (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
          not required to include static dimension indices in this dict, but when they are,
          they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
