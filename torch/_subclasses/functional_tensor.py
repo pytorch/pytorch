@@ -311,7 +311,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
             not any(
-                isinstance(x, FunctionalTensor) for x in pytree.tree_leaves(outs_wrapped)
+                isinstance(x, FunctionalTensor)
+                for x in pytree.tree_leaves(outs_wrapped)
             )
             # Since lift_fresh lifts its argument into a functional tensor, we can skip the
             # aliasing correction step. Otherwise, we would be setting the storage of a
