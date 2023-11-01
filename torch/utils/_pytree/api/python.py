@@ -164,7 +164,7 @@ def _register_pytree_node(
     import torch
 
     if torch._running_with_deploy():
-        warnings.warn("C++ Pytree utilities do not work with torch::deploy.")
+        warnings.warn("C++ pytree utilities do not work with torch::deploy.")
         return
 
     try:
