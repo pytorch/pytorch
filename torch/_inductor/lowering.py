@@ -1662,7 +1662,16 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 def make_fallback(op, layout_constraint=None, warn=True):
     assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
-    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
+    if (
+        warn
+        and bool(os.getenv("CI"))
+        and get_decompositions([op])
+        # if fallback_random, we allow not decomposing random
+        and not (
+            config.fallback_random
+            and op in torch._decomp.decompositions_for_rng.extra_random_decomps
+        )
+    ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
