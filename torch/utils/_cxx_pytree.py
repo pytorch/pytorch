@@ -82,6 +82,8 @@ def register_pytree_node(
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
     namespace: str = "torch",
+    *,
+    serialized_type_name: Optional[str] = None,
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
 
@@ -109,6 +111,8 @@ def register_pytree_node(
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might register
             a different custom behavior for the same type. (default: :const:`"torch"`)
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
 
     Example::
 
@@ -196,6 +200,7 @@ def register_pytree_node(
         cls,
         flatten_func,
         unflatten_func,
+        serialized_type_name=serialized_type_name,
     )
 
     optree.register_pytree_node(
