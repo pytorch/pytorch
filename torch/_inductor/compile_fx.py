@@ -594,7 +594,6 @@ def fx_codegen_and_compile(
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
-            is_inference=is_inference,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)

@@ -82,7 +82,7 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
-        _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
+        code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)

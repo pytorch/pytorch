@@ -163,7 +163,6 @@ class GraphLowering(torch.fx.Interpreter):
         user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
-        is_inference=False,
     ):
         super().__init__(gm)
 
@@ -171,7 +170,6 @@ class GraphLowering(torch.fx.Interpreter):
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
         self.num_channels_last_conv = 0
-        self.is_inference = is_inference
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -908,7 +906,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate(self.is_inference)
+        return self.wrapper_code.generate()
 
     def count_bytes(self):
         from .scheduler import Scheduler

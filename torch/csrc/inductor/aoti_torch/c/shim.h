@@ -127,15 +127,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
     int64_t* ret_storage_offset);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch__alloc_from_pool(
-    AtenTensorHandle self,
-    int64_t offset_bytes,
-    int32_t dtype,
-    int64_t ndim,
-    const int64_t* sizes_ptr,
-    const int64_t* strides_ptr,
-    AtenTensorHandle* ret_new_tensor);
-
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
