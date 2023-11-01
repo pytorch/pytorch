@@ -158,7 +158,6 @@ class TestInductorDynamic(TestCase):
         self.assertEqual(res, ref)
 
     # not supported yet on cpu, https://github.com/pytorch/pytorch/issues/109897
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_bool_mask_nobreak(self, device):
         def f(x, b):
@@ -171,7 +170,6 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -194,7 +192,6 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device))
 
-    @onlyCUDA
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
@@ -203,6 +200,16 @@ class TestInductorDynamic(TestCase):
             torch.empty(y)
             # This will avoid a NopSchedulerNode
             return x.new_zeros(y)
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_return(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            z = x.item()
+            return y + z
 
         f(torch.tensor([3], device=device))
 
@@ -332,6 +339,28 @@ class TestInductorDynamic(TestCase):
         def fn(x, y):
             y0, y1 = y.shape
             return x[: (y0 - y1)].clone()
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+
+        # y0 > y1 -> y0 - y1 is positive
+        b = torch.randn(16, 2, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+        # y0 < y1 -> y0 - y1 is negative
+        b = torch.randn(2, 16, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    def test_abs(self, device):
+        def fn(x, y):
+            y0, y1 = y.shape
+            # Slicing checks abs in wrapper code,
+            # multiplication tests abs in kernel code
+            return x[: abs(y0 - y1)] * abs(y0 - y1)
 
         a = torch.randn(32, 32, device=device)
         cfn = self.compile_fn(fn)

@@ -44,7 +44,7 @@ def manual_seed(seed) -> torch._C.Generator:
         torch.mps.manual_seed(seed)
 
     if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed(seed)
+        torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 
@@ -66,7 +66,7 @@ def seed() -> int:
         torch.mps.manual_seed(seed)
 
     if hasattr(torch, 'xpu') and not torch.xpu._is_in_bad_fork():
-        torch.xpu.manual_seed(seed)
+        torch.xpu.manual_seed_all(seed)
 
     _seed_custom_device(seed)
 

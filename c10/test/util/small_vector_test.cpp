@@ -874,6 +874,7 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
 }
 
 struct notassignable {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   int& x;
   notassignable(int& x) : x(x) {}
 };
@@ -1036,6 +1037,7 @@ TEST(SmallVectorTest, EmplaceBack) {
   }
   {
     SmallVector<Emplaceable, 3> V;
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     Emplaceable& back = V.emplace_back(std::move(A0), A1, std::move(A2), A3);
     EXPECT_TRUE(&back == &V.back());
     EXPECT_TRUE(V.size() == 1);

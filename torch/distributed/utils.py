@@ -147,7 +147,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
             raise AssertionError(s)
 
 
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
+def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
     """
     Allocate storage for ``tensor`` with the given size.
 
@@ -164,10 +164,10 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
                 f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
             )
             tensor._typed_storage()._resize_(size.numel())
-        return not already_allocated
 
 
-def _free_storage(tensor: torch.Tensor) -> bool:
+
+def _free_storage(tensor: torch.Tensor) -> None:
     """
     Frees the underlying storage of ``tensor``.
 
@@ -186,7 +186,6 @@ def _free_storage(tensor: torch.Tensor) -> bool:
                 f"tensor shape: {tensor.shape}",
             )
             tensor._typed_storage()._resize_(0)
-        return not already_freed
 
 
 Q = TypeVar("Q")

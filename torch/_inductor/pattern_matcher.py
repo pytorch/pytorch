@@ -50,8 +50,13 @@ prims = torch.ops.prims
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
 
+
+class Multiple:
+    pass
+
+
 # Sentinel indicating multiple quantities can be matched
-MULTIPLE = object()
+MULTIPLE = Multiple()
 
 
 class Match:
@@ -132,6 +137,14 @@ class Match:
 
 
 class FailedMatch(RuntimeError):
+    def __init__(self, format_string, *args, **kwargs):
+        self.format_string = format_string
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        return self.format_string.format(*self.args, **self.kwargs)
+
     def __bool__(self):
         return False
 
@@ -288,7 +301,7 @@ class _TargetExpr(PatternExpr):
 
         self.fns: List[Union[Callable[..., Any], str]] = fns
         self.fns_set: Set[Union[Callable[..., Any], str]] = set(fns)
-        self.users: int = users
+        self.users: Union[int, Multiple] = users
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -308,7 +321,7 @@ class _TargetExpr(PatternExpr):
         return f"{self.__class__.__name__}({self.fns_repr()})"
 
     def has_multiple_users(self) -> bool:
-        return self.users is MULTIPLE or self.users > 1
+        return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
         raise NotImplementedError()
@@ -380,7 +393,9 @@ class _TargetArgsExpr(_TargetExpr):
             *(pp.pretty_print(x) for x in self.args),
             *[f"{k}={pp.pretty_print(v)}" for k, v in self.kwargs.items()],
         ]
-        if self.users > 1:
+        if isinstance(self.users, Multiple):
+            args.append("_users=MULTIPLE")
+        elif self.users > 1:
             args.append(f"_users={self.users}")
 
         joiner_str = ", "
@@ -392,15 +407,15 @@ class _TargetArgsExpr(_TargetExpr):
             or len(node.args) != len(self.args)
             or len(node.kwargs) != len(self.kwargs)
         ):
-            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
-            return FailedMatch(f"multiple_users {node}")
+            return FailedMatch("multiple_users {}", self)
 
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
-            return FailedMatch(f"args_structure {node_spec} {self_spec}")
+            return FailedMatch("args_structure {} {}", node_spec, self_spec)
         assert len(node_items) == len(self_items)
 
         m = Match(self)
@@ -411,7 +426,9 @@ class _TargetArgsExpr(_TargetExpr):
                     return child_match
                 m.extend(child_match)
             elif isinstance(child_node, torch.fx.Node) or child_node != pattern:
-                return FailedMatch(f"constant_args: {node} {child_node!r}!={pattern!r}")
+                return FailedMatch(
+                    "constant_args: {} {!r}!={pattern!r}", node, child_node
+                )
         m.nodes.append(node)
         m.targets[self] = node.target
         return m
@@ -514,7 +531,7 @@ class ListOf(PatternExpr):
         if not isinstance(node, (list, tuple)) or len(node) == 0:
             return FailedMatch("non_list")
         m = Match(self)
-        # Propogating patterns with multiple users will ensure we don't revisit
+        # Propagating patterns with multiple users will ensure we don't revisit
         # the same nodes
         pattern_to_node = ctx.filter_multi_user_patterns()
         matched = False
@@ -834,7 +851,7 @@ def register_replacement(
     """
     Create a replacement rule based on example functions that get traced
     to create patterns.  This supports both training and inference when
-    run on a joint foward+backward graph.
+    run on a joint forward+backward graph.
 
     Args:
         search_fn: traced to give original pattern
@@ -854,7 +871,7 @@ def register_replacement(
         """
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
             )
         )
         for i, grad in enumerate(requires_grad):
@@ -872,7 +889,7 @@ def register_replacement(
                     )
         specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(
-            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names
+            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names  # type: ignore[has-type]
         )
         specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
         if specific_pattern_match and extra_check(specific_pattern_match):
@@ -883,17 +900,23 @@ def register_replacement(
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:
+        for name in argnames:  # type: ignore[has-type]
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             args.append(kwargs.pop(f"tangents_{i}"))
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
+    if trace_fn is training_graph:
+        # If inference mode is enabled during compilation, assume that we don't
+        # want to match on any training graph patterns
+        if torch.is_inference_mode_enabled():
+            return False
+
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
         argnames = [*inspect.signature(search_fn).parameters.keys()]
-        requires_grad = [
+        requires_grad: List[bool] = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
         if search_fn_pattern is None:
@@ -1079,7 +1102,11 @@ def _not_implemented(*args, **kwargs) -> NoReturn:
 
 
 def fx_to_pattern(
-    gm, ignore_types=(), argnames=(), scalar_workaround=(), exclusive_arg_names=()
+    gm,
+    ignore_types=(),
+    argnames=(),
+    scalar_workaround=(),
+    exclusive_arg_names=(),
 ) -> PatternExpr:
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
@@ -1142,7 +1169,7 @@ def fx_to_pattern(
 
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
-        return MultiOutputPattern(pytree.tree_flatten(pattern)[0])
+        return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
 
 

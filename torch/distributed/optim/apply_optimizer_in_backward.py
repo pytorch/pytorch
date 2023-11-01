@@ -19,18 +19,19 @@ def _apply_optimizer_in_backward(
     register_hook: bool = True,
 ) -> None:
     """
-    Upon ``backward()``, parameters will fire the corresponding optimizer.
+    Upon ``backward()``, the optimizer specified for each parameter will fire after
+    the gradient has been accumulated into the parameter.
 
     Note - gradients for these parameters will be set to None after ``backward()``.
-    This means that any other (non applied) optimizer over this parameter will be
-    a no-op.
+    This means that any other optimizer not specified via `_apply_optimizer_in_backward`
+    over this parameter will be a no-op.
 
     Args:
         optimizer_class: (Type[torch.optim.Optimizer]): Optimizer to apply to parameter
         params: (Iterator[nn.Parameter]): parameters to apply optimizer state to
         optimizer_kwargs: (Dict[str, Any]): kwargs to pass to optimizer constructor
         register_hook: (bool): whether to register a hook that runs the optimizer
-            after gradient for this parameter is computed. This is the default
+            after gradient for this parameter is accumulated. This is the default
             way that optimizer in backward is implemented, but specific use cases
             (such as DDP) may wish to override this to implement custom behavior.
             (Default = True)
@@ -44,7 +45,7 @@ def _apply_optimizer_in_backward(
         apply_optimizer_in_backward(torch.optim.Adam, remainder_params, {"lr": .04})
 
         model(...).sum().backward() # after backward, parameters will already
-        # have their registered optimizer applied.
+        # have their registered optimizer(s) applied.
 
     """
     torch._C._log_api_usage_once(
@@ -67,7 +68,8 @@ def _apply_optimizer_in_backward(
 
         if not hasattr(param, "_in_backward_optimizers"):
             param._in_backward_optimizers = []  # type: ignore[attr-defined]
-            # TODO: investigate whether we really need these attributes.
+            # TODO: Remove these attributes once we have a better way of accessing
+            # optimizer classes and kwargs for a parameter.
             param._optimizer_classes = []  # type: ignore[attr-defined]
             param._optimizer_kwargs = []  # type: ignore[attr-defined]
 
@@ -95,7 +97,7 @@ def _apply_optimizer_in_backward(
 
 def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
     """
-    Return a list of in-backward optimizers applied to ``model``'s parameters. Note that these
+    Return a list of in-backward optimizers applied to ``module``'s parameters. Note that these
     optimizers are not intended to directly have their ``step`` or ``zero_grad`` methods called
     by the user and are intended to be used for things like checkpointing.
 

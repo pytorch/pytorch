@@ -126,3 +126,7 @@ torch/utils/data/ @ejguan
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
 tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# torch.export
+/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17

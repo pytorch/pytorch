@@ -124,6 +124,9 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         cutoffs = list(cutoffs)
 
+        if (len(cutoffs) == 0):
+            raise ValueError("cutoffs should be a sequence of length larger than 0")
+
         if (cutoffs != sorted(cutoffs)) \
                 or (min(cutoffs) <= 0) \
                 or (max(cutoffs) > (n_classes - 1)) \
