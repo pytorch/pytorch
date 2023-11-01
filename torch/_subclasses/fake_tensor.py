@@ -7,7 +7,6 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from functools import partial
 from typing import (
     Any,
     Callable,
@@ -1279,11 +1278,8 @@ class FakeTensor(torch.Tensor):
     # of the tensor to create the output Python list, and (2) creating unbacked
     # symints for each element of the list.
     def tolist(self):
-        # Avoid importing sympy at a module level
-        from torch.fx.experimental.symbolic_shapes import is_symbolic
-
-        assert self.dim() == 1 and is_symbolic(self.shape[0])
-        shape_env = self.shape[0].node.shape_env
+        assert self.dim() == 1, "NYI for higher dims"
+        shape_env = self.fake_mode.shape_env
         out = []
         # Specialize on the length of the list
         for _ in range(self.shape[0]):
@@ -1680,7 +1676,7 @@ class FakeTensorMode(TorchDispatchMode):
             return maybe_run_unsafe_fallback(not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(
-            r, func, flat_args, kwargs
+            r, func, flat_args, device=kwargs.get("device")
         )
 
     # [subclass inputs]
@@ -1742,23 +1738,14 @@ class FakeTensorMode(TorchDispatchMode):
         validated_args = [validate(a) for a in flat_args]
         return validated_args, flat_arg_fake_tensors
 
-    def wrap_meta_outputs_with_default_device_logic(self, r, func, flat_args, kwargs):
-        wrap = self.gen_wrap_fn(func, flat_args)
-
-        # if device is specified, use that
-        if kwargs.get("device", None):
-            return tree_map(partial(wrap, device=kwargs["device"]), r)
-
-        return tree_map(partial(wrap), r)
-
-    def gen_wrap_fn(self, func, flat_args):
+    def wrap_meta_outputs_with_default_device_logic(self, r, func, flat_args, device):
         converter = self.fake_tensor_converter
 
         # Lazily initialized, in case there are no tensor returns
         common_device = None
         has_scalar_only_inputs = False
 
-        def wrap(e, device=None):
+        def wrap(e):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
@@ -1791,7 +1778,7 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return e
 
-        return wrap
+        return tree_map(wrap, r)
 
     def cpp_meta_supports_symint(self, func):
         if torch.Tag.view_copy in func.tags:
@@ -1915,8 +1902,8 @@ def run_fallback_kernel(
     # proper aliasing/metadata relationship between outputs and inputs will
     # not be set up, bc of conversion to device, unless we can reuse an
     # input impl
-    flat_out, out_spec = pytree.tree_flatten(r)
-    for e in flat_out:
+
+    def map_out(e):
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse
@@ -1924,7 +1911,6 @@ def run_fallback_kernel(
         ):
             raise orig_not_implemented_exception
 
-    def map_out(e):
         if isinstance(e, torch.Tensor):
             if id(e) in inp_impls:
                 return inp_impls[id(e)]
@@ -1933,8 +1919,7 @@ def run_fallback_kernel(
         else:
             return e
 
-    flat_out = [map_out(o) for o in flat_out]
-    return pytree.tree_unflatten(flat_out, out_spec)
+    return pytree.tree_map(map_out, out)
 
 
 # Just for use to allow copying a module to fake tensors,
