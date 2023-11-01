@@ -96,7 +96,7 @@ class BackendWorker(mp.Process):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_iters', type=int, default=100)
-    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--model_dir', type=str, default='.')
     parser.add_argument('--compile', type=bool, default=True)
     args = parser.parse_args()
