@@ -966,7 +966,11 @@ SeqNr|OrigAten|SrcFn
             # The tangent to `y[0]`, which has grad_required=False, is irrelevant
             self.assertEqual(
                 sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
-                sum(y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(
+                    x
+                    for x in y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))
+                    if x is not None
+                ),
             )
 
 
