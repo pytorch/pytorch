@@ -1244,6 +1244,9 @@ if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
     torch._dynamo.config.accumulated_cache_size_limit = 8
+    # TODO: Remove this; this is grandfathered in because we suppressed errors
+    # on test suite previously
+    torch._dynamo.config.suppress_errors = True
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
@@ -2692,16 +2695,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
-        if TEST_WITH_TORCHDYNAMO:
-            # TODO: Remove this; this is grandfathered in because we suppressed errors
-            # on test suite previously
-            self._dynamo_suppress_errors = torch._dynamo.config.suppress_errors
-            torch._dynamo.config.suppress_errors = True
-
     def tearDown(self):
-        if TEST_WITH_TORCHDYNAMO and hasattr(self, '_dynamo_suppress_errors'):
-            torch._dynamo.config.suppress_errors = self._dynamo_suppress_errors
-
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
         # attribute is defined in general.
