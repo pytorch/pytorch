@@ -2836,9 +2836,18 @@ class ShapeEnv:
         Tries to evaluate expr without introducing guards
 
         If unbacked_only == True, then we only do substitutions on
-        unbacked SymInts (leaving regular hinted integers alone).
+        unbacked SymInts (leaving regular hinted integers alone).  This could
+        result in an expression that still contains backed SymInts, which you
+        could then potentially guard on.
+
+        Use compute_hint == True if you are trying to compute a non-binding
+        hint for the particular hint values of backed SymInts, e.g., if
+        s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
         expr = self.simplify(expr)
+
+        if compute_hint:
+            expr = expr.xreplace(self.var_to_val)
 
         symbols = list(expr.free_symbols)
 
