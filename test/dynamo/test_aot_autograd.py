@@ -969,10 +969,6 @@ SeqNr|OrigAten|SrcFn
                 sum(y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))),
             )
 
-            print(
-                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
-                sum(y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))))
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
