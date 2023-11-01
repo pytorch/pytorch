@@ -652,6 +652,7 @@ def _compile(
                 backend_compile_time = frame_phase_timing[frame_key].get(
                     "backend_compile", None
                 )
+                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
             else:
                 guard_count = None
                 graph_op_count = None
@@ -659,6 +660,7 @@ def _compile(
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
+                non_compliant_ops = set({})
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -673,6 +675,7 @@ def _compile(
                 entire_frame_compile_time,
                 backend_compile_time,
                 fail_reason,
+                non_compliant_ops,
             )
             log_compilation_event(metrics)
 
