@@ -42,7 +42,6 @@ class TorchExport(exporter.FXGraphExtractor):
         #         args=model_args,  # type: ignore[arg-type]
         #         kwargs=model_kwargs,  # type: ignore[arg-type]
         #     )
-        # TODO: input_adapter and output_adapter should be based on pytree flatten/unflatten API?
 
         model = model.run_decompositions(options.decomposition_table)
 
