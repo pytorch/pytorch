@@ -4,6 +4,7 @@ import subprocess
 import torch
 import time
 import torch.multiprocessing as mp
+from queue import Empty
 
 
 class FrontendWorker(mp.Process):
@@ -78,9 +79,8 @@ class BackendWorker(mp.Process):
     def run(self):
         while True:
             try:
-                data, request_time = self.request_queue.get(timeout=20)
-            except:
-                # FIXME: catch the exact queue timeout exception
+                data, request_time = self.request_queue.get(timeout=10)
+            except Empty:
                 break
 
             if not self._setup_complete:
@@ -114,30 +114,32 @@ if __name__ == '__main__':
         else:
             raise RuntimeError("Failed to download checkpoint")
 
-    mp.set_start_method('forkserver')
-    request_queue = mp.Queue()
-    response_queue = mp.Queue()
-    warmup_event = mp.Event()
+    try:
+        mp.set_start_method('forkserver')
+        request_queue = mp.Queue()
+        response_queue = mp.Queue()
+        warmup_event = mp.Event()
 
-    frontend = FrontendWorker(response_queue, warmup_event, num_iters=args.num_iters)
-    backend = BackendWorker(request_queue, response_queue, args.model_dir, args.compile)
+        frontend = FrontendWorker(response_queue, warmup_event, num_iters=args.num_iters)
+        backend = BackendWorker(request_queue, response_queue, args.model_dir, args.compile)
 
-    frontend.start()
-    backend.start()
+        frontend.start()
+        backend.start()
 
-    # Send one batch of warmup data
-    fake_data = torch.randn(args.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True)
-    request_queue.put((fake_data, time.time()))
-    warmup_event.wait()
-
-    # Send fake data
-    for i in range(args.num_iters):
+        # Send one batch of warmup data
         fake_data = torch.randn(args.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True)
         request_queue.put((fake_data, time.time()))
+        warmup_event.wait()
 
-    frontend.join()
-    backend.join()
+        # Send fake data
+        for i in range(args.num_iters):
+            fake_data = torch.randn(args.batch_size, 3, 250, 250, requires_grad=False, pin_memory=True)
+            request_queue.put((fake_data, time.time()))
 
-    # Cleanup checkpoint file if we downloaded it
-    if downloaded_checkpoint:
-        os.remove(f'{args.model_dir}/resnet18-f37072fd.pth')
+        frontend.join()
+        backend.join()
+
+    finally:
+        # Cleanup checkpoint file if we downloaded it
+        if downloaded_checkpoint:
+            os.remove(f'{args.model_dir}/resnet18-f37072fd.pth')
