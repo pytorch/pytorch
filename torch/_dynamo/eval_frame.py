@@ -1422,6 +1422,7 @@ class TorchPatcher:
             adamax,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
+            adam,
         }
 
         for opt_mod in optimizer_modules:
