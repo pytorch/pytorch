@@ -1561,16 +1561,19 @@ class AotCodeCache:
             specified_output_path,
             specified_so_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-
         key, input_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        print(input_path)
 
         if key not in cls.cache or (
-            specified_so_name and cls.cache[key] != config.aot_inductor.output_path
+            specified_output_path
+            and os.path.dirname(cls.cache[key]) != specified_output_path
+            or specified_so_name
+            and os.path.basename(cls.cache[key]) != specified_so_name
         ):
             from filelock import FileLock
 
