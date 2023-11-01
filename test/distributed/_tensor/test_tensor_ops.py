@@ -185,8 +185,11 @@ class DistTensorOpsTest(DTensorTestBase):
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
         assert dist_tensor.shape == (4, 8)
 
-        torch.fill_(dist_tensor, 42)
-        fill_expected = torch.full(dist_tensor.shape, 42, dtype=input_tensor.dtype)
+        # inplace partial sum should keep partial
+        torch.fill_(dist_tensor, 8)
+        fill_expected = torch.full(
+            dist_tensor.shape, 8 * self.world_size, dtype=input_tensor.dtype
+        )
         self.assertEqual(fill_expected, dist_tensor.full_tensor())
 
     @with_comms
