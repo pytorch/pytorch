@@ -35,10 +35,11 @@ from .graph_signature import (  # noqa: F401
     ConstantArgument,
     ExportGraphSignature,
     InputKind,
+    InputSpec,
     OutputKind,
+    OutputSpec,
     SymIntArgument,
     TensorArgument,
-    InputSpec,
 )
 
 
@@ -281,13 +282,17 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.nn.Module:
+    def module(self, *, flat: bool = True) -> torch.nn.Module:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
         """
         from torch._export.exported_program import unlift_exported_program_lifted_states
+        from torch._export.unflatten import unflatten
 
-        return unlift_exported_program_lifted_states(self)
+        if flat:
+            return unlift_exported_program_lifted_states(self)
+        else:
+            return unflatten(self)
 
     def run_decompositions(
         self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None

@@ -1513,10 +1513,10 @@ def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
             func_args = _wrap_all_tensors_to_functional(args, func_level)
             func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
 
-            flattened_unwrapped_args = pytree.tree_leaves(args)
-            flattened_wrapped_args = pytree.tree_leaves(func_args)
-            flattened_unwrapped_kwargs = pytree.tree_leaves(kwargs)
-            flattened_wrapped_kwargs = pytree.tree_leaves(func_kwargs)
+            flattened_unwrapped_args = pytree.arg_tree_leaves(*args)
+            flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
+            flattened_unwrapped_kwargs = pytree.arg_tree_leaves(**kwargs)
+            flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
             func_outputs = func(*func_args, **func_kwargs)
             outputs = _unwrap_all_tensors_from_functional(func_outputs, reapply_views=reapply_views)

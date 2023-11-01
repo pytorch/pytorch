@@ -2,7 +2,7 @@ import torch
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_map_only
 from torch.utils import _pytree as pytree
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -483,7 +483,7 @@ def reinplace(gm, *sample_args):
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
-            tree_map(_add_to_map, n.meta['fake_result'])
+            pytree.tree_map_(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
