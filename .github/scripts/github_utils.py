@@ -174,3 +174,8 @@ def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
         warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
 
     return merge_base
+
+
+def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") -> None:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
+    gh_fetch_url(url, method="PATCH", data={"state": state})
