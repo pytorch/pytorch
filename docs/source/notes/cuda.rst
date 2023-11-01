@@ -264,7 +264,29 @@ used.  For example, the following code is incorrect::
 When the "current stream" is the default stream, PyTorch automatically performs
 necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
-ensure proper synchronization.
+ensure proper synchronization.  The fixed version of this example is::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # NEW!
+    with torch.cuda.stream(s):
+        B = torch.sum(A)
+
+Note that this synchronization is necessary even when there is no
+read dependency, e.g., as seen in this example::
+
+    cuda = torch.device('cuda')
+    s = torch.cuda.Stream()  # Create a new stream.
+    A = torch.empty((100, 100), device=cuda)
+    s.wait_stream(torch.cuda.default_stream(cuda))  # STILL REQUIRED!
+    with torch.cuda.stream(s):
+        A.normal_(0.0, 1.0)
+
+Despite the computation on ``s`` not reading the contents of ``A`` and no
+other uses of ``A``, it is still necessary to synchronize, because ``A``
+may correspond to memory reallocated by the CUDA caching allocator, with
+pending operations from the old (deallocated) memory.
 
 .. _bwd-cuda-stream-semantics:
 

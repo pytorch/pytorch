@@ -4041,7 +4041,7 @@ current work queued on :attr:`stream` are complete.
 
 .. warning::
 
-    This method is most suitable for use cases where you are a providing a
+    This method is most suitable for use cases where you are providing a
     function that created a tensor on a side stream, and want users to be able
     to make use of the tensor without having to think carefully about stream
     safety when making use of them.  These safety guarantees come at some
@@ -4055,20 +4055,49 @@ current work queued on :attr:`stream` are complete.
     non-deterministically reuse or fail to reuse memory for an allocation.
 
     You can safely use tensors allocated on side streams without
-    :method:`~Tensor.record_stream`; the idea is to manually ensure that that
-    the tensor doesn't get deallocated until it is safe to reuse.  Typically,
-    you can :method:`torch.cuda.Event.synchronize` the side stream before you
-    ``del`` the tensor.  This is not a mechanical change: synchronizing immediately
-    after you queue work on the side stream would defeat the purpose of having
-    a side stream at all.  Instead, the synchronization must be placed at some
-    appropriate, later point in time where you expect the side stream to have
-    finished work.  This point could be identified via profiling.  Note that
-    this approach still implies a device-to-host synchronization, so if the
-    side stream has not actually finished work, you will block until it is
-    finished.  Conversely, if you place the deallocation too late, you will use
-    more memory than is strictly necessary.  For a concrete example of how
-    this guidance can be applied in practice, see this post: `FSDP and
-    CUDACachingAllocator
+    :method:`~Tensor.record_stream`; you must manually ensure that
+    any non-creation stream uses of a tensor are synced back to the creation
+    stream before you deallocate the tensor.  As the CUDA caching allocator
+    guarantees that the memory will only be reused with the same creation stream,
+    this is sufficient to ensure that writes to future reallocations of the
+    memory will be delayed until non-creation stream uses are done.
+    (Counterintuitively, you may observe that on the CPU side we have already
+    reallocated the tensor, even though CUDA kernels on the old tensor are
+    still in progress.  This is fine, because CUDA operations on the new
+    tensor will appropriately wait for the old operations to complete, as they
+    are all on the same stream.)
+
+    Concretely, this looks like this::
+
+        with torch.cuda.stream(s0):
+            x = torch.zeros(N)
+
+        s1.wait_stream(s0)
+        with torch.cuda.stream(s1):
+            y = some_comm_op(x)
+
+        ... some compute on s0 ...
+
+        # synchronize creation stream s0 to side stream s1
+        # before deallocating x
+        s0.wait_stream(s1)
+        del x
+
+    Note that some discretion is required when deciding when to perform
+    ``s0.wait_stream(s1)``.  In particular, if we were to wait immediately
+    after ``some_comm_op``, there wouldn't be any point in having the side
+    stream; it would be equivalent to have run ``some_comm_op`` on ``s0``.
+    Instead, the synchronization must be placed at some appropriate, later
+    point in time where you expect the side stream ``s1`` to have finished
+    work.  This location is typically identified via profiling, e.g., using
+    Chrome traces produced
+    :method:`torch.autograd.profiler.profile.export_chrome_trace`.  If you
+    place the wait too early, work on s0 will block until ``s1`` has finished,
+    preventing further overlapping of communication and computation.  If you
+    place the wait too late, you will use more memory than is strictly
+    necessary (as you are keeping ``x`` live for longer.)  For a concrete
+    example of how this guidance can be applied in practice, see this post:
+    `FSDP and CUDACachingAllocator
     <https://dev-discuss.pytorch.org/t/fsdp-cudacachingallocator-an-outsider-newb-perspective/1486>`_.
 """,
 )
