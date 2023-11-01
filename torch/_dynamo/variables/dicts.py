@@ -670,25 +670,27 @@ class CustomizedDictVariable(ConstDictVariable):
                 if hasattr(fn, "__code__"):
                     skip_code(fn.__code__)
 
-        if not args and not kwargs:
-            # CustomDict() init with empty arguments
-            raw_items = collections.OrderedDict()
-        elif dataclasses.is_dataclass(user_cls):
+        def dict_to_vars(d):
+            if not all(ConstantVariable.is_literal(val) for val in d.values()):
+                unimplemented("expect defaults to be literals")
+
+            # The keys are strings
+            make_const = ConstantVariable.create
+            return {make_const(k): make_const(v) for k, v in d.items()}
+
+        if dataclasses.is_dataclass(user_cls):
             # @dataclass CustomDict(a=1, b=2)
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
-            if not all(
-                ConstantVariable.is_literal(val) for val in bound.arguments.values()
-            ):
-                unimplemented("expect defaults to be literals")
-
-            make_const = ConstantVariable.create
-            items = {make_const(k): make_const(v) for k, v in bound.arguments.items()}
+            items = dict_to_vars(bound.arguments)
+        elif not args:
+            # CustomDict(a=1, b=2) in the general (non-dataclass) case.
+            items = dict_to_vars(kwargs or {})
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             items = args[0].items
         else:
-            unimplemented("custome dict init with args/kwargs unimplemented")
+            unimplemented("custom dict init with args/kwargs unimplemented")
 
         return cls(items, user_cls, **options)
 
