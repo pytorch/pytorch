@@ -944,14 +944,14 @@ SeqNr|OrigAten|SrcFn
         for compiler in ["aot_eager", "inductor"]:
 
             def f(x):
-                y = x.clone()
+                y = x * x
                 torch.set_grad_enabled(False)
                 return y.clone(), y
 
             f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
 
-            x = torch.randn(3, requires_grad=True)
             torch.set_grad_enabled(True)
+            x = torch.ones(3, requires_grad=True) * 3
             y_ref = f(x)
             self.assertEqual(torch.is_grad_enabled(), False)
             torch.set_grad_enabled(True)
@@ -959,8 +959,19 @@ SeqNr|OrigAten|SrcFn
             self.assertEqual(torch.is_grad_enabled(), False)
             self.assertEqual(y_ref, y)
 
-            self.assertTrue(y_ref[1].grad_fn is not None)
-            self.assertTrue(y[1].grad_fn is not None)
+            self.assertIsNotNone(y_ref[1].grad_fn)
+            self.assertIsNotNone(y[1].grad_fn)
+
+            # Check that the grad computed for the inputs, given the input, is the same
+            # The tangent to `y[0]`, which has grad_required=False, is irrelevant
+            self.assertEqual(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))),
+            )
+
+            print(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))))
 
 
 if __name__ == "__main__":
