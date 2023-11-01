@@ -23,21 +23,27 @@ def _wrap_jagged_dim(ndim, dim, op_name, allow_ragged=False):
         )
     return wrapped - 1
 
+
 def _wrap_jagged_dims(ndim, dims, op_name):
     # ex: (2, 3, 4) -> (1, 2, 3)
     # ex: (0, 1, 4) -> (0, 3)
     zero_in_dims = 0 in dims
     one_in_dims = 1 in dims
     if zero_in_dims ^ one_in_dims:
-        apply, not_apply= ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
+        apply, not_apply = ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
         raise RuntimeError(
             f"{op_name}(): applying over the {apply} dimension, but not the {not_apply}"
             " dimension is not supported for NestedTensor"
         )
-    return tuple(
-        _wrap_jagged_dim(ndim, d, op_name, allow_ragged=True)
-        for d in dims if d != 0
-    ), zero_in_dims
+    return (
+        tuple(
+            _wrap_jagged_dim(ndim, d, op_name, allow_ragged=True)
+            for d in dims
+            if d != 0
+        ),
+        zero_in_dims,
+    )
+
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
@@ -598,7 +604,9 @@ def sum_dim_IntList(func, *args, **kwargs):
     )
     inp = new_kwargs.pop("input")
     assert inp._ragged_idx == 1
-    new_kwargs["dim"], ragged_reduced_away = _wrap_jagged_dims(inp.dim(), new_kwargs["dim"], "sum")
+    new_kwargs["dim"], ragged_reduced_away = _wrap_jagged_dims(
+        inp.dim(), new_kwargs["dim"], "sum"
+    )
 
     if not ragged_reduced_away:
         return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
