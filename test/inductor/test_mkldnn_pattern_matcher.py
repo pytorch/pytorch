@@ -17,6 +17,7 @@ from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
+    skipIfNoONEDNNBF16,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
@@ -59,6 +60,9 @@ binary_list = {
 quantization_add_fn_list = [
     lambda x, y: torch.add(x, y),
     lambda x, y: x.add(y),
+]
+
+quantization_inplace_add_fn_list = [
     lambda x, y: x.add_(y),
 ]
 
@@ -533,19 +537,25 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.add_fn(x1, x2)
+                tmp = self.add_fn(x1, x2)
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                return self.add_fn2(tmp1, tmp2)
 
-        for add_fn in quantization_add_fn_list:
+        for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
             mod = M(add_fn).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 6 pattern_matcher_count, 26 pattern_matcher_nodes
-            # 1. Pair of to_int8 and to_fp32 at conv input * 1
+            # Totally 12 pattern_matcher_count, 61 pattern_matcher_nodes
+            # 1. 2 * Pair of to_int8 and to_fp32
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
             #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
@@ -555,19 +565,104 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
             #                                          \-> to_float -> sub -> mul]
             #        So for now we will discount one pattern here
-            # 2. Dequant pattern matcher for dequant promotion * 1
-            #    [convert_element_type_3, sub_1, mul_3]
-            # 3. Dequant-conv pattern matched in quantization weight prepack * 2
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-            # 4. Quantization fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            # 5. Qconv2d_add * 1
+            # 2. 2 * Dequant pattern matcher for dequant promotion
+            #    [convert_element_type_3, sub_1, mul_3, convert_element_type_17]
+            # 3. 4 * Dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, convert_element_type_default, dequantize_per_channel,
+            #     convert_element_type_19, clone, convolution]
+            # 4. 2 * Quantization fusion in post-grad fusion pass
+            #    [qconv2d_pointwise_default, convert_element_type_21, mul_8, round_4, add_4, clamp_min_3,
+            #     clamp_max_3, convert_element_type_8]
+            # 5. Qconv2d_add int8 output in post-grad fusion pass
+            #    [qconv2d_pointwise_default_3, convert_element_type_4, sub_2, mul_4, add_2, mul_5, round_3,
+            #     add_3, clamp_min_2, clamp_max_2, convert_element_type_5]
+            # 6. Qconv2d_add float output in post-grad fusion pass
             #    [qconv2d_pointwise_default_1, add_2]
             self._test_common(
                 mod,
                 (v,),
-                6,
-                26,
+                12,
+                61,
+                check_quantization=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_add_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a Conv2d->Add pattern as:
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                 Y
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.add_fn(x1, x2)
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                return self.add_fn2(tmp1, tmp2)
+
+        for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
+            inplace_add = add_fn in quantization_inplace_add_fn_list
+            mod = M(add_fn).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+            # Totally 12 (15 if inplace_add) pattern_matcher_count, 73 (78 if inplace_add) pattern_matcher_nodes
+            # 1. 2 * Pair of to_int8 and to_fp32
+            #    matched in pointless_convert pass at
+            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #        However when dq has multiple users we will have
+            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #                                          \-> to_float -> sub -> mul]
+            #        So for now we will discount one pattern here
+            # 2. 2 * Dequant pattern matcher for dequant promotion
+            #    [convert_element_type_3, sub_1, mul_3, convert_element_type_17]
+            # 3. 4 * Dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, convert_element_type_default), dequantize_per_channel,
+            #     convert_element_type_19, clone, convolution]
+            # 4. 2 * Quantization fusion in post-grad fusion pass
+            #    [qconv2d_pointwise_default, convert_element_type_21, mul_8, round_4, add_4, clamp_min_3,
+            #     clamp_max_3, convert_element_type_8]
+            # 5. Qconv2d_add int8 output in post-grad fusion pass
+            #    [qconv2d_pointwise_default_3, convert_element_type_4, sub_2, mul_4, add_2, mul_5, round_3,
+            #     add_3, clamp_min_2, clamp_max_2, convert_element_type_5]
+            # 6. Qconv2d_add float output in post-grad fusion pass
+            #    [qconv2d_pointwise_default_1, add_2, optional(convert_element_type_26)]
+            # 7. extra to_bf16 and to_fp32 at first conv_add for inplace add case
+            # 8. 2 extra to_bf16 node matched in
+            #    torch/_inductor/fx_passes/freezing_patterns.py::unnecessary_dtype_convert for inplace add case
+            self._test_common(
+                mod,
+                (v,),
+                15 if inplace_add else 12,
+                78 if inplace_add else 73,
+                check_autocast=True,
                 check_quantization=True,
             )
 
@@ -599,19 +694,26 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
                 self.add_fn = add_fn
                 self.relu = torch.nn.ReLU()
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU()
 
             def forward(self, x):
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
-                return self.relu(self.add_fn(x1, x2))
+                tmp = self.relu(self.add_fn(x1, x2))
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                return self.relu2(self.add_fn2(tmp1, tmp2))
 
-        for add_fn in quantization_add_fn_list:
+        for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
             mod = M(add_fn).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 6 pattern_matcher_count, 27 pattern_matcher_nodes
-            # 1. Pair of to_int8 and to_fp32 at conv input * 1, extra input of add * 1
+            # Totally 12 pattern_matcher_count, 63 pattern_matcher_nodes
+            # 1. 2 * Pair of to_int8 and to_fp32
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
             #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
@@ -621,19 +723,109 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
             #                                          \-> to_float -> sub -> mul]
             #        So for now we will discount one pattern here
-            # 2. Dequant pattern matcher for dequant promotion * 1
+            # 2. 2 * Dequant pattern matcher for dequant promotion
             #    [convert_element_type_3, sub_1, mul_3]
-            # 3. Dequant-conv pattern matched in quantization weight prepack * 2
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-            # 4. Quantization fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            # 5. Qconv2d_add * 1
+            # 3. 4 * Dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, optinal(convert_element_type_19), clone, convolution]
+            # 4. 2 * Quantization fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, optinal(convert_element_type_21), div_1, round_2, add_1, clamp_min_1,
+            #     clamp_max_1, convert_element_type_2]
+            # 5. QConv2d_add int8 output
+            #    [qconv2d_pointwise_default_3, convert_element_type_4, sub_2, mul_4, add_2, relu, mul_5, round_3,
+            #     add_3, clamp_min_2, clamp_max_2, convert_element_type_5]
+            # 6. Qconv2d_add float output
             #    [qconv2d_pointwise_default_1, add_3, relu]
             self._test_common(
                 mod,
                 (v,),
-                6,
-                27,
+                12,
+                63,
+                check_quantization=True,
+            )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_add_relu_int8_mixed_bf16(self):
+        r"""
+        This testcase will quantize a Conv2d->Add->ReLU pattern as:
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                ReLU
+                 |
+                 Y
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                add_fn,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.add_fn = add_fn
+                self.relu = torch.nn.ReLU()
+                self.conv3 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.conv4 = torch.nn.Conv2d(6, 6, kernel_size=3, stride=1)
+                self.add_fn2 = add_fn
+                self.relu2 = torch.nn.ReLU()
+
+            def forward(self, x):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                tmp = self.relu(self.add_fn(x1, x2))
+                tmp1 = self.conv3(tmp)
+                tmp2 = self.conv4(tmp)
+                return self.relu2(self.add_fn2(tmp1, tmp2))
+
+        # for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
+        for add_fn in quantization_add_fn_list:
+            inplace_add = add_fn in quantization_inplace_add_fn_list
+            mod = M(add_fn).eval()
+            v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
+                1
+            )
+            # Totally 12 (14 if inplace_add) pattern_matcher_count, 75 (80 if inplace_add) pattern_matcher_nodes
+            # 1. 2 * Pair of to_int8 and to_fp32
+            #    matched in pointless_convert pass at
+            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #        However when dq has multiple users we will have
+            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #                                          \-> to_float -> sub -> mul]
+            #        So for now we will discount one pattern here
+            # 2. 2 * Dequant pattern matcher for dequant promotion
+            #    [convert_element_type_3, sub_1, mul_3, convert_element_type_17]
+            # 3. 4 * Dequant-conv pattern matched in quantization weight prepack
+            #    [convert_element_type_1, sub, mul_1, convert_element_type_2, dequantize_per_channel,
+            #     convert_element_type_19, clone, convolution]
+            # 4. 2 * Quantization fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, convert_element_type_21, div_1, round_2, add_1, clamp_min_1,
+            #     clamp_max_1, convert_element_type_2]
+            # 5. QConv2d_add int8 output
+            #    [qconv2d_pointwise_default_3, convert_element_type_4, sub_2, mul_4, add_2,
+            #     optional(convert_element_type_12), relu, mul_5,
+            #     round_3, add_3, clamp_min_2, clamp_max_2, convert_element_type_5]
+            # 6. Qconv2d_add float output
+            #    [qconv2d_pointwise_default_1, add_3, optional(convert_element_type_12), relu]
+            # 7. extra to_bf16 and to_fp32 at first conv_add for inplace add case
+            # 8. extra to_bf16 node matched in
+            #    torch/_inductor/fx_passes/freezing_patterns.py::unnecessary_dtype_convert for inplace add case
+            self._test_common(
+                mod,
+                (v,),
+                14 if inplace_add else 12,
+                80 if inplace_add else 75,
+                check_autocast=True,
                 check_quantization=True,
             )
 
