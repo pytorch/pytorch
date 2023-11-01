@@ -244,6 +244,12 @@ class TestPrioritizations:
     def get_unranked_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.UNRANKED.value])
 
+    def get_unlikely_relevance_tests(self) -> TestRuns:
+        return tuple(test for test in self._test_priorities[Relevance.UNLIKELY.value])
+
+    def get_none_relevance_tests(self) -> TestRuns:
+        return tuple(test for test in self._test_priorities[Relevance.NONE.value])
+
     def print_info(self) -> None:
         def _print_tests(label: str, tests: List[TestRun]) -> None:
             if not tests:
