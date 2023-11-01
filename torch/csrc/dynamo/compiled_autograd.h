@@ -399,7 +399,10 @@ class CompiledNodeArgs {
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
+<<<<<<< HEAD
     std::cout << "Adding post_acc_grad_hooks" << std::endl;
+=======
+>>>>>>> ef1f08c5a03635bee1f770d215f138542584f051
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
     _node_call.post_acc_grad_hooks.emplace_back(fn_id);
@@ -634,8 +637,20 @@ class SwapSavedVariables {
   NO_OP_VISIT(double);
 #undef NO_OP_VISIT
 
-  SwapSavedVariables(AutogradCompilerCall& c, TraceState& s)
-      : compiler(c), state(s) {}
+  SwapSavedVariables(
+      AutogradCompilerCall& c,
+      TraceState& s,
+      PyObject* p,
+      const NodeCall& n)
+      : compiler(c), state(s), py_compiler(p), curr_node_call(n) {}
+
+  PyObject* get_py_compiler() {
+    return py_compiler;
+  }
+
+  const NodeCall& get_curr_node_call() {
+    return curr_node_call;
+  }
 
   void debug_asserts() {
     stashed_variables.debug_assert();
@@ -681,6 +696,10 @@ class SwapSavedVariables {
 
   AutogradCompilerCall& compiler;
   TraceState& state;
+  // This is a borrowed reference, we do not increment ownership, or lower it,
+  // it's lifecycle is entirely longer than this objects.
+  PyObject* py_compiler;
+  const NodeCall& curr_node_call;
 
   // These mappings are used to save the prior values when we overwrite things
   // in before(). In after(), we use these to cleanup after ourselves.

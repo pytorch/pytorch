@@ -8,7 +8,18 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -26,13 +37,6 @@ from torch._prims_common import (
 )
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import (
-    _constrain_range_for_size,
-    DimConstraint,
-    DimDynamic,
-    free_symbols,
-    is_symbolic,
-)
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -42,9 +46,14 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
+from torch.utils._pytree import PyTree, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -210,6 +219,10 @@ def maybe_get_fake_mode(t):
         m = modes[0]
         assert all(m is x for x in modes)
         return m
+    elif isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+        reapply_views = torch._C._functionalization_reapply_views_tls()
+        unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
+        return maybe_get_fake_mode(unwrapped)
     return None
 
 
@@ -232,8 +245,8 @@ def torch_decomp_decompositions(func):
     return decomposition_table[func] in decomp_attrs
 
 
-def tree_flatten_only(ty: Type[T], pytree: PyTree):
-    flat_vals, _ = tree_flatten(pytree)
+def tree_flatten_only(ty: Type[T], tree: PyTree):
+    flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
 
@@ -317,8 +330,8 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
     ):
         maybe_memo = self._get_memo(t)
@@ -537,6 +550,10 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
             raise DynamicOutputShapeException(func)
 
         output_size = fake_mode.shape_env.create_unbacked_symint()
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
         _constrain_range_for_size(output_size)
         # TODO: consider a memo
     return repeats.new_empty(output_size)
@@ -581,6 +598,13 @@ def nonzero(fake_mode, func, arg):
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
         maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            free_symbols,
+        )
+
         if not free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
@@ -610,6 +634,13 @@ def masked_select(fake_mode, func, self, mask):
 
     # see nonzero for commentary
     maxval = sys.maxsize - 1
+
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import (
+        _constrain_range_for_size,
+        free_symbols,
+    )
+
     if not free_symbols(arg.numel()):
         if arg.numel() >= 2:
             maxval = int(arg.numel())
@@ -721,6 +752,7 @@ def conv(fake_mode, func, *args, **kwargs):
         k = kwargs["weight"].ndim
         batch = kwargs["input"].shape[0]
 
+        # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import has_hint
 
         if not has_hint(batch):
@@ -1148,7 +1180,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in itertools.chain(tree_flatten(args)[0], tree_flatten(kwargs)[0]):
+        for arg in pytree.arg_tree_leaves(*args, **kwargs):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -1224,8 +1256,8 @@ class FakeTensor(torch.Tensor):
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
-        tree_map(merge_devices, args)
-        tree_map(merge_devices, kwargs)
+        pytree.tree_map_(merge_devices, args)
+        pytree.tree_map_(merge_devices, kwargs)
 
         # some functions that allow Python numbers to bind to Tensors
         # if we have failed to find a device, and we're running one of these operators,
@@ -1249,8 +1281,8 @@ class FakeTensor(torch.Tensor):
     # of the tensor to create the output Python list, and (2) creating unbacked
     # symints for each element of the list.
     def tolist(self):
-        assert self.dim() == 1 and is_symbolic(self.shape[0])
-        shape_env = self.shape[0].node.shape_env
+        assert self.dim() == 1, "NYI for higher dims"
+        shape_env = self.fake_mode.shape_env
         out = []
         # Specialize on the length of the list
         for _ in range(self.shape[0]):
@@ -1812,8 +1844,8 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
@@ -1869,7 +1901,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     tensor_impls = set()
     storages = set()
 
-    for e in tree_flatten((args, kwargs))[0]:
+    for e in pytree.arg_tree_leaves(*args, **kwargs):
         if isinstance(e, torch.Tensor):
             if not e.is_sparse:
                 storages.add(e._typed_storage()._cdata)
@@ -1878,7 +1910,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
     # proper aliasing/metadata relationship between outputs and inputs will
     # not be set up, bc of conversion to device, unless we can reuse an
     # input impl
-    for e in tree_flatten(r)[0]:
+    for e in pytree.tree_leaves(r):
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
             and not e.is_sparse

@@ -73,13 +73,10 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
     args.collect(variable);
     args.collect(variable.grad());
   }
-  std::cout << "compiled_args on acc_grad" << std::endl;
-  // std::unique_ptr<PostAccumulateGradHook>& hookPtr = tensor_post_acc_grad_hooks();
-  // if (hookPtr != nullptr) {
-  //   // auto* rawSubclassPtr = dynamic_cast<PyFunctionTensorPostAccGradHooks*>(hookPtr.get());
-  //   hookPtr->compiled_args(args);
-  // }
-  // args.add_post_hook(c10::SafePyObject(hook, getPyInterpreter()));
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    hook->compiled_args(args);
+  }
 }
 
 variable_list AccumulateGrad::apply_with_saved(
@@ -100,6 +97,10 @@ variable_list AccumulateGrad::apply_with_saved(
                        .findSchemaOrThrow("inductor::accumulate_grad_", "")
                        .typed<void(const at::Tensor&, const at::Tensor&)>();
   op.call(variable_copy, grads[0]);
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    hook->apply_with_saved(variable_copy, saved);
+  }
   saved.after(variable_copy);
   saved.after(grad_copy);
 

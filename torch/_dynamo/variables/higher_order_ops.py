@@ -492,6 +492,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 checkpoint,
                 "cond",
                 source_target=self.value,
+                manually_set_subgraph_inputs=False,
             )
 
             if not isinstance(ret_val, TensorVariable):
@@ -506,45 +507,63 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
         false_nn_modules = tx.copy_graphstate().output.nn_modules
 
-        # TODO (tmanlaibaatar) deduplicate this later
-        # Let's say we capture cond(pred, true_fn, false_fn, x)
-        # and true_fn has lifted variables a, b, c
-        # and false_fn has lifted variables a, b, d
-        # Then each branch graph will receive:
-        # true_fn(x, a, b, c, a_false, b_false, d_false)
-        # false_fn(x, a_true, b_true, c_true, a, b, d)
-        # https://github.com/pytorch/pytorch/issues/103530
-        def fixup_branch_inps(graph, add_after, new_args, suffix) -> None:
-            original_phs = [node for node in graph.nodes if node.op == "placeholder"]
-            assert add_after < len(
-                original_phs
-            ), f"Invalid index for inserting lifted arguments {add_after}."
+        def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
+            shared_freevars = true_lifted_freevars.keys() & false_lifted_freevars.keys()
+            unique_true_freevars = true_lifted_freevars.keys() - shared_freevars
+            unique_false_freevars = false_lifted_freevars.keys() - shared_freevars
 
-            # When operands is empty, add_after can be -1 for false graph. In that case, we need to insert new
-            # nodes before the first node in the graph since placeholders precede normal nodes.
-            def _add_phs():
-                for inp_node in new_args:
-                    new_node_name = inp_node.node.name + suffix
-                    graph.placeholder(new_node_name)
+            def _sort_by_name(vars):
+                return sorted(vars, key=lambda var: var.node.name)
 
-            if add_after == -1:
-                first_node = next(iter(graph.nodes))
-                with graph.inserting_before(first_node):
-                    _add_phs()
-            else:
-                insertion_node = original_phs[add_after]
-                with graph.inserting_after(insertion_node):
-                    _add_phs()
+            return (
+                list(_sort_by_name(list(shared_freevars))),
+                list(_sort_by_name(list(unique_true_freevars))),
+                list(_sort_by_name(list(unique_false_freevars))),
+            )
 
-        fixup_branch_inps(
-            true_graph,
-            len(operands) + len(true_lifted_freevars) - 1,
-            false_lifted_freevars,
-            "_false_branch",
+        shared, unique_true, unique_false = dedup_and_sort_lifted_freevars(
+            true_lifted_freevars, false_lifted_freevars
         )
 
+        # Let's say we capture cond(pred, true_fn, false_fn, (x,))
+        # With mannually_set_graph_input set to False,
+        # true_fn has lifted variables x, a, b, c
+        # false_fn has lifted variables x, a, b, d
+        # Then fixup_branch_inps make sure both branches have the same signature, i.e.:
+        # - true_fn(x, a, b, c_true_branch, d_false_branch)
+        # - false_fn(x, a, b, c_true_branch, d_false_branch)
+        #
+        # More formally, the signature has three parts in the following order:
+        # 1. used in both branches: x, a, b
+        # 2. only used in true branches: c, suffixed with _true_branch
+        # 3. only used in false branches: d, suffixed with _false_branch
+        # Within each part, we re-order the nodes by name to have a derterministic ordering for testing.
+        def fixup_branch_inps(
+            graph, lifted_freevars, shared, unique_true, unique_false
+        ):
+            def _insert_or_replace_phs(new_args, name_suffix):
+                for arg in new_args:
+                    new_ph = graph.placeholder(arg.node.name + name_suffix)
+                    if arg in lifted_freevars:
+                        old_ph = lifted_freevars[arg].node
+                        old_ph.replace_all_uses_with(new_ph)
+                        # replace_all_uses_with doesn't clean users. Clean it mannually so that we could erase it.
+                        old_ph.users = {}
+                        graph.erase_node(old_ph)
+
+            first_not_ph_node = next(
+                node for node in graph.nodes if node.op != "placeholder"
+            )
+            with graph.inserting_before(first_not_ph_node):
+                _insert_or_replace_phs(shared, "")
+                _insert_or_replace_phs(unique_true, "_true_branch")
+                _insert_or_replace_phs(unique_false, "_false_branch")
+
         fixup_branch_inps(
-            false_graph, len(operands) - 1, true_lifted_freevars, "_true_branch"
+            true_graph, true_lifted_freevars, shared, unique_true, unique_false
+        )
+        fixup_branch_inps(
+            false_graph, false_lifted_freevars, shared, unique_true, unique_false
         )
 
         true_name = add_subgraph(
@@ -567,9 +586,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             args[0].as_proxy(),
             true_node,
             false_node,
-            [a.as_proxy() for a in operands]
-            + list(true_lifted_freevars.keys())
-            + list(false_lifted_freevars.keys()),
+            shared + unique_true + unique_false,
         )
         # TODO: assert that the true/false return values are
         # consistent
@@ -614,7 +631,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
-        sample_shape = args[1].get_real_value().size()
+        sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
+
         if len(sample_shape) < 1 or sample_shape[0] == 0:
             unimplemented(
                 "map() operator doesn't support scalar or zero-sized tensors during tracing."
@@ -664,9 +682,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         non_single_tensor_return_unsupported("torch.ops.higher_order.map", body_r)
         r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r.new_empty(
-            [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
-        )
+        example_value = r.new_empty([sample_shape[0], *r.shape])
 
         _, p_kwargs = proxy_args_kwargs([], kwargs)
 
