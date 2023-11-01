@@ -538,7 +538,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
             return sympy_symbol(key)
         return key
 
-    return expr.xreplace(
+    return sympy.sympify(expr).xreplace(
         {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
     )
 
