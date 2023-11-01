@@ -29,7 +29,8 @@ from torch.utils._python_dispatch import (
     _push_mode,
 )
 
-from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
+from .sym_node import SymNode
+from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
@@ -766,6 +767,9 @@ def make_fx(f,
 
     @functools.wraps(f)
     def wrapped(*args):
+        # Avoid importing sympy at a module level
+        from .symbolic_shapes import ShapeEnv
+
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()

@@ -712,6 +712,16 @@ FW_DERIVATIVE_CHECK_TEMPLATE = CodeTemplate(
 isFwGradDefined(${req_inp})\
 """
 )
+FW_DERIVATIVE_SIZE_CHECK_TEMPLATE = CodeTemplate(
+    """\
+TORCH_CHECK(
+    self.size() == ${inp_name}.size(),
+      "Tensor lists must have the same number of tensors, got ",
+    self.size(),
+      " and ",
+    ${inp_name}.size());
+"""
+)
 
 FW_DERIVATIVE_TENSORLIST_CHECK_TEMPLATE = CodeTemplate(
     """\
@@ -1785,27 +1795,40 @@ def emit_body(
         else:
             for derivative in fw_derivatives:
                 bool_vector_name = get_any_has_forward_grad_name(derivative.var_names)
-                cur_derivative_conditions = [
-                    FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
-                        req_inp=(
-                            inp.name
-                            if not inplace
-                            else refargname2inplace_foreacharg[inp.name].name
-                        )
-                        + (
-                            "[i]"
-                            if is_tensor_list_type(
-                                inp.type
-                                if not inplace
-                                else refargname2inplace_foreacharg[inp.name].type
-                            )
-                            else ""
-                        ),
+                cur_derivative_conditions = []
+                for inp in differentiable_inputs:
+                    if derivative.required_inputs_fw_grad is None:
+                        continue
+                    if inp.name not in derivative.required_inputs_fw_grad:
+                        continue
+                    inp_name = (
+                        inp.name
+                        if not inplace
+                        else refargname2inplace_foreacharg[inp.name].name
                     )
-                    for inp in differentiable_inputs
-                    if derivative.required_inputs_fw_grad is not None
-                    and inp.name in derivative.required_inputs_fw_grad
-                ]
+                    inp_type = (
+                        inp.type
+                        if not inplace
+                        else refargname2inplace_foreacharg[inp.name].type
+                    )
+                    is_list_type = is_tensor_list_type(inp_type)
+                    if is_list_type:
+                        if inp_name != "self":
+                            content.append(
+                                FW_DERIVATIVE_SIZE_CHECK_TEMPLATE.substitute(
+                                    inp_name=inp_name
+                                )
+                            )
+                        cur_derivative_conditions.append(
+                            FW_DERIVATIVE_CHECK_TEMPLATE.substitute(
+                                req_inp=inp_name + "[i]"
+                            )
+                        )
+                    else:
+                        cur_derivative_conditions.append(
+                            FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp_name)
+                        )
+
                 content.append(f"std::vector<bool> {bool_vector_name}(self.size());")
                 content.append("for (const auto& i : c10::irange(self.size())) {")
                 content.append(
