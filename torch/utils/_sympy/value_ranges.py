@@ -324,6 +324,10 @@ class SymPyValueRangeAnalysis:
         return cls.mod(cls.floordiv(a, b), c)
 
     @classmethod
+    def is_non_overlapping_and_dense_indicator(cls, *args):
+        return ValueRanges.unknown()
+
+    @classmethod
     def pow(cls, a, b):
         def is_integer(val):
             return isinstance(val, int) or (
