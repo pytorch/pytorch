@@ -24,9 +24,9 @@ from tools.testing.test_run import TestRun, TestRuns
 @total_ordering
 class Relevance(Enum):
     HIGH = 4
-    NONE = 3  # Not yet supported. Needs more infra to be usable
+    NONE = 3
     PROBABLE = 2
-    UNLIKELY = 1  # Not yet supported. Needs more infra to be usable
+    UNLIKELY = 1
     UNRANKED = 0
 
     def __eq__(self, other: object) -> bool:
@@ -70,7 +70,7 @@ class TestPrioritizations:
                otherwise it breaks the test sharding logic
     """
 
-    _test_priorities: List[List[TestRun]]  # This list MUST be ordered by Relevance
+    _test_priorities: List[List[TestRun]]
     _original_tests: FrozenSet[str]
 
     def __init__(
@@ -223,7 +223,6 @@ class TestPrioritizations:
             if relevance > Relevance.UNRANKED:
                 for test in other._test_priorities[relevance.value]:
                     self.raise_test_relevance(test, relevance)
-                # TODO: Hande the case where a test is moved to a lower relevance group (once we support that scenario)
 
         self.validate_test_priorities()
         return
