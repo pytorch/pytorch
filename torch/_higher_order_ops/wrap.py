@@ -81,16 +81,12 @@ class TagActivationCheckpoint(HigherOrderOperator):
     reaches partitioner, inductor has already run its functionalization of rng
     ops. Therefore, the duplication of nodes, by design, respects the rng states
     in the forward and recomputed forward in backward.
-
-    NOTE: this higher-order operator is stateful, thus we don't have a singleton for it
-    and requires a new instance of this operator for every callsite.
     """
 
-    _counter = itertools.count()
+    context_fn_list = []
 
     def __init__(self):
-        super().__init__(f"tag_activation_checkpoint__{next(self._counter)}")
-        self.context_fn = None
+        super().__init__("tag_activation_checkpoint")
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -135,7 +131,8 @@ class TagActivationCheckpoint(HigherOrderOperator):
     def __call__(self, gmod, *args, **kwargs):
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
-        if self.context_fn is not None:
+        context_fn_id = kwargs.pop('context_fn_id')
+        if context_fn_id is not None:
             assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
                 "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
             log.warning("""
@@ -146,7 +143,7 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # And we ensure that AOT Autograd traces through the non reentrant
             # version of checkpointing.
             kwargs["use_reentrant"] = False
-            kwargs["context_fn"] = self.context_fn
+            kwargs["context_fn"] = self.context_fn_list[context_fn_id]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachedTorchDispatchMode.
             gmod = self.tag_nodes(gmod)
@@ -161,3 +158,5 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
             with fx_traceback.preserve_node_meta():
                 return Interpreter(gmod).run(*args)
+
+tag_activation_checkpoint = TagActivationCheckpoint()

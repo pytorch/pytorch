@@ -12,6 +12,7 @@ import torch.utils.checkpoint
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils.checkpoint import checkpoint, context_fn_gen
@@ -63,13 +64,6 @@ def _invalid_context_gen():
 def find_first_node(gm, func):
     for node in gm.graph.nodes:
         if node.target is func:
-            return node
-    return None
-
-
-def find_first_node_prefix(gm, func_name_prefix):
-    for node in gm.graph.nodes:
-        if str(node.target).startswith(func_name_prefix):
             return node
     return None
 
@@ -383,7 +377,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
 
-        wrap_node = find_first_node_prefix(cnt.graphs[0], "tag_activation_checkpoint")
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         # one for checkpoint, and 3 for x, y, z
         self.assertEqual(len(wrap_node.args), 4)
 
@@ -417,7 +411,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result.shape, expected.shape)
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
-        wrap_node = find_first_node_prefix(cnt.graphs[0], "tag_activation_checkpoint")
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")

@@ -1972,9 +1972,7 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    # NOTE: this higher-order operator is stateful, thus we don't have a singleton for it
-    # and requires a new instance of this operator for every callsite.
-    activation_checkpoint_op = higher_order_ops.TagActivationCheckpoint()
+    activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
