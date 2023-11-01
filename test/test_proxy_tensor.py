@@ -1275,7 +1275,7 @@ def forward(self, x_1, y_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
     zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")
+    return add""")  # noqa: B950
 
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
@@ -1296,7 +1296,7 @@ def forward(self, x1_1, x2_1, y_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
     zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")
+    return add""")  # noqa: B950
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):

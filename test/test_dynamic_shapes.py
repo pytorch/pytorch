@@ -503,10 +503,11 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
+        i1_sym = i1.node.expr
         self.assertTrue(expect_true(i0 + i1 == 10))
         # Importantly, this is put in i1, not i0!
         self.assertExpectedInline(
-            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1.node.expr]]),
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[i1_sym]]),
             """[Eq(i0 + i1, 10)]"""
         )
         self.assertTrue(i0 + i1 == 10)
