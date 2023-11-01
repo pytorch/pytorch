@@ -4240,6 +4240,14 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
         return aten.squeeze.dims(self, [dim])
 
 
+@register_decomposition(torch.ops.aten._weight_norm_interface)
+def _weight_norm_interface(x, y, dim):
+    # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
+    keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
+    norm = x.norm(2, keep_dim, keepdim=True)
+    return x * (y / norm), norm
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
