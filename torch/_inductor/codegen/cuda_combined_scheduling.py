@@ -67,3 +67,6 @@ class CUDACombinedScheduling(BaseScheduling):
 
     def flush(self):
         return self._triton_scheduling.flush()
+
+    def codegen_foreach(self, *args, **kwargs):
+        return self._triton_scheduling.codegen_foreach(*args, **kwargs)

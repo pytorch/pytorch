@@ -171,7 +171,7 @@ class TritonOverrides(OpOverrides):
 
             # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
-            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10 # noqa: B950
+            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
             fp8_dtypes = {
                 torch.float8_e4m3fn,
                 torch.float8_e5m2,
