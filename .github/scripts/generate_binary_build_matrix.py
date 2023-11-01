@@ -54,13 +54,13 @@ def arch_type(arch_version: str) -> str:
 
 
 WHEEL_CONTAINER_IMAGES = {
-    "11.8": "pytorch/manylinux-builder:cuda11.8-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "12.1": "pytorch/manylinux-builder:cuda12.1-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "5.5": "pytorch/manylinux-builder:rocm5.5-77901321d9387eeb68ca9e2ddab7562883562cd1",
-    "5.6": "pytorch/manylinux-builder:rocm5.6-77901321d9387eeb68ca9e2ddab7562883562cd1",
-    "cpu": "pytorch/manylinux-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    "11.8": "pytorch/manylinux-builder:cuda11.8-2.1",
+    "12.1": "pytorch/manylinux-builder:cuda12.1-2.1",
+    "5.5": "pytorch/manylinux-builder:rocm5.5-2.1",
+    "5.6": "pytorch/manylinux-builder:rocm5.6-2.1",
+    "cpu": "pytorch/manylinux-builder:cpu-2.1",
+    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.1",
+    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64-2.1",
 }
 
 CONDA_CONTAINER_IMAGES = {
