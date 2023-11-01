@@ -1,10 +1,11 @@
 import logging
 import warnings
 import weakref
+from typing import cast, List, Optional
+
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from typing import List, Optional, cast
 
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 data_ptr_to_work = dict()
 work_version = 0
+
 
 class _WaitRegistration:
     def __init__(self, work):
@@ -60,7 +62,10 @@ class _WaitRegistration:
             self.wait()
         else:
             self.ptr_alias_count[ptr] -= 1
-            if self.ptr_alias_count[ptr] < 1 and data_ptr_to_work.get(ptr, None) == self:
+            if (
+                self.ptr_alias_count[ptr] < 1
+                and data_ptr_to_work.get(ptr, None) == self
+            ):
                 del data_ptr_to_work[ptr]
 
     def cleanup(self):
@@ -82,9 +87,9 @@ def _register_tensor_work(tensor_or_list, work_or_list):
             reg._register_tensor_ptr(tensor.data_ptr())
 
 
-
 def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
+
 
 def _register_tensor_wrapper(tensor) -> None:
     global data_ptr_to_work
@@ -114,6 +119,7 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
         wait_reg.wait()
     return tensor
 
+
 def _tensor_needs_wait(tensor: torch.Tensor) -> bool:
     """Returns true if ```tensor``` needs to be waited. Works with ACS and inner tensors."""
     if hasattr(tensor, "_get_acs_underlying_tensor"):
@@ -122,14 +128,17 @@ def _tensor_needs_wait(tensor: torch.Tensor) -> bool:
     wait_reg = data_ptr_to_work.get(data_ptr)
     return wait_reg is not None and wait_reg.work is not None
 
+
 def _outstanding_wait_count() -> int:
-    """ Returns the number of outstanding work objects waiting to be waited (sic). """
+    """Returns the number of outstanding work objects waiting to be waited (sic)."""
     return len(data_ptr_to_work)
 
+
 def _wait_all() -> None:
-    """ Wait for all outstanding collectives. """
+    """Wait for all outstanding collectives."""
     for work_reg in list(data_ptr_to_work.values()):
         work_reg.wait()
+
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
@@ -145,6 +154,19 @@ Kernel implementations (for eager runtime only) - should never be traced by torc
 These functions should all be bound to dispatcher ops.  During tracing, the op itself should be
 captured in the graph and the backend should implement the op however it prefers.
 """
+
+
+def _broadcast(self, src, tag, ranks, group_size):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+
+    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
+    work = dist.broadcast(inplace_tensor, src, group=group, async_op=True)
+    _register_tensor_work(inplace_tensor, work)
+
+    return inplace_tensor
+
+
 # TODO assert if ranks has duplicated entries
 def _all_reduce(self, reduceOp, tag, ranks, group_size):
     op = _str_to_reduce_op(reduceOp)
@@ -157,16 +179,20 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
 
     return inplace_tensor
 
+
 def _all_reduce_coalesced(self, reduceOp, tag, ranks, group_size):
     op = _str_to_reduce_op(reduceOp)
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
 
     inplace_tensor_list = [t.clone(memory_format=torch.contiguous_format) for t in self]
-    work = dist.all_reduce_coalesced(inplace_tensor_list, op=op, group=group, async_op=True)
+    work = dist.all_reduce_coalesced(
+        inplace_tensor_list, op=op, group=group, async_op=True
+    )
     _register_tensor_work(inplace_tensor_list, work)
 
     return inplace_tensor_list
+
 
 def _all_gather_into_tensor(shard, tag, ranks, group_size):
     # TODO add dim support?
@@ -181,7 +207,9 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
         tensor_list = list(torch.chunk(out_tensor, group_size))
         work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
     else:
-        work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
+        work = dist.all_gather_into_tensor(
+            out_tensor, shard, group=group, async_op=True
+        )
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
@@ -201,14 +229,12 @@ def _all_gather_into_tensor_coalesced(self, tag, rankset, group_size):
     out_tensors = [mk_out_tensor(t) for t in self]
 
     work_list = _all_gather_into_tensor_coalesced_fallback(
-        output_tensors=out_tensors,
-        input_tensors=self,
-        group=group,
-        async_op=True)
-
+        output_tensors=out_tensors, input_tensors=self, group=group, async_op=True
+    )
 
     _register_tensor_work(out_tensors, work_list)
     return out_tensors
+
 
 def _reduce_scatter_tensor(
     input: torch.Tensor,
@@ -244,6 +270,7 @@ def _reduce_scatter_tensor(
 
     return out_tensor
 
+
 def _reduce_scatter_tensor_coalesced(
     inputs: List[torch.Tensor],
     reduce_op: str,
@@ -254,7 +281,6 @@ def _reduce_scatter_tensor_coalesced(
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
     op = _str_to_reduce_op(reduce_op)
-
 
     def mk_out_tensor(shard):
         out_size = list(shard.size())
@@ -270,12 +296,16 @@ def _reduce_scatter_tensor_coalesced(
         input_tensors=inputs,
         op=op,
         group=group,
-        async_op=False)
+        async_op=False,
+    )
 
     _register_tensor_work(out_tensors, work_list)
     return out_tensors
 
-def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, group, async_op=False):
+
+def _all_gather_into_tensor_coalesced_fallback(
+    output_tensors, input_tensors, group, async_op=False
+):
     # all_gather_coalesced is useless, it doesn't work under NCCL and does lots of copies under Gloo
     # all_gather is useless too because it's single tensor
     # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
@@ -297,11 +327,16 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
                 dist.all_gather_into_tensor(out_t, in_t, group=group, async_op=True)
         return cm
 
-def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op, group, async_op=False):
+
+def _reduce_scatter_tensor_coalesced_fallback(
+    output_tensors, input_tensors, op, group, async_op=False
+):
     # All the same reasons as the all_gather fallback
     work_list = []
     for shard, out_tensor in zip(input_tensors, output_tensors):
-        work = c10d.reduce_scatter_tensor(out_tensor, shard, op=op, group=group, async_op=async_op)
+        work = c10d.reduce_scatter_tensor(
+            out_tensor, shard, op=op, group=group, async_op=async_op
+        )
         work_list.append(work)
     return work_list
 
@@ -317,7 +352,10 @@ def _all_to_all_single(
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
 
     if output_split_sizes is not None:
-        torch._check(input.dim() >= 1, lambda: f"Expected input to have at least 1 dim but got {input.dim()} dim")
+        torch._check(
+            input.dim() >= 1,
+            lambda: f"Expected input to have at least 1 dim but got {input.dim()} dim",
+        )
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         out_tensor = input.new_empty(out_size)
@@ -325,8 +363,12 @@ def _all_to_all_single(
         out_tensor = input.new_empty(input.size())
 
     work = c10d.all_to_all_single(
-        out_tensor, input, output_split_sizes=output_split_sizes,
-        input_split_sizes=input_split_sizes, group=group, async_op=True
+        out_tensor,
+        input,
+        output_split_sizes=output_split_sizes,
+        input_split_sizes=input_split_sizes,
+        group=group,
+        async_op=True,
     )
     _register_tensor_work(out_tensor, work)
 
