@@ -1031,15 +1031,6 @@ class VariableBuilder:
             )
             self.install_guards(GuardBuilder.TYPE_MATCH)
 
-        self.install_guards(
-            functools.partial(
-                GuardBuilder.TENSOR_MATCH,
-                value=value
-                if isinstance(source, NumpyTensorSource)
-                else TensorWeakRef(value),
-            )
-        )
-
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1049,6 +1040,16 @@ class VariableBuilder:
             source=source,
             **options,
         )
+
+        self.install_guards(
+            functools.partial(
+                GuardBuilder.TENSOR_MATCH,
+                value=value
+                if isinstance(source, NumpyTensorSource)
+                else TensorWeakRef(value),
+            )
+        )
+
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = value.__dict__.copy()
