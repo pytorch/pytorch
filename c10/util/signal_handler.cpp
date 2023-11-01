@@ -1,12 +1,12 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/signal_handler.h>
-
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
 #include <dirent.h>
 #include <fmt/core.h>
+#include <fmt/format.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -112,46 +112,44 @@ FatalSignalHandler::FatalSignalHandler()
       writingCond(PTHREAD_COND_INITIALIZER),
       writingMutex(PTHREAD_MUTEX_INITIALIZER) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
-    {"SIGABRT", SIGABRT, {}},
-    {"SIGINT", SIGINT, {}},
-    {"SIGILL", SIGILL, {}},
-    {"SIGFPE", SIGFPE, {}},
-    {"SIGBUS", SIGBUS, {}},
-    {"SIGSEGV", SIGSEGV, {}},
-    {nullptr, 0, {}}};
+std::unordered_map<int, FatalSignalHandler::signal_handler>
+    FatalSignalHandler::kSignalHandlers = {
+        {SIGABRT, {"SIGABRT", {}}},
+        {SIGINT, {"SIGINT", {}}},
+        {SIGILL, {"SIGILL", {}}},
+        {SIGFPE, {"SIGFPE", {}}},
+        {SIGBUS, {"SIGBUS", {}}},
+        {SIGSEGV, {"SIGSEGV", {}}},
+};
 
-struct sigaction* FatalSignalHandler::getPreviousSigaction(int signum) {
-  for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
-    if (handler->signum == signum) {
-      return &handler->previous;
-    }
+struct sigaction* FatalSignalHandler::getPreviousSigaction(int signum) const {
+  auto it = kSignalHandlers.find(signum);
+  if (it == kSignalHandlers.end()) {
+    return nullptr;
   }
-  return nullptr;
+  return &(it->second.previous);
 }
 
-const char* FatalSignalHandler::getSignalName(int signum) {
-  for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
-    if (handler->signum == signum) {
-      return handler->name;
-    }
+const char* FatalSignalHandler::getSignalName(int signum) const {
+  auto it = kSignalHandlers.find(signum);
+  if (it == kSignalHandlers.end()) {
+    return nullptr;
   }
-  return nullptr;
+  return it->second.name;
 }
 
 void FatalSignalHandler::callPreviousSignalHandler(
-    struct sigaction* action,
+    struct sigaction& action,
     int signum,
     siginfo_t* info,
     void* ctx) {
-  if (!action->sa_handler) {
+  if (!action.sa_handler) {
     return;
   }
-  if ((action->sa_flags & SA_SIGINFO) == SA_SIGINFO) {
-    action->sa_sigaction(signum, info, ctx);
+  if ((action.sa_flags & SA_SIGINFO) == SA_SIGINFO) {
+    action.sa_sigaction(signum, info, ctx);
   } else {
-    action->sa_handler(signum);
+    action.sa_handler(signum);
   }
 }
 
@@ -246,7 +244,7 @@ void FatalSignalHandler::stacktraceSignalHandler(
   } else {
     // We don't want to actually change the signal handler as we want to
     // remain the signal handler so that we may get the usr2 signal later.
-    callPreviousSignalHandler(&previousSigusr2, signum, info, ctx);
+    callPreviousSignalHandler(previousSigusr2, signum, info, ctx);
   }
 }
 
@@ -267,11 +265,9 @@ void FatalSignalHandler::installFatalSignalHandlers() {
   // corruption, so make our own stack just in case.
   sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
   sa.sa_handler = FatalSignalHandler::fatalSignalHandlerStatic;
-  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
-    if (sigaction(handler->signum, &sa, &handler->previous)) {
-      std::string str("Failed to add ");
-      str += handler->name;
-      str += " handler!";
+  for (auto& [signum, handler] : kSignalHandlers) {
+    if (sigaction(signum, &sa, &handler.previous)) {
+      std::string str = fmt::format("Failed to add {} handler!", handler.name);
       perror(str.c_str());
     }
   }
@@ -287,14 +283,13 @@ void FatalSignalHandler::uninstallFatalSignalHandlers() {
     return;
   }
   fatalSignalHandlersInstalled = false;
-  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
-    if (sigaction(handler->signum, &handler->previous, nullptr)) {
-      std::string str("Failed to remove ");
-      str += handler->name;
-      str += " handler!";
+  for (auto& [signum, handler] : kSignalHandlers) {
+    if (sigaction(signum, &handler.previous, nullptr)) {
+      std::string str =
+          fmt::format("Failed to remove {} handler!", handler.name);
       perror(str.c_str());
     } else {
-      handler->previous = {};
+      handler.previous = {};
     }
   }
   if (sigaction(SIGUSR2, &previousSigusr2, nullptr)) {

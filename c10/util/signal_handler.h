@@ -3,6 +3,7 @@
 #include <atomic>
 #include <csignal>
 #include <mutex>
+#include <unordered_map>
 
 #include <c10/macros/Export.h>
 
@@ -58,10 +59,10 @@ class C10_API FatalSignalHandler {
   static void fatalSignalHandlerStatic(int signum);
   void fatalSignalHandler(int signum);
   virtual void fatalSignalHandlerPostProcess();
-  struct sigaction* getPreviousSigaction(int signum);
-  const char* getSignalName(int signum);
+  struct sigaction* getPreviousSigaction(int signum) const;
+  const char* getSignalName(int signum) const;
   void callPreviousSignalHandler(
-      struct sigaction* action,
+      struct sigaction& action,
       int signum,
       siginfo_t* info,
       void* ctx);
@@ -93,11 +94,10 @@ class C10_API FatalSignalHandler {
 
   struct signal_handler {
     const char* name;
-    int signum;
     struct sigaction previous;
   };
 
-  static signal_handler kSignalHandlers[];
+  static std::unordered_map<int, signal_handler> kSignalHandlers;
 };
 
 #endif // defined(C10_SUPPORTS_SIGNAL_HANDLER)
