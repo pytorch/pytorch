@@ -110,7 +110,9 @@ class ConstDictVariable(VariableTracker):
                 return False
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
 
-    def __init__(self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs):
+    def __init__(
+        self, items: Dict[VariableTracker, VariableTracker], user_cls=dict, **kwargs
+    ):
         super().__init__(**kwargs)
 
         Hashable = ConstDictVariable._HashableTracker
