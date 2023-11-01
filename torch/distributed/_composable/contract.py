@@ -64,7 +64,9 @@ def contract(state_cls: Type[_State] = _State):
     @wraps(state_cls)
     def inner(func):
         @wraps(func)
-        def wrapper(module: Union[nn.Module, Sequence[nn.Module]], *args, **kwargs) -> Optional[nn.Module]:
+        def wrapper(
+            module: Union[nn.Module, Sequence[nn.Module]], *args, **kwargs
+        ) -> Optional[nn.Module]:
             inp_module = module
             if isinstance(module, nn.Module):
                 modules = [module]
@@ -103,9 +105,15 @@ def contract(state_cls: Type[_State] = _State):
                 all_state.setdefault(func, state)
                 registry.setdefault(func.__name__, registry_item)
 
-                module_to_orig_named_params[module] = OrderedDict(module.named_parameters())
-                module_to_orig_named_buffers[module] = OrderedDict(module.named_buffers(remove_duplicate=False))
-                module_to_orig_named_modules[module] = OrderedDict(module.named_modules(remove_duplicate=False))
+                module_to_orig_named_params[module] = OrderedDict(
+                    module.named_parameters()
+                )
+                module_to_orig_named_buffers[module] = OrderedDict(
+                    module.named_buffers(remove_duplicate=False)
+                )
+                module_to_orig_named_modules[module] = OrderedDict(
+                    module.named_modules(remove_duplicate=False)
+                )
 
             # `func` should return the same type as the input module/modules
             updated = func(inp_module, *args, **kwargs)
@@ -120,9 +128,15 @@ def contract(state_cls: Type[_State] = _State):
             module_to_new_named_buffers: Dict[nn.Module, Dict[str, torch.Tensor]] = {}
             module_to_new_named_modules: Dict[nn.Module, Dict[str, nn.Module]] = {}
             for module in updated_modules:
-                module_to_new_named_params[module] = OrderedDict(module.named_parameters())
-                module_to_new_named_buffers[module] = OrderedDict(module.named_buffers(remove_duplicate=False))
-                module_to_new_named_modules[module] = OrderedDict(module.named_modules(remove_duplicate=False))
+                module_to_new_named_params[module] = OrderedDict(
+                    module.named_parameters()
+                )
+                module_to_new_named_buffers[module] = OrderedDict(
+                    module.named_buffers(remove_duplicate=False)
+                )
+                module_to_new_named_modules[module] = OrderedDict(
+                    module.named_modules(remove_duplicate=False)
+                )
 
             def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
                 if orig_fqns == new_fqns:
@@ -148,8 +162,12 @@ def contract(state_cls: Type[_State] = _State):
                         f"New FQNs: {new_only}"
                     )
 
-            if set(module_to_new_named_modules.keys()) != set(module_to_orig_named_modules.keys()):
-                raise RuntimeError(f"{func.__name__} should not change the module structure")
+            if set(module_to_new_named_modules.keys()) != set(
+                module_to_orig_named_modules.keys()
+            ):
+                raise RuntimeError(
+                    f"{func.__name__} should not change the module structure"
+                )
             for module in module_to_new_named_modules:
                 check_fqn(
                     list(module_to_orig_named_params[module].keys()),
@@ -166,7 +184,6 @@ def contract(state_cls: Type[_State] = _State):
                     list(module_to_new_named_modules[module].keys()),
                     "Check modules, ",
                 )
-
 
             # TODO: a stricter verification should also reject changing module
             # types and monkey-patching forward() method implementations.
@@ -206,7 +223,6 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
         return registry
 
 
-
 def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
     """
     Returns the modules in ``modules`` that are root modules (i.e.
@@ -215,7 +231,9 @@ def _get_root_modules(modules: List[nn.Module]) -> List[nn.Module]:
     module in ``modules``.
     """
     root_modules: List[nn.Module] = []
-    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {module: set(module.modules()) for module in modules}
+    module_to_modules: Dict[nn.Module, Set[nn.Module]] = {
+        module: set(module.modules()) for module in modules
+    }
     for candidate_module in modules:
         is_root_module = True
         for module, modules in module_to_modules.items():
