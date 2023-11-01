@@ -56,6 +56,21 @@ class NullHandler:
     pass
 
 
+class NullKernelHandler(NullHandler):
+    """
+    We need access `V.kernel.removed_buffers` in DeferredLine class when there
+    is no kernel in the context. This happens when codegening the wrapper.
+    Initialize `removed_buffers` and `inplaced_to_remove` explicitly so we don't
+    need call 'getattr' with default value which is error prone to typo in
+    attribute name.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.removed_buffers = set()
+        self.inplaced_to_remove = set()
+
+
 def _arg_str(a) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
@@ -169,10 +184,11 @@ _ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _real_inputs = Virtualized("real_inputs", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
-_kernel = Virtualized("kernel", NullHandler)
+_kernel = Virtualized("kernel", NullKernelHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 _aot_compilation = Virtualized("aot_compilation", NullHandler)
+_current_node = Virtualized("current_node", NullHandler)
 
 
 class OpsValue:
@@ -281,6 +297,8 @@ class _V:
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
     set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
+    set_current_node: Callable[[Any], Any] = _current_node._set_handler
+    get_current_node: Callable[[], Any] = _current_node._get_handler
 
     @property
     def ops(self) -> _MockHandler:
@@ -318,6 +336,10 @@ class _V:
     @property
     def aot_compilation(self):
         return _aot_compilation._get_handler()
+
+    @property
+    def current_node(self):
+        return _current_node._get_handler()
 
 
 V = _V()
