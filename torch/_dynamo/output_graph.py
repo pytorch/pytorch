@@ -967,20 +967,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     @contextlib.contextmanager
     def restore_global_state(self):
         """
-        Momentarily restores the global state to what it was
-        prior to tracing the current output
+        Momentarily restores the global state to what it was prior to tracing the current output
         """
-        # State prior to tracing the graph
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
         current_global_state: Dict[str, Tuple[Any, bool]] = {}
-        # State at the current time
         self.save_global_state(current_global_state)
         try:
             # Set to state prior to tracing the graph
             self.tracing_context.global_context.restore_graphstate(prior_global_state)
             yield
         finally:
-            # Set to state at the current time before calling the user compiler
+            # Reset to state at the current time before calling the user compiler
             self.tracing_context.global_context.restore_graphstate(
                 GlobalContextCheckpointState(current_global_state)
             )
