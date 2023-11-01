@@ -946,7 +946,7 @@ SeqNr|OrigAten|SrcFn
             def f(x):
                 y = x.clone()
                 torch.set_grad_enabled(False)
-                return y.clone()
+                return y.clone(), y
 
             f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
 
@@ -958,6 +958,9 @@ SeqNr|OrigAten|SrcFn
             y = f_compiled(x)
             self.assertEqual(torch.is_grad_enabled(), False)
             self.assertEqual(y_ref, y)
+
+            self.assertTrue(y_ref[1].grad_fn is not None)
+            self.assertTrue(y[1].grad_fn is not None)
 
 
 if __name__ == "__main__":

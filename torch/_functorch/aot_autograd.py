@@ -594,8 +594,13 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
-    # The set_grad_enabled mutation we will emit in the runtime_wrapper epilogue
-    set_grad_enabled: Optional[bool] = None
+    # The grad_enabled mutation that we will emit in the runtime_wrapper epilogue
+    # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
+    # that intended to be in effect prior to running the graph, in keeping with
+    # the principle of eager-mode behavioural equivalence to compile-time. It is
+    # the responsibility of upstream graph acquisition to reset the ambient grad mode
+    # prior to calling aot_autograd.
+    grad_enabled_mutation: Optional[bool] = None
 
     def __post_init__(self):
         mutated_inp_indices = [
@@ -1055,6 +1060,8 @@ def run_functionalized_fw_and_collect_metadata(
 
         flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
+        prior_grad_enabled = torch.is_grad_enabled()
+
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
         with disable_above, FunctionalTensorMode():
@@ -1395,19 +1402,15 @@ from a multi-output view call")
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
-        set_grad_enabled = None
-        if ctx := torch._guards.TracingContext.get():
-            prior_grad_enabled = ctx.global_context.global_state.get('grad_enabled')
-            if (
-                prior_grad_enabled is not None
-                and torch.is_grad_enabled() != prior_grad_enabled[1]
-            ):
-                set_grad_enabled = torch.is_grad_enabled()
-                aot_graphs_log.info(
-                    ("grad_mode mutation encountered in graph."
-                     "Will emit mutation epilogue, to set grad_mode=%s"),
-                    set_grad_enabled
-                )
+        grad_enabled_mutation = None
+        if torch.is_grad_enabled() != prior_grad_enabled:
+            grad_enabled_mutation = torch.is_grad_enabled()
+            torch.set_grad_enabled(prior_grad_enabled)  # Restore the prior state after tracing it
+            aot_graphs_log.info(
+                ("grad_mode mutation encountered in graph. "
+                 "Will emit mutation epilogue, to set grad_mode=%s"),
+                grad_enabled_mutation
+            )
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
@@ -1419,7 +1422,7 @@ from a multi-output view call")
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
-            set_grad_enabled=set_grad_enabled,
+            grad_enabled_mutation=grad_enabled_mutation,
         )
         return metadata
 
@@ -3182,8 +3185,8 @@ def create_runtime_wrapper(
                     t._dynamo_weak_dynamic_indices |= o.dynamic_dims
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
-        if runtime_metadata.set_grad_enabled is not None:
-            torch.set_grad_enabled(runtime_metadata.set_grad_enabled)
+        if runtime_metadata.grad_enabled_mutation is not None:
+            torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
     return runtime_wrapper
 
