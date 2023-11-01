@@ -111,7 +111,7 @@ class _SerializeNodeDef(NamedTuple):
 
 
 def _register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_func: FlattenFunc,
     unflatten_func: UnflattenFunc,
     *,
