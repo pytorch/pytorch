@@ -721,8 +721,10 @@ def _get_conv_bn_getitem_nodes(model: torch.fx.GraphModule):
 
 class ConvBnInt32WeightQuantizer(Quantizer):
     """
-    Dummy quantizer that annotates only the conv bn pattern.
+    Dummy quantizer that annotates conv bn in such a way that the weights
+    are quantized per channel to int32.
     """
+
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
         act_qspec = QuantizationSpec(
@@ -763,6 +765,7 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
     Dummy quantizer that annotates conv bn in such a way that the bias qparams are
     derived from the conv input activation and weight qparams.
     """
+
     def _derive_bias_qparams_from_act_and_weight_qparams(self, obs_or_fqs):
         act_scale, _ = obs_or_fqs[0].calculate_qparams()
         weight_scale, _ = obs_or_fqs[1].calculate_qparams()
