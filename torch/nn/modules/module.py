@@ -101,7 +101,7 @@ _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
 
 def register_module_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a buffer registration hook common to all modules.
+    r"""Register a buffer registration hook common to all modules.
 
     .. warning ::
 
@@ -125,7 +125,7 @@ def register_module_buffer_registration_hook(hook: Callable[..., None]) -> Remov
 
 
 def register_module_module_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a module registration hook common to all modules.
+    r"""Register a module registration hook common to all modules.
 
     .. warning ::
 
@@ -149,7 +149,7 @@ def register_module_module_registration_hook(hook: Callable[..., None]) -> Remov
 
 
 def register_module_parameter_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a parameter registration hook common to all modules.
+    r"""Register a parameter registration hook common to all modules.
 
     .. warning ::
 
@@ -173,7 +173,7 @@ def register_module_parameter_registration_hook(hook: Callable[..., None]) -> Re
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
-    r"""Registers a forward pre-hook common to all modules.
+    r"""Register a forward pre-hook common to all modules.
 
     .. warning ::
 
@@ -205,7 +205,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
 
 
 def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool = False) -> RemovableHandle:
-    r"""Registers a global forward hook for all the modules
+    r"""Register a global forward hook for all the modules.
 
     .. warning ::
 
@@ -247,7 +247,7 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
 def register_module_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
-    r"""Registers a backward hook common to all the modules.
+    r"""Register a backward hook common to all the modules.
 
     This function is deprecated in favor of
     :func:`torch.nn.modules.module.register_module_full_backward_hook`
@@ -274,7 +274,7 @@ def register_module_backward_hook(
 def register_module_full_backward_pre_hook(
     hook: Callable[['Module', _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
-    r"""Registers a backward pre-hook common to all the modules.
+    r"""Register a backward pre-hook common to all the modules.
 
     .. warning ::
         This adds global state to the `nn.module` module
@@ -311,7 +311,7 @@ def register_module_full_backward_pre_hook(
 def register_module_full_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, _grad_t]]
 ) -> RemovableHandle:
-    r"""Registers a backward hook common to all the modules.
+    r"""Register a backward hook common to all the modules.
 
     .. warning ::
         This adds global state to the `nn.module` module
@@ -360,7 +360,7 @@ def register_module_full_backward_hook(
 # forward as a value, rather than a function.  See also
 # https://github.com/python/mypy/issues/8795
 def _forward_unimplemented(self, *input: Any) -> None:
-    r"""Defines the computation performed at every call.
+    r"""Define the computation performed at every call.
 
     Should be overridden by all subclasses.
 
@@ -447,13 +447,8 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl : Optional[Callable] = None
 
-
-
     def __init__(self, *args, **kwargs) -> None:
-        """
-        Initializes internal Module state, shared by both nn.Module and ScriptModule.
-        """
-
+        """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
@@ -495,7 +490,7 @@ class Module:
     forward: Callable[..., Any] = _forward_unimplemented
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
-        r"""Adds a buffer to the module.
+        r"""Add a buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
