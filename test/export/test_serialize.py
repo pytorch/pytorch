@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_sym_bool)
+"""
 # Owner(s): ["module: dynamo"]
 import io
 import pathlib
@@ -196,8 +200,8 @@ class TestDeserialize(TestCase):
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
 
-        flat_orig_outputs, _ = pytree.tree_flatten(orig_outputs)
-        flat_loaded_outputs, _ = pytree.tree_flatten(loaded_outputs)
+        flat_orig_outputs = pytree.tree_leaves(orig_outputs)
+        flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
 
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
             self.assertEqual(type(orig), type(loaded))
@@ -236,7 +240,7 @@ class TestDeserialize(TestCase):
                     elif isinstance(val1, (list, tuple)) and isinstance(val2, (list, tuple)):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
-                        for v1, v2 in zip(pytree.tree_flatten(val1)[0], pytree.tree_flatten(val2)[0]):
+                        for v1, v2 in zip(pytree.tree_leaves(val1), pytree.tree_leaves(val2)):
                             self.assertEqual(v1.shape, v2.shape)
                             self.assertEqual(v1.dtype, v2.dtype)
                     else:
