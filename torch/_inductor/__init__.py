@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 import torch.fx
+import torch.utils._pytree as pytree
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
@@ -46,6 +47,33 @@ def aot_compile(
         Path to the generated shared library
     """
     from .compile_fx import compile_fx_aot
+
+    # We will serialize the pytree info into the .so as constant strings
+    serialized_in_spec = ""
+    serialized_out_spec = ""
+    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        codegen = gm.graph._codegen
+        gm.graph._codegen = torch.fx.graph.CodeGen()
+        gm.recompile()
+
+        if codegen.pytree_info.in_spec is not None:
+            serialized_in_spec = pytree.treespec_dumps(codegen.pytree_info.in_spec)
+
+        if codegen.pytree_info.out_spec is not None:
+            serialized_out_spec = pytree.treespec_dumps(codegen.pytree_info.out_spec)
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
 
     return compile_fx_aot(
         gm,
@@ -102,7 +130,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+    current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
 
     return list(current_config.keys())
 

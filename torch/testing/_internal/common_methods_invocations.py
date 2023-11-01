@@ -42,8 +42,8 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
+from torch.utils import _pytree as pytree
 
-from torch.utils._pytree import tree_flatten
 
 from packaging import version
 
@@ -2386,7 +2386,7 @@ def _elementwise_type_promo_np(*args, type_promotion_kind):
             return torch.from_numpy(x)
         return x
 
-    flattened = tree_flatten(args)[0]
+    flattened = pytree.tree_leaves(args)
     transformed = tuple(_maybe_torch(a) for a in flattened)
     result_dtype, _ = prims.utils.elementwise_dtypes(
         *transformed,
@@ -8562,12 +8562,12 @@ class ForeachRightmostArgType(enum.Enum):
 
 class ForeachSampleInput(SampleInput):
     ref_args: Any
-    ref_kwargs: Dict[Any, Any]
+    disable_fastpath: bool
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, disable_fastpath=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.ref_args = self.args
-        self.ref_kwargs = {k: self.kwargs[k] for k in self.kwargs if k != "disable_fastpath"}
+        self.disable_fastpath = disable_fastpath
 
 
 class foreach_inputs_sample_func:
@@ -8869,7 +8869,6 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
                 assert len(args) == 2, f"{len(args)=}"
                 sample = ForeachSampleInput(input, *args, **kwargs)
-                sample.ref_kwargs["values"] = None if rightmost_arg_type == ForeachRightmostArgType.TensorList else rightmost_arg
                 yield sample
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
                     args.pop()
@@ -11493,8 +11492,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -11527,8 +11525,7 @@ op_db: List[OpInfo] = [
                             dtypes=(torch.cfloat,), device_type="cuda"),
            )),
     OpInfo('logspace',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            is_factory_function=True,
            supports_out=True,
            supports_autograd=False,
@@ -12177,8 +12174,7 @@ op_db: List[OpInfo] = [
            aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
            aten_backward_name='_softmax_backward_data',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
@@ -12199,8 +12195,7 @@ op_db: List[OpInfo] = [
         '_softmax_backward_data',
         op=torch.ops.aten._softmax_backward_data,
         aten_name='_softmax_backward_data',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_softmax_backward_data,
         assert_autodiffed=True,
         supports_forward_ad=True,
@@ -12216,8 +12211,7 @@ op_db: List[OpInfo] = [
     # https://github.com/pytorch/pytorch/issues/68752
     OpInfo('nn.functional.softmin',
            aten_name='softmin',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=False,
            assert_autodiffed=False,
@@ -12934,7 +12928,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
                # Doesn't have a corresponding aten operator.
@@ -13694,8 +13688,7 @@ op_db: List[OpInfo] = [
         op=lambda *args, **kwargs:
                wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
@@ -17351,7 +17344,7 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2,
                                                   torch.float32: 1e-4}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
@@ -17436,8 +17429,7 @@ op_db: List[OpInfo] = [
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=True,
         aten_backward_name='_log_softmax_backward_data',
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -17980,8 +17972,7 @@ op_db: List[OpInfo] = [
         "nn.functional.multi_head_attention_forward",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.multi_head_attention_forward, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
             # Tensor-likes are not close
@@ -18059,7 +18050,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.grid_sample",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
@@ -18069,7 +18060,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "grid_sampler_2d",
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
@@ -18642,8 +18633,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
