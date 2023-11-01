@@ -583,7 +583,7 @@ class TestExport(TestCase):
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
-    def test_pytree_regster_data_class(self):
+    def test_pytree_register_data_class(self):
 
         @dataclass
         class MyDataClass:
@@ -596,7 +596,7 @@ class TestExport(TestCase):
         self.assertTrue(spec, LeafSpec())
         self.assertTrue(len(flat) == 1)
 
-        register_dataclass_as_pytree_node(MyDataClass)
+        register_dataclass_as_pytree_node(MyDataClass, serialized_type_name="test_pytree_register_data_class.MyDataClass")
 
         flat, spec = tree_flatten(dt)
         self.assertEqual(
@@ -623,7 +623,7 @@ class TestExport(TestCase):
         self.assertEqual(roundtrip_spec, spec)
 
         # Override the registration with keep none fields
-        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True)
+        register_dataclass_as_pytree_node(MyDataClass, return_none_fields=True, serialized_type_name="test_pytree_regster_data_class.MyDataClass")
 
         flat, spec = tree_flatten(dt)
         self.assertEqual(
@@ -649,7 +649,7 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
-    def test_pytree_regster_nested_data_class(self):
+    def test_pytree_register_nested_data_class(self):
 
         @dataclass
         class Inner:
@@ -666,8 +666,8 @@ class TestExport(TestCase):
         dt = Outer(xy, ab)
         inp = {"dt1": (dt, ({},)), "dt2": ((torch.ones(1),), dt)}
 
-        register_dataclass_as_pytree_node(Inner)
-        register_dataclass_as_pytree_node(Outer)
+        register_dataclass_as_pytree_node(Inner, serialized_type_name="test_pytree_register_nested_data_class.Inner")
+        register_dataclass_as_pytree_node(Outer, serialized_type_name="test_pytree_register_nested_data_class.Outer")
 
         flat, spec = tree_flatten(inp)
         self.assertEqual(flat, [1, 2, 3, 4, torch.ones(1), 1, 2, 3, 4])
