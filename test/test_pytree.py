@@ -47,13 +47,39 @@ class TestGenericPytree(TestCase):
 
                 # The C++ pytree APIs provide more features than the Python APIs.
                 # The Python APIs are a subset of the C++ APIs.
-                cxx_positional_params = OrderedDict(
-                    (name, param)
+                cxx_param_names = list(cxx_signature.parameters)
+                py_param_names = list(py_signature.parameters)
+                self.assertTrue(set(cxx_param_names).issuperset(py_param_names),
+                                msg=f"C++ parameter(s) ({cxx_param_names}) "
+                                    f"not in Python parameter(s) ({py_param_names})")
+                cxx_positional_param_names = [
+                    name
                     for name, param in cxx_signature.parameters.items()
-                    if name in py_signature.parameters
-                )
-                py_positional_params = OrderedDict(py_signature.parameters)
-                self.assertEqual(cxx_positional_params, py_positional_params)
+                    if (
+                        param.kind
+                        in {
+                            inspect.Parameter.POSITIONAL_ONLY,
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        }
+                    )
+                ]
+                py_positional_param_names = [
+                    name
+                    for name, param in py_signature.parameters.items()
+                    if (
+                        param.kind
+                        in {
+                            inspect.Parameter.POSITIONAL_ONLY,
+                            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        }
+                    )
+                ]
+                self.assertEqual(cxx_positional_param_names, py_positional_param_names)
+                for py_name, py_param in py_signature.parameters.items():
+                    self.assertIn(py_name, cxx_signature.parameters)
+                    cxx_param = cxx_signature.parameters[py_name]
+                    self.assertEqual(cxx_param.kind, py_param.kind)
+                    self.assertEqual(cxx_param.default, py_param.default)
 
     @parametrize(
         "pytree_impl",

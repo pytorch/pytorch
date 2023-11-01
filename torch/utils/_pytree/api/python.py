@@ -819,8 +819,8 @@ def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
     return str_spec
 
 
-def treespec_loads(data: str) -> TreeSpec:
-    protocol, json_schema = json.loads(data)
+def treespec_loads(serialized: str) -> TreeSpec:
+    protocol, json_schema = json.loads(serialized)
 
     if protocol in _SUPPORTED_PROTOCOLS:
         return _SUPPORTED_PROTOCOLS[protocol].json_to_treespec(json_schema)
