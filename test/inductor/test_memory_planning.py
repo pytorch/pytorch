@@ -19,7 +19,7 @@ import torch
 from test_aot_inductor import AOTInductorModelRunner
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import run_tests, skipIfRocm, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch.utils._triton import has_triton
@@ -78,10 +78,10 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocm("test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
         f, args = self._generate(device="cuda")
-        constraints: List[torch.export.Constraint] = []
-        constraints = [
+        constraints: List[torch.export.Constraint] = [
             torch._export.dynamic_dim(args[0], 0) >= 1,
             torch._export.dynamic_dim(args[0], 0) <= 2048,
         ]
