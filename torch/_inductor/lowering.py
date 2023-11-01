@@ -1653,7 +1653,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
         return False
 
     # only skip codegen if there is a cpu output, not input
-    for arg in pytree.tree_leaves((node.args, node.kwargs)):
+    for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
         if check_skip_condition(arg, node, is_output=False):
             return True
 
@@ -1662,7 +1662,16 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 def make_fallback(op, layout_constraint=None, warn=True):
     assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
-    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
+    if (
+        warn
+        and bool(os.getenv("CI"))
+        and get_decompositions([op])
+        # if fallback_random, we allow not decomposing random
+        and not (
+            config.fallback_random
+            and op in torch._decomp.decompositions_for_rng.extra_random_decomps
+        )
+    ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -2756,6 +2765,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
+    check,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -2845,6 +2855,7 @@ def index_impl(x, indices, check):
         indices_loaders,
         indexed_size,
         x_loader,
+        check=check,
     )
 
     return Pointwise.create(
@@ -2908,6 +2919,11 @@ def index_put_fallback(self, indices, values, accumulate):
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=True)
+
+
+@register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
+def _unsafe_index_put_(self, indices, values, accumulate=False):
+    return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
 def index_put_impl_(self, indices, values, accumulate, check):
@@ -2975,6 +2991,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         indices_loaders,
         indexed_size,
         None,
+        check=check,
     )
 
     values = expand(values, expected_vals_size)
