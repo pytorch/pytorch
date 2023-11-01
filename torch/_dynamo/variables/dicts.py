@@ -595,7 +595,7 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
 
-            if not all(ConstantVariable.is_literal(val) for val in d.values()):
+            if not all(ConstantVariable.is_literal(val) for val in bound.arguments.values()):
                 unimplemented("expect defaults to be literals"),
 
             # The keys are strings
