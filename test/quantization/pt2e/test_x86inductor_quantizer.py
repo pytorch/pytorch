@@ -300,7 +300,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 @skipIfNoDynamoSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
-    def test_conv2d_with_quantizer_api(self):
+    def test_conv2d(self):
         """
         Test pattern of single conv2d with X86InductorQuantizer.
         """
@@ -334,7 +334,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_conv2d_unary_with_quantizer_api(self):
+    def test_conv2d_unary(self):
         """
         Test pattern of conv2d with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
         Currently, only relu as unary post op is supported.
@@ -373,7 +373,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_binary_with_quantizer_api(self):
+    def test_conv2d_binary(self):
         """
         Test pattern of conv2d with binary post ops (such as add) with X86InductorQuantizer.
         Currently, only add as binary post op is supported.
@@ -427,7 +427,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_binary_unary_with_quantizer_api(self):
+    def test_conv2d_binary_unary(self):
         """
         Test pattern of conv2d with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
         Currently, only add as binary post op and relu as unary post op are supported.
@@ -483,7 +483,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_serials_binary_unary_with_quantizer_api(self):
+    def test_conv2d_serials_binary_unary(self):
         """
         Test pattern of 2 following up conv2d add relu with X86InductorQuantizer.
         """
@@ -905,7 +905,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_qat_conv2d_with_quantizer_api(self):
+    def test_qat_conv2d(self):
         """
         Test QAT pattern of conv2d_bn with X86InductorQuantizer.
         """
@@ -942,7 +942,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_qat_conv2d_unary_with_quantizer_api(self):
+    def test_qat_conv2d_unary(self):
         """
         Test QAT pattern of conv2d_bn with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
         Currently, only relu as unary post op is supported.
@@ -983,7 +983,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_qat_conv2d_binary_with_quantizer_api(self):
+    def test_qat_conv2d_binary(self):
         """
         Test qat pattern of conv2d_bn with binary post ops (such as add) with X86InductorQuantizer.
         Currently, only add as binary post op is supported.
@@ -1025,7 +1025,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_qat_conv2d_binary_unary_with_quantizer_api(self):
+    def test_qat_conv2d_binary_unary(self):
         """
         Test QAT pattern of conv2d_bn with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
         Currently, only add as binary post op and relu as unary post op are supported.
