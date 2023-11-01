@@ -595,9 +595,14 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
 
+            from torch._dynamo.variables.builder import SourcelessBuilder
+
             # The keys are strings
             builder = SourcelessBuilder()
-            items = {ConstantVariable.create(k): builder(v) for k, v in bound.arguments.items()}
+            items = {
+                ConstantVariable.create(k): builder(v)
+                for k, v in bound.arguments.items()
+            }
         elif not args:
             # CustomDict(a=1, b=2) in the general (non-dataclass) case.
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
