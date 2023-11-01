@@ -83,7 +83,7 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_reference_quantized_model(self, mod, inputs, is_qat=False):
+    def _generate_qdq_quantized_model(self, mod, inputs, is_qat=False):
         maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
         with maybe_no_grad:
             export_model = capture_pre_autograd_graph(
@@ -100,7 +100,7 @@ class TestPatternMatcherBase(TestCase):
                 else prepare_pt2e(export_model, quantizer)
             )
             prepare_model(*inputs)
-            convert_model = convert_pt2e(prepare_model)
+            convert_model = convert_pt2e(prepare_model, fold_quantize=True)
             torch.ao.quantization.move_exported_model_to_eval(convert_model)
             return convert_model
 
@@ -123,7 +123,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
-            convert_model = self._generate_reference_quantized_model(
+            convert_model = self._generate_qdq_quantized_model(
                 mod, inputs, is_qat
             )
             with torch.no_grad():
@@ -163,7 +163,7 @@ class TestPatternMatcherBase(TestCase):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = self._generate_reference_quantized_model(mod, inputs)
+                mod = self._generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
