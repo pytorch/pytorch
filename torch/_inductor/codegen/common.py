@@ -332,10 +332,6 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
-    def _print_align(self, expr):
-        assert len(expr.args) == 1
-        return f"align({self._print(expr.args[0])})"
-
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -368,10 +364,6 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"abs({self._print(expr.args[0])})"
 
-    def _print_Max(self, expr):
-        assert len(expr.args) >= 2
-        return f"max({', '.join(map(self._print, expr.args))})"
-
 
 class OpOverrides:
     def __init__(self, parent):
@@ -392,7 +384,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.div("1", x)
+        return ops.truediv("1", x)
 
     @staticmethod
     def square(x):

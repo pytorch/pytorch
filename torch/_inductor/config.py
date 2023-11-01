@@ -39,16 +39,6 @@ inplace_buffers = True
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
-# Enable pooled allocations for non-output tensors
-memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
-
-# How to organize memory under memory_planning=True:
-# - "none": do not try to pool storage, just reuse
-# - "intermediates": all non-outputs share storage, outputs each get unique storage
-# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
-# - "combined": a single pool for both intermediates and outputs
-memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
-
 # codegen benchmark harness
 benchmark_harness = True
 
@@ -209,6 +199,7 @@ aggressive_fusion = False
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
+enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
