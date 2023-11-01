@@ -1244,6 +1244,19 @@ def forward(self, a_1):
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
     return empty""")
 
+    def test_unbacked_unification(self):
+        def f(x, y):
+            z = torch.zeros(x.item())
+            return z + y
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
+    return add""")  # noqa: B950
+
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
             # tolist not directly supported atm
