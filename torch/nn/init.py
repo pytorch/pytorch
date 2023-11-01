@@ -1,4 +1,4 @@
-"""Initialize neural network parameters."""
+"""This file contains utilities for initializing neural network parameters."""
 import math
 import warnings
 
@@ -347,7 +347,7 @@ def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
     r"""Fill the input `Tensor` with values using a normal distribution.
     
     Described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010).The resulting tensor 
+    neural networks` - Glorot, X. & Bengio, Y. (2010). The resulting tensor 
     will have values sampled from :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
@@ -518,7 +518,7 @@ def orthogonal_(tensor, gain=1):
 def sparse_(tensor, sparsity, std=0.01):
     r"""Fill the 2D input `Tensor` as a sparse matrix.
     
-    where the non-zero elements will be drawn from the normal distribution
+    The non-zero elements will be drawn from the normal distribution
     :math:`\mathcal{N}(0, 0.01)`, as described in `Deep learning via
     Hessian-free optimization` - Martens, J. (2010).
 
