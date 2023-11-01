@@ -11,7 +11,11 @@ from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantize_pt2e import (
+    convert_pt2e,
+    prepare_pt2e,
+    prepare_qat_pt2e,
+)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
@@ -79,18 +83,26 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_reference_quantized_model(self, mod, inputs):
-        export_model = capture_pre_autograd_graph(
-            mod,
-            inputs,
-        )
-        quantizer = X86InductorQuantizer()
-        quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-        prepare_model = prepare_pt2e(export_model, quantizer)
-        prepare_model(*inputs)
-        convert_model = convert_pt2e(prepare_model)
-        torch.ao.quantization.move_exported_model_to_eval(convert_model)
-        return convert_model
+    def _generate_qdq_quantized_model(self, mod, inputs, is_qat=False):
+        maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
+        with maybe_no_grad:
+            export_model = capture_pre_autograd_graph(
+                mod,
+                inputs,
+            )
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_qat=is_qat)
+            )
+            prepare_model = (
+                prepare_qat_pt2e(export_model, quantizer)
+                if is_qat
+                else prepare_pt2e(export_model, quantizer)
+            )
+            prepare_model(*inputs)
+            convert_model = convert_pt2e(prepare_model, fold_quantize=True)
+            torch.ao.quantization.move_exported_model_to_eval(convert_model)
+            return convert_model
 
     def _test_common(
         self,
@@ -102,6 +114,7 @@ class TestPatternMatcherBase(TestCase):
         rtol=1.3e-6,
         check_autocast=False,
         check_quantization=False,
+        is_qat=False,
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -110,8 +123,8 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
+            convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
             with torch.no_grad():
-                convert_model = self._generate_reference_quantized_model(mod, inputs)
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
@@ -148,7 +161,7 @@ class TestPatternMatcherBase(TestCase):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
-                mod = self._generate_reference_quantized_model(mod, inputs)
+                mod = self._generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -625,6 +638,93 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 38,
                 check_quantization=True,
             )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d(self):
+        r"""
+        This testcase will quantize a single Conv2d module with qat flow.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.bn = torch.nn.BatchNorm2d(128)
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        mod = M().train()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        # Totally pattern_matcher_count 4,
+        # pattern_matcher_nodes 17
+        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. dequant-conv pattern matched in quantization weight prepack
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+        # 4. Quantization fusion in post-grad fusion pass
+        #    [qconv2d_pointwise_default, div_1, round_2, add_1,
+        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            4,
+            17,
+            check_quantization=True,
+            is_qat=True,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_relu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern with qat flow.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.unary_fn = torch.nn.ReLU()
+                self.bn = torch.nn.BatchNorm2d(128)
+
+            def forward(self, x):
+                return self.unary_fn(self.bn(self.conv(x)))
+
+        mod = M()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        # Totally pattern_matcher_count 4,
+        # pattern_matcher_nodes 18
+        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        # 2. dequant-conv pattern matched in quantization weight prepack
+        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
+        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
+        # 4. Quantization fusion in post-grad fusion pass
+        #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1,
+        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        self._test_common(
+            mod,
+            (v,),
+            4,
+            18,
+            check_quantization=True,
+            is_qat=True,
+        )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
