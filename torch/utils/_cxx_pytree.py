@@ -30,7 +30,7 @@ from typing import (
 
 import torch
 
-if torch._running_with_deploy() or True:
+if torch._running_with_deploy():
     warnings.warn("C++ Pytree utilities do not work with torch::deploy.")
 
 import optree
