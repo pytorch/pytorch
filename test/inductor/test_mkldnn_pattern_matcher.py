@@ -123,9 +123,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(
-                mod, inputs, is_qat
-            )
+            convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
             with torch.no_grad():
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
