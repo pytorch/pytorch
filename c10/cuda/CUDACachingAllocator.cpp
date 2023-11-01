@@ -15,7 +15,6 @@
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
-#include <dlfcn.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
