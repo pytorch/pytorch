@@ -353,6 +353,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return WrapHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
+        ) or value.__name__.startswith(
             "tag_activation_checkpoint",
         ):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
