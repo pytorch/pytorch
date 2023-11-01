@@ -635,7 +635,8 @@ class TensorVariable(VariableTracker):
                     (gm_variable, input_variable, hook_variable, size_variable),
                     {},
                 )
-                return None
+                # TODO: we should avoid running the actual backward
+                return saved_gm(input, hook, size)
 
             # This is being called in the compiled_autograd's end_capture, it need to return a
             # python function that can execute the backward.
