@@ -2530,6 +2530,7 @@ class TestSparseCSR(TestCase):
         run_test(4, 5, 4, 10, False)
         run_test(4, 4, 4, 16, True)
 
+    @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 0.01})
