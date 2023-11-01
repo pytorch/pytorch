@@ -50,15 +50,19 @@ class TestGenericPytree(TestCase):
                 # Check the signature of the Python API is a subset of the C++ API.
                 cxx_param_names = list(cxx_signature.parameters)
                 py_param_names = list(py_signature.parameters)
-                self.assertTrue(set(cxx_param_names).issuperset(py_param_names),
-                                msg=f"C++ parameter(s) ({cxx_param_names}) "
-                                    f"not in Python parameter(s) ({py_param_names})")
+                self.assertTrue(
+                    set(cxx_param_names).issuperset(py_param_names),
+                    msg=(
+                        f"C++ parameter(s) ({cxx_param_names}) "
+                        f"not in Python parameter(s) ({py_param_names})"
+                    ),
+                )
                 # Check the positional parameters are the same.
                 cxx_positional_param_names = [
-                    name
-                    for name, param in cxx_signature.parameters.items()
+                    n
+                    for n, p in cxx_signature.parameters.items()
                     if (
-                        param.kind
+                        p.kind
                         in {
                             inspect.Parameter.POSITIONAL_ONLY,
                             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -66,10 +70,10 @@ class TestGenericPytree(TestCase):
                     )
                 ]
                 py_positional_param_names = [
-                    name
-                    for name, param in py_signature.parameters.items()
+                    n
+                    for n, p in py_signature.parameters.items()
                     if (
-                        param.kind
+                        p.kind
                         in {
                             inspect.Parameter.POSITIONAL_ONLY,
                             inspect.Parameter.POSITIONAL_OR_KEYWORD,
@@ -83,6 +87,18 @@ class TestGenericPytree(TestCase):
                     cxx_param = cxx_signature.parameters[py_name]
                     self.assertEqual(cxx_param.kind, py_param.kind)
                     self.assertEqual(cxx_param.default, py_param.default)
+                    if "TreeSpec" in str(cxx_param.annotation):
+                        self.assertIn("TreeSpec", str(py_param.annotation))
+                    else:
+                        self.assertEqual(
+                            cxx_param.annotation,
+                            py_param.annotation,
+                            msg=(
+                                f"C++ parameter {cxx_param} "
+                                f"does not match Python parameter {py_param} "
+                                f"for API `{name}`"
+                            ),
+                        )
 
     @parametrize(
         "pytree_impl",

@@ -443,12 +443,12 @@ def tree_structure(tree: PyTree) -> TreeSpec:
     return tree_flatten(tree)[1]
 
 
-def tree_map(func: Any, tree: PyTree) -> PyTree:
+def tree_map(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(tree)
     return tree_unflatten([func(i) for i in flat_args], spec)
 
 
-def tree_map_(func: Any, tree: PyTree) -> PyTree:
+def tree_map_(func: Callable[..., Any], tree: PyTree) -> PyTree:
     flat_args = tree_leaves(tree)
     deque(map(func, flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
