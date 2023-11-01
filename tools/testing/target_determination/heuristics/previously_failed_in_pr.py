@@ -26,6 +26,10 @@ class PreviouslyFailedInPR(HeuristicInterface):
 
         return test_rankings
 
+    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
+        critical_tests = _get_previously_failing_tests()
+        return {test: 1 for test in critical_tests if test in tests}
+
 
 def _get_previously_failing_tests() -> Set[str]:
     PYTEST_FAILED_TESTS_CACHE_FILE_PATH = Path(".pytest_cache/v/cache/lastfailed")

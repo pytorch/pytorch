@@ -10,7 +10,11 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 
-from tools.testing.target_determination.heuristics.utils import get_correlated_tests
+from tools.testing.target_determination.heuristics.utils import (
+    get_correlated_tests,
+    get_rankings_for_tests,
+    normalize_ratings,
+)
 
 
 class CorrelatedWithHistoricalFailures(HeuristicInterface):
@@ -27,3 +31,10 @@ class CorrelatedWithHistoricalFailures(HeuristicInterface):
         )
 
         return test_rankings
+
+    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
+        test_ratings = get_rankings_for_tests(
+            ADDITIONAL_CI_FILES_FOLDER / TEST_FILE_RATINGS_FILE
+        )
+        test_ratings = {k: v for (k, v) in test_ratings.items() if k in tests}
+        return normalize_ratings(test_ratings, 0.25)

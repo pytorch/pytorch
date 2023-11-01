@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, Dict, List
 
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
@@ -10,7 +10,11 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 
-from tools.testing.target_determination.heuristics.utils import get_correlated_tests
+from tools.testing.target_determination.heuristics.utils import (
+    get_correlated_tests,
+    get_rankings_for_tests,
+    normalize_ratings,
+)
 
 
 # This heuristic assumes that changed files in previous commits are good sources
@@ -32,3 +36,10 @@ class HistorialEditedFiles(HeuristicInterface):
         )
 
         return test_rankings
+
+    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
+        test_ratings = get_rankings_for_tests(
+            ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_HISTORICAL_EDITED_FILES
+        )
+        test_ratings = {k: v for (k, v) in test_ratings.items() if k in tests}
+        return normalize_ratings(test_ratings, 0.25)
