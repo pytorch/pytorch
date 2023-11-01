@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -289,12 +289,7 @@ def _multi_tensor_adadelta(
             device_grads = torch._foreach_neg(device_grads)
 
         if has_complex:
-            for i in range(len(device_params)):
-                if torch.is_complex(device_params[i]):
-                    device_params[i] = torch.view_as_real(device_params[i])
-                    device_grads[i] = torch.view_as_real(device_grads[i])
-                    device_square_avgs[i] = torch.view_as_real(device_square_avgs[i])
-                    device_acc_deltas[i] = torch.view_as_real(device_acc_deltas[i])
+            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
