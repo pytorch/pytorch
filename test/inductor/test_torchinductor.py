@@ -187,9 +187,7 @@ class InputGen:
 
 def compute_grads(args, kwrags, results, grads):
     def gather_leaf_tensors(args, kwargs):
-        args = pytree.tree_leaves(args)
-        kwargs = pytree.tree_leaves(kwargs)
-        args = args + kwargs
+        args = pytree.arg_tree_leaves(*args, **kwargs)
         leaf_tensors = [
             arg for arg in args if isinstance(arg, torch.Tensor) and arg.requires_grad
         ]
@@ -829,6 +827,7 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     @skipIfRocm
+    @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
@@ -894,6 +893,11 @@ class CommonTemplate:
 
         # Constant is propagated as we can prove that the result is always negative.
         test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+        def unsafe_index(a, b):
+            return aten._unsafe_index(a, (b,))
+
+        test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
 
     def test_computed_buffer_inlining(self):
         def flip(x):
@@ -3571,6 +3575,27 @@ class CommonTemplate:
         )
         out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
         self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+    def test_remove_noop_copy(self):
+        def fn(x, y):
+            x = x.cos()
+            a = x.copy_(y)
+            return a.sin()
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8)))
+
+        def fn2(a, b):
+            abs_max = torch.abs(a).max()
+            b[0] = abs_max.to(a.dtype)
+            return b
+
+        self.common(
+            fn2,
+            (
+                torch.randn(8, 8, dtype=torch.float16),
+                torch.randn(8, dtype=torch.float32),
+            ),
+        )
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -7652,7 +7677,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     nonlocal max_live_tensors
 
                     kwargs = kwargs if kwargs else {}
-                    for arg in pytree.tree_leaves((args, kwargs)):
+                    for arg in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(arg, torch.Tensor):
                             live_tensors[arg] = True
 
