@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
 
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor
 
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
@@ -621,11 +621,7 @@ class TestDTensorOps(DTensorOpTestBase):
         rs = concat_res_if_necessary(func, rs)
 
         def to_replicate(e: object) -> object:
-            return (
-                e.redistribute(self.mesh, self.mesh.ndim * [Replicate()])
-                if isinstance(e, DTensor)
-                else e
-            )
+            return e.full_tensor() if isinstance(e, DTensor) else e
 
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
