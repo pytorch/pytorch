@@ -415,7 +415,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d(self):
+    def test_qconv2d_cpu(self):
         r"""
         This testcase will quantize a single Conv2d module.
         """
@@ -456,7 +456,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_relu(self):
+    def test_qconv2d_relu_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
         """
@@ -498,7 +498,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_add(self):
+    def test_qconv2d_add_cpu(self):
         r"""
         This testcase will quantize a Conv2d->Add pattern as:
                  X
@@ -562,7 +562,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_add_relu(self):
+    def test_qconv2d_add_relu_cpu(self):
         r"""
         This testcase will quantize a Conv2d->Add->ReLU pattern as:
                  X
@@ -629,7 +629,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_dequant_promotion(self):
+    def test_qconv2d_dequant_promotion_cpu(self):
         r"""
         This testcase tests if dequant node before conv2d is promoted correctly:
                  X
@@ -692,7 +692,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear(self):
+    def test_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
@@ -731,7 +731,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_relu(self):
+    def test_qlinear_relu_cpu(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
@@ -771,7 +771,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_dequant_promotion(self):
+    def test_qlinear_dequant_promotion_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
                   X
