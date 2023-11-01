@@ -713,6 +713,22 @@ def _remove_extra_dequantize(m: GraphModule):
                 m.graph.erase_node(dq_user)
     m.recompile()
 
+def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
+    """
+    Given a pair of quantize or dequantize nodes, copy over all literal args
+    from the original node to the replacement node.
+    """
+    # For quantize_per_tensor, scale and zp are literals and need to be copied
+    # For quantize_per_channel, scale and zp are get_attr nodes and should be skipped
+    # TODO: support copying over quantize_per_channel args in a future PR
+    assert original_node.target == replacement_node.target
+    if original_node.target in (
+        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+    ):
+        # Args: input, [scale, zp, qmin, qmax, dtype]
+        replacement_node.args = replacement_node.args[:1] + original_node.args[1:]
+
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     m = _fold_conv_bn_qat_helper(m, is_cuda=False)
     if torch.cuda.is_available():
@@ -774,16 +790,12 @@ def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
             replacement_node.meta = original_node.meta
 
         # Step (3): Copy over args for weight (and optionally bias) q - dq nodes
-        (o_conv_weight_q, r_conv_weight_q) = node_map["conv_weight_q"]
-        (o_conv_weight_dq, r_conv_weight_dq) = node_map["conv_weight_dq"]
-        r_conv_weight_q.args = r_conv_weight_q.args[:1] + o_conv_weight_q.args[1:]
-        r_conv_weight_dq.args = r_conv_weight_dq.args[:1] + o_conv_weight_dq.args[1:]
-
-        if "conv_bias_q" in node_map and "conv_bias_dq" in node_map:
-            (o_conv_bias_q, r_conv_bias_q) = node_map["conv_bias_q"]
-            (o_conv_bias_dq, r_conv_bias_dq) = node_map["conv_bias_dq"]
-            r_conv_bias_q.args = r_conv_bias_q.args[:1] + o_conv_bias_q.args[1:]
-            r_conv_bias_dq.args = r_conv_bias_dq.args[:1] + o_conv_bias_dq.args[1:]
+        _copy_over_q_dq_args(*node_map["conv_weight_q"])
+        _copy_over_q_dq_args(*node_map["conv_weight_dq"])
+        if "conv_bias_q" in node_map:
+            assert "conv_bias_dq" in node_map
+            _copy_over_q_dq_args(*node_map["conv_bias_q"])
+            _copy_over_q_dq_args(*node_map["conv_bias_dq"])
 
         # Step (4): Fold BN weights into conv
         conv_bias = None
