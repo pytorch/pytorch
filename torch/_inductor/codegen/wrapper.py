@@ -255,11 +255,12 @@ class AllocateLine(MemoryPlanningLine):
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
 
-        static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
-        if static_shape is not None:
-            state.total_allocated_buffer_size += int(
-                functools.reduce(operator.mul, static_shape, 1)
-            )
+        if self.node.get_device().type == "cpu":
+            static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
+            if static_shape is not None:
+                state.total_allocated_buffer_size += int(
+                    functools.reduce(operator.mul, static_shape, 1)
+                )
 
         return self
 
