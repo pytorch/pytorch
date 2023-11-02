@@ -349,3 +349,14 @@ class ExportGraphSignature:
             len(self.user_outputs) + len(self.buffers_to_mutate)
             == assertion_dep_token_index
         )
+
+    def replace_all_uses(self, old: str, new: str):
+        """
+        Replace all uses of the old name with new name in the signature.
+        """
+        assert isinstance(old, str)
+        assert isinstance(new, str)
+        for o in self.output_specs:
+            if isinstance(o.arg, TensorArgument):
+                if o.arg.name == old:
+                    o.arg.name = new
