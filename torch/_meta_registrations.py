@@ -2966,6 +2966,7 @@ def meta_round(self, **kwargs):
         aten._foreach_abs_.default,
         aten._foreach_acos_.default,
         aten._foreach_asin_.default,
+        aten._foreach_atan_.default,
         aten._foreach_ceil_.default,
         aten._foreach_cos_.default,
         aten._foreach_cosh_.default,
@@ -2991,7 +2992,6 @@ def meta_round(self, **kwargs):
         aten._foreach_tan_.default,
         aten._foreach_tanh_.default,
         aten._foreach_trunc_.default,
-        aten._foreach_zero_.default,
     ]
 )
 def meta__foreach_unaop_(self, _scalar_fn):
@@ -3008,6 +3008,7 @@ def meta__foreach_unaop_(self, _scalar_fn):
         aten._foreach_abs.default,
         aten._foreach_acos.default,
         aten._foreach_asin.default,
+        aten._foreach_atan.default,
         aten._foreach_ceil.default,
         aten._foreach_cos.default,
         aten._foreach_cosh.default,
@@ -3033,7 +3034,6 @@ def meta__foreach_unaop_(self, _scalar_fn):
         aten._foreach_tan.default,
         aten._foreach_tanh.default,
         aten._foreach_trunc.default,
-        aten._foreach_zero.default,
     ]
 )
 def meta__foreach_unaop(self, _scalar_fn):
