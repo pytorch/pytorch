@@ -155,11 +155,31 @@ class MiniArrayRef final {
 
 using MiniIntArrayRef = MiniArrayRef<int64_t>;
 
+inline bool is_contiguous_strides_for_shape(
+    int64_t ndim,
+    const int64_t* strides_ptr,
+    const int64_t* sizes_ptr) {
+  int64_t z = 1;
+  for (int64_t d = ndim - 1; d >= 0; d--) {
+    const auto& size_d = sizes_ptr[d];
+    if (size_d != 1) {
+      if (strides_ptr[d] == z) {
+        z *= size_d;
+      } else {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Shim for AOTI generated code to pretend a raw array works like an
 // AtenTensorHandle.
-template <typename T, size_t N>
+template <typename T>
 class ArrayRefTensor {
  public:
+  ArrayRefTensor() = default;
+
   explicit ArrayRefTensor(
       MiniArrayRef<T> arr,
       MiniArrayRef<const int64_t> sizes,
@@ -172,8 +192,10 @@ class ArrayRefTensor {
         strides_(strides),
         dtype_(dtype),
         device_type_(device_type),
-        device_idx_(device_idx) {
-    assert(arr.size() == N);
+        device_idx_(device_idx),
+        numel_(arr.size()) {
+    assert(sizes.size() == strides.size());
+    assert(is_contiguous_strides_for_shape(sizes.size(), strides.data(), sizes.data()));
   }
 
   AtenTensorHandle expensiveCopyToTensor() const {
@@ -225,8 +247,12 @@ class ArrayRefTensor {
     return arrayRef_.data();
   }
 
-  static constexpr auto numel() {
-    return N;
+  auto numel() const {
+    return numel_;
+  }
+
+  void set_arrayref(MiniArrayRef<T> new_arrayref) {
+    arrayRef_ = new_arrayref;
   }
 
  private:
@@ -235,9 +261,10 @@ class ArrayRefTensor {
   // strides for us.
   MiniArrayRef<const int64_t> sizes_;
   MiniArrayRef<const int64_t> strides_;
-  int32_t dtype_;
-  int32_t device_type_;
-  int32_t device_idx_;
+  int32_t dtype_ = 0;
+  int32_t device_type_ = 0;
+  int32_t device_idx_ = 0;
+  int32_t numel_ = 0;
 };
 
 inline AtenTensorHandle reinterpret_tensor_wrapper(
@@ -252,27 +279,9 @@ inline AtenTensorHandle reinterpret_tensor_wrapper(
   return result;
 }
 
-inline bool is_contiguous_strides_for_shape(
-    int64_t ndim,
-    const int64_t* strides_ptr,
-    const int64_t* sizes_ptr) {
-  int64_t z = 1;
-  for (int64_t d = ndim - 1; d >= 0; d--) {
-    const auto& size_d = sizes_ptr[d];
-    if (size_d != 1) {
-      if (strides_ptr[d] == z) {
-        z *= size_d;
-      } else {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-template <typename T, size_t N>
-inline ArrayRefTensor<T, N> reinterpret_tensor_wrapper(
-    const ArrayRefTensor<T, N>& self,
+template <typename T>
+inline ArrayRefTensor<T> reinterpret_tensor_wrapper(
+    const ArrayRefTensor<T>& self,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
@@ -280,7 +289,7 @@ inline ArrayRefTensor<T, N> reinterpret_tensor_wrapper(
   // REVIEW: we should add a way to build the DSO in debug mode during
   // tests so we can have checks like this!
   assert(is_contiguous_strides_for_shape(ndim, strides_ptr, sizes_ptr));
-  return ArrayRefTensor<T, N>(
+  return ArrayRefTensor<T>(
       MiniArrayRef<T>(
           self.data() + storage_offset, self.numel() - storage_offset),
       MiniArrayRef<const int64_t>(sizes_ptr, ndim),
@@ -296,9 +305,14 @@ inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
   return result;
 }
 
-template <typename T, size_t N>
-inline T* get_data_ptr_wrapper(ArrayRefTensor<T, N>& tensor) {
+template <typename T>
+inline T* get_data_ptr_wrapper(ArrayRefTensor<T>& tensor) {
   return tensor.data();
+}
+
+template <typename T>
+inline T* get_data_ptr_wrapper(const MiniArrayRef<T>& arr) {
+  return arr.data();
 }
 
 inline AtenTensorHandle unwrap_raii_handle_if_needed(
@@ -306,15 +320,15 @@ inline AtenTensorHandle unwrap_raii_handle_if_needed(
   return handle.get();
 }
 
-template <typename T, size_t N>
-inline const ArrayRefTensor<T, N>& unwrap_raii_handle_if_needed(
-    const ArrayRefTensor<T, N>& tensor) {
+template <typename T>
+inline const ArrayRefTensor<T>& unwrap_raii_handle_if_needed(
+    const ArrayRefTensor<T>& tensor) {
   return tensor;
 }
 
-template <typename T, size_t N>
-inline ArrayRefTensor<T, N>& unwrap_raii_handle_if_needed(
-    ArrayRefTensor<T, N>& tensor) {
+template <typename T>
+inline ArrayRefTensor<T>& unwrap_raii_handle_if_needed(
+    ArrayRefTensor<T>& tensor) {
   return tensor;
 }
 
@@ -323,21 +337,21 @@ inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
   return RAIIAtenTensorHandle(handle);
 }
 
-template <typename T, size_t N>
-inline const ArrayRefTensor<T, N>& wrap_with_raii_handle_if_needed(
-    const ArrayRefTensor<T, N>& tensor) {
+template <typename T>
+inline const ArrayRefTensor<T>& wrap_with_raii_handle_if_needed(
+    const ArrayRefTensor<T>& tensor) {
   return tensor;
 }
 
-template <typename T, size_t N>
-inline ArrayRefTensor<T, N>& wrap_with_raii_handle_if_needed(
-    ArrayRefTensor<T, N>& tensor) {
+template <typename T>
+inline ArrayRefTensor<T>& wrap_with_raii_handle_if_needed(
+    ArrayRefTensor<T>& tensor) {
   return tensor;
 }
 
-template <typename T, size_t N>
+template <typename T>
 inline RAIIAtenTensorHandle expensive_copy_to_tensor_if_needed(
-    const ArrayRefTensor<T, N>& tensor) {
+    const ArrayRefTensor<T>& tensor) {
   return tensor.expensiveCopyToTensor();
 }
 

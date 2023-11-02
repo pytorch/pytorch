@@ -27,6 +27,22 @@
             std::to_string(actual_size));                         \
   } while (0)
 
+// AOTInductor uses at::addmm_out, which doesn't supports
+// arguments that requires gradient. For this reason, we
+// enforce no_grad context for run APIs.
+//
+// A RAII, thread local (!) guard that enables or disables grad mode upon
+// construction, and sets it back to the original value upon destruction.
+struct AOTINoGradGuard {
+  AOTINoGradGuard() : prev_mode(aoti_torch_grad_mode_is_enabled()) {
+    aoti_torch_grad_mode_set_enabled(false);
+  }
+  ~AOTINoGradGuard() {
+    aoti_torch_grad_mode_set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 extern "C" {
 
 AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -80,6 +96,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
 
   auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
     container->run(
         input_handles,
         output_handles,
@@ -168,11 +185,12 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles) {
   auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-      model->run_impl(
-          input_handles,
-          output_handles,
-          (torch::aot_inductor::DeviceStreamType)nullptr,
-          nullptr);
+    AOTINoGradGuard guard;
+    model->run_impl(
+        input_handles,
+        output_handles,
+        (torch::aot_inductor::DeviceStreamType)nullptr,
+        nullptr);
   })
 }
 
@@ -226,25 +244,39 @@ struct ThreadLocalCachedOutputTensor;
 template<>
 struct ThreadLocalCachedOutputTensor<RAIIAtenTensorHandle> {
   explicit ThreadLocalCachedOutputTensor(const RAIIAtenTensorHandle&) {}
-  void copy_data_from(AtenTensorHandle) { throw std::runtime_error("can't happen"); }
-  std::array<char, 1> storage;
-  RAIIAtenTensorHandle tensor;
+  void copy_data_from(const RAIIAtenTensorHandle& handle) {
+    throw std::runtime_error("can't happen");
+  }
+
+  AtenTensorHandle tensor() const {
+    throw std::runtime_error("can't happen");
+  }
 };
 
-template<>
-struct ThreadLocalCachedOutputTensor<AtenTensorHandle> {
-  explicit ThreadLocalCachedOutputTensor(const AtenTensorHandle&) {}
-  void copy_data_from(AtenTensorHandle) { throw std::runtime_error("can't happen"); }
-  std::array<char, 1> storage;
-  RAIIAtenTensorHandle tensor;
-};
+template <typename T>
+struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
+  explicit ThreadLocalCachedOutputTensor(const ArrayRefTensor<T>& t) {
+    realloc(t);
+  }
 
-template <typename T, size_t N>
-struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T, N>> {
-  explicit ThreadLocalCachedOutputTensor(ArrayRefTensor<T, N>& t) {
+  void copy_data_from(const ArrayRefTensor<T>& t) {
+    if (t.numel() > capacity_) {
+      realloc(t);
+    }
+    std::copy(t.data(), t.data() + t.numel(), storage_.get());
+  }
+
+  AtenTensorHandle tensor() const {
+    return tensor_.get();
+  }
+
+ private:
+  void realloc(const ArrayRefTensor<T>& t) {
+    capacity_ = t.numel();
+    storage_ = std::make_unique<T[]>(t.numel());
     AtenTensorHandle handle;
     AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-                                    storage.data(),
+                                    storage_.get(),
                                     t.sizes().size(),
                                     t.sizes().data(),
                                     t.strides().data(),
@@ -253,15 +285,12 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T, N>> {
                                     t.device_type(),
                                     t.device_idx(),
                                     &handle));
-    tensor = handle;
+    tensor_ = handle;
   }
 
-  void copy_data_from(const ArrayRefTensor<T, N>& t) {
-    std::copy(t.data(), t.data() + t.numel(), storage.data());
-  }
-
-  std::array<T, N> storage;
-  RAIIAtenTensorHandle tensor;
+  std::unique_ptr<T[]> storage_;
+  size_t capacity_ = 0;
+  RAIIAtenTensorHandle tensor_;
 };
 
 } // namespace aot_inductor
