@@ -420,12 +420,18 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     source = torch._library.utils.get_source(_stacklevel + 1)
     frame = inspect.stack()[_stacklevel]
     caller_module = inspect.getmodule(frame[0])
-    assert caller_module is not None
-    caller_module_name = caller_module.__name__
+    # Can be none if you call impl_abstract from somewhere there isn't a module
+    # (e.g. __main__)
+    caller_module_name = None if caller_module is None else caller_module.__name__
 
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
-        handle = entry.abstract_impl.register(_check_pystubs_once(func, qualname, caller_module_name), source)
+        if caller_module_name is not None:
+            func_to_register = _check_pystubs_once(func, qualname, caller_module_name)
+        else:
+            func_to_register = func
+
+        handle = entry.abstract_impl.register(func_to_register, source)
         if lib is not None:
             lib._registration_handles.append(handle)
         return func
