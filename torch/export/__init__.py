@@ -570,12 +570,12 @@ def load(
     )
 
 
-def register_dataclass(typ: Any) -> None:
+def register_dataclass(cls: Any) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
-        typ: the dataclass type to register
+        cls: the dataclass type to register
 
     Example::
 
@@ -601,4 +601,4 @@ def register_dataclass(typ: Any) -> None:
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(typ)
+    return register_dataclass_as_pytree_node(cls)
