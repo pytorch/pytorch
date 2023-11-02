@@ -1811,7 +1811,10 @@ def main():
 
                 # Is this an excessive number of things to emit? probably.  But
                 # it was also really easy to write
-                emit_metric("td_number_ranking_experiment", get_experimental_rankings())
+                emit_metric(
+                    "td_number_ranking_experiment",
+                    {**get_experimental_rankings(), "failure": test},
+                )
 
     if len(all_failures):
         for _, err in all_failures:
