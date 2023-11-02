@@ -1541,7 +1541,7 @@ class ShapeEnv:
         #     to the next unbacked symbol to wait on, but if we choose the
         #     latest key, an assert will only show up at the moment when
         #     we can actually codegen it.
-        self.deferred_runtime_asserts: Dict[sympy.Symbol, List[RuntimeAssert]] = collections.defaultdict(list)
+        self.deferred_runtime_asserts: Dict[sympy.Symbol, List[RuntimeAssert]] = {}
         # This exists so we can efficiently invalidate the cache (it's used as
         # part of the cache key); otherwise we'd have to iterate through
         # deferred_runtime_asserts to compute its length
@@ -2828,16 +2828,17 @@ class ShapeEnv:
             if s in self.var_to_val:
                 continue
             subst = {}
-            for ra in self.deferred_runtime_asserts[s]:
-                if compute_hint:
-                    e = ra.expr.xreplace(self.var_to_val)
-                else:
-                    e = ra.expr
-                subst[e] = sympy.true
-                subst[sympy.Not(e)] = sympy.false
-                # NB: this doesn't match relations if they're flipped; e.g.,
-                # if you have x < 5, we won't get 5 > x.  Holler if this is
-                # a problem
+            if s in self.deferred_runtime_asserts:
+                for ra in self.deferred_runtime_asserts[s]:
+                    if compute_hint:
+                        e = ra.expr.xreplace(self.var_to_val)
+                    else:
+                        e = ra.expr
+                    subst[e] = sympy.true
+                    subst[sympy.Not(e)] = sympy.false
+                    # NB: this doesn't match relations if they're flipped; e.g.,
+                    # if you have x < 5, we won't get 5 > x.  Holler if this is
+                    # a problem
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
 
@@ -3345,7 +3346,7 @@ class ShapeEnv:
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
-            self.deferred_runtime_asserts[cands[-1]].append(ra)
+            self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
             self.num_deferred_runtime_asserts += 1
             # TODO: refine ranges
             # Unfortunately, range refinement is probably going to not
