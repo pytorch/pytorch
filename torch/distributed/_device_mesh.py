@@ -296,7 +296,7 @@ class DeviceMesh:
         _mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
-        return f"DeviceMesh:({self.mesh.tolist()})"
+        return f"DeviceMesh({self.mesh.tolist()})"
 
     def __hash__(self):
         return self._hash
