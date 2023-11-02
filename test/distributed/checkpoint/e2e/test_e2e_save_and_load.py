@@ -3,7 +3,6 @@
 from enum import auto, Enum
 
 import torch
-import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
 import torch.nn as nn
 from torch.distributed._tensor.device_mesh import init_device_mesh
@@ -93,7 +92,7 @@ class TestE2ELoadAndSave(DTensorTestBase):
         return True
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @with_temp_dir
     @parametrize("compile", [True, False])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
