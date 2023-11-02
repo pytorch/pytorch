@@ -1919,9 +1919,12 @@ class TritonKernel(Kernel):
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
-            "mutated_arg_names": mutated_args,
+        }
+
+        inductor_meta = {
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "mutated_arg_names": mutated_args,
         }
 
         for tree in self.range_trees:
@@ -1956,7 +1959,8 @@ class TritonKernel(Kernel):
                     size_hints={size_hints!r},
                     reduction_hint={reduction_hint},
                     filename=__file__,
-                    meta={triton_meta!r}
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
             """
@@ -1971,7 +1975,8 @@ class TritonKernel(Kernel):
                 @{heuristics}(
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
-                    meta={triton_meta!r},
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r},
                     min_elem_per_thread={self.min_elem_per_thread}
                 )
                 @triton.jit
