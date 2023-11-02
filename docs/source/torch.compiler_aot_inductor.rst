@@ -102,12 +102,12 @@ previous step, enabling us to conduct model predictions directly within a C++ en
         torch::inductor::AOTIModelRunnerCuda runner("model.so");
         std::vector<torch::Tensor> inputs = {torch::randn({8, 10}, at::kCUDA)};
         std::vector<torch::Tensor> outputs = runner.run(inputs);
-        std::cout << "Result from first inference:"<< std::endl;
+        std::cout << "Result from the first inference:"<< std::endl;
         std::cout << outputs[0] << std::endl;
 
         // The second inference uses a different batch size and it works because we
         // specified that dimension as dynamic when compiling model.so.
-        std::cout << "Result from second inference:"<< std::endl;
+        std::cout << "Result from the second inference:"<< std::endl;
         std::cout << runner.run({torch::randn({2, 10}, at::kCUDA)})[0] << std::endl;
 
         return 0;
@@ -151,18 +151,18 @@ Please be mindful that your path may vary from the one illustrated in this examp
 
 .. code-block:: shell
 
-    (nightly) [ ~/local/aoti_example]$ mkdir build
-    (nightly) [ ~/local/aoti_example]$ cd build
-    (nightly) [ ~/local/aoti_example/build]$ CMAKE_PREFIX_PATH=/home/$USER/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
-    (nightly) [ ~/local/aoti_example/build]$ cmake --build . --config Release
+    $ mkdir build
+    $ cd build
+    $ CMAKE_PREFIX_PATH=/home/$USER/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
+    $ cmake --build . --config Release
 
 After the ``aoti_example`` binary has been generated in the ``build`` directory, executing it will
 display results akin to the following:
 
 .. code-block:: shell
 
-    (nightly) [ ~/local/aoti_example/build]$ ./aoti_example
-    Result from first inference:
+    $ ./aoti_example
+    Result from the first inference:
     0.4866
     0.5184
     0.4462
@@ -172,7 +172,7 @@ display results akin to the following:
     0.4938
     0.4193
     [ CUDAFloatType{8,1} ]
-    Result from second inference:
+    Result from the second inference:
     0.4883
     0.4703
     [ CUDAFloatType{2,1} ]
