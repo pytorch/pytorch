@@ -80,8 +80,10 @@ def _reverse_args(func: UnflattenFunc) -> OpTreeUnflattenFunc:
 
 def register_pytree_node(
     cls: Type[Any],
-    flatten_func: FlattenFunc,
-    unflatten_func: UnflattenFunc,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    *,
+    serialized_type_name: Optional[str] = None,
     namespace: str = "torch",
 ) -> None:
     """Extend the set of types that are considered internal nodes in pytrees.
@@ -98,16 +100,18 @@ def register_pytree_node(
 
     Args:
         cls (type): A Python type to treat as an internal pytree node.
-        flatten_func (callable): A function to be used during flattening, taking an instance of
+        flatten_fn (callable): A function to be used during flattening, taking an instance of
             ``cls`` and returning a pair, with (1) an iterable for the children to be flattened
             recursively, and (2) some hashable auxiliary data to be stored in the treespec and to be
-            passed to the ``unflatten_func``.
-        unflatten_func (callable): A function taking two arguments: the auxiliary data that was
-            returned by ``flatten_func`` and stored in the treespec, and the unflattened children.
+            passed to the ``unflatten_fn``.
+        unflatten_fn (callable): A function taking two arguments: the auxiliary data that was
+            returned by ``flatten_fn`` and stored in the treespec, and the unflattened children.
             The function should return an instance of ``cls``.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might
             register a different custom behavior for the same type. (default: :const:`"torch"`)
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
 
     Example::
 
@@ -193,14 +197,15 @@ def register_pytree_node(
 
     _register_pytree_node(
         cls,
-        flatten_func,
-        unflatten_func,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
     )
 
     optree.register_pytree_node(
         cls,
-        flatten_func,
-        _reverse_args(unflatten_func),
+        flatten_fn,
+        _reverse_args(unflatten_fn),
         namespace=namespace,
     )
 
