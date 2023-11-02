@@ -62,7 +62,7 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
             return og_tensor
 
     def compute_batch_size(*args, **kwargs):
-        args_and_kwargs = pytree.tree_leaves(args) + pytree.tree_leaves(kwargs)
+        args_and_kwargs = pytree.arg_tree_leaves(*args, **kwargs)
         batch_size = None
         for arg in args_and_kwargs:
             if not isinstance(arg, torch.Tensor):

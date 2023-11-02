@@ -28,12 +28,12 @@ invoke ``aot_compile`` to transform the model into a shared library.
 .. note::
 
    To execute the following code, it's essential to have a CUDA-enabled device on your machine.
-   If you do not possess a GPU, you can simply omit the ``.to(device="cuda")`` code within the snippet
-   below. In such a case, the script will compile the model code into a shared library that is optimized
+   In such a case, the script will compile the model code into a shared library that is optimized
    for CPU execution.
 
 .. code-block:: python
 
+    import os
     import torch
 
     class Model(torch.nn.Module):
@@ -52,15 +52,18 @@ invoke ``aot_compile`` to transform the model into a shared library.
             return x
 
     with torch.no_grad():
-        m = Model().to("cuda")
-        example_inputs=(torch.randn(8, 10).to("cuda"),)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = Model().to(device=device)
+        example_inputs=(torch.randn(8, 10, device=device),)
         batch_dim = torch.export.Dim("batch", min=1, max=1024)
-        dynamic_shapes = {"x": {0: batch_dim}}
-        so_path = torch._export.aot_compile(m, example_inputs, dynamic_shapes=dynamic_shapes)
-
-    print(f"Compiled model into: {so_path}")
-    with open("model_so_path.txt", "w") as file:
-        file.write(so_path)
+        so_path = torch._export.aot_compile(
+            model,
+            example_inputs,
+            # Specify the first dimension of the input x as dynamic
+            dynamic_shapes={"x": {0: batch_dim}},
+            # Specify the generated shared library path
+            options={"aot_inductor.output_path": os.path.join(os.getcwd(), "model.so")},
+        )
 
 In this illustrative example, the ``Dim`` parameter is employed to designate the first dimension of
 the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
@@ -87,59 +90,50 @@ previous step, enabling us to conduct model predictions directly within a C++ en
 
 .. code-block:: cpp
 
-    #include <fstream>
     #include <iostream>
     #include <vector>
+
     #include <torch/torch.h>
     #include <torch/csrc/inductor/aoti_model_runner_cuda.h>
 
     int main() {
-        torch::NoGradGuard no_grad;
+        c10::InferenceMode mode;
 
-        std::ifstream path_file("model_so_path.txt");
-        if (!path_file.is_open()) {
-            std::cerr << "Error: Unable to open model_so_path.txt." << std::endl;
-            return 1;
-        }
-        std::string model_so;
-        if (!std::getline(path_file, model_so)) {
-            std::cerr << "Error: File is empty." << std::endl;
-        }
-        path_file.close();
-
-        // AOTIModelRunnerCuda dlopens the compiled shared library
-        torch::inductor::AOTIModelRunnerCuda runner(model_so.c_str());
-        std::vector<torch::Tensor> inputs = {torch::randn({8, 10}).to(at::kCUDA)};
+        torch::inductor::AOTIModelRunnerCuda runner("model.so");
+        std::vector<torch::Tensor> inputs = {torch::randn({8, 10}, at::kCUDA)};
         std::vector<torch::Tensor> outputs = runner.run(inputs);
         std::cout << "Result from first inference:"<< std::endl;
         std::cout << outputs[0] << std::endl;
 
+        // The second inference uses a different batch size and it works because we
+        // specified that dimension as dynamic when compiling model.so.
         std::cout << "Result from second inference:"<< std::endl;
-        std::cout << runner.run({torch::randn({2, 10}).to(at::kCUDA)})[0] << std::endl;
+        std::cout << runner.run({torch::randn({2, 10}, at::kCUDA)})[0] << std::endl;
+
         return 0;
     }
 
 For building the C++ file, you can make use of the provided ``CMakeLists.txt`` file, which
 automates the process of invoking ``python model.py`` for AOT compilation of the model and compiling
-``inference.cpp`` into an executable binary named ``aot_inductor_example``.
+``inference.cpp`` into an executable binary named ``aoti_example``.
 
 .. code-block:: cmake
 
     cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-    project(aot_inductor_example)
+    project(aoti_example)
 
     find_package(Torch REQUIRED)
 
-    add_executable(aot_inductor_example inference.cpp model_so_path.txt)
+    add_executable(aoti_example inference.cpp model.so)
 
     add_custom_command(
-        OUTPUT model_so_path.txt
+        OUTPUT model.so
         COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/model.py
         DEPENDS model.py
     )
 
-    target_link_libraries(aot_inductor_example "${TORCH_LIBRARIES}")
-    set_property(TARGET aot_inductor_example PROPERTY CXX_STANDARD 17)
+    target_link_libraries(aoti_example "${TORCH_LIBRARIES}")
+    set_property(TARGET aoti_example PROPERTY CXX_STANDARD 17)
 
 
 Provided the directory structure resembles the following, you can execute the subsequent commands
@@ -149,7 +143,7 @@ Please be mindful that your path may vary from the one illustrated in this examp
 
 .. code-block:: shell
 
-    aot_inductor_example/
+    aoti_example/
         CMakeLists.txt
         inference.cpp
         model.py
@@ -157,17 +151,17 @@ Please be mindful that your path may vary from the one illustrated in this examp
 
 .. code-block:: shell
 
-    (nightly) [ ~/local/aot_inductor_example]$ mkdir build
-    (nightly) [ ~/local/aot_inductor_example]$ cd build
-    (nightly) [ ~/local/aot_inductor_example/build]$ CMAKE_PREFIX_PATH=/home/userid/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
-    (nightly) [ ~/local/aot_inductor_example/build]$ cmake --build . --config Release
+    (nightly) [ ~/local/aoti_example]$ mkdir build
+    (nightly) [ ~/local/aoti_example]$ cd build
+    (nightly) [ ~/local/aoti_example/build]$ CMAKE_PREFIX_PATH=/home/$USER/local/miniconda3/envs/nightly/lib/python3.10/site-packages/torch/share/cmake cmake ..
+    (nightly) [ ~/local/aoti_example/build]$ cmake --build . --config Release
 
-After the ``aot_inductor_example`` binary has been generated in the ``build`` directory, executing it will
+After the ``aoti_example`` binary has been generated in the ``build`` directory, executing it will
 display results akin to the following:
 
 .. code-block:: shell
 
-    (nightly) [ ~/local/aot_inductor_example/build]$ ./aot_inductor_example
+    (nightly) [ ~/local/aoti_example/build]$ ./aoti_example
     Result from first inference:
     0.4866
     0.5184
