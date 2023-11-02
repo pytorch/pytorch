@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM60OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version, _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
@@ -8176,6 +8176,25 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
                          error_type=error_type, error_regex=error_regex)
 
+def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+    make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
+    M, N, K = 15, 32, 16
+    samples = []
+    # two e4m3
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    samples.append(SampleInput(mat1, mat2))
+    # mat1 e4m3 mat2 e5m2
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
+    samples.append(SampleInput(mat1, mat2))
+    # mat1 e5m2 mat2 e4m3
+    mat1 = make_mat_e5m2((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    samples.append(SampleInput(mat1, mat2))
+
+    yield from samples
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -13689,6 +13708,17 @@ op_db: List[OpInfo] = [
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
+    ),
+    OpInfo(
+        'torch._scaled_mm',
+        sample_inputs_func=sample_inputs_scaled_mm,
+        dtypes=empty_types(),
+        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        supports_out=True,
+        supports_forward_ad=False,
+        supports_autograd=False,
+        decorators=[skipCUDAIf(not SM90OrLater, 'Requires CUDA SM >= 9.0')],
+        skips=()
     ),
     OpInfo(
         'nn.functional.scaled_dot_product_attention',
