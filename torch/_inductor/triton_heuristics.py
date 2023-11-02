@@ -133,17 +133,19 @@ class CachingAutotuner(KernelInterface):
     def __init__(
         self,
         fn,
-        meta,
+        triton_meta,  # passed directly to triton
         configs,
         save_cache_hook,
         mutated_arg_names,
         heuristic_type,
         size_hints=None,
+        inductor_meta=None,  # metadata not relevant to triton
     ):
         super().__init__()
 
         self.fn = fn
-        self.meta = meta
+        self.triton_meta = triton_meta
+        self.inductor_meta = {} if inductor_meta is None else inductor_meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
@@ -160,7 +162,7 @@ class CachingAutotuner(KernelInterface):
             os.environ["TRITON_CACHE_DIR"] = os.path.join(
                 cache_dir(),
                 "triton",
-                str(self.meta.get("device", 0)),
+                str(self.triton_meta.get("device", 0)),
             )
 
         self.size_hints = size_hints
@@ -170,7 +172,7 @@ class CachingAutotuner(KernelInterface):
 
         # pre-create the profiler context manager to reduce latency
         self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.meta.get("kernel_name", "triton kernel")
+            self.inductor_meta.get("kernel_name", "triton kernel")
         )
 
     def precompile(self, warm_cache_only_with_cc=None):
@@ -190,7 +192,7 @@ class CachingAutotuner(KernelInterface):
 
             device_interface = get_interface_for_device("cuda")
             device_prop = device_interface.Worker.get_device_properties(
-                self.meta["device"]
+                self.triton_meta["device"]
             )
             if (
                 config.dynamic_scale_rblock
@@ -261,7 +263,7 @@ class CachingAutotuner(KernelInterface):
 
     def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
         """Ahead of time compile a given autotuner config."""
-        compile_meta = copy.deepcopy(self.meta)
+        compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
@@ -434,7 +436,7 @@ class CachingAutotuner(KernelInterface):
         else:
             grid_x, grid_y, grid_z = grid
 
-        key = self.meta.get("kernel_name", None)  # unique kernel name
+        key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
             "mangled_name": launcher.bin.metadata["name"],
@@ -668,9 +670,10 @@ def load_cached_autotuning(
 def cached_autotune(
     size_hints: Optional[List[int]],
     configs: List[Config],
-    meta,
+    triton_meta,
     heuristic_type,
     filename=None,
+    inductor_meta=None,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -679,6 +682,7 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
     save_cache_hook: Optional[Callable[[Any, Any], Any]]
+    inductor_meta = {} if inductor_meta is None else inductor_meta
 
     # on disk caching logic
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
@@ -708,7 +712,7 @@ def cached_autotune(
     else:
         save_cache_hook = None
 
-    mutated_arg_names = meta.pop("mutated_arg_names", ())
+    mutated_arg_names = inductor_meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
         # Remove XBLOCK from config if it's not a function argument.
@@ -726,7 +730,8 @@ def cached_autotune(
         if config.profile_bandwidth:
             return DebugAutotuner(
                 fn,
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 regex_filter=config.profile_bandwidth_regex,
                 configs=configs,
                 save_cache_hook=save_cache_hook,
@@ -736,7 +741,8 @@ def cached_autotune(
             )
         return CachingAutotuner(
             fn,
-            meta=meta,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             configs=configs,
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
@@ -932,15 +938,24 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thread=0):
+def pointwise(
+    size_hints,
+    triton_meta,
+    tile_hint=None,
+    filename=None,
+    min_elem_per_thread=0,
+    inductor_meta=None,
+):
     """
     Construct @triton.heuristics() based on size_hints.
     """
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+
     numel = functools.reduce(operator.mul, size_hints)
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        meta.get("autotune_hints", set()), size_hints, bs
+        inductor_meta.get("autotune_hints", set()), size_hints, bs
     )
 
     triton_config_with_settings = functools.partial(
@@ -954,7 +969,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
             return cached_autotune(
                 size_hints,
                 [triton_config_with_settings(size_hints, bs)],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
@@ -970,7 +986,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
                     ),
                     *hinted_configs,
                 ],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
@@ -981,7 +998,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
             return cached_autotune(
                 size_hints,
                 [triton_config_with_settings(size_hints, 32, 32)],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
@@ -996,7 +1014,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
             ],
-            meta=meta,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             filename=filename,
             heuristic_type=HeuristicType.POINTWISE,
         )
@@ -1005,7 +1024,8 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
             return cached_autotune(
                 size_hints,
                 [triton_config_with_settings(size_hints, 16, 16, 16)],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
@@ -1021,16 +1041,25 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
                 triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
             ],
-            meta=meta,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             filename=filename,
             heuristic_type=HeuristicType.POINTWISE,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+def reduction(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
     """args to @triton.heuristics()"""
-    assert meta is not None
+    inductor_meta = {} if inductor_meta is None else inductor_meta
+
+    assert triton_meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
@@ -1046,7 +1075,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune(
                 size_hints,
                 [contiguous_config],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
@@ -1054,7 +1084,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune(
                 size_hints,
                 [outer_config],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
@@ -1062,7 +1093,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune(
                 size_hints,
                 [tiny_config],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
@@ -1070,7 +1102,8 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             return cached_autotune(
                 size_hints,
                 [triton_config_reduction(size_hints, 32, 128)],
-                meta=meta,
+                triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
@@ -1087,14 +1120,21 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
                 triton_config_reduction(size_hints, 64, 4, num_warps=8),
             ],
-            meta=meta,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
             filename=filename,
             heuristic_type=HeuristicType.REDUCTION,
         )
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+def persistent_reduction(
+    size_hints,
+    reduction_hint=False,
+    triton_meta=None,
+    filename=None,
+    inductor_meta=None,
+):
     xnumel, rnumel = size_hints
 
     configs = [
@@ -1124,26 +1164,28 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     return cached_autotune(
         size_hints,
         configs,
-        meta=meta,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
         filename=filename,
         heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
     )
 
 
-def template(num_stages, num_warps, meta, filename=None):
+def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=None):
     """
     Compile a triton template
     """
     return cached_autotune(
         None,
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
-        meta=meta,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
     )
 
 
-def user_autotune(configs, meta, filename=None):
+def user_autotune(configs, triton_meta, filename=None, inductor_meta=None):
     """
     Compile a user defined triton kernel
     """
@@ -1170,20 +1212,22 @@ def user_autotune(configs, meta, filename=None):
     return cached_autotune(
         None,
         configs,
-        meta=meta,
+        triton_meta=triton_meta,
         heuristic_type=HeuristicType.USER_AUTOTUNE,
         filename=filename,
+        inductor_meta=inductor_meta,
     )
 
 
-def foreach(meta, num_warps, filename=None):
+def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
     """
     return cached_autotune(
         None,
         [triton.Config({}, num_stages=1, num_warps=num_warps)],
-        meta=meta,
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,
     )
@@ -1191,10 +1235,6 @@ def foreach(meta, num_warps, filename=None):
 
 def grid(*numels):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1 and isinstance(numels[0], tuple):
-        numels = numels[0]
-
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
     elif len(numels) == 2:
@@ -1205,8 +1245,10 @@ def grid(*numels):
         raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
-        if numel is None or block is None:
+        if numel is None:
             return 1
+        if block is None:
+            return numel
         return ceildiv(numel, block)
 
     def grid_fn(meta):
