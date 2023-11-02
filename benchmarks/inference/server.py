@@ -56,7 +56,7 @@ class BackendWorker(mp.Process):
         self, request_queue, response_queue, model_dir=".", compile_model=True
     ):
         super().__init__()
-        self.device = f"cuda:{0}"
+        self.device = "cuda:0"
         self.request_queue = request_queue
         self.response_queue = response_queue
         self.model_dir = model_dir

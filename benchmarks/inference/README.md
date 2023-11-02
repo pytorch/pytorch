@@ -19,7 +19,7 @@ The togglable commmand line arguments to the script are as follows:
   - `num_iters` (default: 100): how many requests to send to the backend
     excluding the first warmup request
   - `batch_size` (default: 32): the batch size of the requests.
-  - `model_dir` (default: '.'): the directory to save the checkpoint to
+  - `model_dir` (default: '.'): the directory to load the checkpoint from
   - `compile` (default: True): whether to `torch.compile()` the model
 
 e.g. A sample command to run the benchmark
