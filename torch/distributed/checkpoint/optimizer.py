@@ -34,7 +34,6 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
-from torch.distributed.checkpoint.planner import LoadPlanner
 
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
@@ -214,7 +213,6 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: dist_cp.StorageReader,
-    planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
     Loads a state_dict in conjunction with FSDP sharded optimizer state.
@@ -344,7 +342,7 @@ def load_sharded_optimizer_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict
-        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else planner,
+        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else None,
     )
 
     state_dict = unflatten_state_dict(state_dict, metadata.planner_data)
