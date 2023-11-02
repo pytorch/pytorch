@@ -81,6 +81,7 @@ __all__ = [
 
 
 DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL = 1
+NO_SERIALIZED_TYPE_NAME_FOUND = "NO_SERIALIZED_TYPE_NAME_FOUND"
 
 
 ToStrFunc = Callable[["TreeSpec", List[str]], str]
@@ -102,36 +103,39 @@ class NodeDef(NamedTuple):
 
 # _SerializeNodeDef holds the following:
 # - typ: the type of the node (e.g., "Dict", "List", etc)
-# - type_fqn: the fully qualified name of the type, e.g. "collections.OrderedDict"
+# - serialized_type_name: the fully qualified name of the type, e.g. "collections.OrderedDict"
 # - to_dumpable_context takes a TreeSpec, and returns a serialized string format of the
 #   context, and the version number
 # - from_dumpable_context takes in a string representation of the context, and the
 #   version, and returns the deserialized context
 class _SerializeNodeDef(NamedTuple):
     typ: Type[Any]
-    type_fqn: str
+    serialized_type_name: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
 
 
 def _register_pytree_node(
     cls: Any,
-    flatten_func: FlattenFunc,
-    unflatten_func: UnflattenFunc,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
     to_str_fn: Optional[ToStrFunc] = None,  # deprecated
     maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
     *,
+    serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
 ) -> None:
     """
     Args:
         cls: the type to register
-        flatten_func: A callable that takes a pytree and returns a flattened
+        flatten_fn: A callable that takes a pytree and returns a flattened
             representation of the pytree and additional context to represent the
             flattened pytree.
-        unflatten_func: A callable that takes a flattened version of the pytree,
+        unflatten_fn: A callable that takes a flattened version of the pytree,
             additional context, and returns an unflattened pytree.
+        serialized_type_name: A keyword argument used to specify the fully qualified
+            name used when serializing the tree spec.
         to_dumpable_context: An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable
             representation. This is used for json serialization, which is being
@@ -152,8 +156,8 @@ def _register_pytree_node(
 
     node_def = NodeDef(
         cls,
-        flatten_func,
-        unflatten_func,
+        flatten_fn,
+        unflatten_fn,
     )
     SUPPORTED_NODES[cls] = node_def
 
@@ -163,15 +167,17 @@ def _register_pytree_node(
             "be None or registered."
         )
 
-    type_fqn = f"{cls.__module__}.{cls.__qualname__}"
+    if serialized_type_name is None:
+        serialized_type_name = NO_SERIALIZED_TYPE_NAME_FOUND
+
     serialize_node_def = _SerializeNodeDef(
         cls,
-        type_fqn,
+        serialized_type_name,
         to_dumpable_context,
         from_dumpable_context,
     )
     SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
-    SERIALIZED_TYPE_TO_PYTHON_TYPE[type_fqn] = cls
+    SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
     import torch
 
@@ -758,7 +764,13 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[treespec.type]
 
-    type_fqn = serialize_node_def.type_fqn
+    serialized_type_name = serialize_node_def.serialized_type_name
+
+    if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
+        raise NotImplementedError(
+            f"No registered serialization name for {treespec.type} found. "
+            "Please update your _register_pytree_node call with a `serialized_type_name` kwarg."
+        )
 
     if serialize_node_def.to_dumpable_context is None:
         try:
@@ -774,7 +786,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
 
-    return _TreeSpecSchema(type_fqn, serialized_context, child_schemas)
+    return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
 
 def _json_to_treespec(json_schema: DumpableContext) -> TreeSpec:
@@ -871,3 +883,16 @@ def pytree_to_str(treespec: TreeSpec) -> str:
 def str_to_pytree(json: str) -> TreeSpec:
     warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
     return treespec_loads(json)
+
+
+def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
+    """Get a flat list of arguments to this function
+
+    A slightly faster version of tree_leaves((args, kwargs))
+    """
+    leaves: List[Any] = []
+    for a in args:
+        _tree_leaves_helper(a, leaves)
+    for a in kwargs.values():
+        _tree_leaves_helper(a, leaves)
+    return leaves
