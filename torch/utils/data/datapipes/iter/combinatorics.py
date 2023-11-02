@@ -16,13 +16,14 @@ T_co = TypeVar('T_co', covariant=True)
 
 class SamplerIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Generates sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
+    Generate sample elements using the provided ``Sampler`` (defaults to :class:`SequentialSampler`).
 
     Args:
         datapipe: IterDataPipe to sample from
         sampler: Sampler class to generate sample elements from input DataPipe.
             Default is :class:`SequentialSampler` for IterDataPipe
     """
+
     datapipe: IterDataPipe
     sampler: Sampler
 
@@ -54,8 +55,9 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
 @functional_datapipe('shuffle')
 class ShufflerIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Shuffles the input DataPipe with a buffer (functional name: ``shuffle``). The buffer
-    with ``buffer_size`` is filled with elements from the datapipe first. Then,
+    Shuffle the input DataPipe with a buffer (functional name: ``shuffle``).
+
+    The buffer with ``buffer_size`` is filled with elements from the datapipe first. Then,
     each item will be yielded from the buffer by reservoir sampling via iterator.
 
     ``buffer_size`` is required to be larger than ``0``. For ``buffer_size == 1``, the
@@ -84,6 +86,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         >>> list(shuffle_dp)
         [0, 4, 1, 6, 3, 2, 9, 5, 7, 8]
     """
+
     datapipe: IterDataPipe[T_co]
     buffer_size: int
     _buffer: List[T_co]
