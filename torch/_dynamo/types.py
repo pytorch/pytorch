@@ -10,9 +10,10 @@ from typing import (
     Optional,
     OrderedDict,
     Protocol,
-    TypeAlias,
     Union,
 )
+
+from typing_extensions import TypeAlias
 
 
 if sys.version_info >= (3, 11):
