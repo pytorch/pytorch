@@ -17,6 +17,15 @@ prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
+
+def _generate_pattern_with_dtype_convert(pattern, dtype=Arg()):
+    return CallFunction(
+        prims.convert_element_type.default,
+        pattern,
+        dtype,
+    )
+
+
 """
 dequantize activation:
     x = x.to(fp32)
@@ -48,10 +57,8 @@ dequantize_per_channel_weight_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
-dequantize_per_channel_to_bf16_weight_pattern = CallFunction(
-    prims.convert_element_type.default,
-    dequantize_per_channel_weight_pattern,
-    KeywordArg("autocast_weight_convert_dtype"),
+dequantize_per_channel_to_bf16_weight_pattern = _generate_pattern_with_dtype_convert(
+    dequantize_per_channel_weight_pattern
 )
 
 dequantize_per_channel_clone_weight_pattern = CallFunction(
@@ -131,10 +138,8 @@ def generate_pattern_with_binary(
         extra_input_pattern,
     )
     return (
-        CallFunction(
-            prims.convert_element_type.default,
-            binary_pattern,
-            KeywordArg("convert_dtype_after_inplace_add"),
+        _generate_pattern_with_dtype_convert(
+            binary_pattern, KeywordArg("convert_dtype_after_inplace_add")
         )
         if int8_mixed_bf16_with_inplace_add
         else binary_pattern
@@ -174,11 +179,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             aten.mul.Tensor,
                             computation_call
                             if dtype == torch.float32
-                            else CallFunction(
-                                prims.convert_element_type.default,
-                                computation_call,
-                                KeywordArg("output_convert_bf16_to_fp32_dtype"),
-                            ),
+                            else _generate_pattern_with_dtype_convert(computation_call),
                             KeywordArg("o_inv_scale"),
                         ),
                     ),
@@ -1095,10 +1096,8 @@ def _generate_dequant_convolution_node_pattern(
         aten.convolution.default,
         dequantize_per_tensor_activation_pattern
         if dtype == torch.float32
-        else CallFunction(
-            prims.convert_element_type.default,
-            dequantize_per_tensor_activation_pattern,
-            KeywordArg("autocast_activation_convert_dtype"),
+        else _generate_pattern_with_dtype_convert(
+            dequantize_per_tensor_activation_pattern
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1284,8 +1283,7 @@ def _generate_dequant_linear_node_pattern(
         aten.permute.default,
         _dequant_per_channel_pattern
         if dtype == torch.float32
-        else CallFunction(
-            prims.convert_element_type.default,
+        else _generate_pattern_with_dtype_convert(
             _dequant_per_channel_pattern,
             KeywordArg("autocast_weight_convert_dtype"),
         ),
@@ -1296,8 +1294,7 @@ def _generate_dequant_linear_node_pattern(
         KeywordArg("b"),
         dequantize_per_tensor_activation_pattern
         if dtype == torch.float32
-        else CallFunction(
-            prims.convert_element_type.default,
+        else _generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
             KeywordArg("autocast_activation_convert_dtype"),
         ),
@@ -1307,8 +1304,7 @@ def _generate_dequant_linear_node_pattern(
         aten.mm.default,
         dequantize_per_tensor_activation_pattern
         if dtype == torch.float32
-        else CallFunction(
-            prims.convert_element_type.default,
+        else _generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
             KeywordArg("autocast_activation_convert_dtype"),
         ),
@@ -1330,10 +1326,8 @@ def _register_quantization_weight_pack_pass():
         _register_dequant_promotion_pass(
             dequantize_per_tensor_activation_pattern
             if dtype == torch.float32
-            else CallFunction(
-                prims.convert_element_type.default,
-                dequantize_per_tensor_activation_pattern,
-                KeywordArg("activation_to_bf16"),
+            else _generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern
             ),
             pass_number=0,
             dtype=dtype,
