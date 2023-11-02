@@ -34,7 +34,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    serialized_type = f"{cls.__module__}.{cls.__name__}"
+    serialized_type = f"{cls.__module__}.{cls.__qualname__}"
     SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = cls
 
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
