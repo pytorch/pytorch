@@ -9,7 +9,7 @@ import torch._inductor.utils
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
-from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TemporaryFileName
 
 from torch.utils._triton import has_triton
 
@@ -39,12 +39,14 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue("traceEvents" in trace_json)
         events = trace_json["traceEvents"]
 
+        kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
+
         def nameMatchesLaunchKernel(event_name):
-            return "cuLaunchKernel" in event_name
+            return kernel_name in event_name
 
         self.assertTrue(
             any(
-                ("name" in event and "cuLaunchKernel" == event["name"])
+                ("name" in event and kernel_name == event["name"])
                 for event in events
             )
         )
@@ -122,5 +124,4 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
