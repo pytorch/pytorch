@@ -86,24 +86,24 @@ class SymNode:
         #   computation, but we don't know what it actually is because we
         #   haven't actually run the tensor computation.
         #
-        # hint_expr is only set if we don't have a hint.  When it is set, it
-        # contains the expression which contains the unbacked symnodes that,
-        # if constrained, would allow this expression to be hinted again.
-        if hint is None:
-            self._hint_expr = self.expr.xreplace(shape_env.var_to_val)
-            self._hint = None
-            self._update_hint()  # check if the replacement actually was enough
-        else:
-            self._hint_expr = None
-            self._hint = hint
+        # If _hint is None, we will query maybe_evaluate_static(compute_hint=True)
+        # in hopes that we've learned enough about the unbacked symints to
+        # discharge the hint; otherwise, you're likely to just error out.
+        #
+        # (A previous version of this system had some optimizations to only
+        # recompute when it was possible we had learned enough about the
+        # unbacked symint that a hint was now possible, but as we added more
+        # potential refinements to unbacked symints this got harder to keep
+        # in sync, so we've deleted it for now.)
+        self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
-
-        from torch.fx.experimental.validator import translation_validation_enabled
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
         # the translation validation problem.
-        self.fx_node = fx_node if translation_validation_enabled() else None
+        self.fx_node = (
+            fx_node if self.shape_env._translation_validation_enabled else None
+        )
 
     def with_shape_env(self, shape_env: "ShapeEnv") -> "SymNode":
         return SymNode(
@@ -114,18 +114,12 @@ class SymNode:
     def expr(self):
         return self.shape_env.replace(self._expr)
 
-    # Check if we have replacements hint_expr that would allow us to
-    # simplify it into a hint
+    # Recompute the hint and see if we've got it now
+    # Precondition: self._hint is None
     def _update_hint(self):
-        if self._hint_expr.free_symbols <= self.shape_env.replacements.keys():
-            new_hint = self.shape_env.replace(self._hint_expr)
-            # NB: unification constraints could result in a replacement that
-            # doesn't actually solve the hint!  Check for this.
-            if new_hint.free_symbols:
-                self._hint_expr = new_hint
-                return
-            self._hint = self.pytype(new_hint)
-            self._hint_expr = None
+        r = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
+        if r is not None:
+            self._hint = self.pytype(r)
 
     @property
     def hint(self):
@@ -134,19 +128,17 @@ class SymNode:
         return self._hint
 
     def has_hint(self):
+        if self._hint is None:
+            self._update_hint()
         return self._hint is not None
 
     def require_hint(self):
         if self._hint is None:
             self._update_hint()
-            if self._hint is None:
-                raise self.shape_env._make_data_dependent_error(
-                    self._hint_expr, self.expr
-                )
-            else:
-                return self._hint
-        else:
-            return self._hint
+        if self._hint is None:
+            # NB: we expect this to raise
+            return self.shape_env.size_hint(self.expr)
+        return self._hint
 
     def maybe_as_int(self):
         if self.expr.free_symbols:

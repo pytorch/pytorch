@@ -25,6 +25,7 @@ def register_dataclass_as_pytree_node(
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
+    serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
@@ -87,6 +88,7 @@ def register_dataclass_as_pytree_node(
         typ,
         flatten_fn,
         unflatten_fn,
+        serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )
