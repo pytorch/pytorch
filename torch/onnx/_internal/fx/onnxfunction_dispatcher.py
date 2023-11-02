@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import math
 import operator
 from typing import (
     Any,
@@ -435,10 +436,26 @@ def _symint_symfloat_builtin_to_exporter_key_table(
     _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
         Union[Callable[..., Any], str], torch._ops.OpOverload
     ] = {
-        operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
+        # NOTE: Arithmetic ops
         operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
-        operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
         operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
+        operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
+        operator.truediv: torch.ops.aten.true_divide.Tensor,  # type: ignore[has-type]
+        operator.floordiv: torch.ops.aten.floor_divide.default,  # type: ignore[has-type]
+        operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
+        math.ceil: torch.ops.aten.ceil.default,  # type: ignore[has-type]
+        math.floor: torch.ops.aten.floor.default,  # type: ignore[has-type]
+        # # NOTE: Comparison ops
+        operator.abs: torch.ops.aten.abs.default,  # type: ignore[has-type]
+        operator.neg: torch.ops.aten.neg.default,  # type: ignore[has-type]
+        operator.eq: torch.ops.aten.eq.Tensor,  # type: ignore[has-type]
+        operator.ne: torch.ops.aten.ne.Tensor,  # type: ignore[has-type]
+        operator.le: torch.ops.aten.le.Tensor,  # type: ignore[has-type]
+        operator.lt: torch.ops.aten.lt.Tensor,  # type: ignore[has-type]
+        operator.ge: torch.ops.aten.ge.Tensor,  # type: ignore[has-type]
+        operator.gt: torch.ops.aten.gt.Tensor,  # type: ignore[has-type]
+        operator.and_: torch.ops.aten.bitwise_and.Tensor,  # type: ignore[has-type]
+        operator.or_: torch.ops.aten.bitwise_or.Tensor,  # type: ignore[has-type]
     }
     return _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE.get(target)
 

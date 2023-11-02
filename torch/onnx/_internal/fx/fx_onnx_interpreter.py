@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+import math
 import operator
 import re
 import types
@@ -114,7 +115,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         return fx_name_to_onnxscript_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
         isinstance(node, torch.fx.Node)
-        and isinstance(node.meta.get("val"), torch.SymInt)
+        and fx_type_utils.is_torch_symbolic_type(node.meta.get("val"))
         for node in onnx_tensor
     ):
         # This intends to handle dynamic axes. for example, if the input size of op.Expand
@@ -128,9 +129,9 @@ def _retrieve_or_adapt_input_to_graph_set(
             ]
         ] = []
         for tensor in onnx_tensor:
-            if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta.get("val"), torch.SymInt
-            ):
+            if isinstance(
+                tensor, torch.fx.Node
+            ) and fx_type_utils.is_torch_symbolic_type(tensor.meta.get("val")):
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
@@ -213,14 +214,16 @@ def _fill_tensor_shape_type(
         onnxscript_graph_building.TorchScriptTensor,
         Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
     ],
-    name: str,
+    node: torch.fx.Node,
+):
+    """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
+
+    name: str = node.name
     expected_values: Union[
         fx_type_utils.META_VALUE_TYPE,
         List[fx_type_utils.META_VALUE_TYPE],
         Tuple[Optional[fx_type_utils.META_VALUE_TYPE], ...],
-    ],
-):
-    """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
+    ] = node.meta.get("val", None)
 
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
@@ -240,12 +243,17 @@ def _fill_tensor_shape_type(
             # None could be a valid value for return type, so we need to handle it.
             # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
             continue
-        elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        elif fx_type_utils.is_torch_symbolic_type(expected_value):
             # aten::sym_size output is a int, not a tensor, which stands
             # for the size of one dim. We treat it as 0-D tensor.
-            onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
-                expected_value
-            )
+            if node.target == math.ceil or node.target == math.floor:
+                # Type promotion for ceil/floor from built-in functions.
+                # ceil and floor have float outputs in torchlib
+                onnxscript_value.dtype = torch.float32
+            else:
+                onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
+                    expected_value
+                )
         elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
@@ -662,7 +670,7 @@ class FxOnnxInterpreter:
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
         # Assign type and shape from fx graph.
-        _fill_tensor_shape_type(output, node.name, node.meta["val"])
+        _fill_tensor_shape_type(output, node)
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(
@@ -792,7 +800,7 @@ class FxOnnxInterpreter:
             outputs, (onnxscript_graph_building.TorchScriptTensor, tuple)
         ), f"Unexpected outputs type {type(outputs)} for node {node}."
 
-        _fill_tensor_shape_type(outputs, node.name, node.meta["val"])
+        _fill_tensor_shape_type(outputs, node)
         fx_name_to_onnxscript_value[node.name] = outputs
 
         # Skip op_level_validation for call_module. Subgraph nodes are validated individually.
