@@ -1,3 +1,4 @@
+"""This file contains utilities for initializing neural network parameters."""
 import math
 import warnings
 
@@ -66,6 +67,7 @@ def _no_grad_zero_(tensor):
 
 def calculate_gain(nonlinearity, param=None):
     r"""Return the recommended gain value for the given nonlinearity function.
+
     The values are as follows:
 
     ================= ====================================================
@@ -120,7 +122,8 @@ def calculate_gain(nonlinearity, param=None):
 
 
 def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
-    r"""Fills the input Tensor with values drawn from the uniform
+    r"""Fill the input Tensor with values drawn from the uniform.
+
     distribution :math:`\mathcal{U}(a, b)`.
 
     Args:
@@ -138,8 +141,9 @@ def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
 
 
 def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
-    r"""Fills the input Tensor with values drawn from the normal
-    distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
+    r"""Fill the input Tensor with values drawn from the normal distribution.
+
+    :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -162,8 +166,9 @@ def trunc_normal_(
     b: float = 2.,
     generator: _Optional[torch.Generator] = None
 ) -> Tensor:
-    r"""Fills the input Tensor with values drawn from a truncated
-    normal distribution. The values are effectively drawn from the
+    r"""Fill the input Tensor with values drawn from a truncated normal distribution.
+
+    The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
     with values outside :math:`[a, b]` redrawn until they are within
     the bounds. The method used for generating the random values works
@@ -184,7 +189,7 @@ def trunc_normal_(
 
 
 def constant_(tensor: Tensor, val: float) -> Tensor:
-    r"""Fills the input Tensor with the value :math:`\text{val}`.
+    r"""Fill the input Tensor with the value :math:`\text{val}`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -200,7 +205,7 @@ def constant_(tensor: Tensor, val: float) -> Tensor:
 
 
 def ones_(tensor: Tensor) -> Tensor:
-    r"""Fills the input Tensor with the scalar value `1`.
+    r"""Fill the input Tensor with the scalar value `1`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -213,7 +218,7 @@ def ones_(tensor: Tensor) -> Tensor:
 
 
 def zeros_(tensor: Tensor) -> Tensor:
-    r"""Fills the input Tensor with the scalar value `0`.
+    r"""Fill the input Tensor with the scalar value `0`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -226,8 +231,9 @@ def zeros_(tensor: Tensor) -> Tensor:
 
 
 def eye_(tensor):
-    r"""Fills the 2-dimensional input `Tensor` with the identity
-    matrix. Preserves the identity of the inputs in `Linear` layers, where as
+    r"""Fill the 2-dimensional input `Tensor` with the identity matrix.
+
+    Preserves the identity of the inputs in `Linear` layers, where as
     many inputs are preserved as possible.
 
     Args:
@@ -246,8 +252,9 @@ def eye_(tensor):
 
 
 def dirac_(tensor, groups=1):
-    r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
-    delta function. Preserves the identity of the inputs in `Convolutional`
+    r"""Fill the {3, 4, 5}-dimensional input `Tensor` with the Dirac delta function.
+
+    Preserves the identity of the inputs in `Convolutional`
     layers, where as many input channels are preserved as possible. In case
     of groups>1, each group of channels preserves identity
 
@@ -308,10 +315,12 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
-    distribution. The resulting tensor will have values sampled from
+    r"""Fill the input `Tensor` with values using a uniform distribution.
+
+    Described in `Understanding the difficulty of training deep feedforward
+    neural networks` - Glorot, X. & Bengio, Y. (2010).
+
+    The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-a, a)` where
 
     .. math::
@@ -335,11 +344,11 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
 
 
 def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
-    distribution. The resulting tensor will have values sampled from
-    :math:`\mathcal{N}(0, \text{std}^2)` where
+    r"""Fill the input `Tensor` with values using a normal distribution.
+
+    Described in `Understanding the difficulty of training deep feedforward
+    neural networks` - Glorot, X. & Bengio, Y. (2010). The resulting tensor
+    will have values sampled from :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
         \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan\_in} + \text{fan\_out}}}
@@ -373,10 +382,11 @@ def _calculate_correct_fan(tensor, mode):
 def kaiming_uniform_(
     tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
 ):
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015), using a
-    uniform distribution. The resulting tensor will have values sampled from
+    r"""Fill the input `Tensor` with values using a uniform distribution.
+
+    Described in `Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification` - He, K. et al. (2015).
+    The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
@@ -422,10 +432,11 @@ def kaiming_uniform_(
 def kaiming_normal_(
     tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
 ):
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015), using a
-    normal distribution. The resulting tensor will have values sampled from
+    r"""Fill the input `Tensor` with values using a normal distribution.
+
+    Described in `Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification` - He, K. et al. (2015).
+    The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
@@ -459,8 +470,9 @@ def kaiming_normal_(
 
 
 def orthogonal_(tensor, gain=1):
-    r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
-    described in `Exact solutions to the nonlinear dynamics of learning in deep
+    r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
+
+    Described in `Exact solutions to the nonlinear dynamics of learning in deep
     linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
     trailing dimensions are flattened.
@@ -504,8 +516,9 @@ def orthogonal_(tensor, gain=1):
 
 
 def sparse_(tensor, sparsity, std=0.01):
-    r"""Fills the 2D input `Tensor` as a sparse matrix, where the
-    non-zero elements will be drawn from the normal distribution
+    r"""Fill the 2D input `Tensor` as a sparse matrix.
+
+    The non-zero elements will be drawn from the normal distribution
     :math:`\mathcal{N}(0, 0.01)`, as described in `Deep learning via
     Hessian-free optimization` - Martens, J. (2010).
 
