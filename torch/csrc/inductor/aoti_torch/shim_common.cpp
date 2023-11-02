@@ -47,13 +47,6 @@ c10::optional<T> pointer_to_optional(T* ptr) {
   return ptr ? c10::make_optional(*ptr) : c10::nullopt;
 }
 
-template <class T>
-c10::optional<T> value_to_optional(ShimOptional val_opt) {
-  return val_opt.has_value
-      ? c10::make_optional(reinterpret_cast<T&>(val_opt.value))
-      : c10::nullopt;
-}
-
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -304,7 +297,7 @@ AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle self,
     AtenTensorHandle mat2,
     AtenTensorHandle bias,
-    ShimOptional out_dtype,
+    int32_t* out_dtype,
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,
     AtenTensorHandle scale_result,
@@ -323,7 +316,7 @@ AOTITorchError aoti_torch__scaled_mm(
         *self_tensor,
         *mat2_tensor,
         pointer_to_optional(bias_tensor),
-        value_to_optional<c10::ScalarType>(out_dtype),
+        pointer_to_optional(reinterpret_cast<c10::ScalarType*>(out_dtype)),
         pointer_to_optional(scale_a_tensor),
         pointer_to_optional(scale_b_tensor),
         pointer_to_optional(scale_result_tensor));

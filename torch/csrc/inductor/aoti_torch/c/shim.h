@@ -74,11 +74,6 @@ using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
 
-struct ShimOptional {
-  bool has_value;
-  int64_t value;
-};
-
 // Getter functions for retrieving various constants from the runtime, that
 // can subsequently be passed to other aoti_* functions.  By hiding these
 // behind functions, the precise value of device/dtype is NOT part of the
@@ -191,7 +186,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle self,
     AtenTensorHandle mat2,
     AtenTensorHandle bias,
-    ShimOptional out_dtype,
+    int32_t* out_dtype,
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,
     AtenTensorHandle scale_result,
