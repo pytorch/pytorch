@@ -12,7 +12,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -62,6 +62,7 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     PERSISTENT_REDUCTION = auto()
     TEMPLATE = auto()
+    USER_AUTOTUNE = auto()
 
 
 class AutotuneHint(Enum):
@@ -337,14 +338,14 @@ class CachingAutotuner(KernelInterface):
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
         launcher.store_cubin = config.triton.store_cubin
-        # store this global varible to avoid the high overhead of reading it when calling run
+        # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid):
+    def bench(self, launcher, *args, grid, **kwargs):
         """Measure the performance of a given launcher"""
         if launcher.n_spills > config.triton.spill_threshold:
             log.debug(
@@ -362,16 +363,17 @@ class CachingAutotuner(KernelInterface):
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
-            cloned_args = self.clone_args(*args)
+            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
+                **cloned_kwargs,
                 grid=grid,
                 stream=stream,
             )
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    def clone_args(self, *args):
+    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -385,7 +387,15 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
-        return cloned_args
+        cloned_kwargs: Dict[str, Any] = {}
+        for name, arg in kwargs.items():
+            if name in self.mutated_arg_names:
+                assert isinstance(arg, torch.Tensor)
+                cloned_kwargs[name] = clone_preserve_strides(arg)
+            else:
+                cloned_kwargs[name] = arg
+
+        return cloned_args, cloned_kwargs
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
@@ -451,11 +461,14 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if self.heuristic_type == HeuristicType.TEMPLATE:
+        if (
+            self.heuristic_type == HeuristicType.TEMPLATE
+            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        ):
             # skip triton template
             return launcher
 
-        cloned_args = self.clone_args(*args)
+        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -1130,6 +1143,39 @@ def template(num_stages, num_warps, meta, filename=None):
     )
 
 
+def user_autotune(configs, meta, filename=None):
+    """
+    Compile a user defined triton kernel
+    """
+    defaults = inspect.signature(triton.Config).parameters
+    default_num_stages = defaults["num_stages"].default
+    default_num_warps = defaults["num_warps"].default
+
+    if len(configs) == 0:
+        configs = [
+            triton.Config(
+                {}, num_stages=default_num_stages, num_warps=default_num_warps
+            )
+        ]
+    else:
+        configs = [
+            triton.Config(
+                c.get("kwargs", {}),
+                num_stages=c.get("num_stages", default_num_stages),
+                num_warps=c.get("num_warps", default_num_warps),
+            )
+            for c in configs
+        ]
+
+    return cached_autotune(
+        None,
+        configs,
+        meta=meta,
+        heuristic_type=HeuristicType.USER_AUTOTUNE,
+        filename=filename,
+    )
+
+
 def foreach(meta, num_warps, filename=None):
     """
     Compile a triton foreach kernel
@@ -1145,10 +1191,6 @@ def foreach(meta, num_warps, filename=None):
 
 def grid(*numels):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1 and isinstance(numels[0], tuple):
-        numels = numels[0]
-
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
     elif len(numels) == 2:
@@ -1159,8 +1201,10 @@ def grid(*numels):
         raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
-        if numel is None or block is None:
+        if numel is None:
             return 1
+        if block is None:
+            return numel
         return ceildiv(numel, block)
 
     def grid_fn(meta):
