@@ -1612,6 +1612,8 @@ class ShapeEnv:
             "tracked_fakes",
             "events",
             "source_name_to_debug_name",
+            "_prev_cache_key",
+            "_version_counter",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
