@@ -1960,9 +1960,8 @@ def forward(self, x_1, output_1):
         t2 = torch.ones(5, device="cuda")
 
         test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
-        self.assertEqual(test, torch.tensor([5.0, 5.0, 5.0, 5.0, 5.0], device="cuda"))
-        # Enable after fixing
-        # self.assertTrue("add_kernel_autotuned_1.run" not in code)
+        self.assertEqual(test, 5 * torch.ones(5, device="cuda"))
+        self.assertTrue("add_kernel_autotuned_1.run" not in code)
 
     @requires_cuda()
     @requires_triton()
