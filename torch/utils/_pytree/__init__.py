@@ -40,7 +40,7 @@ from .api import (
     treespec_pprint,
     UnflattenFunc,
 )
-from .api.python import (  # used by third-party packages
+from .api.python import (  # used by internals and/or third-party packages
     _broadcast_to_and_flatten,
     _dict_flatten,
     _dict_unflatten,
@@ -54,6 +54,7 @@ from .api.python import (  # used by third-party packages
     _register_pytree_node,
     _tuple_flatten,
     _tuple_unflatten,
+    arg_tree_leaves,
     SUPPORTED_NODES,
 )
 
