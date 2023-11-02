@@ -4036,7 +4036,9 @@ def _adaptive_avg_pool2d(x, output_size):
     ones_loader = pad_adaptive_loader(ones_like(x))
 
     def fn(idx):
-        return ops.div(fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader))
+        return ops.truediv(
+            fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader)
+        )
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4182,7 +4184,7 @@ def avg_pool2d(
 
         def fn(idx):
             # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.div(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4738,7 +4740,7 @@ def div_prim(a, b):
         return truncdiv(a, b)
 
     def fn(*args):
-        return ops.div(*args)
+        return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
 
