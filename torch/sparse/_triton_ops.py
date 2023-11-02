@@ -1,7 +1,11 @@
 import math
+import os
 import torch
+import weakref
 from functools import lru_cache
 from torch.utils._triton import has_triton
+
+TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
 
 
 def check(cond, msg):
@@ -582,7 +586,7 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
     GROUP_SIZE = GROUP_SIZE or 4
 
     assert TILE_M <= Ms, dict(TILE_M=TILE_M, Ms=Ms)
-    assert TILE_N <= Ns, dict(TILE_B=TILE_N, Ns=Ns)
+    assert TILE_N <= Ns, dict(TILE_N=TILE_N, Ns=Ns)
     assert Ms <= M, dict(M=M, Ms=Ms)
     assert Ns <= N, dict(N=N, Ns=Ns)
     assert Ks <= K, dict(K=K, Ks=Ks)
@@ -675,40 +679,76 @@ def bsr_dense_mm_meta(M, K, N, Ms, Ks,
 
 class TensorAsKey:
     """A light-weight wrapper of a tensor that enables storing tensors as
-    keys with efficient data-pointer/shape/strides based comparision
-    as an approximation to data equality based keys.
+    keys with efficient memory reference based comparision as an
+    approximation to data equality based keys.
 
-    Motivation: the hash value of a torch tensor is tensor-pointer
-    based that completely ignores data equality and makes the usage of
-    tensors as keys rather pointless. For instance, the result of
+    Motivation: the hash value of a torch tensor is tensor instance
+    based that does not use data equality and makes the usage of
+    tensors as keys less useful. For instance, the result of
     ``len({a.crow_indices(), a.crow_indices()})`` is `2`, although,
-    the results of `crow_indices` method hold the same data storage.
+    the tensor results from `crow_indices` method call are equal, in
+    fact, these share the same data storage.
     On the other hand, for efficient caching of tensors we want to
-    avoid calling torch.equal at the expense of having a possibly
-    larger cache as it may contain tensors that are element-wise equal
-    but that use different data storages.
+    avoid calling torch.equal that compares tensors item-wise.
+
+    TensorAsKey offers a compromise in that it guarantees key equality
+    of tensors that references data in the same storage in the same
+    manner and without accessing underlying data. However, this
+    approach does not always guarantee correctness. For instance, for
+    a complex tensor ``x``, we have ``TensorAsKey(x) ==
+    TensorAsKey(x.conj())`` while ``torch.equal(x, x.conj())`` would
+    return False.
     """
+
     def __init__(self, obj):
-        self.obj = obj
-        self.key = (obj.data_ptr(), obj.shape, obj.stride())
+
+        def get_tensor_key(obj):
+            # Warning: TensorAsKey does not track negative nor
+            # conjugate bits of its input object because in the use
+            # case of wrapping compressed/plain indices of compressed
+            # sparse tensors (that are always integer tensors with
+            # non-negative items) these bits are never set. However,
+            # when extending the use of TensorAsKey to float or
+            # complex tensors, the values of these bits (see is_neg
+            # and is_conj methods) must be included in the key as
+            # well.
+            assert not (obj.dtype.is_floating_point or obj.dtype.is_complex), obj.dtype
+            return (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), obj.dtype)
+
+        self._obj_ref = weakref.ref(obj)
+        if obj.layout is torch.strided:
+            self.key = get_tensor_key(obj)
+        elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            self.key = (get_tensor_key(obj.crow_indices()), get_tensor_key(obj.col_indices()))
+        elif obj.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            self.key = (get_tensor_key(obj.ccol_indices()), get_tensor_key(obj.row_indices()))
+        else:
+            raise NotImplementedError(obj.layout)
         self._hash = hash(self.key)
 
     def __hash__(self):
         return self._hash
 
     def __eq__(self, other):
-        if self is other:
-            return True
         if not isinstance(other, TensorAsKey):
             return False
-        if self.obj is other.obj:
-            return True
+        if self.obj is None or other.obj is None:
+            # dead objects always compare unequal unless these are
+            # same objects
+            return self is other
         return self.key == other.key
 
+    @property
+    def obj(self):
+        """Return object if alive, otherwise None."""
+        return self._obj_ref()
 
-@lru_cache(maxsize=128)
-def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, crow_indices_as_key, col_indices_as_key):
-    crow_indices, col_indices = crow_indices_as_key.obj, col_indices_as_key.obj
+
+@lru_cache(maxsize=TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE)
+def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key):
+    bsr = compressed_sparse_tensor_as_key.obj
+    assert bsr is not None
+    crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     device = crow_indices.device
     indices_dtype = torch.int32
 
@@ -800,8 +840,7 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
     SPLIT_N = meta['SPLIT_N']
     indices_data = _bsr_scatter_mm_indices_data(
-        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N,
-        TensorAsKey(bsr.crow_indices()), TensorAsKey(bsr.col_indices()))
+        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, TensorAsKey(bsr))
 
     if indices_format == 'bsr_strided_mm_compressed':
         meta.update(is_compressed=True)
@@ -1629,7 +1668,7 @@ if has_triton():
 
     @triton.jit
     def _scatter_mm6_kernel(
-            nbatches: tl.constexpr, Ms: tl.constexpr, Ks: tl.constexpr, N: tl.constexpr,
+            nbatches, Ms, Ks: tl.constexpr, N,
             blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
             others_ptr, others_stride_B, others_stride_K, others_stride_N,
             accumulators_ptr, accumulators_stride_B, accumulators_stride_M, accumulators_stride_N,
@@ -1742,11 +1781,33 @@ if has_triton():
         assert p_offsets.stride(0) == 1
         assert q_offsets.stride(0) == 1
 
+        # Re non-contiguous tensor arguments. Sometimes triton kernel
+        # launches may fail with
+        #
+        #   RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered
+        #
+        # that appears to be case when the size of a non-contiguous
+        # tensor argument is larger than a certain threshold. Could
+        # this be related to shared memory or L1 cache size of a GPU
+        # card? In anycase, ensuring that tensor arguments are
+        # contiguous seems to avoid the above exception. So, in the
+        # following we'll always convert tensor arguments to
+        # C-contiguous tensors.
+
+        blocks = blocks.contiguous()
+
+        others = others.contiguous()
+
+        if not accumulators.is_contiguous():
+            accumulators_ = accumulators.contiguous()
+        else:
+            accumulators_ = accumulators
+
         _scatter_mm6_kernel[grid](
             B, Ms, Ks, N,
             blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
             others, others.stride(0), others.stride(1), others.stride(2),
-            accumulators, accumulators.stride(0), accumulators.stride(1), accumulators.stride(2),
+            accumulators_, accumulators_.stride(0), accumulators_.stride(1), accumulators_.stride(2),
             c_indices,
             r_offsets,
             p_offsets,
@@ -1754,6 +1815,9 @@ if has_triton():
             dot_out_dtype=dot_out_dtype,
             **meta
         )
+
+        if not accumulators.is_contiguous():
+            accumulators.copy_(accumulators_)
 
 else:
     bsr_softmax = None  # type: ignore[assignment]
