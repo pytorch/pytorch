@@ -6,7 +6,6 @@ import weakref
 import functools
 import inspect
 import re
-import warnings
 
 __all__ = [
     'Library',
@@ -420,8 +419,9 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
     frame = inspect.stack()[_stacklevel]
-    caller_module_name = inspect.getmodulename(frame[0])
-    assert caller_module_name is not None
+    caller_module = inspect.getmodule(frame[0])
+    assert caller_module is not None
+    caller_module_name = caller_module.__name__
 
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
@@ -454,10 +454,8 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         maybe_pystub = torch._C._dispatch_pystub(
             op._schema.name,
             op._schema.overload_name)
-        # TODO(rzou): The following are warnings for now, while we figure out
-        # fbgemm co-dev. In a couple of days we will flip these to be errors.
         if not maybe_pystub:
-            warnings.warn(
+            raise RuntimeError(
                 f"Operator '{qualname}' was defined in C++ and has a Python "
                 f"abstract impl. In this situation, it is required to have a "
                 f"C++ `m.impl_abstract_pystub` call, but we could not find one."
@@ -466,7 +464,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
                 f"defined in.")
         pystub_module = maybe_pystub[0]
         if actual_module_name != pystub_module:
-            warnings.warn(
+            raise RuntimeError(
                 f"Operator '{qualname}' specified that its python abstract impl "
                 f"is in the Python module '{mod_name}' but it was actually found "
                 f"in '{actual_module_name}'. Please either move the abstract impl "

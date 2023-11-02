@@ -93,6 +93,8 @@ enum class _RegisterOrVerify { REGISTER, VERIFY };
 template <class CurClass>
 class class_;
 
+#define HAS_IMPL_ABSTRACT_PYSTUB
+
 /// Represents a C++ function that implements an operator.  Most users won't
 /// interact directly with this class, except via error messages: the
 /// constructors this function define the set of permissible "function"-like
