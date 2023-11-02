@@ -716,8 +716,8 @@ class AOTInductorTestsTemplate:
                 return d.sum()
 
         example_inputs = (
-            torch.tensor([1, 1, 1], device="cuda"),
-            torch.randn((1, 32), dtype=torch.float16, device="cuda"),
+            torch.tensor([1, 1, 1], device=self.device),
+            torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
 
@@ -729,7 +729,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
 
-        example_inputs = (torch.ones((1,), dtype=torch.int32, device="cuda") * 12,)
+        example_inputs = (torch.ones((1,), dtype=torch.int32, device=self.device) * 12,)
         self.check_model(Repro(), example_inputs)
 
     def test_dynamic_cat(self):
@@ -957,6 +957,33 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(4, 4, 4, 4).to(self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_run_with_grad_enabled(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, weight, bias):
+                return torch.ops.aten.addmm(bias, weight, x)
+
+        m = Model().to(device=self.device)
+        x = torch.rand(8, 8, device=self.device, requires_grad=True)
+        weight = torch.rand(8, 8, device=self.device, requires_grad=True)
+        bias = torch.rand(8, device=self.device, requires_grad=True)
+        example_inputs = (x, weight, bias)
+
+        expected = m(*example_inputs)
+        expected, _ = pytree.tree_flatten(expected)
+
+        # compiler under no_grad
+        with torch.no_grad():
+            so_path = AOTInductorModelRunner.compile(m, example_inputs)
+
+        # run under grad enabled
+        self.assertTrue(torch.is_grad_enabled())
+
+        optimized = AOTInductorModelRunner.load(self.device, so_path, example_inputs)
+        actual = optimized(example_inputs)
+        actual, _ = pytree.tree_flatten(actual)
+
+        self.assertTrue(same(actual, expected))
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -990,6 +1017,8 @@ CPU_TEST_FAILURES = {
     "test_sdpa": fail_with_and_without_stack_allocation(),
     "test_sdpa_2": fail_with_and_without_stack_allocation(),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_zero_grid": fail_with_and_without_stack_allocation(),  # unsupported input dtype
+    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(),  # unsupported input dtype
 }
 
 copy_tests(
