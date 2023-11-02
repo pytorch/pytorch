@@ -31,7 +31,13 @@ import torch._logging
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import Checkpointable, Guard, Source, TracingContext
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    Source,
+    TracingContext,
+)
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
@@ -106,6 +112,7 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 class OutputGraphState(NamedTuple):
     input_source_to_var: Dict[Source, VariableTracker]
     tracked_fakes: List[TrackedFake]
+    guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
     register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
@@ -116,7 +123,12 @@ class OutputGraphState(NamedTuple):
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
-            if k == "side_effects":
+            if k == "guard_state":
+                r = self.guard_state.diff(other.guard_state)
+                if r is not None:
+                    return r
+                continue
+            elif k == "side_effects":
                 r = self.side_effects.diff(other.side_effects)
                 if r is not None:
                     return r
@@ -127,6 +139,11 @@ class OutputGraphState(NamedTuple):
             if sv != ov:
                 return f"{prefix}{k} mismatch: {sv} != {ov}"
         return None
+
+    # Back compat .guards api
+    @property
+    def guards(self):
+        return self.guard_state.dynamo_guards
 
 
 @functools.lru_cache(None)
@@ -489,11 +506,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.param_name_to_source is not None
+        guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         module_state = self.tracing_context.module_context.copy_graphstate()
         global_state = self.tracing_context.global_context.copy_graphstate()
         state = OutputGraphState(
             dict(self.input_source_to_var),
             list(self.tracked_fakes),
+            guards_graph_state,
             module_state,
             list(self.register_finalizer_fns),
             global_state,
@@ -510,6 +529,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         (
             self.input_source_to_var,
             self.tracked_fakes,
+            guards_state,
             module_state,
             self.register_finalizer_fns,
             global_state,
@@ -518,6 +538,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.timestamp,
             self.non_compliant_ops,
         ) = state
+        self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
         self.tracing_context.global_context.restore_graphstate(global_state)
 
@@ -1464,9 +1485,6 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                # Special case for autograd.Function tracing
-                if "saved_tensor_marked" in arg.meta:
-                    continue
                 assert (
                     arg.graph == self.graph
                 ), "create_node using arg not from this SubgraphTracer"
@@ -1579,9 +1597,6 @@ class SubgraphTracer(fx.Tracer):
         if not isinstance(arg, torch.fx.Proxy):
             return arg
         elif arg.tracer == self:
-            return arg
-        # Special case for autograd.Function tracing
-        elif "saved_tensor_marked" in arg.node.meta:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
 

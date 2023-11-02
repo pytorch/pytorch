@@ -238,11 +238,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
         output_code_log.setLevel(logging.DEBUG)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
         s = log_capture_string.getvalue()
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
-    return s
+    return result, s
 
 
 def check_model(
@@ -833,7 +833,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
@@ -8116,6 +8116,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+    class NanCheckerTest(TestCase):
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_pass(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            ref = f(x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
+            self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue(
+                re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+            self.assertTrue(
+                re.search(r"assert not .*\.isinf\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fail(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            x[0, 0] = float("nan")
+            with self.assertRaises(AssertionError):
+                torch.compile(f)(x)
 
 
 if HAS_CPU:
