@@ -775,7 +775,7 @@ void initDispatchBindings(PyObject* module) {
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
   m.def("_dispatch_pystub", [](const char* name, const char* overload) {
     return c10::Dispatcher::singleton().getAbstractImplPyStub(
-        OperatorName(name, overload));
+        c10::OperatorName(name, overload));
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {

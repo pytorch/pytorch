@@ -420,7 +420,8 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
     frame = inspect.stack()[_stacklevel]
-    caller_module_name = inspect.getmodule(frame[0]).__name__
+    caller_module_name = inspect.getmodulename(frame[0])
+    assert caller_module_name is not None
 
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
