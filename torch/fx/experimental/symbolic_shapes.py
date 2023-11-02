@@ -180,6 +180,7 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
 
 def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
+    """Equivalent to bool(free_symbols(val))"""
     return not all(e.is_number for e in _iterate_exprs(val))
 
 # Like free_symbols, but filtered to only report unbacked symbols
