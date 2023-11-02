@@ -2,8 +2,6 @@ MAX_CYCLE = 3000
 
 from typing import List, Optional
 
-from .. import polyfill
-
 from ..exc import InlinedUserStopIteration, unimplemented
 
 from .base import VariableTracker
@@ -25,7 +23,6 @@ class GenericIteratorVariable(IteratorVariable):
 
     def next_variables(self, tx):
         assert self.mutable_local
-        from .builder import SourcelessBuilder
 
         next_item = self.iterator.call_method(tx, "__next__", [], {})
         next_iter = self.clone(iterator=self.iterator)

@@ -30,7 +30,3 @@ def zip(*iterators):
         # raises `StopIteration`
         nexts = tuple(next(i) for i in iterators)
         yield nexts
-
-
-def next_p(iterable):
-    return iterable.__next__()
