@@ -1285,7 +1285,7 @@ def _new_process_group_helper(
                     pg_options, ProcessGroupNCCL.Options
                 ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
                 if pg_options._timeout:
-                    raise ValueError(
+                    warnings.warn(
                         "pg_options._timeout was specified, "
                         "but timeout kwarg has a default value that will always override it. "
                     )
