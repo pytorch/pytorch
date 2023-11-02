@@ -977,7 +977,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracing_context.global_context.restore_graphstate(prior_global_state)
             yield
         finally:
-            # Reset to state at the current time before calling the user compiler
+            # Reset to state at the current time (e.g. before calling the user compiler)
             self.tracing_context.global_context.restore_graphstate(
                 GlobalContextCheckpointState(current_global_state)
             )

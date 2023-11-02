@@ -594,11 +594,11 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
-    # The grad_enabled mutation that we will emit in the runtime_wrapper epilogue
+    # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
-    # that is intended to be in effect prior to running the graph, in keeping with the goal
-    # of eager-mode behavioural equivalence. It is the responsibility of upstream
-    # graph acquisition to reset the ambient grad mode prior to calling aot_autograd.
+    # that is intended to be in effect prior to running the graph, in keeping with
+    # of eager-mode equivalence. It is the responsibility of upstream graph acquisition
+    # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
     grad_enabled_mutation: Optional[bool] = None
 
     def __post_init__(self):
