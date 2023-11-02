@@ -2154,6 +2154,11 @@ class GraphModule(torch.nn.Module):
         eager_res = fn(pred, inp)
         self.assertEqual(compiled_res, eager_res)
         graph = backend.graphs[0]
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
         self.assertExpectedInline(
             graph.code.strip(),
             """\
