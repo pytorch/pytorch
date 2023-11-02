@@ -1123,7 +1123,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 requires_grad=requires_grad,
-                mutation_type=_get_mutation_type(keep_input_mutations, is_train, mutates_data, mutates_metadata, requires_grad)
+                mutation_type=_get_mutation_type(keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
@@ -2240,19 +2240,17 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     return actual_aliased_indices
 
 
-def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, is_train: bool, mutates_data, mutates_metadata, requires_grad):
-    if keep_input_mutations and is_train:
-        return mutates_data and not mutates_metadata and not requires_grad
+def _check_if_mutation_can_be_in_graph(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
     if keep_input_mutations:
-        return mutates_data and not mutates_metadata
+        return mutates_data and not mutates_metadata and not requires_grad
     return False
 
 
-def _get_mutation_type(keep_input_mutations: bool, is_train: bool, mutates_data, mutates_metadata, requires_grad):
+def _get_mutation_type(keep_input_mutations: bool, mutates_data, mutates_metadata, requires_grad):
     if (not mutates_data) and (not mutates_metadata):
         return MutationType.NOT_MUTATED
 
-    if _check_if_mutation_can_be_in_graph(keep_input_mutations, is_train, mutates_data, mutates_metadata, requires_grad):
+    if _check_if_mutation_can_be_in_graph(keep_input_mutations, mutates_data, mutates_metadata, requires_grad):
         return MutationType.MUTATED_IN_GRAPH
 
     return MutationType.MUTATED_OUT_GRAPH
@@ -2577,7 +2575,7 @@ def create_synthetic_base_metadata(
             mutations_hidden_from_autograd=all(m.input_info[x].mutations_hidden_from_autograd for x in outer_indices),
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=_get_mutation_type(m.keep_input_mutations, m.is_train, mutates_data, mutates_metadata, requires_grad)
+            mutation_type=_get_mutation_type(m.keep_input_mutations, mutates_data, mutates_metadata, requires_grad)
         )
         input_infos.append(inpt_info)
 
