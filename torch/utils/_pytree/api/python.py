@@ -378,20 +378,6 @@ def tree_flatten(tree: PyTree) -> Tuple[List[Any], TreeSpec]:
     return leaves, spec
 
 
-def _tree_leaves_helper(tree: PyTree, leaves: List[Any]) -> None:
-    if _is_leaf(tree):
-        leaves.append(tree)
-        return
-
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, _ = flatten_fn(tree)
-
-    # Recursively flatten the children
-    for child in child_pytrees:
-        _tree_leaves_helper(child, leaves)
-
-
 def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
@@ -424,6 +410,20 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         start = end
 
     return unflatten_fn(child_pytrees, treespec.context)
+
+
+def _tree_leaves_helper(tree: PyTree, leaves: List[Any]) -> None:
+    if _is_leaf(tree):
+        leaves.append(tree)
+        return
+
+    node_type = _get_node_type(tree)
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+    child_pytrees, _ = flatten_fn(tree)
+
+    # Recursively flatten the children
+    for child in child_pytrees:
+        _tree_leaves_helper(child, leaves)
 
 
 def tree_leaves(tree: PyTree) -> List[Any]:
