@@ -21,6 +21,7 @@ def get_tensor_id(tensor, *, coeff=1):
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
+    _lengths: Optional[torch.Tensor]
     # NOTE [ Singleton ints for ragged sizes and strides ]
     #
     # Jagged layout tensors are tensors that represent a n-dim tensor with a
@@ -46,6 +47,7 @@ class NestedTensor(torch.Tensor):
         values,
         offsets,
         *,
+        lengths=None,
         ragged_size=None,
         **kwargs,
     ):
@@ -69,7 +71,7 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, ragged_size=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, ragged_size=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -97,12 +99,16 @@ class NestedTensor(torch.Tensor):
             )
         self._values = values
         self._offsets = offsets
+        self._lengths = lengths
 
     def values(self):
         return self._values
 
     def offsets(self):
         return self._offsets
+
+    def lengths(self):
+        return self._lengths
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -111,7 +117,7 @@ class NestedTensor(torch.Tensor):
         )
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
-        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str})"
+        return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str}, contiguous={self._lengths is None})"
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
@@ -131,13 +137,14 @@ class NestedTensor(torch.Tensor):
             "requires_grad": self.requires_grad,
             "ragged_size": self._size[self._ragged_idx],
         }
-        return ["_values", "_offsets"], ctx
+        return ["_values", "_offsets", "_lengths"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):
         assert len(inner_tensors) == 2
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
+        lengths = inner_tensors["_lengths"]
 
         # NOTE [ Storing symbolic values as plain attributes on subclasses ]
         #
@@ -173,6 +180,7 @@ class NestedTensor(torch.Tensor):
         return NestedTensor(
             values,
             offsets=offsets,
+            lengths=lengths,
             ragged_size=meta["ragged_size"],
             requires_grad=meta["requires_grad"],
         )
@@ -232,6 +240,17 @@ class ViewNestedFromBuffer(torch.autograd.Function):
         return gO.values(), None, None
 
 
+# Not actually a view!
+class ViewNoncontiguousNestedFromBuffer(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
+        return NestedTensor(values.detach(), offsets=offsets, lengths=lengths)
+
+    @staticmethod
+    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
+        return gO.values(), None, None
+
+
 # Need to make it obvious that users should be passing in offsets
 def jagged_from_list(
     tensors: List[torch.Tensor],
@@ -283,6 +302,37 @@ def jagged_from_list(
         )
 
     return ViewNestedFromBuffer.apply(values, offsets), offsets  # type: ignore[call-overload]
+
+
+def jagged_from_tensor_and_lengths(
+    tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
+) -> Tuple[NestedTensor, torch.Tensor]:
+    """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
+    batch_size = tensor.shape[0]
+    try:
+        start_list = starts.expand(batch_size, 1)
+        length_list = lengths.expand(batch_size, 1)
+    except RuntimeError as e:
+        raise RuntimeError(
+            "When constructing a jagged nested tensor using narrow(), "
+            "your start and length must be a Tensor that broadcasts to input.shape[0] x 1"
+        ) from e
+
+    # Calculate jagged offsets
+    max_seq_len = tensor.shape[1]
+    offset_lengths = max_seq_len * torch.arange(
+        0, batch_size, dtype=torch.int64, device=tensor.device
+    )
+    # Jagged layout specifies that offsets are stored as int64 on the same device as values.
+    offsets = start_list + offset_lengths
+
+    # Reshape buffer to flatten the 1st and 2nd dimension
+    if len(tensor.shape) > 2:
+        values = tensor.reshape(-1, *tensor.shape[2:])
+    else:
+        values = tensor.reshape(-1)
+
+    return ViewNoncontiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
 
 
 def buffer_from_jagged(jagged):

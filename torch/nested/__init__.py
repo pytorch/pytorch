@@ -1,7 +1,7 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch._C import _add_docstr, _nested  # type: ignore[attr-defined]
 
 from torch.types import _device as Device, _dtype as DType
@@ -186,3 +186,34 @@ Example::
         return nt
     else:
         raise RuntimeError(f"Specified layout is unsupported for nested tensors: {layout}")
+
+
+
+
+def narrow(tensor: Tensor, dim: int, start: Union[SymInt, Tensor], length: Union[SymInt, Tensor], layout=torch.jagged):
+
+    if not isinstance(start, SymInt) or isinstance(start, Tensor):
+        raise RuntimeError("start must be an integer or a tensor")
+
+    if not isinstance(length, SymInt) or isinstance(length, Tensor):
+        raise RuntimeError("length must be an integer or a tensor")
+
+    if layout == torch.jagged and dim != 1:
+        raise RuntimeError("jagged layout only supports dim=1")
+
+    # Create the offset and lengths tensors from start and length
+    if layout == torch.jagged:
+        from torch.nested._internal.nested_tensor import jagged_from_tensor_and_lengths
+
+        if isinstance(start, SymInt):
+            start = torch.tensor([int(start)])
+
+        if isinstance(length, SymInt):
+            length = torch.tensor([int(length)])
+
+        nt = jagged_from_tensor_and_lengths(tensor, start, length)
+
+    else:
+        nt = as_nested_tensor(torch.unbind(tensor), layout=torch.strided).narrow(start, length)
+
+    return nt
