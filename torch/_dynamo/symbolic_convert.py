@@ -50,6 +50,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder
@@ -72,7 +73,13 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
+from .variables.base import (
+    _is_top_level_scope,
+    is_side_effect_safe,
+    MutableLocal,
+    typestr,
+    VariableTracker,
+)
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -814,7 +821,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        loaded_vt = loaded_vt.rename(self, name)
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if _is_top_level_scope(current_scope_id()):
+            loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -1065,11 +1076,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, ListIteratorVariable):
+        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
             try:
-                val, next_iter = it.next_variables()
-                self.replace_all(it, next_iter)
+                val, next_iter = it.next_variables(self)
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
@@ -1079,8 +1089,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left.as_specialized(self)
-        right = right.as_specialized(self)
+        left = left
+        right = right
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
@@ -1314,7 +1324,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                [x.as_specialized(self) for x in items],
+                items,
                 **options,
             )
         )
@@ -2559,11 +2569,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-            if isinstance(tos, ListIteratorVariable):
+            if isinstance(
+                tos, (variables.ListIteratorVariable, variables.IteratorVariable)
+            ):
                 self.output.guards.update(tos.guards)
                 try:
-                    val, next_iter = tos.next_variables()
-                    self.replace_all(tos, next_iter)
+                    val, next_iter = tos.next_variables(self)
                     self.push(val)
                     # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)
