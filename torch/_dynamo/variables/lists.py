@@ -686,7 +686,7 @@ class ListIteratorVariable(VariableTracker):
     def next_variables(self, tx):
         assert self.mutable_local
         if self.index >= len(self.items):
-            raise InlinedUserStopIteration
+            raise InlinedUserStopIteration()
         next_iter = ListIteratorVariable(
             self.items,
             self.index + 1,

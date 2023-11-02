@@ -118,5 +118,5 @@ class CycleIteratorVariable(IteratorVariable):
             tx.replace_all(self, next_iter)
             return self.item.add_options(self), next_iter
         else:
-            raise InlinedUserStopIteration
+            raise InlinedUserStopIteration()
         return self.item.add_options(self), next_iter
