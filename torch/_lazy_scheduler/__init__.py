@@ -48,14 +48,14 @@ class AsyncTensor(torch.Tensor):
   def data_ptr(self):
     if self._handle is not None:
       AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.data_ptr
+      return self._materialized_tensor.data_ptr()
     else:
       raise Exception("Calling data_ptr on an unmaterialized AsyncTensor!")
 
   def storage(self):
     if self._handle is not None:
       AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.storage
+      return self._materialized_tensor.storage()
     else:
       raise Exception("Calling storage on an unmaterialized AsyncTensor!")
 
@@ -132,10 +132,11 @@ class AsyncTensor(torch.Tensor):
         print(f"done waiting for completion {async_tensor.async_repr()}")
 
 class AsyncFuncHandle:
-  def __init__(self, compiled_fn, gm, args, outs_async, scheduler):
+  def __init__(self, compiled_fn, gm, segment, args, outs_async, scheduler):
     self.cuda_event = torch.cuda.Event()
     self.compiled_fn: Callable = compiled_fn
     self.gm: torch.fx.GraphModule = gm
+    self.segment: str = segment  # for bookkeeping
     # dependency graph is built implicitly as we run the program
     self.args = args
     self.outs_async = outs_async
@@ -144,6 +145,7 @@ class AsyncFuncHandle:
     self._scheduler = weakref.ref(scheduler)
 
   def schedule(self):
+    print(f"scheduling {self.gm} ... from segment: {self.segment}")
     # make sure to schedule only once
     if self.is_scheduled:
       return
@@ -169,11 +171,12 @@ class AsyncFuncHandle:
 
 
 class LazyGraphModule(torch.nn.Module):  # TODO: better name?
-  def __init__(self, gm, scheduler):
+  def __init__(self, gm, scheduler, segment):
     super().__init__()
     self.gm = gm
     self.scheduler = scheduler
     self.compiled_fn = None
+    self.segment = segment  # bookkeeping
 
   def __call__(self, *args):
     if self.compiled_fn is None:
@@ -184,7 +187,7 @@ class LazyGraphModule(torch.nn.Module):  # TODO: better name?
       #     print(f"x: {x}")
       # args_fake = [fake_mode.from_tensor(x) for x in args]
       self.compiled_fn = torch._inductor.compile(self.gm, args)
-      self.scheduler.record_compiled_fn(self.gm, self.compiled_fn)
+      self.scheduler.record_compiled_fn(self.gm, self.compiled_fn, self.segment)
       # During compile time, return real tensor, because downstream Inductor compilation needs real tensor
       return self.compiled_fn(*args)
     else:
@@ -241,10 +244,7 @@ class LazyScheduler:
           print(f'partition: {known_segments.index(node.meta["segment"])}')
         print("-")
       print("------")
-    # Replace subgraph with the lazy version
     for name, sub_gm in gm_after_split.named_children():
-      lazy_sub_gm = LazyGraphModule(sub_gm, self)
-      setattr(gm_after_split, name, lazy_sub_gm)
       # Build segment -> GMs mapping
       node_list = list(sub_gm.graph.nodes)
       assert node_list[-1].op == "output"
@@ -253,6 +253,9 @@ class LazyScheduler:
       assert node_list[-2].op != "placeholder"
       segment = node_list[-2].meta["segment"]
       print(f"segment: {segment}")
+      # Replace subgraph with the lazy version
+      lazy_sub_gm = LazyGraphModule(sub_gm, self, segment)
+      setattr(gm_after_split, name, lazy_sub_gm)
       self._segment_to_gms_map[segment].append(sub_gm)
 
     print(f"gm.graph: {gm.graph}")
@@ -268,8 +271,8 @@ class LazyScheduler:
     # breakpoint()
     return gm_after_split
 
-  def record_compiled_fn(self, gm, compiled_fn):
-    cur_handle = AsyncFuncHandle(compiled_fn, gm, args=[], outs_async=[], scheduler=self)
+  def record_compiled_fn(self, gm, compiled_fn, segment):
+    cur_handle = AsyncFuncHandle(compiled_fn, gm, segment, args=[], outs_async=[], scheduler=self)
     self._gm_to_handle_map[gm] = cur_handle
 
   def maybe_run(self, gm, compiled_fn, *args):

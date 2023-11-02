@@ -75,7 +75,7 @@ class TestModule(torch.nn.Module):
 
     def forward(self, x, y):
         z = self.subfunc0(x, y)
-        # y = y.relu()
+        y = y.relu()
         z = self.subfunc01(z, y)
         # x, y = self.subfunc1(x, y)
         # y.relu_()
@@ -100,6 +100,7 @@ x = torch.randn(4, 4, device=device)
 y = torch.randn(4, 4, device=device)
 
 lazy_scheduler = LazyScheduler([
+    # TODO: need to check that actual scheduling is done in the right order
     "subfunc0",
     "subfunc01",
     # "subfunc1",
