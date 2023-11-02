@@ -34,6 +34,22 @@ namespace at { namespace native {
 #include <cudnn_frontend.h>
 
 namespace fe = cudnn_frontend;
+using graph_and_tensors = std::tuple<
+                                    std::shared_ptr<fe::graph::Graph>,                    
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // Q,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // K,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // V,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // Attn_scale,
+                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Bias,
+                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_Q,
+                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // SEQ_LEN_KV,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // Seed,
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // Offset,
+                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_mask,
+                                    //std::shared_ptr<fe::graph::Tensor_attributes>, // Dropout_scale
+                                    std::shared_ptr<fe::graph::Tensor_attributes>, // O
+                                    std::shared_ptr<fe::graph::Tensor_attributes> // Stats
+                        >;
 
 #define MAX_MHA_DIM 4
 
@@ -80,7 +96,38 @@ void setMHAParams(MHAParams& params, int64_t b, int64_t h, int64_t s_q, int64_t 
   std::copy(v.strides().begin(), v.strides().end(), params.v_stride);
 }
 
-auto build_graph_and_attributes(int64_t b,
+struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
+  MHACacheKeyWrapper(int64_t b, int64_t h, int64_t s_q, int64_t s_kv, int64_t d, const Tensor& q, const Tensor& k, const Tensor & v, double dropout_probability, bool is_causal, bool return_softmaxstats) {
+    setMHAParams(this->pod, b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, return_softmaxstats);
+  }
+};
+
+template <typename T, typename KeyType>
+struct MHAGraphCache {
+std::unordered_map<KeyType, graph_and_tensors, ParamsWrapperHash<KeyType>> engine_cache;
+
+// no mutexes here as caches are now thread local for v8, can also return a pointer
+// to the Execution Plan if we know it will not be invalidated by another thread
+T* find(const KeyType& key) {
+  auto it = engine_cache.find(key);
+  if (it == engine_cache.end()) {
+    return nullptr;
+  }
+  return &(it->second);
+}
+
+void update(const KeyType& key, T& results) {
+  engine_cache.erase(key);
+  engine_cache.emplace(key, std::move(results));
+}
+
+};
+
+// @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to be thread safe across all engines
+// see Limitations in https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
+
+auto build_graph_and_tensors(int64_t b,
                                 int64_t h,
                                 int64_t s_q,
                                 int64_t s_kv,
@@ -350,16 +397,23 @@ run_cudnn_LLM_fprop(int64_t b,
     //TORCH_INTERNAL_ASSERT(plans.check_support(handle).is_good());
 
     //TORCH_INTERNAL_ASSERT(mha_graph.set_execution_plans(plans).is_good());
-    MHAParams params;
-    setMHAParams(params, b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, return_softmaxstats);
-    auto [mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats] = build_graph_and_attributes(b,
+    
+    auto key = MHACacheKeyWrapper(b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, return_softmaxstats);
+    auto graph_and_tensors_ptr = mhagraphcache.find(key);
+    graph_and_tensors graph_and_tensors_values;
+    if (graph_and_tensors_ptr) {
+        std::cout << "cache hit" << std::endl;
+        graph_and_tensors_values = *graph_and_tensors_ptr;
+    } else {
+        std::cout << "cache miss" << std::endl;
+        graph_and_tensors_values = build_graph_and_tensors(b,
                                  h,
                                  s_q,
                                  s_kv,
                                  d,
                                  scaling_factor,
                                  return_softmaxstats,
-		                         is_causal,
+                                 is_causal,
                                  dropout_probability,
                                  q,
                                  k,
@@ -369,8 +423,9 @@ run_cudnn_LLM_fprop(int64_t b,
                                  dropoutseed,
                                  dropoutoffset,
                                  handle,
-                                 params);
-
+                                 key.pod);
+    }
+    auto [mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats] = graph_and_tensors_values;
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = { {Q, q.data_ptr()},
          {K, k.data_ptr()},
          {V, v.data_ptr()},
@@ -379,14 +434,13 @@ run_cudnn_LLM_fprop(int64_t b,
          {seed, dropoutseed.data_ptr()},
          {offset, dropoutoffset.data_ptr()},
          {O, o.data_ptr()}};
-
     if (return_softmaxstats) {
         variant_pack[Stats] = softmaxstats.data_ptr();
     }
-
     auto workspace_size = mha_graph->get_workspace_size();
     auto workspace_ptr = c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
     TORCH_INTERNAL_ASSERT(mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
+    mhagraphcache.update(key, graph_and_tensors_values);
 }
 
 
