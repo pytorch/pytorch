@@ -332,6 +332,10 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_align(self, expr):
+        assert len(expr.args) == 1
+        return f"align({self._print(expr.args[0])})"
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -364,6 +368,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"abs({self._print(expr.args[0])})"
 
+    def _print_Max(self, expr):
+        assert len(expr.args) >= 2
+        return f"max({', '.join(map(self._print, expr.args))})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -384,7 +392,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.div("1", x)
+        return ops.truediv("1", x)
 
     @staticmethod
     def square(x):
@@ -992,7 +1000,7 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(var, size, add_asserts=True):
+            def indirect_indexing(var, size, check=True):
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:
@@ -1020,7 +1028,7 @@ class Kernel(CodeGen):
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var
 
-                if self.generate_assert(add_asserts):
+                if self.generate_assert(check):
                     mask = self.load_mask(var)
 
                     # An assertion line may have been written already, if so just
@@ -1129,10 +1137,8 @@ class Kernel(CodeGen):
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
-    def generate_assert(self, add_asserts):
-        return (
-            add_asserts or config.debug_index_asserts
-        ) and config.assert_indirect_indexing
+    def generate_assert(self, check):
+        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
     def load_mask(self, var):
         # only the triton kernel requires mask
