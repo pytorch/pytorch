@@ -534,7 +534,9 @@ class ContinueExecutionCache:
                         block_target_offset_remap[cast(int, inst.offset)] = o
 
                     # old bytecode targets are after the prefix PUSH_EXC_INFO's
-                    old_start_offset = cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
+                    old_start_offset = (
+                        cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
+                    )
                     # offsets into old bytecode
                     old_inst_offsets = sorted(
                         n for n in setup_fn_target_offsets if n > old_start_offset
