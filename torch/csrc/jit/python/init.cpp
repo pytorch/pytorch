@@ -145,6 +145,12 @@ bool loadPythonClasses() {
   return true;
 }
 
+static bool opAllowsNumbersAsTensors(c10::Symbol symbol) {
+  return symbol.is_prims() || symbol.is_nvprims() ||
+      (symbol.is_aten() &&
+       torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+}
+
 c10::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // Errors need to be caught here because toTypeInferredIValue errors out
   // on various object types, but we want it to work with all types.
@@ -1587,10 +1593,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               auto func =
@@ -1627,6 +1630,8 @@ void initJITBindings(PyObject* module) {
       [](const char* op_name, py::args args, py::kwargs kwargs) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
+          ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
           auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
@@ -1667,10 +1672,7 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
-          bool allow_numbers_as_tensors = symbol.is_prims() ||
-              symbol.is_nvprims() ||
-              (symbol.is_aten() &&
-               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
 
           auto func = py::cpp_function(
               [sortedOps, symbol, allow_numbers_as_tensors](
