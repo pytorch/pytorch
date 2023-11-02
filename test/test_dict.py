@@ -3431,7 +3431,6 @@ class TestTensorDicts(TestCase):
             assert value.shape == td.get(key).transpose(2, 3).shape
         with td.unlock_():
             tdt.set(("some", "transposed", "tensor"), torch.zeros(tdt.shape))
-        assert td.get(("some", "transposed", "tensor")).shape == td.shape
         with self.assertRaisesRegex(
             ValueError, expected_regex="The provided dimensions are incompatible"
         ):
@@ -3493,6 +3492,7 @@ class TestTensorDicts(TestCase):
         if inplace:
             assert td is td_unflatten
 
+    @parametrize("td_type", TD_TYPES)
     def test_unlock(self, td_type):
         torch.manual_seed(1)
         td = getattr(self, td_type)

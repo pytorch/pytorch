@@ -469,26 +469,19 @@ class TensorDictParams(TensorDictBase, nn.Module):
                 self._param_td.clone(False),
                 no_convert=True
                 )
-        out = {}
-        for key, val in self._param_td.items(True, True):
-            if isinstance(val, nn.Parameter):
-                out[key] = nn.Parameter(
-                    val.data.clone(), requires_grad=val.requires_grad
+        def _clone(tensor):
+            if isinstance(tensor, nn.Parameter):
+                tensor = nn.Parameter(
+                    tensor.data.clone(), requires_grad=tensor.requires_grad
                 )
             else:
-                out[key] = Buffer(
-                    val.data.clone(),
-                    requires_grad=val.requires_grad
+                tensor = Buffer(
+                    tensor.data.clone(),
+                    requires_grad=tensor.requires_grad
                     )
-        return TensorDictParams(
-            TensorDict(
-                out,
-                batch_size=self._param_td.batch_size,
-                device=self._param_td.device,
-                names=self._param_td.names,
-            ),
-            no_convert=True,
-        )
+            return tensor
+
+        return TensorDictParams(self._param_td.apply(_clone), no_convert=True)
 
     @_fallback
     def chunk(self, chunks: int, dim: int = 0) -> tuple[TensorDictBase, ...]:
@@ -834,11 +827,10 @@ class TensorDictParams(TensorDictBase, nn.Module):
                 continue
             yield self._apply_get_post_hook(v)
 
-    def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
-        sd = self._param_td.flatten_keys(".").state_dict(
-            destination=destination, prefix=prefix, keep_vars=keep_vars
+    def state_dict(self, *args, destination=None, prefix="", keep_vars=False, flatten=False):
+        return self._param_td.state_dict(
+            destination=destination, prefix=prefix, keep_vars=keep_vars, flatten=flatten,
         )
-        return sd
 
     def load_state_dict(
         self, state_dict: OrderedDict[str, Any], strict=True, assign=False
@@ -852,8 +844,9 @@ class TensorDictParams(TensorDictBase, nn.Module):
         state_dict_tensors = dict(
             TensorDict(state_dict_tensors, []).unflatten_keys(".")
         )
+        state_dict.update(state_dict_tensors)
         self.data.load_state_dict(
-            {**state_dict_tensors, **state_dict}, strict=True, assign=False
+            state_dict, strict=True, assign=False
         )
         return self
 
