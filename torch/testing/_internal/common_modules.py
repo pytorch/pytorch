@@ -2611,6 +2611,13 @@ module_db: List[ModuleInfo] = [
                        'test_grad',
                        dtypes=[torch.float64],
                        active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
                    ),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
@@ -2625,6 +2632,20 @@ module_db: List[ModuleInfo] = [
                        'TestModule',
                        'test_memory_format',
                        active_if=lambda p: p['training'],
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_grad',
+                       dtypes=[torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
                    ),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool3d,
@@ -2633,7 +2654,22 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(skipMPS),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_grad',
+                       dtypes=[torch.float64],
+                       device_type='cuda',
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -2644,7 +2680,14 @@ module_db: List[ModuleInfo] = [
                        'TestModule',
                        'test_grad',
                        dtypes=[torch.float64],
-                       device_type='cpu',
+                       device_type='cuda',
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
                        active_if=(TEST_WITH_TORCHINDUCTOR),
                    ),)
                ),
@@ -2658,7 +2701,14 @@ module_db: List[ModuleInfo] = [
                        'TestModule',
                        'test_grad',
                        dtypes=[torch.float64],
-                       device_type='cpu',
+                       device_type='cuda',
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
                        active_if=(TEST_WITH_TORCHINDUCTOR),
                    ),)
                ),
@@ -2668,7 +2718,22 @@ module_db: List[ModuleInfo] = [
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(skipMPS),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_grad',
+                       dtypes=[torch.float64],
+                       device_type='cuda',
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ),
+                   DecorateInfo(
+                       unittest.expectedFailure,
+                       'TestModule',
+                       'test_gradgrad',
+                       dtypes=[torch.float64],
+                       active_if=(TEST_WITH_TORCHINDUCTOR),
+                   ))
                ),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,

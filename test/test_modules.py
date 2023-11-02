@@ -15,7 +15,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck)
+    gradgradcheck, skipIfTorchDynamo)
 from unittest.mock import patch, call
 
 
@@ -502,6 +502,7 @@ class TestModule(TestCase):
     def test_grad(self, device, dtype, module_info, training):
         self._test_gradients_helper(device, dtype, module_info, training, gradcheck)
 
+    @skipIfTorchDynamo("torch.compile with aot_autograd does not currently support double backward")
     @modules([m for m in module_db if m.supports_gradgrad],
              allowed_dtypes=[torch.double])
     def test_gradgrad(self, device, dtype, module_info, training):
