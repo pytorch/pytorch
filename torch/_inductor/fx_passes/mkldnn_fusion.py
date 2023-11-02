@@ -823,7 +823,9 @@ if torch._C._has_mkldnn:
         batch_size = input_meta_value.shape[0]
         is_bf16_weight = weight_meta_value.dtype == torch.bfloat16
         # for fp32, mkl should be enabled and batch_size should not be a free symbol.
-        if not is_bf16_weight and (free_symbols(batch_size) or (not torch._C.has_mkl)):
+        if not is_bf16_weight and (
+            (not torch._C.has_mkl) or has_free_symbols(batch_size)
+        ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
             if (

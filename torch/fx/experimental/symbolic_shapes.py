@@ -152,7 +152,7 @@ def is_concrete_bool(a: Union[bool, SymBool]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
-def iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
+def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
     if isinstance(val, SymTypes):
         yield val.node.expr
     elif isinstance(val, sympy.Expr):
@@ -160,17 +160,17 @@ def iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
     elif isinstance(val, (int, float, bool)):
         pass
     elif isinstance(val, torch.Tensor):
-        yield from iterate_exprs(val.size())
-        yield from iterate_exprs(val.stride())
-        yield from iterate_exprs(val.storage_offset())
+        yield from _iterate_exprs(val.size())
+        yield from _iterate_exprs(val.stride())
+        yield from _iterate_exprs(val.storage_offset())
     elif isinstance(val, (tuple, list)):
         for s in val:
-            yield from iterate_exprs(s)
+            yield from _iterate_exprs(s)
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
-    itr = iterate_exprs(val)
+    itr = _iterate_exprs(val)
     # we need at least 1 to call union, so we hand code the identity
     try:
         first_expr = next(itr)
@@ -180,7 +180,7 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
 
 def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
-    return not all(e.is_number for e in iterate_exprs(val))
+    return not all(e.is_number for e in _iterate_exprs(val))
 
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
@@ -1622,6 +1622,8 @@ class ShapeEnv:
             "tracked_fakes",
             "events",
             "source_name_to_debug_name",
+            "_prev_cache_key",
+            "_version_counter",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
