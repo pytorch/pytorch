@@ -2992,6 +2992,7 @@ def meta_round(self, **kwargs):
         aten._foreach_tan_.default,
         aten._foreach_tanh_.default,
         aten._foreach_trunc_.default,
+        aten._foreach_zero_.default,
     ]
 )
 def meta__foreach_unaop_(self, _scalar_fn):
@@ -3034,6 +3035,7 @@ def meta__foreach_unaop_(self, _scalar_fn):
         aten._foreach_tan.default,
         aten._foreach_tanh.default,
         aten._foreach_trunc.default,
+        aten._foreach_zero.default,
     ]
 )
 def meta__foreach_unaop(self, _scalar_fn):

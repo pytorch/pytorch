@@ -126,7 +126,7 @@ class TestForeach(TestCase):
         wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
-            if not op.has_no_out_of_place:
+            if op.supports_out:
                 wrapped_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
@@ -165,7 +165,7 @@ class TestForeach(TestCase):
             except Exception as e:
                 with (
                     self.assertRaisesRegex(type(e), re.escape(str(e)))
-                    if not (op.has_no_in_place or op.has_no_out_of_place)
+                    if not (op.has_no_in_place or not op.supports_out)
                     else self.assertRaises(type(e))
                 ):
                     ref([ref_input, *sample.ref_args], **ref_kwargs)
@@ -352,7 +352,7 @@ class TestForeach(TestCase):
             self.assertEqual(res, tensors)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
@@ -371,7 +371,7 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         allowed_dtypes=[torch.float],
     )
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
@@ -389,7 +389,7 @@ class TestForeach(TestCase):
 
     @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
@@ -455,7 +455,7 @@ class TestForeach(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
@@ -507,7 +507,7 @@ class TestForeach(TestCase):
             alpha=None, scalar_self_arg=False)
 
     @ops(
-        filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
+        filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
@@ -537,12 +537,11 @@ class TestForeach(TestCase):
     @onlyCUDA
     @ops(foreach_unary_op_db)
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
-        op.has_no_out_of_place = op.name != "_foreach_zero"
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
         tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2]))[0].input
         tensors[1] = tensors[1].to("cpu")
-        if op.has_no_out_of_place:
+        if not op.supports_out:
             try:
                 actual = method((tensors,), False, False, zero_size=False)
             except RuntimeError as e:
@@ -558,13 +557,13 @@ class TestForeach(TestCase):
             with self.assertRaisesRegex(type(e), str(e)):
                 ref_inplace((tensors,))
         else:
-            if op.has_no_out_of_place:
+            if not op.supports_out:
                 self.assertEqual(expected, tensors)
             else:
                 self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
 
     @onlyCUDA
-    @ops(filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db))
+    @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
@@ -681,12 +680,13 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        filter(
+            lambda op: op.supports_out,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        ),
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
-        if op.has_no_out_of_place:
-            self.skipTest(f"{op.name} does not have out-of-place implementation")
         func, *_ = self._get_funcs(op)
         sample = list(op.sample_inputs(dtype=dtype, device=device, requires_grad=True, num_input_tensors=[2], same_size=True))[0]
         self.assertTrue(all(t.requires_grad for t in sample.input))
@@ -817,9 +817,9 @@ class TestForeach(TestCase):
     def test_autodiff(self, device, dtype, op, inplace):
         if not (op.supports_autograd or op.supports_forward_ad):
             self.skipTest("neither reverse mode nor forward mode supported")
-        if (not inplace) and op.has_no_out_of_place:
+        if (not inplace) and not op.supports_out:
             self.skipTest("out-of-place not implemented")
-        if inplace and op.has_no_in_place:
+        if inplace and not op.has_no_in_place:
             self.skipTest("in-place not implemented")
 
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
