@@ -7588,7 +7588,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             return kernels
 
-        def test_divisibile_by_16_covers_numel_args(self):
+        def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
             def fn(a: torch.Tensor) -> torch.Tensor:
@@ -7601,13 +7601,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
             # at slot 3 should be in the divisible by 16 descriptor
             arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].meta["configs"][0].divisible_by_16
+                kernels[0].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].meta["configs"][0].divisible_by_16
+                kernels[1].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8197,6 +8197,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+    class NanCheckerTest(TestCase):
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_pass(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            ref = f(x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
+            self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue(
+                re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+            self.assertTrue(
+                re.search(r"assert not .*\.isinf\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fail(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            x[0, 0] = float("nan")
+            with self.assertRaises(AssertionError):
+                torch.compile(f)(x)
 
 
 if HAS_CPU:
