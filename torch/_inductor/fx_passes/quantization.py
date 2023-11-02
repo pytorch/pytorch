@@ -17,6 +17,15 @@ prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
+
+def _generate_pattern_with_dtype_convert(pattern, dtype=Arg()):
+    return CallFunction(
+        prims.convert_element_type.default,
+        pattern,
+        dtype,
+    )
+
+
 """
 dequantize activation:
     x = x.to(fp32)
@@ -48,10 +57,8 @@ dequantize_per_channel_weight_pattern = CallFunction(
     KeywordArg("w_dtype"),
 )
 
-dequantize_per_channel_to_bf16_weight_pattern = CallFunction(
-    prims.convert_element_type.default,
-    dequantize_per_channel_weight_pattern,
-    KeywordArg("autocast_weight_convert_dtype"),
+dequantize_per_channel_to_bf16_weight_pattern = _generate_pattern_with_dtype_convert(
+    dequantize_per_channel_weight_pattern
 )
 
 dequantize_per_channel_clone_weight_pattern = CallFunction(
@@ -160,11 +167,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             aten.mul.Tensor,
                             computation_call
                             if dtype == torch.float32
-                            else CallFunction(
-                                prims.convert_element_type.default,
-                                computation_call,
-                                KeywordArg("output_convert_bf16_to_fp32_dtype"),
-                            ),
+                            else _generate_pattern_with_dtype_convert(computation_call),
                             KeywordArg("o_inv_scale"),
                         ),
                     ),
@@ -1054,10 +1057,8 @@ def _generate_dequant_convolution_node_pattern(
         aten.convolution.default,
         dequantize_per_tensor_activation_pattern
         if dtype == torch.float32
-        else CallFunction(
-            prims.convert_element_type.default,
-            dequantize_per_tensor_activation_pattern,
-            KeywordArg("autocast_activation_convert_dtype"),
+        else _generate_pattern_with_dtype_convert(
+            dequantize_per_tensor_activation_pattern
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1246,10 +1247,8 @@ def _register_quantization_weight_pack_pass():
         _register_dequant_promotion_pass(
             dequantize_per_tensor_activation_pattern
             if dtype == torch.float32
-            else CallFunction(
-                prims.convert_element_type.default,
-                dequantize_per_tensor_activation_pattern,
-                KeywordArg("activation_to_bf16"),
+            else _generate_pattern_with_dtype_convert(
+                dequantize_per_tensor_activation_pattern
             ),
             pass_number=0,
             dtype=dtype,

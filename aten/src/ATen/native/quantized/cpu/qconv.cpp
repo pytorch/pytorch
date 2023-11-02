@@ -1424,6 +1424,7 @@ static at::Tensor _quantized_convolution_onednn(
   if (has_accum_postop_sum && (fp32_output || bfloat16_output)) {
     TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
     TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, accum_zero_point must be 0");
+    TORCH_CHECK((accum.value().scalar_type() == c10::kFloat) || (accum.value().scalar_type() == c10::kBFloat16), "The accum tensor should be KFloat or KBFloat.");
   }
 
   std::string func_name = "quantized::packed_weights_conv";
@@ -1597,7 +1598,6 @@ static at::Tensor _quantized_convolution_onednn(
         kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
     accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
     if (fp32_output || bfloat16_output) {
-      TORCH_CHECK((accum_contig.scalar_type() == c10::kFloat) || (accum_contig.scalar_type() == c10::kBFloat16), "The accum_contig tensor should be KFloat or KBFloat.");
       TORCH_CHECK((output.scalar_type() == c10::kFloat) || (output.scalar_type() == c10::kBFloat16), "The output tensor should be KFloat or KBFloat.");
       if (accum_contig.scalar_type() != output.scalar_type()) {
         // accum_contig is KFloat32 and we expect a kBFloat16 output
