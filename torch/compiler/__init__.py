@@ -115,6 +115,6 @@ def cudagraph_mark_step_begin():
 
     For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
     """
-    from torch._inductor import cudagraph trees
+    from torch._inductor import cudagraph_trees
 
     cudagraph_trees.mark_step_begin()
