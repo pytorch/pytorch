@@ -645,7 +645,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         torch.stack,
                         *proxy_args_kwargs(args, kwargs),
                     ),
-                    **options,
                 )
                 args = [stacked]
 
