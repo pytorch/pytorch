@@ -545,10 +545,8 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
-        # TODO: These special cases shouldn't be necessary; we should
-        # generically support torch.ops that return int
         elif (
-            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
+            self.value is torch.ops.aten.sym_size
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -556,7 +554,7 @@ class TorchVariable(VariableTracker):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
+            self.value is torch.ops.aten.sym_stride
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
