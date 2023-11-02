@@ -599,9 +599,9 @@ class ViewAndMutationMeta:
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
-    # We're plumbing this is_subclass here is because it's painful to support input mutations
+    # We're plumbing this requires_subclass_dispatch here is because it's painful to support input mutations
     # on subclasses, and that info isn't easily available.
-    is_subclass: bool = False
+    requires_subclass_dispatch: bool = False
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -615,9 +615,9 @@ class ViewAndMutationMeta:
         # handling data-only mutations, because we keep them directly in the graph.
 
         # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on is_subclass argument but this is not easy to do because you would
+        # based on requires_subclass_dispatch argument but this is not easy to do because you would
         # have to pass around this argument multiple level down.
-        if not self.is_subclass:
+        if not self.requires_subclass_dispatch:
             mutated_inp_runtime_indices = [
                 i for i, m in enumerate(self.input_info)
                 if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
@@ -627,7 +627,7 @@ class ViewAndMutationMeta:
 
         mutated_graph_handled_indices = [
             i for i, m in enumerate(self.input_info)
-            if m.mutation_type == MutationType.MUTATED_IN_GRAPH and not self.is_subclass
+            if m.mutation_type == MutationType.MUTATED_IN_GRAPH and not self.requires_subclass_dispatch
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
@@ -1065,7 +1065,7 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
-    is_subclass: bool = False,
+    requires_subclass_dispatch: bool = False,
 ) -> ViewAndMutationMeta:
     memo = {}
 
@@ -1442,7 +1442,7 @@ from a multi-output view call")
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
-            is_subclass=is_subclass,
+            requires_subclass_dispatch=requires_subclass_dispatch,
         )
         return metadata
 
@@ -3587,7 +3587,7 @@ def aot_dispatch_subclass(
         metadata_fn,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        is_subclass=True,
+        requires_subclass_dispatch=True,
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
