@@ -51,7 +51,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
-    positions: Optional[dis.Positions] = None
+    positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
@@ -299,7 +299,7 @@ def linetable_311_writer(first_lineno: int):
     linetable = []
     lineno = first_lineno
 
-    def update(positions: dis.Positions, inst_size):
+    def update(positions: "dis.Positions", inst_size):
         nonlocal lineno
         lineno_new = positions.lineno if positions else None
 
