@@ -26,6 +26,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import Self
+
 from torchgen.code_template import CodeTemplate
 
 
@@ -185,7 +187,7 @@ class FileManager:
     def write(
         self,
         filename: str,
-        env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]],
+        env_callable: Callable[[], Union[str, Dict[str, Any]]],
     ) -> None:
         self.write_with_template(filename, filename, env_callable)
 
@@ -486,7 +488,7 @@ class OrderedSet(Generic[T]):
     def __or__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
         return OrderedSet.union(self, other)
 
-    def __ior__(self, other: "OrderedSet[T]") -> "OrderedSet[T]":
+    def __ior__(self, other: "OrderedSet[T]") -> Self:
         self.update(other)
         return self
 

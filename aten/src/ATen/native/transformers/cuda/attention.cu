@@ -668,7 +668,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -828,6 +828,8 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
             return_debug_mask,
             c10::nullopt /*gen_*/);
   } else {
@@ -848,17 +850,19 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
             return_debug_mask, /*return_softmax (this is used for testing)*/
             c10::nullopt);
   }
   debug_attn_mask =
       return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
   return std::make_tuple(
-      output,
-      logsumexp,
-      philox_seed,
-      philox_offset,
-      debug_attn_mask);
+      std::move(output),
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
 
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")

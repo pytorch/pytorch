@@ -79,16 +79,16 @@ except ImportError as e:
     # velocity. These are covered by a separate test target `quantization_fx`
     logging.warning(e)
 
-# Quantization for PyTorch 2.0 Export path
+# PyTorch 2 Export Quantization
 try:
     # To be moved to compiler side later
     from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
     from quantization.pt2e.test_duplicate_dq import TestDuplicateDQPass  # noqa: F401
     from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EOps  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
