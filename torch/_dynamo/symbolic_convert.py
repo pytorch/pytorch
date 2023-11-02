@@ -624,6 +624,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def inline_user_function_return(self, fn, args, kwargs, allow_stopiteration=False):
         """
         A call to some user defined function by inlining it.
+
+        allow_stopiteration: whether a inlining generator translator can return the
+            values yielded upon encountering `InlinedUserStopIteration`, instead of reraising.
         """
         state = self.copy_graphstate()
         try:
@@ -724,7 +727,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except Unsupported:
+        # StopIteration, if uncaught by tracing mechanisms, should trigger compile
+        except (Unsupported, exc.InlinedUserStopIteration):
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
@@ -906,8 +910,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def RAISE_VARARGS(self, inst):
         value = self.pop()
-        if isinstance(value, UserDefinedObjectVariable) and isinstance(
-            value.value, StopIteration
+        if (
+            # not isinstance(self, InstructionTranslator)
+            isinstance(value, UserDefinedObjectVariable)
+            and isinstance(value.value, StopIteration)
         ):
             raise exc.InlinedUserStopIteration()
         unimplemented(f"RAISE_VARARGS is not implemented for {value}")

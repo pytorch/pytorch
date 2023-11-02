@@ -7926,6 +7926,45 @@ def ___make_guard_fn():
         with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
             compiled = compiled_fn(x)
 
+    def test_correct_behaviour_graph_break_while_raising(self):
+        def fn(x):
+            x = x + 1
+            try:
+                raise StopIteration()
+            except StopIteration:
+                pass
+            x = x + 1
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager")(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+
+    def test_correct_behaviour_graph_break_while_nested_raising(self):
+        def fn(x):
+            x = x + 1
+            try:
+                items = iter([1, 2])
+                x += next(items)
+                x += next(items)
+                x += next(items)
+            except StopIteration:
+                pass
+            x = x + 1
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager")(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+
     def test_zip_user_defined(self):
         # https://github.com/pytorch/pytorch/issues/107691
         class MyClass:
