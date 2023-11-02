@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state_if_fully_sharded_module,
     FSDP_WRAPPED_MODULE,
 )
+from torch.nn.modules.module import _IncompatibleKeys
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -368,9 +369,9 @@ def _load_model_state_dict(
     model: nn.Module,
     state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
-) -> None:
+) -> _IncompatibleKeys:
     if not info.handle_model or not state_dict:
-        return
+        return _IncompatibleKeys({}, {})
 
     for key, _ in model.named_parameters():
         fqns = _get_fqns(model, key)
@@ -380,7 +381,10 @@ def _load_model_state_dict(
                 state_dict[fqn_with_ddp_prefix] = state_dict.pop(fqn)
 
     with info.fsdp_context():
-        return _state_dict_fn(model, "load_state_dict")(state_dict, strict=info.strict)
+        return cast(
+            _IncompatibleKeys,
+            _state_dict_fn(model, "load_state_dict")(state_dict, strict=info.strict),
+        )
 
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
@@ -726,7 +730,7 @@ def set_model_state_dict(
     ],
     *,
     options: Optional[StateDictOptions] = None,
-) -> None:
+) -> _IncompatibleKeys:
     """Load the model state_dict.
 
     The counterpart of ``get_model_state_dict`` to set the state_dict to the
@@ -744,7 +748,9 @@ def set_model_state_dict(
             `StateDictOptions` for the details.
 
     Returns:
-        None
+        ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+            * **missing_keys** is a list of str containing the missing keys
+            * **unexpected_keys** is a list of str containing the unexpected keys
     """
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
@@ -753,7 +759,7 @@ def set_model_state_dict(
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
         _verify_state_dict(model_state_dict, {}, info)
-        _load_model_state_dict(model, model_state_dict, info)
+        return _load_model_state_dict(model, model_state_dict, info)
 
 
 def set_optimizer_state_dict(
@@ -802,7 +808,7 @@ def set_state_dict(
     ],
     optim_state_dict: OptimizerStateType,
     options: Optional[StateDictOptions] = None,
-) -> None:
+) -> _IncompatibleKeys:
     """Load the model state_dict and optimizers state_dict.
 
     The counterpart of ``get_state_dict`` to set the state_dict to the model and
@@ -829,7 +835,9 @@ def set_state_dict(
             `StateDictOptions` for the details.
 
     Returns:
-        None
+        ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+            * **missing_keys** is a list of str containing the missing keys of the model state_dict.
+            * **unexpected_keys** is a list of str containing the unexpected keys of the model state_dict.
     """
 
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
@@ -846,8 +854,8 @@ def set_state_dict(
         )
 
         _verify_state_dict(model_state_dict, optim_state_dict, info)
-        _load_model_state_dict(model, model_state_dict, info)
         _load_optim_state_dict(model, optimizers, optim_state_dict, info)
+        return _load_model_state_dict(model, model_state_dict, info)
 
 
 # TODO: correct the state_dict function signature.

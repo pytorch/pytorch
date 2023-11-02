@@ -389,13 +389,15 @@ class TestStateDict(FSDPTest):
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
-        model_state_dict.pop("abc")
         model_state_dict.pop(key)
-        set_model_state_dict(
+        incompatible_keys = set_model_state_dict(
             model,
             model_state_dict=model_state_dict,
             options=StateDictOptions(strict=False),
         )
+        self.assertEqual(incompatible_keys.missing_keys, [key])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["abc"])
+        model_state_dict.pop("abc")
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
 
