@@ -2890,7 +2890,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(DistBackendError, self.blocking_wait_error_msg):
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=failed_collective_timeout)
             # Now do a barrier to tell other rank to go ahead.
             pg_gloo.barrier().wait()
@@ -3093,7 +3093,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                DistBackendError, "Health check failure"
+                dist.DistBackendError, "Health check failure"
             ):
                 c10d.init_process_group(
                     backend="nccl",

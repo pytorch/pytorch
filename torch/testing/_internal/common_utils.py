@@ -1086,7 +1086,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
-IS_ARM64 = platform.machine() == 'arm64'
+IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -4607,11 +4607,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
+    for out in pytree.tree_leaves(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_flatten(inps)[0]:
+    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_leaves(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

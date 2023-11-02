@@ -373,7 +373,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             ]:
                 input_act = getattr(m, n.args[0].target)
                 output_act = getattr(m, list(n.users)[0].target)
-                self.assertEqual(id(input_act), id(output_act))
+                self.assertTrue(input_act is output_act)
 
         m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
