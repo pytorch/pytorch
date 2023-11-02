@@ -115,8 +115,8 @@ class WorkerSpec:
 class Worker:
     """
     Represents a worker instance.
-    
-    Contrast this with ``WorkerSpec`` that represents the specifications of 
+
+    Contrast this with ``WorkerSpec`` that represents the specifications of
     a worker. A ``Worker`` is created from a ``WorkerSpec``. A ``Worker`` is
     to a ``WorkerSpec`` as an object is to a class.
 
@@ -235,7 +235,7 @@ class WorkerState(str, Enum):
     def is_running(state: "WorkerState") -> bool:
         """
         Boolean to Check the :class:`WorkerState`.
-        
+
         Returns:
              True if the worker state represents workers still running
              (e.g. that the process exists but not necessarily healthy).
@@ -246,7 +246,7 @@ class WorkerState(str, Enum):
 class WorkerGroup:
     r"""
     Represents the set of ``Worker`` instances for the given ``WorkerSpec`` managed by ``ElasticAgent``.
-    
+
     Whether the worker group contains cross
     instance workers or not depends on the implementation of the agent.
     """
@@ -327,7 +327,7 @@ class _RoleInstanceInfo:
 class RunResult:
     """
     Results returned by the worker executions.
-    
+
     Run results follow an "all-or-nothing" policy
     where the run is successful if and only if ALL local workers managed by this agent
     complete successfully.
@@ -362,7 +362,7 @@ class RunResult:
 def _get_socket_with_port() -> socket.socket:
     """
     Return a free port on localhost that is "reserved" by binding a temporary socket on it.
-      
+
     Close the socket before passing the port to the entity
     that requires it. Usage example
 
@@ -496,7 +496,7 @@ class SimpleElasticAgent(ElasticAgent):
         r"""
         Stop all workers in the given worker group.
 
-        Implementors must deal with workers in all states defined by 
+        Implementors must deal with workers in all states defined by
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """

@@ -9,7 +9,7 @@
 """
 The elastic agent is the control plane of torchelastic.
 
-It is a process that launches and manages underlying worker 
+It is a process that launches and manages underlying worker
 processes. The agent is responsible for:
 
 1. Working with distributed torch: the workers are started with all the

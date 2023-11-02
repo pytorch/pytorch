@@ -86,7 +86,7 @@ class Skippable(nn.Module):
 
     def isolate(self: T, ns: Namespace, *, only: Optional[Iterable[str]] = None) -> T:
         r"""Isolates a specified subset or the whole set of skip tensors into a namespace.
-        
+
         In a single sequential module, skip tensors with the same name are not allowed
         unless they are isolated by different namespaces.
 
@@ -179,7 +179,7 @@ class Skippable(nn.Module):
 
     def forward(self, input: Union[List[Any], Tensor]) -> TensorOrTensors:
         """Perform the forward propagation.
-        
+
         :class:`stash` or :class:`pop` commands will be handled by portals silently.
         The portals won't be exposed to users.
 
@@ -240,7 +240,7 @@ def skippable(
     stash: Iterable[str] = (), pop: Iterable[str] = (),
 ) -> Callable[[Type[SkippableModule]], Type[Skippable]]:
     """Decorate :class:`nn.Module <torch.nn.Module>` with skip connections.
-    
+
     Decorated modules are called "skippable". This functionality
     works perfectly fine even when the module is not wrapped by
     :class:`~torch.distributed.pipeline.sync.Pipe`.
