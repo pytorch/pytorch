@@ -1101,18 +1101,6 @@ class BuiltinVariable(VariableTracker):
                 for grapharg in tx.output.graphargs:
                     if grapharg.source == source.base:
                         example_value = grapharg.example.grad
-                        if example_value is None:
-                            from .builder import wrap_fx_proxy
-
-                            grad_proxy = obj.as_proxy().grad
-                            return wrap_fx_proxy(
-                                tx=tx,
-                                proxy=grad_proxy,
-                                example_value=obj.as_proxy()
-                                .node.meta["example_value"]
-                                .grad,
-                                **options,
-                            )
                         return VariableBuilder(tx, source)(example_value).add_options(
                             options
                         )
