@@ -911,7 +911,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def RAISE_VARARGS(self, inst):
         value = self.pop()
         if (
-            # not isinstance(self, InstructionTranslator)
             isinstance(value, UserDefinedObjectVariable)
             and isinstance(value.value, StopIteration)
         ):
