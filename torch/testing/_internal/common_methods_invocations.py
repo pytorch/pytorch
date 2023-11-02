@@ -4347,6 +4347,15 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
 def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs)
 
+    D = 4
+    S = 3
+    L = 5
+
+    def shape(size, rank, with_batch_channel=True):
+        if with_batch_channel:
+            return tuple([2, 3] + ([size] * rank))
+        return tuple([size] * rank)
+
     if mode in ('bilinear', 'bicubic'):
         make_arg = partial(
             make_tensor,
@@ -4359,24 +4368,15 @@ def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwa
         # provide few samples for more typical image processing usage
         for memory_format in [torch.contiguous_format, torch.channels_last]:
             for aa in [True, False]:
-                yield SampleInput(
-                    make_arg((2, 3, 345, 456), memory_format=memory_format),
-                    (270, 270),
-                    scale_factor=None,
-                    mode=mode,
-                    align_corners=False,
-                    antialias=aa,
-                )
-
-            if mode in ('bilinear', 'bicubic'):
-                if device == "cpu" and dtype in (torch.bfloat16, ):
-                    # skiping torch.bfloat16 dtype as compute_indices_weights_aa is not implemented for BFloat16 for CPU
-                    continue
-                yield SampleInput(
-                    make_arg(shape(D, rank)),
-                    shape(S, rank, False), None, mode, align_corners,
-                    antialias=True
-                )
+                for align_corners in [True, False]:
+                    yield SampleInput(
+                        make_arg((2, 3, 345, 456), memory_format=memory_format),
+                        (270, 270),
+                        scale_factor=None,
+                        mode=mode,
+                        align_corners=align_corners,
+                        antialias=aa,
+                    )
 
 
 def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):

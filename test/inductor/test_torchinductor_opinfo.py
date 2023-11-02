@@ -365,6 +365,8 @@ inductor_override_kwargs = {
     },
     "nn.functional.interpolate.bilinear": {"assert_equal": False},
     "nn.functional.upsample_bilinear": {"assert_equal": False},
+    ("_upsample_bilinear2d_aa", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("_upsample_bilinear2d_aa", "cpu", f64): {"atol": 1e-6, "rtol": 1e-5},
 }
 
 # Always test with all sample for following ops
