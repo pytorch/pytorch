@@ -1078,12 +1078,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         it = self.pop()
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
-            try:
-                val, next_iter = it.next_variables(self)
-                self.push(next_iter)
-                self.push(val)
-            except StopIteration:
+            val, next_iter = it.next_variables(self)
+            if _is_stop_iteration(val):
                 self.jump(inst)
+                return
+            self.push(next_iter)
+            self.push(val)
         else:
             unimplemented(f"FOR_ITER {typestr(it)}")
 
@@ -2543,6 +2543,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.instruction_pointer = None
 
 
+def _is_stop_iteration(vt: VariableTracker):
+    return vt.is_python_constant() and vt.as_python_constant() == StopIteration
+
+
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
@@ -2573,15 +2577,14 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 tos, (variables.ListIteratorVariable, variables.IteratorVariable)
             ):
                 self.output.guards.update(tos.guards)
-                try:
-                    val, next_iter = tos.next_variables(self)
-                    self.push(val)
-                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                    self.YIELD_VALUE(inst)
-                    self.pop()
-                    self.push(next_iter)
-                except StopIteration:
+                val, next_iter = tos.next_variables(self)
+                if _is_stop_iteration(val):
                     return
+                self.push(val)
+                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                self.YIELD_VALUE(inst)
+                self.pop()
+                self.push(next_iter)
             else:
                 unimplemented(f"YIELD_FROM {typestr(tos)}")
 

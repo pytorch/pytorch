@@ -2,6 +2,8 @@ MAX_CYCLE = 3000
 
 from typing import List, Optional
 
+from .. import polyfill
+
 from ..exc import unimplemented
 
 from .base import VariableTracker
@@ -14,6 +16,28 @@ class IteratorVariable(VariableTracker):
 
     def next_variables(self, tx):
         unimplemented("abstract method, must implement")
+
+
+class GenericIteratorVariable(IteratorVariable):
+    def __init__(self, iterator, **kwargs):
+        super().__init__(**kwargs)
+        self.iterator = iterator
+
+    def next_variables(self, tx):
+        assert self.mutable_local
+        from .builder import SourcelessBuilder
+
+        try:
+            # We need this to polyfill because otherwise, `call_method` will
+            # not have tracked the side effects incurred to `iterator`.
+            next_item = tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.next_p), [self.iterator], {}
+            )
+            next_iter = self.clone(iterator=self.iterator)
+        except StopIteration:
+            return variables.BuiltinVariable(StopIteration), self
+        tx.replace_all(self, next_iter)
+        return next_item.add_options(self), next_iter
 
 
 class RepeatIteratorVariable(IteratorVariable):
@@ -97,5 +121,5 @@ class CycleIteratorVariable(IteratorVariable):
             tx.replace_all(self, next_iter)
             return self.item.add_options(self), next_iter
         else:
-            raise StopIteration
+            return BuiltinVariable(StopIteration), self
         return self.item.add_options(self), next_iter

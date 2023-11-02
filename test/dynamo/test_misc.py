@@ -7856,6 +7856,59 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_iter_user_defined(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += 1
+                return self.a
+
+        def fn(x):
+            i = 0
+            for item in MyClass():
+                x += item
+                i += 1
+                if i > 10:
+                    break
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="inductor", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+
+    def test_zip_user_defined(self):
+        # https://github.com/pytorch/pytorch/issues/107691
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += 1
+                return self.a
+
+        def fn(x):
+            for items in zip([1, 2, 3], MyClass()):
+                x += sum(items)
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="inductor", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+
     def test_pure_python_accumulate(self):
         def accumulate(iterable, func=lambda x, y: x + y):
             it = iter(iterable)

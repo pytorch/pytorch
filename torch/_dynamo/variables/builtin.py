@@ -841,6 +841,13 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
                 guards=guards,
             ).add_options(self, obj)
+        elif obj is not None and isinstance(obj, variables.UserDefinedObjectVariable):
+            options = VariableTracker.propagate(obj)
+            iterator = obj.call_method(tx, "__iter__", [], {}).add_options(options)
+
+            return variables.GenericIteratorVariable(
+                iterator=iterator, mutable_local=MutableLocal()
+            )
 
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
@@ -903,6 +910,12 @@ class BuiltinVariable(VariableTracker):
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
             ]
             return variables.TupleVariable(items, **options)
+        else:
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.zip), args, {}
+            )
 
     def call_enumerate(self, tx, *args):
         options = VariableTracker.propagate(self, args)
@@ -970,7 +983,24 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx, arg):
+    def call_next(self, tx, arg, kwargs=None):
+        def _is_stop_iteration(vt):
+            return vt.is_python_constant() and vt.as_python_constant() == StopIteration
+
+        if isinstance(
+            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
+        ):
+            val, next_iter = arg.next_variables(tx)
+            if _is_stop_iteration(val):
+                raise StopIteration()
+            return val
+        elif isinstance(arg, variables.BaseListVariable):
+            return arg.items[0].add_options(self, arg)
+
+    def call_wrapped_next(self, tx, arg, kwargs=None):
+        def _is_stop_iteration(vt):
+            return vt.is_python_constant() and vt.as_python_constant() == StopIteration
+
         if isinstance(
             arg, (variables.ListIteratorVariable, variables.IteratorVariable)
         ):

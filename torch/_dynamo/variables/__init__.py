@@ -27,6 +27,7 @@ from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    GenericIteratorVariable,
     IteratorVariable,
     RepeatIteratorVariable,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "CycleIteratorVariable",
     "LambdaVariable",
     "ListIteratorVariable",
+    "GenericIteratorVariable",
     "ListVariable",
     "NNModuleVariable",
     "NamedTupleVariable",
