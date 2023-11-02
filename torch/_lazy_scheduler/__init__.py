@@ -1,31 +1,16 @@
 import torch
 import itertools
+from typing import Optional, Dict, Callable
 
 
 class Segment:
-  _instance = None
-  _mapping = {}
+  _cur_segment: Optional[str] = None
+  _func_to_segment_mapping: Dict[Callable, str] = {}
   _unnamed_counter = itertools.count(start=0)
-
-  def __new__(cls):
-    if cls._instance is None:
-      cls._instance = super(Segment, cls).__new__(cls)
-      cls._instance.tag = None
-    return cls._instance
-
-  def __call__(self, fn, tag):
-    def _fn(*args, **kwargs):
-      Segment._instance.tag = tag
-      return fn(*args, **kwargs)
-    return _fn
 
   @classmethod
   def get_next_unnamed_segment(cls):
     return f"unnamed_{next(cls._unnamed_counter)}"
-
-
-# NOTE: this initializes the singleton instance of `Segment`
-Segment()
 
 
 class LazyScheduler:
@@ -33,6 +18,7 @@ class LazyScheduler:
     self.schedule = schedule
 
   def compile(self, gm_, example_inputs_):
+    # breakpoint()
     known_segments = []
     print(f"gm_.graph: {gm_.graph}")
     for node in gm_.graph.nodes:
@@ -57,13 +43,17 @@ class LazyScheduler:
     # submod_list = list(gm_after_split.children())
     # breakpoint()
 
-    # NOTE: What happens if we have a user-defined segment deep down in a submodule?
-    # Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
-    # You can call this a "segment break".
-
     # TODO: How do we generate example inputs for each compiled subgraph?
 
     # assert isinstance(root, FakeRootModule)
     # gm = fx.GraphModule(root, self.graph)
 
     return torch._inductor.compile(gm_, example_inputs_)
+
+"""
+FAQ
+
+Q1: What happens if we have a user-defined segment deep down in a submodule?
+Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
+You can call this a "segment break".
+"""

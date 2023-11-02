@@ -389,10 +389,6 @@ class VariableBuilder:
         # We want to get those out and wrap those.
         value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
-        # if istype(value, (type, types.FunctionType)):
-        #     # NOTE: this catches all global functions
-        #     print(f"value: {value}")
-
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
             value, config.traceable_tensor_subclasses

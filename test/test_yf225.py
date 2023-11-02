@@ -78,26 +78,34 @@ class TestModule(torch.nn.Module):
 
 from torch._lazy_scheduler import Segment, LazyScheduler
 
+m = TestModule()
+# TODO: implement submodule method tagging
+Segment._func_to_segment_mapping[m.subfunc1] = "subfunc1"
+Segment._func_to_segment_mapping[m.subfunc2] = "subfunc2"
+m = m.to(device)
+x = torch.randn(4, 4, device=device)
+y = torch.randn(4, 4, device=device)
 
-with (
-    torch._dynamo.config.patch(
-        dynamic_shapes=False,
-        capture_dynamic_output_shape_ops=False,
-        capture_scalar_outputs=False,
-    ),
-):
-    torch._dynamo.reset()
-    m = TestModule()
-    # TODO: implement submodule method tagging
-    Segment._mapping[m.subfunc1] = "subfunc1"
-    Segment._mapping[m.subfunc2] = "subfunc2"
-    m = m.to(device)
-    x = torch.randn(4, 4, device=device)
-    y = torch.randn(4, 4, device=device)
+lazy_scheduler = LazyScheduler([])
+compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
 
-    lazy_scheduler = LazyScheduler([])
-    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False, dynamic=False)
+# ref = m(x, y)
+actual = compiled_m(x, y)
+# # assert torch.allclose(ref, actual)
 
-    # ref = m(x, y)
-    actual = compiled_m(x, y)
-    # # assert torch.allclose(ref, actual)
+
+# TODO: can we use module hook to implement the segment tagging logic?
+#
+# class Segment:
+#     _instance = None
+#     def __call__(self, fn, tag):
+#         def _fn(*args, **kwargs):
+#             with tag_segment(tag):  # TODO: does this work with Dynamo? what if `fn` is not single graph?
+#                 return fn(*args, **kwargs)
+#         return _fn
+#
+# def hook(module, args):
+#     module.subfunc1 = Segment()(module.subfunc1, "subfunc1")
+#     module.subfunc2 = Segment()(module.subfunc2, "subfunc2")
+#
+# m.register_forward_pre_hook(hook)

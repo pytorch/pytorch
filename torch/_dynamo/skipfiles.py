@@ -365,9 +365,6 @@ def check_verbose(obj, allow_torch=False):
     else:
         filename = getfile(obj)
 
-    # traceback.print_stack()
-    # print(f"obj: {obj}")
-
     if obj in get_func_inlinelist():
         return SkipResult(
             False,
