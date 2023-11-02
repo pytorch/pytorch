@@ -316,6 +316,15 @@ AOTITorchError aoti_torch_assign_tensors(
   });
 }
 
+AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = self_tensor->clone();
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *ret = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
@@ -415,5 +424,27 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         flatten_int_args,
         num_tensors,
         flatten_tensor_args);
+  });
+}
+
+AOTITorchError aoti_torch__alloc_from_pool(
+    AtenTensorHandle self,
+    int64_t offset_bytes,
+    int32_t dtype,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor* new_tensor = new at::Tensor(torch::inductor::_alloc_from_pool(
+        *self_tensor,
+        offset_bytes,
+        static_cast<c10::ScalarType>(dtype),
+        sizes,
+        strides));
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
