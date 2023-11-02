@@ -51,15 +51,7 @@ class TestMatmulCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super(self.__class__, self).tearDown()
 
-    @onlyCUDA
-    @skipIfRocmVersionLessThan((5, 2))
-    # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
-                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
-    @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    @parametrize("size", [100, 1000, 10000])
-    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
+    def cublas_addmm(self, size: int, dtype: torch.dtype, reduced_precision: bool = False):
         #
         # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
         # results from the CUDA invocation of torch.addmm and the CPU invocation
@@ -71,8 +63,8 @@ class TestMatmulCuda(TestCase):
         # which fail the threshold check
         orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = reduced_precision
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = reduced_precision
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
         make_arg = partial(make_tensor, dtype=dtype, device="cpu")
@@ -117,65 +109,28 @@ class TestMatmulCuda(TestCase):
     @onlyCUDA
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
+    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
+                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
+                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("size", [100, 1000, 10000])
+    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
+        self.cublas_addmm(size, dtype, False)
+
+    @onlyCUDA
+    @skipIfRocmVersionLessThan((5, 2))
+    # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     def test_cublas_addmm_reduced_precision(self, size: int, dtype: torch.dtype):
-        # Similar to test_cublas_addmm, but with reduced precision deliberately
-        # enabled and increased tolerances
-        n, m, p = (size + 1, size, size + 2)
-        # Disable reduced precision reductions in BFloat16 to bypass some kernels
-        # which fail the threshold check
-        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
-        # Make random tensors on CPU (seed set on common_utils.py import)
-        # (Not using numpy because it does not support bfloat16)
-        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
-        m_beta = make_arg(1)
-        m_input = make_arg((n, p))
-        m_1 = make_arg((n, m))
-        m_2 = make_arg((m, p))
-        # *(B)FLOAT16 Special Handling*
-        # Backend does not tensorize float16 on CPU,
-        # and bloat16 may present accuracy issues,
-        # so convert to float32 for these cases
-        # (but keep same for other types, e.g. float32 and int*)
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=torch.float32)
-            m_input = m_input.to(dtype=torch.float32)
-            m_1 = m_1.to(dtype=torch.float32)
-            m_2 = m_2.to(dtype=torch.float32)
-        # Get CPU result
-        res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # *(B)FLOAT16 Special Handling*``
-        # Convert back to (b)float16
-        if dtype == torch.float16 or dtype == torch.bfloat16:
-            m_beta = m_beta.to(dtype=dtype)
-            m_input = m_input.to(dtype=dtype)
-            m_1 = m_1.to(dtype=dtype)
-            m_2 = m_2.to(dtype=dtype)
-            res_cpu = res_cpu.to(dtype=dtype)
-        # Move arg tensors to CUDA
-        m_beta = m_beta.to("cuda")
-        m_input = m_input.to("cuda")
-        m_1 = m_1.to("cuda")
-        m_2 = m_2.to("cuda")
-        # Get CUDA result
-        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
-        # Move to CPU for comparison
-        res_cuda = res_cuda.to("cpu")
-        # Compare
-        self.assertEqual(res_cpu, res_cuda)
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
-
+        self.cublas_addmm(size, dtype, True)
 
     @onlyCUDA
-    def test_cublas_addmm_alignment(self):
-        dtype = torch.half
+    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})
+    @dtypes(torch.float16)
+    def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
         # perturb X, A, or B alignment
         for idx in range(0, 3):
