@@ -14,8 +14,10 @@ from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
+    get_model_state_dict,
     get_state_dict,
     PG,
+    set_model_state_dict,
     set_state_dict,
     STATE,
     StateDictOptions,
@@ -382,30 +384,30 @@ class TestStateDict(FSDPTest):
     def test_strict(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict, _ = get_state_dict(model)
+        model_state_dict = get_model_state_dict(model)
         key = next(iter(model_state_dict.keys()))
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
+            set_model_state_dict(model, model_state_dict=model_state_dict)
         model_state_dict.pop("abc")
         model_state_dict.pop(key)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict=model_state_dict,
             options=StateDictOptions(strict=False),
         )
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
+            set_model_state_dict(model, model_state_dict=model_state_dict)
 
     @skip_if_lt_x_gpu(1)
     def test_partial(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict1, _ = get_state_dict(model)
+        model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
-        model_state_dict2, _ = get_state_dict(model, submodules={model.l})
+        model_state_dict2 = get_model_state_dict(model, submodules={model.l})
         model_state_dict2 = copy.deepcopy(model_state_dict2)
-        model_state_dict3, _ = get_state_dict(
+        model_state_dict3 = get_model_state_dict(
             model,
             submodules={model.l},
             options=StateDictOptions(keep_submodule_prefixes=False),
@@ -425,7 +427,7 @@ class TestStateDict(FSDPTest):
             k: torch.zeros_like(v) for k, v in model_state_dict1.items()
         }
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict=model_state_dict2,
             options=StateDictOptions(strict=False),
@@ -434,7 +436,7 @@ class TestStateDict(FSDPTest):
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict={model.l: model_state_dict3},
             options=StateDictOptions(strict=False),
