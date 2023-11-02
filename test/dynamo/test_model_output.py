@@ -137,33 +137,43 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             d: torch.Tensor = None
             e: torch.Tensor = None
 
-        def fn(obj):
-            class_fields = dataclasses.fields(obj)
-            assert len(class_fields)
-            assert all(field.default is None for field in class_fields[1:])
-            other_fields_are_none = all(
-                getattr(obj, field.name) is None for field in class_fields[1:]
-            )
-            assert not other_fields_are_none
+        # Patch the __module__; to avoid expensive imports we currently only
+        # trigger custom logic for ModelOutput and BaseModel when the module
+        # names match.
+        MyDataClass.__module__ = "transformers.modeling_outputs"
 
-            total = getattr(obj, class_fields[0].name)
-            for field in class_fields[1:]:
-                v = getattr(obj, field.name)
-                if v is not None:
-                    total += v
+        def fn(mo_parameter, custom_dataclass_args):
+            mo_constructed = MyDataClass(*custom_dataclass_args)
+            total = torch.zeros(10)
+            for obj in (mo_parameter, mo_constructed):
+                class_fields = dataclasses.fields(obj)
+                assert len(class_fields)
+                assert all(field.default is None for field in class_fields[1:])
+                other_fields_are_none = all(
+                    getattr(obj, field.name) is None for field in class_fields[1:]
+                )
+                assert not other_fields_are_none
 
-            return total
+                for field in class_fields:
+                    v = getattr(obj, field.name)
+                    if v is not None:
+                        total += v
+
+            return mo_constructed, total
 
         tensors = [torch.randn(10), torch.randn(10), torch.randn(10)]
-        obj1 = MyDataClass(*tensors)
-        correct1 = fn(obj1)
+        param1 = MyDataClass(*tensors)
+        constructed1, total1 = fn(param1, tensors)
 
-        obj2 = MyDataClass(*tensors)
+        param2 = MyDataClass(*tensors)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
-        self.assertTrue(same(opt_fn(obj2), correct1))
+        constructed2, total2 = opt_fn(param2, tensors)
+
+        self.assertTrue(same(constructed1, constructed2))
+        self.assertTrue(same(total1, total2))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
+        self.assertEqual(cnts.op_count, 7)
 
     @maybe_skip
     def test_HF_bert_model_output(self):
