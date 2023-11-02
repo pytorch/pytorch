@@ -624,6 +624,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
+        fn, args, kwargs = VariableTracker.apply(
+            lambda x: x.realize(), (fn, args, kwargs)
+        )
         state = self.copy_graphstate()
         try:
             result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
