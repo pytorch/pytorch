@@ -102,6 +102,8 @@ struct CUDAPluggableAllocator
       c10::cuda::CUDACachingAllocator::RecordContext when) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
+  void attachAllocatorTraceTracker(
+      c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) override;
   std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
   getCheckpointState(int device, at::cuda::MempoolId_t id) override;
   c10::cuda::CUDACachingAllocator::CheckpointDelta setCheckpointPoolState(
