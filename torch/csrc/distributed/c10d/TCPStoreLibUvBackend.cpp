@@ -578,6 +578,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   void registerClient(c10::intrusive_ptr<UvHandle> client);
   void unregisterClient(c10::intrusive_ptr<UvHandle> client);
   void clearClientWaitState(c10::intrusive_ptr<UvHandle> client);
+  bool isMiscellaneousClient(c10::intrusive_ptr<UvHandle> client);
 
   uint16_t get_socket_port(uv_tcp_t* handle);
   void init(const TCPStoreOptions& opts);
@@ -598,6 +599,7 @@ class LibUVStoreDaemon : public BackgroundThread {
   // From socket -> number of keys awaited
   std::unordered_map<c10::intrusive_ptr<UvHandle>, size_t> keysAwaited_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> clients_;
+  std::unordered_set<c10::intrusive_ptr<UvHandle>> miscellaneousClients_;
   int port_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
@@ -635,65 +637,82 @@ class UvClient : public UvTcpSocket {
       uint8_t command = -1;
       if (!stream.read1(command))
         break;
-      switch ((QueryType)command) {
-        case QueryType::SET:
-          if (!parse_set_command())
-            return;
-          break;
-        case QueryType::COMPARE_SET:
-          if (!parse_compare_set_command())
-            return;
-          break;
-        case QueryType::GET:
-          if (!parse_get_command())
-            return;
-          break;
-        case QueryType::ADD:
-          if (!parse_add_command())
-            return;
-          break;
-        case QueryType::CHECK:
-          if (!parse_check_command())
-            return;
-          break;
-        case QueryType::WAIT:
-          if (!parse_wait_command())
-            return;
-          break;
-        case QueryType::GETNUMKEYS:
-          if (!parse_getnumkeys_command())
-            return;
-          break;
-        case QueryType::DELETE_KEY:
-          if (!parse_delete_key_command())
-            return;
-          break;
-        case QueryType::APPEND:
-          if (!parse_append_command())
-            return;
-          break;
-        case QueryType::MULTI_GET:
-          if (!parse_multi_get_command())
-            return;
-          break;
-        case QueryType::MULTI_SET:
-          if (!parse_multi_set_command())
-            return;
-          break;
-        case QueryType::CANCEL_WAIT:
-          if (!parse_cancel_wait_command())
-            return;
-          break;
-        default:
-          C10D_DEBUG(
-              "Client sent invalid command. client:{} command:{}",
-              (void*)this,
-              (int)command);
-          close();
+      if (store->isMiscellaneousClient(iptr())) {
+        if ((QueryType)command != QueryType::VALIDATE)
           return;
+        if (!parse_validate_command())
+          return;
+      } else {
+        switch ((QueryType)command) {
+          case QueryType::SET:
+            if (!parse_set_command())
+              return;
+            break;
+          case QueryType::COMPARE_SET:
+            if (!parse_compare_set_command())
+              return;
+            break;
+          case QueryType::GET:
+            if (!parse_get_command())
+              return;
+            break;
+          case QueryType::ADD:
+            if (!parse_add_command())
+              return;
+            break;
+          case QueryType::CHECK:
+            if (!parse_check_command())
+              return;
+            break;
+          case QueryType::WAIT:
+            if (!parse_wait_command())
+              return;
+            break;
+          case QueryType::GETNUMKEYS:
+            if (!parse_getnumkeys_command())
+              return;
+            break;
+          case QueryType::DELETE_KEY:
+            if (!parse_delete_key_command())
+              return;
+            break;
+          case QueryType::APPEND:
+            if (!parse_append_command())
+              return;
+            break;
+          case QueryType::MULTI_GET:
+            if (!parse_multi_get_command())
+              return;
+            break;
+          case QueryType::MULTI_SET:
+            if (!parse_multi_set_command())
+              return;
+            break;
+          case QueryType::CANCEL_WAIT:
+            if (!parse_cancel_wait_command())
+              return;
+            break;
+          default:
+            C10D_DEBUG(
+                "Client sent invalid command. client:{} command:{}",
+                (void*)this,
+                (int)command);
+            close();
+            return;
+        }
       }
       stream.commit();
     }
+  }
+
+  bool parse_validate_command() {
+    uint32_t validateNumber;
+    if (!stream.read_value(validateNumber))
+      return false;
+
+    if (validateNumber != c10d::detail::validationMagicNumber)
+      return false;
+    return true;
   }
 
   bool parse_set_command() {
@@ -1061,12 +1080,24 @@ void LibUVStoreDaemon::stop() {
   }
 }
 
+bool LibUVStoreDaemon::isMiscellaneousClient(c10::intrusive_ptr<UvHandle> client) {
+  if (miscellaneousClients_.find(client) != miscellaneousClients_.end()) {
+    miscellaneousClients_.erase(client);
+    return true;
+  }
+  return false;
+}
+
 void LibUVStoreDaemon::registerClient(c10::intrusive_ptr<UvHandle> client) {
   clients_.insert(client);
+  miscellaneousClients_.insert(client);
 }
 
 void LibUVStoreDaemon::unregisterClient(c10::intrusive_ptr<UvHandle> client) {
   clients_.erase(client);
+  if (miscellaneousClients_.find(client) != miscellaneousClients_.end()) {
+    miscellaneousClients_.erase(client);
+  }
   clearClientWaitState(client);
 }
 
