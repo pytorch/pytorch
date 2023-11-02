@@ -321,7 +321,6 @@ class stash:
     __slots__ = ("name", "tensor")
 
     def __init__(self, name: str, tensor: Optional[Tensor]) -> None:
-        """Initialize the stash for a skip tensor."""
         self.name = name
         self.tensor = tensor
 
@@ -346,7 +345,6 @@ class pop:
     __slots__ = ("name",)
 
     def __init__(self, name: str) -> None:
-        """Initialize Pop command for skip tensor."""
         self.name = name
 
 

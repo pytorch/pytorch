@@ -5,7 +5,7 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-"""The API to define worker methods and objects for ```torch.distributed.elastic```."""
+
 import abc
 import functools
 import json
@@ -85,7 +85,6 @@ class WorkerSpec:
     tee: Union[Std, Dict[int, Std]] = Std.NONE
 
     def __post_init__(self):
-        """Post Initialize function for WorkerSpec."""
         assert self.local_world_size > 0
         assert self.monitor_interval > 0
 
@@ -149,7 +148,6 @@ class Worker:
         world_size: int = -1,
         role_world_size: int = -1,
     ):
-        """Initialize the worker instance."""
         # unique identifier for this worker
         self.id: Any = None
 
@@ -176,7 +174,6 @@ class Worker:
         self.role_world_size: int = role_world_size
 
     def __str__(self):
-        """Representation(str) for worker class."""
         return (
             f"local_rank={self.local_rank},global_rank={self.global_rank}"
             f",role_rank={self.role_rank},world_size={self.world_size}"
@@ -184,7 +181,6 @@ class Worker:
         )
 
     def __repr__(self):
-        """Representation for worker class."""
         return str(self)
 
 
@@ -253,7 +249,6 @@ class WorkerGroup:
     __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state"]
 
     def __init__(self, spec: WorkerSpec):
-        """Initialize the worker group."""
         self.spec = spec
         self.workers = [Worker(local_rank=i) for i in range(self.spec.local_world_size)]
 
@@ -357,7 +352,6 @@ class RunResult:
     failures: Dict[int, ProcessFailure] = field(default_factory=dict)
 
     def is_failed(self) -> bool:
-        """Check if the execution failed for the worker."""
         return self.state == WorkerState.FAILED
 
 
@@ -467,7 +461,6 @@ class SimpleElasticAgent(ElasticAgent):
     """
 
     def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
-        """Initialize the SimpleElastic Agent."""
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
         self._store = None
@@ -737,7 +730,6 @@ class SimpleElasticAgent(ElasticAgent):
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def run(self, role: str = DEFAULT_ROLE) -> RunResult:
-        """Run the agent with profile to record execution metrics."""
         start_time = time.monotonic()
         shutdown_called: bool = False
         try:
@@ -758,7 +750,6 @@ class SimpleElasticAgent(ElasticAgent):
             self._total_execution_time = int(time.monotonic() - start_time)
 
     def get_event_failed(self) -> Event:
-        """Return the Event with a failed State."""
         return self._construct_event(
             state="FAILED",
             source=EventSource.AGENT,
@@ -766,7 +757,6 @@ class SimpleElasticAgent(ElasticAgent):
         )
 
     def get_event_succeeded(self) -> Event:
-        """Return the Event with a Suceed State."""
         return self._construct_event(
             state="SUCCEEDED",
             source=EventSource.AGENT,

@@ -45,8 +45,8 @@ TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
 
 class LocalElasticAgent(SimpleElasticAgent):
     """
-    An implementation of :py:class:`torchelastic.agent.server.ElasticAgent`
-    that handles host-local workers.
+    Implementation of :py:class:`torchelastic.agent.server.ElasticAgent` for host-local workers.
+
     This agent is deployed per host and is configured to spawn ``n`` workers.
     When using GPUs, ``n`` maps to the number of GPUs available on the host.
 
