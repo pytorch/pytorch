@@ -3,6 +3,7 @@ import os
 from typing import Any, List
 
 import torch
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
 from .utils import print_once
 
@@ -167,14 +168,14 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
             # doing matching and substitution.  However, I'm guessing that
             # this assert doesn't matter too much so it's not worth the work
             assert shapes_of(args) == input_shapes or any(
-                free_symbols(s) for s in input_shapes
+                has_free_symbols(s) for s in input_shapes
             ), debug_print(shapes_of(args))
             result = gm.forward(*args)
             if output_shapes is None:
                 output_shapes = shapes_of(result)
             else:
                 assert shapes_of(result) == output_shapes or any(
-                    free_symbols(s) for s in input_shapes
+                    has_free_symbols(s) for s in input_shapes
                 ), debug_print(shapes_of(result))
             return result
 
