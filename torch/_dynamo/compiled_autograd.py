@@ -147,9 +147,11 @@ class AutogradCompilerInstance:
             inputs,
         )
         with disable_proxy_modes_tracing():
-            inputs = [maybe_clone(x) for x in inputs]
+            if isinstance(inputs, list):
+                inputs = [maybe_clone(x) for x in inputs]
+            else:
+                inputs = [maybe_clone(inputs)]
             self.bind_tensors_to_proxies(inputs, proxies)
-        return inputs
 
     def end_capture(self, outputs):
         self.stack.close()
