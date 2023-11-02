@@ -433,6 +433,9 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
     num_init = len(flat_init)
     example_input = _unstack_pytree(xs)
     body_graph = f
+    out_carries = []
+    out_pytrees = []
+    direction = -1 if reverse else 1
 
     with disable_proxy_modes_tracing():
         if not isinstance(body_graph, torch.fx.GraphModule):
@@ -444,37 +447,30 @@ def trace_scan(proxy_mode, func_overload, f, flat_init, flat_xs, reverse=False):
         # BW Expects BxF, BxF, BxF, BxF
         # import pdb
         # pdb.set_trace()
+        # carry = flat_init
+        # for inp in _unstack_and_flatten_tensors_or_lists(flat_xs)[::direction]:
+        #     #loop_values = [xs_el[::direction] for xs_el in flat_xs]
+        #     #for inp_t in range(leading_dim):
+        #     #inp = [lv[inp_t, :] for lv in loop_values]
+        #     out_carries.append(carry)
+        #     example_outs = body_graph(*carry, *inp)
+        #     out_pytrees.append(example_outs[num_init:])
+        #     carry = example_outs[:num_init]
+        # out_carries.append(carry)
+        # #import pdb
+        # #pdb.set_trace()
+        # ys = _stack_pytree(out_pytrees[::direction])
+        # cs = _stack_pytree(out_carries[::direction])
+        # cs = out_carries[::direction][-1]
+        
         example_outs = body_graph(*flat_init, *flat_xs)
-
-        # def expand_tensor_carry(t):
-        #     if isinstance(t, torch.Tensor):
-        #         return t.expand(leading_dim+1, *t.shape)
-        #     return t
-        # def expand_tensor_xs(t):
-        #     if isinstance(t, torch.Tensor):
-        #         return t.expand(leading_dim, *t.shape)
-        #     return t
-        # expanded_carries, expanded_outs = (pytree.tree_map(expand_tensor_carry, example_outs[:num_init]), pytree.tree_map(expand_tensor_xs, example_outs[num_init:]))
         expanded_carries_out, expanded_outs = (example_outs[:num_init], example_outs[num_init:])
 
-        # import pdb
-        # pdb.set_trace()
-        # example_outs = []
-        # for node in body_graph.graph.nodes:
-        #     if node.op == "output":
-        #         example_outs.extend(node.args)
-
-        # example_outs, _ = pytree.tree_flatten(example_outs)
-
-    # The output of this operation is only a single carry, but all the outputs
-    # import pdb
-    # pdb.set_trace()
-    # expanded_carries_out = [carry[-1, :] for carry in expanded_carries]
-
     expanded_outs_comb = (expanded_carries_out, expanded_outs)
+    #expanded_outs_comb = (cs, ys)
 
-    # import pdb
-    # pdb.set_trace()
+    #import pdb
+    #pdb.set_trace()
     next_name = None
     i = 0
     while not next_name:
@@ -684,9 +680,15 @@ def map_proxy_torch_dispatch_mode(f, flat_init, flat_xs, reverse=False):
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
         if mode.enable_tracing:
-            return trace_scan(mode, scan_impl, f, flat_init, flat_xs, reverse=reverse)
+            ret = trace_scan(mode, scan_impl, f, flat_init, flat_xs, reverse=reverse)
+            #import pdb
+            #pdb.set_trace()
+            return ret
         else:
-            return scan_impl(f, flat_init, flat_xs, reverse=reverse)
+            ret = scan_impl(f, flat_init, flat_xs, reverse=reverse)
+            import pdb
+            pdb.set_trace()
+            return ret
 
 
 @scan_impl.py_impl(FakeTensorMode)

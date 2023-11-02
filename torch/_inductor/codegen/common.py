@@ -777,9 +777,7 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
     
-    def scan(self, dtype, combine_fn, value, init, dim, carry_out_ptr, out_ptr):
-        import pdb
-        pdb.set_trace()
+    def scan(self, dtype, f, init_arg, xs_arg, xs_size, carry_size, out_size, reverse, return_out):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -836,10 +834,10 @@ class Kernel(CodeGen):
                 )
                 
             @staticmethod
-            def scan(dtype, f, init, xs, dim, carry_out_ptr, out_ptr, reverse):
+            def scan(dtype, f, init_arg, xs_arg, xs_size, carry_size, out_size, reverse, return_out):
                 #import pdb
                 #pdb.set_trace()
-                return self.scan(dtype, f, init, xs, dim, carry_out_ptr, out_ptr, reverse)
+                return self.scan(dtype, f, init_arg, xs_arg, xs_size, carry_size, out_size, reverse, return_out)
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

@@ -620,9 +620,132 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     
     #import pdb
     #pdb.set_trace()
+    dummy_init = torch.ones(*init_size)
+    dummy_xs = torch.ones(*xs_size)
+    dummy_carry, dummy_out = f(dummy_init, dummy_xs)
+    carry_size = list(dummy_carry.shape)
+    out_size = list(dummy_out.shape)
+    
+    carry_indexer = ir.FixedLayout(
+        device,
+        dtype,
+        carry_size,
+        ir.FlexibleLayout.contiguous_strides(carry_size),
+    ).make_indexer()
+    
+    out_indexer = ir.FixedLayout(
+        device,
+        dtype,
+        out_size,
+        ir.FlexibleLayout.contiguous_strides(out_size),
+    ).make_indexer()
+    
+    def fn(idx, return_out):
+        #import pdb
+        #pdb.set_trace()
+        init = [in_lo(init_size) for in_lo in init_load]
+        xs = [xs_lo(xs_size) for xs_lo in xs_load]
+        carry_out = ops.scan(dtype, f, init[0], xs[0], xs_size, [carry_size[1]], out_size, reverse, return_out)
+        #import pdb
+        #pdb.set_trace()
+        #ops.store(output_name, indexer(idx), result_carry)
+        return carry_out
+
+    
+    
+    #import pdb
+    #pdb.set_trace()
+
+    # def inner_fn(index):
+    #     # Both seed and offset in the philox_rand op are tensors.
+    #     # torch seed and offsets are of type int64, but tl.rand accepts int32
+    #     seed_index_expr = ops.to_dtype(seed_loader([]), torch.int32)
+    #     offset_index_expr = ops.to_dtype(offset_loader([]), torch.int32)
+    #     # Get the offset'd position
+    #     rand_index_expr = ops.add(
+    #         ops.index_expr(random_pos(index), torch.int32), offset_index_expr
+    #     )
+    #     result = ops.rand(
+    #         seed_index_expr,
+    #         rand_index_expr,
+    #     )
+    #     return ops.to_dtype(result, dtype)
+
+    # carry = Pointwise.create(
+    #     device=device,
+    #     dtype=dtype,
+    #     inner_fn=functools.partial(fn, return_out=False),
+    #     ranges=list(carry_size),
+    # )
+    
+    out = Pointwise.create(
+    #out = ir.Scan.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=functools.partial(fn, return_out=True),
+        ranges=list(out_size),
+    )
+    #import pdb
+    #pdb.set_trace()
+    
+    return [init, [out]]
+    
+    
+    
+    # #TODO Create the multi-layout portion here
+    # import pdb
+    # pdb.set_trace()
+    # return MultiOutput(
+    #                 FixedLayout(
+    #                     output.device,
+    #                     output.dtype,
+    #                     convert_shape_to_inductor(output.size()),
+    #                     convert_shape_to_inductor(output.stride()),
+    #                 ),
+    #                 packed,
+    #                 indices,
+    #             )
+    
+    
+    #import pdb
+    #pdb.set_trace()
     #TODO: The carry and the output need to be created before the lowering
-    carry_out_ptr = TensorBox.create(torch.empty(11, 1, 2, device=device).data)
-    out_ptr = TensorBox.create(torch.empty(10, 1, 2, device=device).data)
+    #carry_out_ptr = TensorBox.create(torch.empty(11, 1, 2, device=device).data)
+    #out_ptr = TensorBox.create(torch.empty(10, 1, 2, device=device).data)
+    #carry_size = [11, 1, 2]
+    # def inner_fn_carry():
+    #     return empty(*carry_size, device=device)
+    # carry_out_ptr = Pointwise.create(
+    #                 device=device,
+    #                 dtype=dtype,
+    #                 inner_fn=inner_fn_carry,
+    #                 ranges=carry_size,)
+    #carry_out_ptr = full_like(xs[0], 0)
+    #carry_out_ptr = [empty([11, 1, 2], device=device)]
+    
+    def inner_fn(index):
+        i0, i1, i2 = index
+        tmp0 = ops.constant(torch.empty(*carry_size, device=device).data, torch.float32)
+        return tmp0
+    carry_out_ptr = [Pointwise.create(
+                    device=device,
+                    dtype=dtype,
+                    inner_fn=inner_fn,
+                    ranges=carry_size,)]
+    carry_out_load = [carry_el.make_loader() for carry_el in carry_out_ptr]
+    
+    # out_size = [10, 1, 2]
+    # def inner_fn_out():
+    #     return empty(*out_size, device=device)
+    # out_ptr = Pointwise.create(
+    #                 device=device,
+    #                 dtype=dtype,
+    #                 inner_fn=inner_fn_out,
+    #                 ranges=out_size,)
+    out_ptr = [empty([10, 1, 2], device=device)]
+    out_load = [out_el.make_loader() for out_el in out_ptr]
+    #import pdb
+    #pdb.set_trace()
     '''
     carry_out_tmp = torch.empty(11, 1, 2)
     out_tmp = torch.empty(10, 1, 2)
@@ -644,8 +767,8 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
                                             ))
     
     '''
-    carry_out_load = carry_out_ptr#.make_loader()
-    out_load = out_ptr#.make_loader()
+    #carry_out_load = carry_out_ptr#.make_loader()
+    #out_load = out_ptr#.make_loader()
     #carry_out = []
     #out = []
     
@@ -659,8 +782,10 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     carry, ys = ir.Scan.create(device, dtype, len_init, f, 
                                init, init_size, init_load, 
                                xs, xs_size, xs_load, 
-                               carry_out_ptr.data_ptr(), carry_out_load,
-                               out_ptr.data_ptr(), out_load,
+                               #carry_out_ptr.data_ptr(), carry_out_load,
+                               #out_ptr.data_ptr(), out_load,
+                               carry_out_ptr, carry_out_load, carry_size,
+                               out_ptr, out_load, out_size,
                                #carry_out, carry_out,
                                #out, out,
                                reverse=reverse)
@@ -679,11 +804,47 @@ def scan(f, init: TensorBox, xs: TensorBox, reverse=False):
     tb.realize()
     '''
     
+    def _fake_scan(f, init, x):
+        from functorch.experimental._map import _stack_pytree, _unstack_pytree
+        x_pytrees = _unstack_pytree(x)
+        zs = []
+        cs = [init]
+        carry = init
+        for xp in x_pytrees:
+            carry, out = f(carry, xp)
+            zs.append(out)
+            cs.append(carry)
+        #return carry, _stack_pytree(zs)
+        return _stack_pytree(cs), _stack_pytree(zs)
+
+    init = torch.Tensor([[0.1272, 0.8167]])
+    xs = torch.Tensor([[[0.6208, 0.0276]],
+        [[0.3255, 0.1114]],
+        [[0.6812, 0.3608]],
+        [[0.1715, 0.1965]],
+        [[0.8400, 0.0438]],
+        [[0.3011, 0.0285]],
+        [[0.1628, 0.6302]],
+        [[0.0447, 0.0927]],
+        [[0.5736, 0.1185]],
+        [[0.8971, 0.0516]]])
+    fk_carry, fk_out = _fake_scan(f, init, xs)
+    import pdb
+    pdb.set_trace()
+    fk_carry = empty([1, 2])
+    fk_out = empty([10, 1, 2])
+    
+    #TODO: Check why the final carry that the user sees is still [2] and not [1, 2]
+    
+    
     #TODO this return does not quite work yet
     #import pdb
     #pdb.set_trace()
-    return [[carry], [ys]]
+    #return [[carry], [ys]]
     #return [init, xs]
+    #return [[fk_carry], [fk_out]]
+    return [[fk_carry], [ys]]
+    #return [[carry_out_ptr], [out_ptr]]
 
 @register_lowering(aten.where, broadcast=False, type_promotion_kind=None)
 def where(cond, a, b):

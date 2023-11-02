@@ -400,7 +400,27 @@ class OpOverload(OperatorBase):
         )
 
     def __call__(self, *args, **kwargs):
-        return self._op(*args, **kwargs or {})
+        import traceback
+        try:
+            return self._op(*args, **kwargs or {})
+        except Exception:
+            print(traceback.format_exc())
+            print(args)
+            #import pdb
+            #pdb.set_trace()
+            args_new = []
+            device = args[0].device
+            for arg in args:
+                args_new.append(arg.to(device))
+            try:
+                return self._op(*args_new, **kwargs or {})
+            except Exception:
+                print(traceback.format_exc())
+                print('STOPPPPPPPP')
+                print(args)
+                print(args_new)
+                import pdb
+                pdb.set_trace()
 
     def __hash__(self):
         return hash(self._op)

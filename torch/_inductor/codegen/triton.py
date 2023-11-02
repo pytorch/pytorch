@@ -1416,7 +1416,6 @@ class TritonKernel(Kernel):
             print('Function has code')
             name = fn.code.split('(')[0].split('def ')[1]
             helper.splice(fn.code.strip())
-            
         else:
             name = f"_triton_helper_fn{len(self.helper_functions)}"
             
@@ -1448,25 +1447,30 @@ class TritonKernel(Kernel):
         return name
              
     #TODO: this code is a replication from https://github.com/pytorch/pytorch/pull/109132 and needs to be adapted
-    def scan(self, dtype, f, init_arg, xs_arg, xs_dim, carry_out_ptr, out_ptr, reverse):
+    def scan(self, dtype, f, init_arg, xs_arg, xs_size, carry_size, out_size, reverse, return_out):
         
         #TODO: Check if the dim size works to be a list
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
+        # if name not in V.graph.removed_buffers:
+        #     var = self.args.output(name)
+        #     self.suffix.writeline(
+        #         DeferredLine(name, f"tl.store({var} + {index}, {result_var}, {mask})")
+        #     )
         
         #TODO: Design the mask and the blocks such that the batch dimension is worked-through in parallel.
         #E.g. parallelize over the batch dimension
         
-        assert self.inside_reduction
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
-        self.filter_masks(masks)
-        masks = sorted(masks)
-        if self._load_mask:
-            masks.append(self._load_mask)
-        reduction_range_prefix = self.range_trees[-1].prefix
+        #assert self.inside_reduction
+        # masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        # self.filter_masks(masks)
+        # masks = sorted(masks)
+        # if self._load_mask:
+        #     masks.append(self._load_mask)
+        # reduction_range_prefix = self.range_trees[-1].prefix
         
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
 
         #xs = self.cse.generate(
         #    self.compute, f"tl.broadcast_to({xs_arg}, {self.dense_size_str()})"
@@ -1478,15 +1482,17 @@ class TritonKernel(Kernel):
         #)
         init = init_arg
         
+        #xs = self.cse.generate(self.compute, f"tl.constant({xs_arg}, {self.dense_size_str()})")
+        
         #dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         #acc_type = triton_acc_type(dtype)
         #cond = " & ".join(masks)
 
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
 
         combine_helper_fn = self._lift_helper(f, 2)
-
+        
         '''
         masked_xs = self.cse.generate(
             self.compute, f"tl.where({cond}, {xs}, {default_tensor})"
@@ -1500,41 +1506,135 @@ class TritonKernel(Kernel):
         #     f"{combine_helper_fn}({init}, {xs})",
         # )
         
+        #self.compute.splice(f"tl.device_print(XBLOCK)")
         
-        import pdb
-        pdb.set_trace()
-        carry = self.cse.generate(self.compute, f"{init}",)
-        out = self.cse.generate(self.compute, f"{init}",)
-        self.compute.splice(f"tl.store(0x{carry_out_ptr})")
+        #import pdb
+        #pdb.set_trace()
+        #carry = self.cse.generate(self.compute, f"{init}",)
+        #out = self.cse.generate(self.compute, f"{init}",)
+        #carry = 'carry'
+        #out = 'out'
+        #self.compute.splice(f"{carry} = {init}")
+        #self.compute.splice(f"{out} = {init}")
+        #import pdb
+        #pdb.set_trace()
+        #carry = self.cse.generate(self.compute, f"tl.full({carry_size}, 1, tl.float32)",)
+        #out = self.cse.generate(self.compute, f"tl.full({out_size}, 1, tl.float32)",)
+        
+        def prod(l):
+            li = 1
+            for el in l:
+                li *= el
+            #return li
+            
+            #import pdb
+            #pdb.set_trace()
+            #Compute next power of two
+            def shift_bit_length(x):
+                return 1<<(x-1).bit_length()
+            
+            li_2 = shift_bit_length(li)
+            return li_2
+        
+        # import pdb
+        # pdb.set_trace()
+        # print(self.range_trees)
+        # carry = self.cse.generate(self.compute, f"tl.full([{prod(carry_size)}], 1, tl.float32)",)
+        # #carry = self.cse.generate(self.compute, f"tl.broadcast_to({carry}, {})",)
+        # out = self.cse.generate(self.compute, f"tl.full([{prod(out_size)}], 1, tl.float32)",)
+        # #out = self.cse.generate(self.compute, f"tl.broadcast_to({out}, {})",)
+        
+        if return_out:
+            out = self.cse.generate(self.compute, f"tl.full({out_size}, 1, tl.float32)",)
+        else:
+            out = self.cse.generate(self.compute, f"tl.full({carry_size}, 1, tl.float32)",)
+        
+        #self.compute.splice(f"tl.store('0x{carry_out_ptr}', {carry})")
+        #self.compute.splice(f"tl.store({carry_out_ptr}, {carry})")
         
         t_loop = "t_loop"
-        loop_code = f"for {t_loop} in range({xs_dim[0]}):"
-        self.compute.splice(loop_code)
+        carry_loop = "c_loop"
+        out_loop = "o_loop"
+        # loop_code = f"for {t_loop} in range({out_size[0]}):"
+        # self.compute.splice(loop_code)
         
-        with self.compute.indent():
-            if reverse:
-                xs_t = self.cse.generate(self.compute, f"tl.load({xs} + ({xs_dim[0]} - {t_loop}) * {xs_dim[1]} * {xs_dim[2]})",)
-            else:
-                xs_t = self.cse.generate(self.compute, f"tl.load({xs} + {t_loop} * {xs_dim[1]} * {xs_dim[2]})",)
-            self.compute.splice(f"{carry}, {out} = {combine_helper_fn}({carry}, {xs_t})")
-            if reverse:
-                self.compute.splice(f"tl.store(0x{carry_out_ptr} + ({t_loop}+1) * {xs_dim[1]} * {xs_dim[2]})")
-                self.compute.splice(f"tl.store(0x{out_ptr} + {t_loop} * {xs_dim[1]} * {xs_dim[2]})")
-            else:
-                self.compute.splice(f"tl.store(0x{carry_out_ptr} + ({xs_dim[0]} - {t_loop}+1) * {xs_dim[1]} * {xs_dim[2]})")
-                self.compute.splice(f"tl.store(0x{out_ptr} + ({xs_dim[0]} - {t_loop}) * {xs_dim[1]} * {xs_dim[2]})")
+        # with self.compute.indent():
+        #     if reverse:
+        #         xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + (({xs_size[0]} - {t_loop}) * {xs_size[1]} * {xs_size[2]}))",)
+        #     else:
+        #         xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + ({t_loop} * {xs_size[1]} * {xs_size[2]}))",)
+            
+        #     #xs_t = self.cse.generate(self.compute, f"tl.load({xs})",)
+        #     #self.compute.splice(f"pass")
+            
+        #     # self.compute.splice(f"{carry}, {out} = {combine_helper_fn}({carry}, {xs_t})")
+            
+        #     # if reverse:
+        #     #     self.compute.splice(f"tl.store({carry} + ({t_loop}+1) * {xs_size[1]} * {xs_size[2]}, {carry})")
+        #     #     self.compute.splice(f"tl.store({out} + {t_loop} * {xs_size[1]} * {xs_size[2]}, {out})")
+        #     # else:
+        #     #     self.compute.splice(f"tl.store({carry} + ({xs_size[0]} - {t_loop}+1) * {xs_size[1]} * {xs_size[2]}, {carry})")
+        #     #     self.compute.splice(f"tl.store({out} + ({xs_size[0]} - {t_loop}) * {xs_size[1]} * {xs_size[2]}, {out})")
+        #     # self.compute.splice(f"tl.store({carry} + {xs_size[1]} * {xs_size[2]}, {carry})")
+        #     # self.compute.splice(f"tl.store({out} + {t_loop} * {xs_size[1]} * {xs_size[2]}, {carry})")
+            
+        #     if return_out:
+        #         self.compute.splice(f"tl.store(out_ptr0 + {t_loop} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
+        #     else:
+        #         self.compute.splice(f"tl.store(out_ptr0, {xs_t})")
+          
+        import pdb
+        pdb.set_trace()      
+        #loop_code = f"for {t_loop} in range({out_size[0]}):"
+        #self.compute.splice(loop_code)
         
+        for t in range(out_size[0]):
+            if reverse:
+                raise Exception('Failed!!!!!!!')
+                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + (({xs_size[0]} - {t}) * {xs_size[1]} * {xs_size[2]}))",)
+            else:
+                #xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + ({t} * {xs_size[1]} * {xs_size[2]}))",)
+                xs_t = self.cse.generate(self.compute, f"tl.load({self.args.input('arg1_1')} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}))",)
+            
+            #x0
+            #self.compute.splice(f"if x0 < 1:")
+            #with self.compute.indent():
+            self.compute.splice(f"tl.device_print('xs_t', {xs_t})")
+            #self.compute.splice(f"tl.device_print('XBLOCK', XBLOCK)")
+            #self.compute.splice(f"tl.device_print('progID', tl.program_id(0))")
+            #self.compute.splice(f"tl.device_print('progLaunches', tl.num_programs(0))")
+        
+            if return_out:
+                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
+                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
+                
+                #self.compute.splice(f"tl.store(out_ptr0 + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]}, {xs_t})")
+                #self.compute.splice(f"tl.store(out_ptr0 + {t} * {xs_size[1]} * {xs_size[2]} + 1, {xs_t} + 1)")
+            
+                self.compute.splice(f"tl.store({out} + tl.arange({t} * {xs_size[1]} * {xs_size[2]}, {t+1} * {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+            else:
+                #self.compute.splice(f"tl.store(out_ptr0, {xs_t})")
+                #self.compute.splice(f"tl.store(out_ptr0 + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+
+                self.compute.splice(f"tl.store({out} + tl.arange(0, {xs_size[1]} * {xs_size[2]}), {xs_t} + tl.arange(0, {xs_size[1]} * {xs_size[2]}))")
+                
         #result_carry = self.cse.generate(self.compute, f"init_val",)
         #result_out = self.cse.generate(self.compute, f"x",)
 
         print(self.body._lines)
         print(self.compute._lines)
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         #result_carry.mask_vars = masks  # type: ignore[attr-defined]
         #result_out.mask_vars = masks  # type: ignore[attr-defined]
         
-        return [carry_out_ptr, out_ptr]
+        #return carry, out#[carry_out_ptr, out_ptr]
+        # if return_out:
+        #     return out
+        # else:
+        #     return carry
+        return self.cse.generate(self.compute, f"tl.load(out_ptr0)",)
 
     def codegen_body(self):
         """
@@ -1632,6 +1732,8 @@ class TritonKernel(Kernel):
                 stream_name = f"stream{index}"
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
+                import pdb
+                pdb.set_trace()
                 result.writeline(
                     f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
@@ -1644,6 +1746,8 @@ class TritonKernel(Kernel):
                 result.writeline(
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
+                import pdb
+                pdb.set_trace()
                 result.writeline(
                     f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
@@ -1739,6 +1843,8 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
         }
 
+        #import pdb
+        #pdb.set_trace()
         for tree in self.range_trees:
             if tree.prefix != "r" or self.inside_reduction:
                 sizearg = SizeArg(f"{tree.prefix}numel", tree.numel)
@@ -1781,13 +1887,13 @@ class TritonKernel(Kernel):
             """
         code.splice(heuristics_line)
         
-        #import pdb
-        #pdb.set_trace()
-        for helper in self.helper_functions:
-            code.writeline("")
-            #code.splice(helper)
-            for line in helper._lines:
-                code.writeline(line.replace('@triton.jit', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
+        # import pdb
+        # pdb.set_trace()
+        # for helper in self.helper_functions:
+        #     code.writeline("")
+        #     #code.splice(helper)
+        #     for line in helper._lines:
+        #         code.writeline(line.replace('@triton.jit', '').replace(';  arg1_1 = arg0_1 = None', '').replace('torch.ops.aten.add.Tensor(arg0_1, 1)', 'arg0_1 + 1').replace('torch.ops.aten.add.Tensor(arg1_1, arg0_1)', 'arg1_1 + 1'))
         
         code.writeline(f"")
         code.writeline(f"@triton.jit")
@@ -1807,8 +1913,8 @@ class TritonKernel(Kernel):
             return code.getvalue()
 
         print(code.getvalue())
-        import pdb
-        pdb.set_trace()
+        #import pdb
+        #pdb.set_trace()
         return code.getvalue()
 
     def codegen_static_numels(self, code):

@@ -296,10 +296,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         try:
-            import pdb
-            pdb.set_trace()
+            #import pdb
+            #pdb.set_trace()
             sources = [
-                #origin.name if 'scan' in origin.name else origin.meta["original_aten"]._overloadpacket.__name__
                 origin.meta["original_aten"]._overloadpacket.__name__
                 for origin in all_origins
                 if origin.op == "call_function" and "original_aten" in origin.meta
@@ -308,7 +307,21 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
             print('Failed')
             import pdb
             pdb.set_trace()
-            sources = ["scan_impl"]
+            op_, op_dk_, tags = torch._C._get_operation_overload("aten::_assert_async", "msg")
+            schema = torch._C._get_schema("aten::_assert_async", "msg")
+            opoverloadpacket = torch._ops.OpOverloadPacket("aten::_assert_async", "_assert_async", torch.ops.aten._assert_async, ['', 'msg'])
+            opoverload = torch._ops.OpOverload(opoverloadpacket, op_, op_dk_, schema, tags)
+            for origins in all_origins:
+                origins.meta["original_aten"] = opoverload
+            sources = [
+                origin.meta["original_aten"]._overloadpacket.__name__
+                for origin in all_origins
+                if origin.op == "call_function" and "original_aten" in origin.meta
+            ]
+            #import pdb
+            #pdb.set_trace()
+            
+            
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
