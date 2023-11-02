@@ -167,7 +167,7 @@ class TestContract(TestCase):
             AssertionError,
             "Each distinct composable distributed API can only be applied to "
             r"a module once. multi_module_api has already been applied to the "
-            "following module:"
+            "following module:",
         ):
             multi_module_api([model[0], model[2]])
 
