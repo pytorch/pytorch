@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Rprop", "rprop"]
@@ -42,9 +42,11 @@ class Rprop(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params, grads, prevs, step_sizes):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params.append(p)
             grad = p.grad
             if grad.is_sparse:
@@ -76,6 +78,7 @@ class Rprop(Optimizer):
             step_sizes.append(state["step_size"])
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -100,7 +103,7 @@ class Rprop(Optimizer):
             foreach = group["foreach"]
             maximize = group["maximize"]
 
-            self._init_group(group, params, grads, prevs, step_sizes)
+            has_complex = self._init_group(group, params, grads, prevs, step_sizes)
 
             rprop(
                 params,
@@ -114,6 +117,7 @@ class Rprop(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=group["differentiable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -179,6 +183,7 @@ def rprop(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     step_size_min: float,
     step_size_max: float,
@@ -212,6 +217,7 @@ def rprop(
         etaplus=etaplus,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -227,6 +233,7 @@ def _single_tensor_rprop(
     etaplus: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for i, param in enumerate(params):
@@ -273,6 +280,7 @@ def _multi_tensor_rprop(
     etaplus: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -283,12 +291,8 @@ def _multi_tensor_rprop(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
     for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
         # Handle complex params
-        for i in range(len(grouped_params)):
-            if torch.is_complex(grouped_params[i]):
-                grouped_params[i] = torch.view_as_real(grouped_params[i])
-                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                grouped_prevs[i] = torch.view_as_real(grouped_prevs[i])
-                grouped_step_sizes[i] = torch.view_as_real(grouped_step_sizes[i])
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes)
 
         signs = torch._foreach_mul(grouped_grads, grouped_prevs)
         if maximize:
