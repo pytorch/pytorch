@@ -27,11 +27,7 @@ class GenericIteratorVariable(IteratorVariable):
         assert self.mutable_local
         from .builder import SourcelessBuilder
 
-        # We need this to polyfill because otherwise, `call_method` will
-        # not have tracked the side effects incurred to `iterator`.
-        next_item = tx.inline_user_function_return(
-            SourcelessBuilder()(tx, polyfill.next_p), [self.iterator], {}
-        )
+        next_item = self.iterator.call_method(tx, "__next__", [], {})
         next_iter = self.clone(iterator=self.iterator)
         tx.replace_all(self, next_iter)
         return next_item.add_options(self), next_iter
