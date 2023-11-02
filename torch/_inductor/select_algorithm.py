@@ -120,7 +120,10 @@ class TritonTemplateKernel(TritonKernel):
         }
         triton_meta["configs"] = [config_of(signature)]
 
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        inductor_meta = {
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "origin_ops": str(Placeholder.ORIGIN_INFO),
+        }
         return textwrap.dedent(
             f"""
             @template(

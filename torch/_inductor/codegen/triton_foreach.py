@@ -162,7 +162,10 @@ class ForeachKernel(Kernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
+        inductor_meta = {
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "origin_ops": str(Placeholder.ORIGIN_INFO),
+        }
         return (
             f"@foreach(num_warps={self.num_warps}, triton_meta={triton_meta!r}, inductor_meta={inductor_meta!r})\n"
             + "@triton.jit"
