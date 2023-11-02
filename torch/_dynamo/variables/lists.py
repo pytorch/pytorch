@@ -9,7 +9,7 @@ import torch.fx
 
 from .. import polyfill, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
+from ..exc import InlinedUserStopIteration, unimplemented
 from ..source import GetItemSource
 from ..utils import (
     get_fake_value,
@@ -686,9 +686,7 @@ class ListIteratorVariable(VariableTracker):
     def next_variables(self, tx):
         assert self.mutable_local
         if self.index >= len(self.items):
-            from .builtin import BuiltinVariable
-
-            return BuiltinVariable(StopIteration), self
+            raise InlinedUserStopIteration
         next_iter = ListIteratorVariable(
             self.items,
             self.index + 1,

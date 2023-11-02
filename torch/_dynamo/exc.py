@@ -33,6 +33,10 @@ class TorchDynamoException(RuntimeError):
     pass
 
 
+class InlinedUserStopIteration(TorchDynamoException):
+    pass
+
+
 class InternalTorchDynamoError(TorchDynamoException):
     pass
 

@@ -914,7 +914,10 @@ class BuiltinVariable(VariableTracker):
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.zip), args, {}
+                SourcelessBuilder()(tx, polyfill.zip),
+                args,
+                {},
+                allow_stopiteration=True,
             )
 
     def call_enumerate(self, tx, *args):
@@ -987,17 +990,6 @@ class BuiltinVariable(VariableTracker):
         def _is_stop_iteration(vt):
             return vt.is_python_constant() and vt.as_python_constant() == StopIteration
 
-        if isinstance(
-            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
-        ):
-            val, next_iter = arg.next_variables(tx)
-            if _is_stop_iteration(val):
-                raise StopIteration()
-            return val
-        elif isinstance(arg, variables.BaseListVariable):
-            return arg.items[0].add_options(self, arg)
-
-    def call___wrapped_next(self, tx, arg, kwargs=None):
         if isinstance(
             arg, (variables.ListIteratorVariable, variables.IteratorVariable)
         ):

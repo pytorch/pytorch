@@ -621,13 +621,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
 
-    def inline_user_function_return(self, fn, args, kwargs):
+    def inline_user_function_return(self, fn, args, kwargs, allow_stopiteration=False):
         """
         A call to some user defined function by inlining it.
         """
         state = self.copy_graphstate()
         try:
-            result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+            result = InliningInstructionTranslator.inline_call(
+                self, fn, args, kwargs, allow_stopiteration=allow_stopiteration
+            )
             self.output.guards.update(fn.guards)
             return result
         except Exception:
@@ -907,7 +909,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(value, UserDefinedObjectVariable) and isinstance(
             value.value, StopIteration
         ):
-            raise StopIteration()
+            raise exc.InlinedUserStopIteration()
         unimplemented(f"RAISE_VARARGS is not implemented for {value}")
 
     def import_source(self, module_name):
@@ -1087,12 +1089,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         it = self.pop()
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
-            val, next_iter = it.next_variables(self)
-            if _is_stop_iteration(val):
+            try:
+                val, next_iter = it.next_variables(self)
+                if _is_stop_iteration(val):
+                    self.jump(inst)
+                    return
+                self.push(next_iter)
+                self.push(val)
+            except exc.InlinedUserStopIteration:
                 self.jump(inst)
-                return
-            self.push(next_iter)
-            self.push(val)
         else:
             unimplemented(f"FOR_ITER {typestr(it)}")
 
@@ -2261,9 +2266,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     symbolic_result: Optional[TensorVariable]
 
     @classmethod
-    def inline_call(cls, parent, func, args, kwargs):
+    def inline_call(cls, parent, func, args, kwargs, allow_stopiteration=False):
         with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-            return cls.inline_call_(parent, func, args, kwargs)
+            return cls.inline_call_(
+                parent, func, args, kwargs, allow_stopiteration=allow_stopiteration
+            )
 
     @staticmethod
     def check_inlineable(func):
@@ -2319,7 +2326,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def inline_call_(
-        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+        parent,
+        func: VariableTracker,
+        args: List[VariableTracker],
+        kwargs,
+        allow_stopiteration=False,
     ):
         assert isinstance(
             func,
@@ -2400,6 +2411,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
+        except exc.InlinedUserStopIteration:
+            if not allow_stopiteration or not isinstance(
+                tracer, InliningGeneratorInstructionTranslator
+            ):
+                raise
+            tracer.symbolic_result = ConstantVariable(None)
         except Exception as e:
             log.debug("FAILED INLINING %s", code)
             raise
@@ -2586,14 +2603,17 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 tos, (variables.ListIteratorVariable, variables.IteratorVariable)
             ):
                 self.output.guards.update(tos.guards)
-                val, next_iter = tos.next_variables(self)
-                if _is_stop_iteration(val):
+                try:
+                    val, next_iter = tos.next_variables(self)
+                    if _is_stop_iteration(val):
+                        return
+                    self.push(val)
+                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                    self.YIELD_VALUE(inst)
+                    self.pop()
+                    self.push(next_iter)
+                except exc.InlinedUserStopIteration:
                     return
-                self.push(val)
-                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                self.YIELD_VALUE(inst)
-                self.pop()
-                self.push(next_iter)
             else:
                 unimplemented(f"YIELD_FROM {typestr(tos)}")
 

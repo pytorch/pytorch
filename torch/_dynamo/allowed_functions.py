@@ -24,7 +24,7 @@ import torch
 import torch._functorch.deprecated as deprecated_func
 from torch.fx._symbolic_trace import is_fx_tracing
 
-from . import config, polyfill
+from . import config
 from .external_utils import is_compiling
 from .utils import is_safe_constant, NP_SUPPORTED_MODULES
 
@@ -302,7 +302,6 @@ def _builtin_function_ids() -> Dict[int, str]:
     )
     rv.update({id(cast): "typing.cast"})
     rv[id(functools.reduce)] = "functools.reduce"
-    rv[id(polyfill.__wrapped_next)] = "polyfill.__wrapped_next"
     return rv
 
 

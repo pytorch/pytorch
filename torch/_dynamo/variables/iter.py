@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from .. import polyfill
 
-from ..exc import unimplemented
+from ..exc import InlinedUserStopIteration, unimplemented
 
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -26,17 +26,13 @@ class GenericIteratorVariable(IteratorVariable):
     def next_variables(self, tx):
         assert self.mutable_local
         from .builder import SourcelessBuilder
-        from .builtin import BuiltinVariable
 
-        try:
-            # We need this to polyfill because otherwise, `call_method` will
-            # not have tracked the side effects incurred to `iterator`.
-            next_item = tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.next_p), [self.iterator], {}
-            )
-            next_iter = self.clone(iterator=self.iterator)
-        except StopIteration:
-            return BuiltinVariable(StopIteration), self
+        # We need this to polyfill because otherwise, `call_method` will
+        # not have tracked the side effects incurred to `iterator`.
+        next_item = tx.inline_user_function_return(
+            SourcelessBuilder()(tx, polyfill.next_p), [self.iterator], {}
+        )
+        next_iter = self.clone(iterator=self.iterator)
         tx.replace_all(self, next_iter)
         return next_item.add_options(self), next_iter
 
@@ -108,7 +104,7 @@ class CycleIteratorVariable(IteratorVariable):
                 if self.item is None:
                     return next_iter.next_variables(tx)
                 return self.item.add_options(self), next_iter
-            except StopIteration:
+            except InlinedUserStopIteration:
                 next_iter = self.clone(iterator=None)
                 # this is redundant as next_iter will do the same
                 # but we do it anyway for safety
@@ -122,5 +118,5 @@ class CycleIteratorVariable(IteratorVariable):
             tx.replace_all(self, next_iter)
             return self.item.add_options(self), next_iter
         else:
-            return BuiltinVariable(StopIteration), self
+            raise InlinedUserStopIteration
         return self.item.add_options(self), next_iter
