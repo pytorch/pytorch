@@ -173,6 +173,16 @@ class TestForeach(TestCase):
                 expected = ref([ref_input, *sample.ref_args], **ref_kwargs)
                 self.assertEqual(expected, actual)
 
+    @ops(
+        filter(lambda op: op.error_inputs_func is not None, foreach_binary_op_db)
+    )
+    def test_errors(self, device, dtype, op):
+        func, ref, _, _ = self._get_funcs(op)
+        for sample in op.error_inputs(device, dtype=dtype):
+            with nullcontext(), self.assertRaisesRegex(RuntimeError, "Tensor list(s)? must have (the )?same number.*"):
+                actual = func([sample.input, *sample.args], self.is_cuda, False, **sample.kwargs)
+
+
     def _binary_test(
         self,
         dtype, op, ref, inputs, is_fastpath, is_inplace,
