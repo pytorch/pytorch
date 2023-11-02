@@ -8177,7 +8177,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     # for extern_kernels.  Extern kernels directly
                     # call cuBlas or cuDNN, rather than generating
                     # a triton kernel.
-                    res = re.search(r"record_function.*extern_kernel.*mm", line)
+                    res = re.search(r"RecordFunctionFast.*extern_kernel.*mm", line)
                     if res:
                         record_mm_detected = True
             self.assertTrue(record_mm_detected)
