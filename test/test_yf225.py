@@ -46,6 +46,12 @@ class TestModule(torch.nn.Module):
     def f2(self, x, y):
         return x + y
 
+    def subfunc0(self, x, y):
+        return x + y
+
+    def subfunc01(self, x, y):
+        return x + y
+
     def subfunc1(self, x, y):
       x.relu_()
       self.buf.relu_()
@@ -68,29 +74,44 @@ class TestModule(torch.nn.Module):
         return z
 
     def forward(self, x, y):
-        x, y = self.subfunc1(x, y)
-        y.relu_()
-        z = self.subfunc2(x, y)
-        z.relu_()
+        z = self.subfunc0(x, y)
+        # y = y.relu()
+        z = self.subfunc01(z, y)
         # x, y = self.subfunc1(x, y)
-        return x, y, z
+        # y.relu_()
+        # y = y.relu()
+        # z = self.subfunc2(x, y)
+        # z.relu_()
+        # z = z.relu()
+        # x, y = self.subfunc1(x, y)
+        # return x, y, z
+        return z
 
 
 from torch._lazy_scheduler import Segment, LazyScheduler
 
 m = TestModule()
 # TODO: implement submodule method tagging
-Segment._func_to_segment_mapping[m.subfunc1] = "subfunc1"
-Segment._func_to_segment_mapping[m.subfunc2] = "subfunc2"
+Segment._func_to_segment_mapping[m.subfunc0] = "subfunc0"
+# Segment._func_to_segment_mapping[m.subfunc1] = "subfunc1"
+# Segment._func_to_segment_mapping[m.subfunc2] = "subfunc2"
 m = m.to(device)
 x = torch.randn(4, 4, device=device)
 y = torch.randn(4, 4, device=device)
 
-lazy_scheduler = LazyScheduler([])
+lazy_scheduler = LazyScheduler([
+    "subfunc0",
+    "subfunc01",
+    # "subfunc1",
+    # "subfunc2",
+])
 compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
 
 # ref = m(x, y)
 actual = compiled_m(x, y)
+print("first iter done")
+actual = compiled_m(x, y)
+print("second iter done")
 # # assert torch.allclose(ref, actual)
 
 
