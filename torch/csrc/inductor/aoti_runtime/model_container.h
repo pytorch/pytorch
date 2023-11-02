@@ -50,15 +50,17 @@ class AOTInductorModelContainer {
       output_names_.push_back(model->output_name(i));
     }
 
-    size_t num_constants = model->num_constants();
-    std::vector<size_t> constants_internal_offset(num_constants);
-
     model->load_constants(is_cpu);
 #ifdef USE_CUDA
-    if (!is_cpu) {
-      constant_blob_ = model->release_constant_blob();
-    }
+    constant_blob_ = model->release_constant_blob();
 #endif
+
+    for (auto& model : models_) {
+      model->update_constants_map(constants_);
+    }
+
+    in_spec_ = model->get_in_spec();
+    out_spec_ = model->get_out_spec();
   }
 
   void run(
@@ -107,9 +109,19 @@ class AOTInductorModelContainer {
     return models_.size();
   }
 
+  const char* get_in_spec() const {
+    return in_spec_;
+  }
+
+  const char* get_out_spec() const {
+    return out_spec_;
+  }
+
  private:
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
+  const char* in_spec_;
+  const char* out_spec_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.

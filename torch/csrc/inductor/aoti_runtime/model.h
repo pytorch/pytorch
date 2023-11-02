@@ -15,18 +15,6 @@
 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-// At codegen time, we write out a binary file called constants.bin.
-// We then turn the raw binary to an object file that exposes this
-// symbol and link it into the final .so.
-// For information on the binary format, see `man objcopy`, under
-// the "binary-architecture" flag:
-// https://man7.org/linux/man-pages/man1/objcopy.1.html
-// todo: use #embed in C++ 23 once available
-extern const uint8_t _binary_constants_bin_start[];
-extern const uint8_t _binary_constants_bin_end[];
-
-#define AOTI_CONST_GPU_ALIGNMENT 64
-
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
     bool ok = EXPR;                   \
@@ -43,19 +31,17 @@ extern const uint8_t _binary_constants_bin_end[];
 #define AOTI_NOINLINE
 #endif
 
-AOTI_NOINLINE static void throw_exception(
-    const char* call,
-    const char* file,
-    int64_t line) {
-  std::stringstream ss;
-  ss << call << " API call failed at " << file << ", line " << line;
-  throw std::runtime_error(ss.str());
-}
+// At codegen time, we write out a binary file called constants.bin.
+// We then turn the raw binary to an object file that exposes this
+// symbol and link it into the final .so.
+// For information on the binary format, see `man objcopy`, under
+// the "binary-architecture" flag:
+// https://man7.org/linux/man-pages/man1/objcopy.1.html
+// todo: use #embed in C++ 23 once available
+extern const uint8_t _binary_constants_bin_start[];
+extern const uint8_t _binary_constants_bin_end[];
 
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
-  if ((call) != AOTI_TORCH_SUCCESS) {           \
-    throw_exception(#call, __FILE__, __LINE__); \
-  }
+#define AOTI_CONST_GPU_ALIGNMENT 64
 
 namespace {
 
@@ -72,29 +58,21 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 
 #endif // USE_CUDA
 
-inline uint8_t* constant_ptr(
-    void* constant_blob,
-    size_t constant_offset,
-    size_t bytes_read,
-    size_t data_size) {
-#ifdef USE_CUDA
-  auto* constants_ptr = static_cast<uint8_t*>(constant_blob);
-  uint8_t* internal_ptr = constants_ptr + constant_offset;
-  // Copy data to GPU memory
-  // TODO: Handle shared storage case.
-  AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
-      internal_ptr,
-      _binary_constants_bin_start + bytes_read,
-      data_size,
-      cudaMemcpyHostToDevice));
-  return internal_ptr;
-#else // !USE_CUDA
-  // get pointer to constant which is packed in model during compile time.
-  return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
-#endif // USE_CUDA
+} // anonymous namespace
+
+AOTI_NOINLINE static void throw_exception(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  std::stringstream ss;
+  ss << call << " API call failed at " << file << ", line " << line;
+  throw std::runtime_error(ss.str());
 }
 
-} // anonymous namespace
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
+  if ((call) != AOTI_TORCH_SUCCESS) {           \
+    throw_exception(#call, __FILE__, __LINE__); \
+  }
 
 using DeleterFnPtr = void (*)(void*);
 
@@ -250,52 +228,29 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
-#ifdef USE_CUDA
-  CUDAPtr make_cuda_constant_blob(
-      std::vector<size_t>& constants_internal_offset) {
-    size_t num_constants = this->num_constants();
-    // Compute required blob size with 64-alignment if on GPU.
-    size_t max_blob = 0;
-    for (size_t i = 0; i < num_constants; i++) {
-      size_t data_size = this->constant_data_size(i);
-      if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
-        data_size = AOTI_CONST_GPU_ALIGNMENT +
-            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
-      }
-      constants_internal_offset[i] = max_blob;
-      max_blob += data_size;
-    }
-    return RAII_cudaMalloc(max_blob);
-  }
-#endif
-
   void load_constants(bool is_cpu) {
     size_t num_constants = this->num_constants();
     constants_map_->reserve(num_constants);
 
     std::vector<size_t> constants_internal_offset(num_constants);
-    void* constant_blob = nullptr;
     if (!is_cpu) {
-#ifdef USE_CUDA
-      constant_blob_ = this->make_cuda_constant_blob(constants_internal_offset);
-      constant_blob = constant_blob_.get();
-#endif
+      make_cuda_constant_blob(constants_internal_offset);
     }
 
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
-      std::string name = constant_name(i);
-      size_t data_size = constant_data_size(i);
-      uint8_t* internal_ptr = constant_ptr(
-          constant_blob, constants_internal_offset[i], bytes_read, data_size);
+      std::string name = this->constant_name(i);
+      size_t data_size = this->constant_data_size(i);
+      uint8_t* internal_ptr =
+          constant_ptr(constants_internal_offset[i], bytes_read, data_size);
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
-      auto dtype = constant_type(i);
-      auto ndim = constant_ndim(i);
-      auto size = constant_shape(i);
-      auto stride = constant_stride(i);
-      auto offset = constant_offset(i);
+      auto dtype = this->constant_type(i);
+      auto ndim = this->constant_ndim(i);
+      auto size = this->constant_shape(i);
+      auto stride = this->constant_stride(i);
+      auto offset = this->constant_offset(i);
 
       auto device_type = aoti_torch_device_type_cuda();
       if (is_cpu) {
@@ -319,6 +274,7 @@ class AOTInductorModelBase {
           &tensor_handle));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
+    this->update_constants_map(constants_map_);
   }
 
 #ifdef USE_CUDA
@@ -326,6 +282,45 @@ class AOTInductorModelBase {
     return std::move(constant_blob_);
   }
 #endif
+
+  uint8_t* constant_ptr(
+      size_t constant_offset,
+      size_t bytes_read,
+      size_t data_size) {
+#ifdef USE_CUDA
+    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+    uint8_t* internal_ptr = constants_ptr + constant_offset;
+    // Copy data to GPU memory
+    // TODO: Handle shared storage case.
+    AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+        internal_ptr,
+        _binary_constants_bin_start + bytes_read,
+        data_size,
+        cudaMemcpyHostToDevice));
+    return internal_ptr;
+#else // !USE_CUDA
+    // get pointer to constant which is packed in model during compile time.
+    return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+#endif // USE_CUDA
+  }
+
+  void make_cuda_constant_blob(std::vector<size_t>& constants_internal_offset) {
+#ifdef USE_CUDA
+    size_t num_constants = this->num_constants();
+    // Compute required blob size with 64-alignment if on GPU.
+    size_t max_blob = 0;
+    for (size_t i = 0; i < num_constants; i++) {
+      size_t data_size = this->constant_data_size(i);
+      if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
+        data_size = AOTI_CONST_GPU_ALIGNMENT +
+            (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+      }
+      constants_internal_offset[i] = max_blob;
+      max_blob += data_size;
+    }
+    constant_blob_ = RAII_cudaMalloc(max_blob);
+#endif // USE_CUDA
+  }
 
   size_t num_inputs() const {
     return inputs_info_.size();
@@ -373,6 +368,14 @@ class AOTInductorModelBase {
 
   size_t constant_data_size(int64_t idx) const {
     return constants_info_.at(idx).data_size;
+  }
+
+  const char* get_in_spec() const {
+    return in_spec_.c_str();
+  }
+
+  const char* get_out_spec() const {
+    return out_spec_.c_str();
   }
 
   void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
@@ -441,6 +444,8 @@ class AOTInductorModelBase {
   std::vector<ParamInfo> inputs_info_;
   std::vector<ParamInfo> outputs_info_;
   std::vector<ConstInfo> constants_info_;
+  std::string in_spec_;
+  std::string out_spec_;
 
   std::shared_ptr<ConstantMap> constants_map_;
   std::vector<AtenTensorHandle> constants_;
