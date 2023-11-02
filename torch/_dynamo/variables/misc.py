@@ -399,7 +399,10 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            bwd_args = [ctx, speculated_fwd_result]
+            if isinstance(speculated_fwd_result, variables.TupleVariable):
+                bwd_args = [ctx, *speculated_fwd_result.items]
+            else:
+                bwd_args = [ctx, speculated_fwd_result]
             safe_or_raise_always_restore(
                 tx,
                 graph_checkpoint,
@@ -559,9 +562,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             tx.output.side_effects.track_save_for_backward(self, args)
 
         for arg in args:
-            # as_proxy can return constant values or other non proxy values
-            if isinstance(arg.as_proxy(), torch.fx.Proxy):
-                arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
 
