@@ -466,7 +466,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         if actual_module_name != pystub_module:
             raise RuntimeError(
                 f"Operator '{qualname}' specified that its python abstract impl "
-                f"is in the Python module '{mod_name}' but it was actually found "
+                f"is in the Python module '{pystub_module}' but it was actually found "
                 f"in '{actual_module_name}'. Please either move the abstract impl "
                 f"or correct the m.impl_abstract_pystub call.")
         checked = True
