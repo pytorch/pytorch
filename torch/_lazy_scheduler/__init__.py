@@ -2,7 +2,7 @@ import torch
 import itertools
 from typing import Optional, Dict, Callable
 from torch._subclasses.fake_tensor import FakeTensorMode
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 import weakref
 
 fake_mode = FakeTensorMode()
@@ -150,6 +150,7 @@ class AsyncFuncHandle:
     if self.is_scheduled:
       return
     AsyncTensor.wait_until_materialized(self.args)
+    print(f"self.args: {self.args}")
     self.outs = self.compiled_fn(*self.args)
     self.cuda_event.record()
     self.is_scheduled = True
@@ -180,21 +181,15 @@ class LazyGraphModule(torch.nn.Module):  # TODO: better name?
 
   def __call__(self, *args):
     if self.compiled_fn is None:
-      # fake_mode = FakeTensorMode()
-      # breakpoint()
-      # for x in args:
-      #   if isinstance(x, list):
-      #     print(f"x: {x}")
-      # args_fake = [fake_mode.from_tensor(x) for x in args]
-      self.compiled_fn = torch._inductor.compile(self.gm, args)
-      self.scheduler.record_compiled_fn(self.gm, self.compiled_fn, self.segment)
       # During compile time, return real tensor, because downstream Inductor compilation needs real tensor
+      self.compiled_fn = torch._inductor.compile(self.gm, args)
       return self.compiled_fn(*args)
     else:
       # breakpoint()
       print(f"lgm call args will be called")
       print(f"lgm call args: {args}")
-      return self.scheduler.maybe_run(self.gm, self.compiled_fn, *args)
+      print(f"lgm self.gm: {self.gm}")
+      return self.scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
 
     # return self.gm(*args)
 
@@ -202,7 +197,7 @@ class LazyGraphModule(torch.nn.Module):  # TODO: better name?
 class LazyScheduler:
   def __init__(self, schedule):
     self._schedule = schedule
-    self._gm_to_handle_map = {}
+    self._gm_to_handle_map = OrderedDict()
     self._segment_to_gms_map = defaultdict(list)
     self._next_segment_index = 0
 
@@ -272,10 +267,9 @@ class LazyScheduler:
     return gm_after_split
 
   def record_compiled_fn(self, gm, compiled_fn, segment):
-    cur_handle = AsyncFuncHandle(compiled_fn, gm, segment, args=[], outs_async=[], scheduler=self)
-    self._gm_to_handle_map[gm] = cur_handle
+    pass
 
-  def maybe_run(self, gm, compiled_fn, *args):
+  def maybe_run(self, gm, compiled_fn, segment, *args):
     # For now, we just eagerly run it
     # TODO: implement running based on schedule and returning AsyncTensor
     # return compiled_fn(*args)
@@ -297,9 +291,8 @@ class LazyScheduler:
     # as well as materialized when handle is finally run.
     outs_async = tuple(AsyncTensor(out_fake) for out_fake in outs_fake)
     # breakpoint()
-    cur_handle = self._gm_to_handle_map[gm]
-    cur_handle.args = args
-    cur_handle.outs_async = outs_async
+    cur_handle = AsyncFuncHandle(compiled_fn, gm, segment, args=args, outs_async=outs_async, scheduler=self)
+    self._gm_to_handle_map[gm] = cur_handle
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
