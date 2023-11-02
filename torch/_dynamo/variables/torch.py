@@ -872,31 +872,4 @@ class TorchVariable(VariableTracker):
                 ),
             )
 
-        return variables.LambdaVariable(fake_cross_entropy_loss)
-
-    def _call_ntuple(self, tx, args, kwargs):
-        """inline behavior of torch.nn.modules.utils._ntuple"""
-        if self.value is torch.nn.modules.utils._ntuple:
-            count = args[0].as_python_constant()
-        else:
-            count = self.value.__closure__[0].cell_contents
-        assert isinstance(count, int)
-        assert not kwargs
-
-        def handle_ntuple(value):
-            if value.has_unpack_var_sequence(tx):
-                return variables.TupleVariable(
-                    list(value.unpack_var_sequence(tx)),
-                )
-            elif value.is_python_constant():
-                # constant prop through it
-                return variables.ConstantVariable.create(
-                    torch.nn.modules.utils._ntuple(count)(value.as_python_constant()),
-                )
-            else:
-                unimplemented(f"torch.nn.modules.utils._ntuple({value})")
-
-        if self.value is torch.nn.modules.utils._ntuple:
-            return variables.LambdaVariable(handle_ntuple)
-        else:
-            return handle_ntuple(args[0])
+        return variables.LambdaVariable(fake_cross_entropy_loss, **options)
