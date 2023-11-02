@@ -107,11 +107,11 @@ def register_pytree_node(
         unflatten_fn (callable): A function taking two arguments: the auxiliary data that was
             returned by ``flatten_fn`` and stored in the treespec, and the unflattened children.
             The function should return an instance of ``cls``.
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might
             register a different custom behavior for the same type. (default: :const:`"torch"`)
-        serialized_type_name (str, optional): A keyword argument used to specify the fully
-            qualified name used when serializing the tree spec.
 
     Example::
 
