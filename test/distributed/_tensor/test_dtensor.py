@@ -265,9 +265,20 @@ class DTensorTest(DTensorTestBase):
         )
         local_out.sum().backward()
 
-        replica_grad = sharded_dtensor.grad.redistribute(
-            placements=[Replicate()]
-        ).to_local()
+        replica_grad = sharded_dtensor.grad.full_tensor()
+        self.assertEqual(replica_grad, global_tensor * self.world_size)
+
+    @with_comms
+    def test_full_tensor_grad_hint(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = (Shard(0),)
+        global_tensor = torch.ones(8, 3, requires_grad=True)
+
+        sharded_dtensor = distribute_tensor(global_tensor, device_mesh, shard_spec)
+        local_out = sharded_dtensor.full_tensor(grad_placements=[_Partial()])
+        local_out.sum().backward()
+
+        replica_grad = sharded_dtensor.grad.full_tensor()
         self.assertEqual(replica_grad, global_tensor * self.world_size)
 
     @with_comms
