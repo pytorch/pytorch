@@ -384,7 +384,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.div("1", x)
+        return ops.truediv("1", x)
 
     @staticmethod
     def square(x):
