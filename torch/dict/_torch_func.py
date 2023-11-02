@@ -283,6 +283,7 @@ def _stack(
     keys = _check_keys(list_of_tensordicts)
     result_batch_size = list(batch_size)
     result_batch_size.insert(dim, len(list_of_tensordicts))
+    result_batch_size = torch.Size(result_batch_size)
 
     if out is None:
         device = list_of_tensordicts[0].device
@@ -299,7 +300,7 @@ def _stack(
                 )
         return TensorDict(
             out,
-            batch_size=torch.Size(result_batch_size),
+            batch_size=result_batch_size,
             device=device,
             _run_checks=False,
         )
@@ -308,7 +309,7 @@ def _stack(
         if out.batch_size != result_batch_size:
             raise RuntimeError(
                 "out.batch_size and stacked batch size must match, "
-                f"got out.batch_size={out.batch_size} and batch_size"
+                f"got out.batch_size={out.batch_size} and resulting batch_size"
                 f"={result_batch_size}"
             )
 

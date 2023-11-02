@@ -52,6 +52,8 @@ _register_tensor_class(ftdim.Tensor)
 
 from .base import _ACCEPTED_CLASSES
 
+__base__setattr__ = torch.nn.Module.__setattr__
+
 
 class TensorDict(TensorDictBase):
     """A batched dictionary of tensors.
@@ -208,10 +210,8 @@ class TensorDict(TensorDictBase):
             return TensorDictParams(td, no_convert=True)
         return td
 
-    def to_module(self, module, return_swap: bool = False):
-        from .func import set_tensor_dict
+    def to_module(self, module, return_swap: bool = False, swap_dest=None):
 
-        __base__setattr__ = nn.Module.__setattr__
         # we use __dict__ directly to avoid the getattr/setattr overhead whenever we can
         __dict__ = module.__dict__
         out = None
@@ -220,18 +220,27 @@ class TensorDict(TensorDictBase):
             # this could break if the device and batch-size are not congruent.
             # For batch-size it is a minor issue (unlikely that a td with batch-size
             # is passed with to_module) but for the device it could be a problem.
-            out = self.empty()
+            if swap_dest is None:
+                out = self.empty()
+            else:
+                out = swap_dest
 
         for key, value in self.items():
             cls = value.__class__
-            if _is_tensor_collection(cls) or issubclass(cls, dict):
+            if _is_tensor_collection(cls):  # or issubclass(cls, dict):
+                if swap_dest is not None:
+                    local_dest = swap_dest._get_str(key, default=NO_DEFAULT)
+                else:
+                    local_dest = None
                 local_out = value.to_module(
                     __dict__["_modules"][key],
-                    return_swap=return_swap
+                    return_swap=return_swap,
+                    swap_dest=local_dest,
                     )
             else:
                 if module.__class__.__setattr__ is __base__setattr__:
-                    local_out = set_tensor_dict(__dict__, module, key, value)
+                    # if setattr is the native nn.Module.setattr, we can rely on _set_tensor_dict
+                    local_out = _set_tensor_dict(__dict__, module, key, value)
                 else:
                     if return_swap:
                         local_out = getattr(module, key)
@@ -344,7 +353,9 @@ class TensorDict(TensorDictBase):
                 self._set_tuple(
                     index_unravel,
                     value,
-                    inplace=False,
+                    inplace=BEST_ATTEMPT_INPLACE
+                    if isinstance(self, _SubTensorDict)
+                    else False,
                     validated=False,
                 )
                 return
@@ -358,7 +369,7 @@ class TensorDict(TensorDictBase):
             if isinstance(value, dict):
                 value = self.empty(recurse=True)[index].update(value)
             if value.batch_size != indexed_bs:
-                # try to expand
+                # try to expand on the left (broadcasting)
                 try:
                     value = value.expand(indexed_bs)
                 except RuntimeError as err:
@@ -485,12 +496,15 @@ class TensorDict(TensorDictBase):
             else:
                 item_trsf = fn(item, *_others)
             if item_trsf is not None:
-                out._set_str(
-                    key,
-                    item_trsf,
-                    inplace=BEST_ATTEMPT_INPLACE if inplace else False,
-                    validated=checked,
-                )
+                if isinstance(self, _SubTensorDict):
+                    out.set(key, item_trsf, inplace=inplace)
+                else:
+                    out._set_str(
+                        key,
+                        item_trsf,
+                        inplace=BEST_ATTEMPT_INPLACE if inplace else False,
+                        validated=checked,
+                    )
 
         if not inplace and is_locked:
             out.lock_()
@@ -599,9 +613,14 @@ class TensorDict(TensorDictBase):
                 )
 
         def _expand(tensor):
-            tensor_dims = len(tensor.shape)
+            tensor_shape = tensor.shape
+            tensor_dims = len(tensor_shape)
             last_n_dims = tensor_dims - tensordict_dims
-            return tensor.expand(*shape, *tensor.shape[-last_n_dims:])
+            if last_n_dims > 0:
+                new_shape = (*shape, *tensor_shape[-last_n_dims:])
+            else:
+                new_shape = shape
+            return tensor.expand(new_shape)
 
         names = [None] * (len(shape) - tensordict_dims) + self.names
         return self._fast_apply(
@@ -852,7 +871,7 @@ class TensorDict(TensorDictBase):
             return self
 
         def _transpose(tensor):
-            return tensor.permute(dim0, dim1)
+            return tensor.transpose(dim0, dim1)
 
         batch_size = list(self.batch_size)
         v0 = batch_size[dim0]
@@ -1177,7 +1196,7 @@ class TensorDict(TensorDictBase):
                  self.keys()]
             )
             raise RuntimeError(
-                f"tensors must be either all MemmapTensor or not, but mixed "
+                f"tensors must be either all MemoryMappedTensor or not, but mixed "
                 f"features is not allowed. "
                 f"Found: {memmap_str}"
             )
@@ -1412,7 +1431,7 @@ class TensorDict(TensorDictBase):
             # cuda tensors are shared by default
             return self
         for value in self.values():
-            # no need to consider MemmapTensors here as we have checked that this is not a memmap-tensordict
+            # no need to consider MemoryMappedTensors here as we have checked that this is not a memmap-tensordict
             if (
                 isinstance(value, Tensor)
                 and value.device.type == "cpu"
@@ -1481,9 +1500,9 @@ class TensorDict(TensorDictBase):
                 else:
                     # memmap in wrong location and copy is disallowed
                     raise RuntimeError(
-                        "TensorDict already contains MemmapTensors saved to a location "
+                        "TensorDict already contains MemoryMappedTensors saved to a location "
                         "incompatible with prefix. Either move the location of the "
-                        "MemmapTensors, or allow automatic copying with "
+                        "MemoryMappedTensors, or allow automatic copying with "
                         "copy_existing=True"
                     )
             else:
@@ -1726,6 +1745,9 @@ class TensorDict(TensorDictBase):
         inplace: bool = False,
         strict: bool = True
     ) -> T:
+        if inplace and self.is_locked:
+            raise RuntimeError(_LOCK_ERROR)
+
         source = {}
         if len(keys):
             keys_to_select = None
@@ -2143,7 +2165,7 @@ class _SubTensorDict(TensorDictBase):
             if firstkey in keys:
                 target_class = self.entry_class(firstkey)
                 if _is_tensor_collection(target_class):
-                    target = self._source.get(firstkey).get_sub_tensordict(
+                    target = self._source.get(firstkey)._get_sub_tensordict(
                         self.idx
                     )
                     if len(subkey):
@@ -2234,7 +2256,7 @@ class _SubTensorDict(TensorDictBase):
 
         Examples:
             >>> data = TensorDict({"a": torch.arange(4).reshape(2, 2,)}, batch_size=[2, 2])
-            >>> sub_data = data.get_sub_tensordict([0,])
+            >>> sub_data = data._get_sub_tensordict([0,])
             >>> print(sub_data)
             _SubTensorDict(
                 fields={
@@ -2718,3 +2740,29 @@ def _getitem_batch_size(batch_size, index):
     if batch_size[count:]:
         out.extend(batch_size[count:])
     return torch.Size(out)
+
+
+def _set_tensor_dict(  # noqa: F811
+    module_dict, module, name: str, tensor: torch.Tensor
+) -> None:
+    """Simplified version of torch.nn.utils._named_member_accessor."""
+    was_buffer = False
+    out = module_dict["_parameters"].pop(name, None)  # type: ignore[assignment]
+    if out is None:
+        out = module_dict["_buffers"].pop(name, None)
+        was_buffer = out is not None
+    if out is None:
+        out = module_dict.pop(name, None)
+
+    if isinstance(tensor, torch.nn.Parameter):
+        # module.register_parameter(name, tensor)
+        for hook in torch.nn.modules.module._global_parameter_registration_hooks.values():
+            output = hook(module, name, tensor)
+            if output is not None:
+                tensor = output
+        module_dict["_parameters"][name] = tensor
+    elif was_buffer and isinstance(tensor, torch.Tensor):
+        module_dict["_buffers"][name] = tensor
+    else:
+        module_dict[name] = tensor
+    return out

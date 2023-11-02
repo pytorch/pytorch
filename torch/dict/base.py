@@ -314,13 +314,15 @@ class TensorDictBase(MutableMapping):
         ...
 
     @abc.abstractmethod
-    def to_module(self, module: "nn.Module", return_swap: bool = False):
+    def to_module(self, module: "nn.Module", return_swap: bool = False, swap_dest=None):
         """Writes the content of a TensorDictBase instance onto a given nn.Module attributes, recursively.
 
         Args:
             module (nn.Module): a module to write the parameters into.
             return_swap (bool, optional): if ``True``, the old parameter configuration
                 will be returned. Defaults to ``False``.
+            swap_dest (TensorDictBase, optional): if ``return_swap`` is ``True``,
+                the tensordict where the swap should be written.
 
         Examples:
             >>> from torch import nn
@@ -1248,13 +1250,13 @@ class TensorDictBase(MutableMapping):
 
         for key, item in state_dict.items():
             if isinstance(item, dict):
+                dest = self.get(key, default=None)
+                if dest is None:
+                    dest = self.empty()
+                dest.load_state_dict(item, assign=assign, strict=strict)
                 self.set(
                     key,
-                    self.get(
-                        key, default=self.empty().load_state_dict(
-                            item, assign=assign, strict=strict
-                        )
-                    ),
+                    dest,
                     inplace=not assign,
                 )
             else:
@@ -3549,11 +3551,10 @@ class TensorDictBase(MutableMapping):
         self._lock_id = self._lock_id.union(lock_ids)
         lock_ids = lock_ids.union({id(self)})
         _locked_tensordicts = []
-        for key in self.keys():
-            if _is_tensor_collection(self.entry_class(key)):
-                dest = self.get(key)
-                dest._lock_propagate(lock_ids)
-                _locked_tensordicts.append(dest)
+        for key, value in self.items():
+            if _is_tensor_collection(type(value)):
+                value._lock_propagate(lock_ids)
+                _locked_tensordicts.append(value)
         if is_root:
             self._locked_tensordicts = _locked_tensordicts
         else:
@@ -3582,10 +3583,9 @@ class TensorDictBase(MutableMapping):
 
         unlocked_tds = [self]
         lock_ids.add(id(self))
-        for key in self.keys():
-            if _is_tensor_collection(self.entry_class(key)):
-                dest = self.get(key)
-                unlocked_tds.extend(dest._propagate_unlock(lock_ids))
+        for key, value in self.items():
+            if _is_tensor_collection(type(value)):
+                unlocked_tds.extend(value._propagate_unlock(lock_ids))
         self._locked_tensordicts = []
 
         self._is_shared = False

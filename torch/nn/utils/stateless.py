@@ -106,11 +106,9 @@ def _reparametrize_module(
             orig_parameters_and_buffers = parameters_and_buffers.to_module(module, return_swap=True)
             yield
         finally:
-            new_parameters_and_buffers = orig_parameters_and_buffers.to_module(module, return_swap=True)
             # tensordict is locked by default in this case, so we unlock it as we can't tell if an inplace update
             # can be done (most likely not)
-            # with parameters_and_buffers.unlock_():
-            #     parameters_and_buffers.update(new_parameters_and_buffers)
+            orig_parameters_and_buffers.to_module(module, return_swap=True, swap_dest=parameters_and_buffers)
     else:
         if tie_weights:
             untied_parameters_and_buffers = _untie_named_tensors_map(

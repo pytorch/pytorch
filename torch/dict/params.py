@@ -18,22 +18,22 @@ from ._torch_func import TD_HANDLED_FUNCTIONS
 from .base import TensorDictBase, _is_tensor_collection, CompatibleType, \
     NO_DEFAULT
 from .tensordict import _SubTensorDict, TensorDict
-from .utils import Buffer
+from .utils import Buffer, _LOCK_ERROR
 from .utils import lock_blocked
 
 
 def _apply_leaves(data, fn):
-    if isinstance(data, TensorDict):
+    if isinstance(data, _SubTensorDict):
+        raise RuntimeError(
+            "Using a _SubTensorDict within a TensorDictParams isn't permitted."
+        )
+    elif isinstance(data, TensorDictBase):
         with data.unlock_():
             for key, val in list(data.items()):
                 data._set_str(
                     key, _apply_leaves(val, fn), validated=True, inplace=False
                 )
         return data
-    elif isinstance(data, _SubTensorDict):
-        raise RuntimeError(
-            "Using a _SubTensorDict within a TensorDictParams isn't permitted."
-        )
     else:
         return fn(data)
 
@@ -69,6 +69,7 @@ def _maybe_make_param_or_buffer(tensor):
 
 
 class _unlock_and_set:
+    # temporarily unlocks the nested tensordict to execute a function
     def __new__(cls, *args, **kwargs):
         if len(args) and callable(args[0]):
             return cls(**kwargs)(args[0])
@@ -97,7 +98,9 @@ class _unlock_and_set:
             else:
                 args = tree_map(_maybe_make_param_or_buffer, args)
                 kwargs = tree_map(_maybe_make_param_or_buffer, kwargs)
-
+            if _self.is_locked:
+                # if the root (TensorDictParams) is locked, we still want to raise an exception
+                raise RuntimeError(_LOCK_ERROR)
             with _self._param_td.unlock_():
                 meth = getattr(_self._param_td, name)
                 out = meth(*args, **kwargs)
@@ -686,6 +689,27 @@ class TensorDictParams(TensorDictBase, nn.Module):
     @_fallback_property
     def shape(self) -> torch.Size:
         ...
+
+    def _lock_propagate(self, lock_ids=None):
+        """Registers the parent tensordict that handles the lock."""
+        self._is_locked = True
+        is_root = lock_ids is None
+        if is_root:
+            lock_ids = set()
+        self._lock_id = self._lock_id.union(lock_ids)
+        lock_ids = lock_ids.union({id(self)})
+        _locked_tensordicts = []
+        # we don't want to double-lock the _param_td attrbute which is locked by default
+        if not self._param_td.is_locked:
+            for key, value in self._param_td.items():
+                if _is_tensor_collection(type(value)):
+                    value._lock_propagate(lock_ids)
+                    _locked_tensordicts.append(value)
+        if is_root:
+            self._locked_tensordicts = _locked_tensordicts
+        else:
+            self._locked_tensordicts += _locked_tensordicts
+
 
     @erase_cache
     def _propagate_unlock(self, lock_ids=None):
