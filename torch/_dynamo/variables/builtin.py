@@ -1108,7 +1108,9 @@ class BuiltinVariable(VariableTracker):
                             return wrap_fx_proxy(
                                 tx=tx,
                                 proxy=grad_proxy,
-                                example_value=obj.as_proxy().node.meta["example_value"].grad,
+                                example_value=obj.as_proxy()
+                                .node.meta["example_value"]
+                                .grad,
                                 **options,
                             )
                         return VariableBuilder(tx, source)(example_value).add_options(
