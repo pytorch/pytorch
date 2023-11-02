@@ -137,6 +137,11 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             d: torch.Tensor = None
             e: torch.Tensor = None
 
+        # Patch the __module__; to avoid expensive imports we currently only
+        # trigger custom logic for ModelOutput and BaseModel when the module
+        # names match.
+        MyDataClass.__module__ = "transformers.modeling_outputs"
+
         def fn(obj):
             class_fields = dataclasses.fields(obj)
             assert len(class_fields)
