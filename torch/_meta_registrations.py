@@ -3162,8 +3162,22 @@ def meta__foreach_binop__tensor(self, other, alpha=1):
     )
 
 
+@register_meta([aten._local_scalar_dense])
+def meta__local_scalar_dense(self):
+    torch._check(
+        isinstance(self, Tensor),
+        lambda: f"The first argument must be Tensor, but got {type(self)}.",
+    )
+    torch._check(
+        self.dim() == 0 and self.numel() == 1,
+        lambda: f"The first argument must be 0-dim, but got {self.dim()}-dim.",
+    )
+    return torch.zeros(size=(1,), dtype=self.dtype).item()
+
+
 @register_meta(
     [
+        aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
@@ -3179,6 +3193,7 @@ def meta__foreach_binop__scalar(self, scalar=1):
 
 @register_meta(
     [
+        aten._foreach_add.Scalar,
         aten._foreach_mul.Scalar,
         aten._foreach_sub.Scalar,
     ]
@@ -3226,6 +3241,7 @@ def meta__foreach_div_scalar(self, scalar=1):
 
 @register_meta(
     [
+        aten._foreach_add.ScalarList,
         aten._foreach_mul.ScalarList,
         aten._foreach_sub.ScalarList,
     ]
@@ -3289,6 +3305,7 @@ def meta__foreach_div_scalarlist(self, scalars):
 
 @register_meta(
     [
+        aten._foreach_add_.ScalarList,
         aten._foreach_mul_.ScalarList,
         aten._foreach_sub_.ScalarList,
         aten._foreach_div_.ScalarList,
