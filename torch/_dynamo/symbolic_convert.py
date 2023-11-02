@@ -910,9 +910,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     @break_graph_if_unsupported(push=1)
     def RAISE_VARARGS(self, inst):
         value = self.pop()
-        if (
-            isinstance(value, UserDefinedObjectVariable)
-            and isinstance(value.value, StopIteration)
+        if isinstance(value, UserDefinedObjectVariable) and isinstance(
+            value.value, StopIteration
         ):
             raise exc.InlinedUserStopIteration()
         unimplemented(f"RAISE_VARARGS is not implemented for {value}")
@@ -1096,9 +1095,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.output.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables(self)
-                if _is_stop_iteration(val):
-                    self.jump(inst)
-                    return
                 self.push(next_iter)
                 self.push(val)
             except exc.InlinedUserStopIteration:
@@ -2574,10 +2570,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.instruction_pointer = None
 
 
-def _is_stop_iteration(vt: VariableTracker):
-    return vt.is_python_constant() and vt.as_python_constant() == StopIteration
-
-
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     generated_items: List[VariableTracker]
 
@@ -2610,8 +2602,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 self.output.guards.update(tos.guards)
                 try:
                     val, next_iter = tos.next_variables(self)
-                    if _is_stop_iteration(val):
-                        return
                     self.push(val)
                     # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)

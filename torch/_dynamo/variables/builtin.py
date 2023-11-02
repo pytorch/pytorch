@@ -987,9 +987,6 @@ class BuiltinVariable(VariableTracker):
         return variables.SuperVariable(a, b)
 
     def call_next(self, tx, arg, kwargs=None):
-        def _is_stop_iteration(vt):
-            return vt.is_python_constant() and vt.as_python_constant() == StopIteration
-
         if isinstance(
             arg, (variables.ListIteratorVariable, variables.IteratorVariable)
         ):
