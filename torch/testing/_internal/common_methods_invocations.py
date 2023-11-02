@@ -8561,12 +8561,19 @@ class ForeachRightmostArgType(enum.Enum):
 
 
 class ForeachSampleInput(SampleInput):
+    # For TensorList <op> Scalar/Tensor, we compute the reference
+    # by converting it into TensorList <op> ScalarList/TensorList and
+    # then converting into multiple Tensor <op> Scalar/Tensor.
+    # ref_args contains the args converted to TensorList <op> ScalarList/TensorList
     ref_args: Any
     disable_fastpath: bool
 
-    def __init__(self, *args, disable_fastpath=False, **kwargs):
+    def __init__(self, *args, disable_fastpath=False, ref_args=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ref_args = self.args
+        if ref_args:
+            self.ref_args = ref_args
+        else:
+            self.ref_args = self.args
         self.disable_fastpath = disable_fastpath
 
 
@@ -8759,11 +8766,10 @@ class foreach_inputs_sample_func:
                 for rightmost_arg in rightmost_arg_list:
                     args.append(rightmost_arg)
                     kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
-                    sample = ForeachSampleInput(input, *args, **kwargs)
                     ref_args = args
                     if rightmost_arg_type in (ForeachRightmostArgType.Scalar, ForeachRightmostArgType.Tensor):
                         ref_args = args[:-1] + [[args[-1] for _ in range(num_tensors)]]
-                    sample.ref_args = ref_args
+                    sample = ForeachSampleInput(input, *args, ref_args=ref_args, **kwargs)
                     yield sample
                     args.pop()
             else:
@@ -8825,10 +8831,8 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         arity: int = 3,
         rightmost_supports_scalar: bool = False,
         rightmost_supports_scalarlist: bool = False,
-        without_values_kwarg: bool = False,
     ):
         super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist)
-        self.without_values_kwarg = without_values_kwarg
 
     def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
         return dtype in integral_types_and(torch.bool) and opinfo.ref in (torch.addcmul,)
@@ -8843,8 +8847,7 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
             sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
             for _ in range(2)
         ]
-        if "values" in kwargs:
-            del kwargs["values"]
+        kwargs["values"] = None
         kwargs.update(self._sample_kwargs(opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype))
         yield ForeachSampleInput(input, *args, **kwargs)
 
@@ -8867,13 +8870,10 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 kwargs = {}
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
                     args.append(rightmost_arg)
-                    assert len(args) == 2, f"{len(args)=}"
-                elif self.without_values_kwarg:
-                    args.append(rightmost_arg)
                 else:
                     kwargs["values"] = rightmost_arg
-                    assert len(args) == 2, f"{len(args)=}"
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
+                assert len(args) == 2, f"{len(args)=}"
                 sample = ForeachSampleInput(input, *args, **kwargs)
                 yield sample
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
@@ -9049,6 +9049,8 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
+                         "test_dispatch_symbolic_meta_inplace", dtypes=complex_types()),
+            DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
                          "test_dispatch_meta_inplace", dtypes=complex_types()),
             DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), "TestMeta",
                          "test_meta_inplace", dtypes=complex_types()),
@@ -9058,7 +9060,7 @@ foreach_unary_op_db: List[OpInfo] = [
         'zero',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-        has_no_out_of_place=True,
+        supports_out=False,
     ),
     ForeachFuncInfo(
         'sign',
@@ -9071,6 +9073,14 @@ foreach_unary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+        skips=(
+            DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
+                         "test_dispatch_symbolic_meta_inplace", dtypes=integral_types_and(torch.bool)),
+            DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
+                         "test_dispatch_meta_inplace", dtypes=integral_types_and(torch.bool)),
+            DecorateInfo(unittest.skip("In-place lgamma not supported for integral tensors"), "TestMeta",
+                         "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
+        ),
     ),
 ]
 
@@ -9247,22 +9257,16 @@ foreach_binary_op_db: List[OpInfo] = [
         "copy",
         foreach_inputs_sample_func(2, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
-        has_no_out_of_place=True,
+        supports_out=False,
         supports_forward_ad=False,
         supports_autograd=False,
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
     )
 ]
 
 foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "addcmul",
-        foreach_pointwise_sample_func(4, True, True, False),
+        foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
@@ -9278,16 +9282,7 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
     ),
     ForeachFuncInfo(
         "addcdiv",
-        sample_inputs_func=foreach_pointwise_sample_func(4, True, True, False),
-        dtypes=all_types_and_complex(),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-    ),
-]
-
-foreach_pointwise_without_values_kwarg_op_db: List[ForeachFuncInfo] = [
-    ForeachFuncInfo(
-        "addcmul",
-        foreach_pointwise_sample_func(4, True, True, True),
+        sample_inputs_func=foreach_pointwise_sample_func(4, True, True),
         dtypes=all_types_and_complex(),
         dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         skips=(
@@ -9299,31 +9294,6 @@ foreach_pointwise_without_values_kwarg_op_db: List[ForeachFuncInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
-    ),
-    ForeachFuncInfo(
-        "addcdiv",
-        sample_inputs_func=foreach_pointwise_sample_func(4, True, True, True),
-        dtypes=all_types_and_complex(),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
-        skips=(
-            # Integer division with addcdiv is no longer supported
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                         dtypes=integral_types()),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         dtypes=integral_types()),
         ),
     ),
 ]
