@@ -13,6 +13,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
@@ -1137,12 +1138,16 @@ class NodeUser:
         )
 
 
+_post_grad_graph_counter = itertools.count()
+
+
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.nodes = []
         self.available_buffer_names = {
@@ -1164,12 +1169,21 @@ class Scheduler:
             str, BaseSchedulerNode
         ] = dict()  # set in fuse_nods()
 
-        # we handle mutation by renaming modified versions of the same
+        # mutation_real_name: Maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_real_name = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        self.mutation_real_name = {}
+
+        # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
         #                   (changed once per mutation)
-        self.mutation_real_name = {}
-        # mutation_real_name: maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_renames = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_renames = {}
 
         self.compute_dependencies()
@@ -1185,6 +1199,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
+        self.logged_slow_fusion = set()
         self.fuse_nodes()
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
@@ -1203,7 +1218,13 @@ class Scheduler:
         # for debug attribution
         self.origin_to_index = {}
 
-        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+        get_metric_table("graph_stats").add_row(
+            lambda: {
+                "graph_id": self.post_grad_graph_id,
+                "num_nodes_before_fusion": self.num_orig_nodes,
+                "num_nodes_after_fusion": len(self.nodes),
+            }
+        )
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1574,19 +1595,19 @@ class Scheduler:
         from triton.compiler.errors import CompilationError
 
         try:
-            ms1 = self.benchmark_fused_nodes(node_list_1)
+            ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             if math.isinf(ms1):
                 log.debug(
                     "Skip fusion because of register spilling of the first kernel"
                 )
                 return False
-            ms2 = self.benchmark_fused_nodes(node_list_2)
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
             if math.isinf(ms2):
                 log.debug(
                     "Skip fusion because of register spilling of the second kernel"
                 )
                 return False
-            ms_fused = self.benchmark_fused_nodes(node_list_fused)
+            ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
             if math.isinf(ms_fused):
                 log.debug(
                     "Skip fusion because of register spilling of the fused kernel"
@@ -1615,6 +1636,23 @@ class Scheduler:
                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                 )
 
+        if (
+            is_metric_table_enabled("slow_fusion")
+            and ms_fused >= ms1 + ms2
+            and (path1, path2) not in self.logged_slow_fusion
+        ):
+            self.logged_slow_fusion.add((path1, path2))
+            get_metric_table("slow_fusion").add_row(
+                lambda: {
+                    "kernel1_path": path1,
+                    "kernel1_latency": ms1,
+                    "kernel2_path": path2,
+                    "kernel2_latency": ms2,
+                    "fused_kernel_path": path_fused,
+                    "fused_kernel_latency": ms_fused,
+                    "slow_down_ratio": ms_fused / (ms1 + ms2),
+                }
+            )
         return ms_fused < ms1 + ms2
 
     def fuse_nodes_once(self):

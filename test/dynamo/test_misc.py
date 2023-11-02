@@ -1716,6 +1716,19 @@ utils_device.CURRENT_DEVICE == None""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_readonly(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x
+
+        x = np.broadcast_to(np.arange(3), (2, 3))
+        self.assertFalse(x.flags.writeable)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            y = fn(x)
+        self.assertTrue(y.flags.writeable)  # XXX: differs from numpy
+
     def test_numpy_tolist(self):
         def fn(x):
             return x.tolist()
@@ -7540,6 +7553,23 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
 
+    def test_default_args_device_dtype(self):
+        class Foo:
+            def __init__(
+                self,
+                dtype: torch.dtype = torch.float16,
+                device: torch.device = torch.device("cpu"),
+            ) -> None:
+                self.value = torch.tensor(10, dtype=dtype, device=device)
+
+        def fn():
+            return Foo().value + 1
+
+        opt_func = torch._dynamo.optimize("eager", nopython=True)(fn)
+        ref = fn()
+        res = opt_func()
+        self.assertEqual(ref, res)
+
     def test_torch_device_python_type(self):
         for device, device_type, index in [
             ("cpu", "cpu", None),
@@ -8113,6 +8143,9 @@ ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  > Right: {}
+==> divisible: values don't match.
+  >  Left: {Mod(i0, 3)}
   > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, i0, mod}

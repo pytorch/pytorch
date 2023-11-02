@@ -18,8 +18,6 @@ from torch._inductor.fx_passes.post_grad import view_to_reshape
 from . import config
 
 aten = torch.ops.aten
-
-aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
