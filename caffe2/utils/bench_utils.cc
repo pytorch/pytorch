@@ -96,9 +96,9 @@ uint32_t wipe_cache() {
       wipe_size = sysconf(_SC_LEVEL3_CACHE_SIZE);
       if (wipe_size <= 0) {
         wipe_size = sysconf(_SC_LEVEL2_CACHE_SIZE);
-	if(wipe_size <= 0) {
-	  wipe_size = sysconf(_SC_LEVEL1D_CACHE_SIZE);
-	}
+        if(wipe_size <= 0) {
+          wipe_size = sysconf(_SC_LEVEL1D_CACHE_SIZE);
+        }
       }
     }
 #endif
