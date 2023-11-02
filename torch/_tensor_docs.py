@@ -4055,7 +4055,7 @@ current work queued on :attr:`stream` are complete.
     non-deterministically reuse or fail to reuse memory for an allocation.
 
     You can safely use tensors allocated on side streams without
-    :method:`~Tensor.record_stream`; you must manually ensure that
+    :meth:`~Tensor.record_stream`; you must manually ensure that
     any non-creation stream uses of a tensor are synced back to the creation
     stream before you deallocate the tensor.  As the CUDA caching allocator
     guarantees that the memory will only be reused with the same creation stream,
@@ -4091,7 +4091,7 @@ current work queued on :attr:`stream` are complete.
     point in time where you expect the side stream ``s1`` to have finished
     work.  This location is typically identified via profiling, e.g., using
     Chrome traces produced
-    :method:`torch.autograd.profiler.profile.export_chrome_trace`.  If you
+    :meth:`torch.autograd.profiler.profile.export_chrome_trace`.  If you
     place the wait too early, work on s0 will block until ``s1`` has finished,
     preventing further overlapping of communication and computation.  If you
     place the wait too late, you will use more memory than is strictly
