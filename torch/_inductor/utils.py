@@ -950,7 +950,9 @@ class OriginOpList:
     def codegen(self, code: IndentedBuffer, line: str):
         marker_string = str(self)
         prefix = f"{self.kernel_prefix}_kernel, OriginOps: "
-        code.writeline(f'with record_function("{prefix}{marker_string}"):')
+        code.writeline(
+            f'with torch._C._profiler._RecordFunctionFast("{prefix}{marker_string}"):'
+        )
         with code.indent():
             code.writeline(line)
         return

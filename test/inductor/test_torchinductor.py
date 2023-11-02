@@ -8147,7 +8147,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for line in fwd_code.split("\n"):
                 mod_name = ""
                 res = re.search(
-                    r"record_function.*extern_.*'mod_name':\s+'(\S+)'", line
+                    r"RecordFunctionFast.*extern_.*'mod_name':\s+'(\S+)'", line
                 )
                 if res:
                     mod_name = res.group(1)
