@@ -405,6 +405,12 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       DeviceStreamType stream,
       AOTIProxyExecutorHandle proxy_executor);
 
+  template <typename Inputs, typename Outputs>
+  Outputs run_impl_minimal_arrayref_interface(
+      const Inputs& inputs,
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
+
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
       std::optional<std::string> cubin_dir) {

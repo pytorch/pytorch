@@ -276,6 +276,29 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
 
 #ifdef __cplusplus
 } // extern "C"
+
+template <typename T>
+int32_t aoti_torch_dtype();
+
+#define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
+  template <>                                        \
+  inline int32_t aoti_torch_dtype<ctype>() {         \
+    return aoti_torch_dtype_##typename();            \
+  }
+
+// REVIEW: bfloat16 and half don't seem to actually build? Do I have
+// the wrong types?
+//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
+//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+DEFINE_DTYPE_SPECIALIZATION(float, float32)
+DEFINE_DTYPE_SPECIALIZATION(double, float64)
+DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)
+DEFINE_DTYPE_SPECIALIZATION(int8_t, int8)
+DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
+DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
+DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
+DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+
 #endif
 
 #endif // AOTI_TORCH_SHIM

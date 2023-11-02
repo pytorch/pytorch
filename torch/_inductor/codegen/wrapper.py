@@ -325,6 +325,7 @@ class WrapperCodeGen(CodeGen):
         self._names_iter = count()
         self.header = IndentedBuffer()
         self.prefix = IndentedBuffer()
+        self.suffix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
         self.kenel_numel_expr = set()
@@ -488,6 +489,9 @@ class WrapperCodeGen(CodeGen):
         else:
             self.wrapper_call.writeline("return ()")
 
+    def generate_before_suffix(self, result):
+        return
+
     def generate_end(self, result):
         return
 
@@ -616,6 +620,9 @@ class WrapperCodeGen(CodeGen):
 
         with result.indent():
             result.splice(self.wrapper_call)
+
+        self.generate_before_suffix(result)
+        result.splice(self.suffix)
 
         self.generate_end(result)
 
@@ -1250,8 +1257,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 new_args = []
                 for arg in call_args:
                     var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"void *{var_name}{self.ending}")
-                    self.writeline(f"{var_name} = get_data_ptr_wrapper({arg});")
+                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
                     dtype = V.graph.get_dtype(arg)
                     cpp_dtype = DTYPE_TO_CPP[dtype]
                     new_args.append(f"({cpp_dtype}*)({var_name})")
@@ -1320,11 +1326,46 @@ class CppWrapperCodeGen(WrapperCodeGen):
     ):
         self.prefix.writeline(f"""{info_kind}[{idx}].name = "{name}";""")
 
+    @staticmethod
+    def get_input_cpp_type(input):
+        assert config.use_minimal_arrayref_interface
+        from .cpp import DTYPE_TO_CPP
+
+        if isinstance(input, sympy.Expr):
+            from ..graph import may_get_constant_buffer_dtype
+
+            graph_input = V.graph.graph_inputs[input_key]
+            dtype = may_get_constant_buffer_dtype(graph_input)
+            assert (
+                dtype is not None
+            ), f"Failed to get the dtype of sympy.Expr: {graph_input}"
+            return DTYPE_TO_CPP[dtype]
+        return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
+
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            self.prefix.splice(
-                """
+            if config.use_minimal_arrayref_interface:
+                from .cpp import DTYPE_TO_CPP
+
+                input_cpp_types = ", ".join(
+                    f"{CppWrapperCodeGen.get_input_cpp_type(x)}"
+                    for x in V.graph.graph_inputs.values()
+                )
+
+                output_arrayref_types = ", ".join(
+                    f"ArrayRefTensor<{DTYPE_TO_CPP[x.get_dtype()]}>"
+                    for x in V.graph.graph_outputs
+                )
+
+                self.prefix.splice(
+                    f"""
+                    using AOTInductorModelInputs = std::tuple<{input_cpp_types}>;
+                    using AOTInductorModelOutputs = std::tuple<{output_arrayref_types}>;
+                    """
+                )
+
+            run_impl_proto = """
                 void AOTInductorModel::run_impl(
                     AtenTensorHandle*
                         input_handles, // array of input AtenTensorHandle; handles
@@ -1337,14 +1378,57 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     AOTIProxyExecutorHandle proxy_executor
                 ) {
                 """
-            )
+            if config.use_minimal_arrayref_interface:
+                self.prefix.splice(
+                    """
+                    template <>
+                    AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                        const AOTInductorModelInputs& inputs,
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                )
+                self.suffix.splice(run_impl_proto)
+                self.suffix.splice(
+                    """
+                        AOTInductorModelInputs inputs;
+                        convert_handles_to_inputs(input_handles, inputs);
+                        auto outputs = run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                            inputs, stream, proxy_executor);
+                        // NOTE: outputs is full of ArrayRef to thread_local storage. If in the future we need this
+                        // interface to perform well for a DSO using the minimal arrayref interface, all we need
+                        // to do is provide ThreadLocalCachedTensor for each one!
+                        convert_outputs_to_handles(outputs, output_handles);
+                    }
+                """
+                )
+
+                self.suffix.splice(
+                    """
+                    extern "C" AOTIRuntimeError AOTInductorModelRunMinimalArrayrefInterface(
+                        AOTInductorModelHandle model_handle,
+                        const AOTInductorModelInputs& inputs,
+                        AOTInductorModelOutputs& outputs) {
+                      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+                      CONVERT_EXCEPTION_TO_ERROR_CODE({
+                          outputs = model->run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                              inputs,
+                              (torch::aot_inductor::DeviceStreamType)nullptr,
+                              nullptr);
+                      })
+                    }
+                """
+                )
+            else:
+                self.prefix.splice(run_impl_proto)
         else:
             self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
             )
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
-            if V.graph.aot_mode:
+            if V.graph.aot_mode and not config.use_minimal_arrayref_interface:
                 if config.aot_inductor.abi_compatible:
                     self.prefix.splice(
                         """
@@ -1361,6 +1445,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
+                    if config.use_minimal_arrayref_interface:
+                        self.prefix.writeline(
+                            f"auto {input_key} = std::get<{idx}>(inputs);"
+                        )
+                        continue
                     # unwrap input tensor back to scalar
                     if isinstance(V.graph.graph_inputs[input_key], sympy.Expr):
                         from ..graph import may_get_constant_buffer_dtype
@@ -1410,7 +1499,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                self.prefix.writeline("inputs.clear();")
+                if not config.use_minimal_arrayref_interface:
+                    self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = static_cast<AOTInductorModelKernels&>(*this->kernels_.get());"
                 )
@@ -1546,47 +1636,92 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if V.graph.aot_mode:
+            arr_iface = config.use_minimal_arrayref_interface  # For brevity.
+
+            def use_thread_local_cached_output_tensor(idx, output):
+                cached_output_name = f"cached_output_{next(self.cached_output_id)}"
+                cache_type = "Array" if arr_iface else "Tensor"
+                self.wrapper_call.writeline(
+                    f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
+                    f"{cached_output_name}({output});"
+                )
+                if arr_iface:
+                    self.wrapper_call.writeline(
+                        f"{cached_output_name}.copy_data_from({output});"
+                    )
+                    output_entry = f"std::get<{idx}>(output_arrayref_tensors)"
+                    self.wrapper_call.writeline(
+                        f"{output_entry} = {cached_output_name}.arrayref_tensor<std::decay_t<decltype({output_entry}.data()[0])>>();"
+                    )
+                else:
+                    self.wrapper_call.writeline(
+                        f"{cached_output_name}.copy_data_from({output});"
+                    )
+                    self.wrapper_call.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
+                    )
+                    self.wrapper_call.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
+                        f"output_handles[{idx}]));"
+                    )
+
+            if arr_iface:
+                self.wrapper_call.writeline(
+                    "AOTInductorModelOutputs output_arrayref_tensors;"
+                )
             for idx, output in enumerate(output_refs):
                 if config.aot_inductor.abi_compatible:
+                    output_is_tensor_handle_expr = (
+                        f"std::is_same_v<std::decay_t<decltype({output})>,"
+                        "RAIIAtenTensorHandle>"
+                    )
                     self.wrapper_call.writeline(
-                        f"if constexpr (std::is_same_v<std::decay_t<decltype({output})>, RAIIAtenTensorHandle>) {{"
+                        f"if constexpr ({output_is_tensor_handle_expr}) {{"
                     )
                     with self.wrapper_call.indent():
-                        self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = {output}.release();"
-                        )
+                        if config.use_minimal_arrayref_interface:
+                            cached_output_name = (
+                                f"cached_output_{next(self.cached_output_id)}"
+                            )
+                            output_value_type = f"std::decay_t<decltype(std::get<{idx}>(output_arrayref_tensors).data()[0])>"
+                            self.wrapper_call.writeline(
+                                f"thread_local RAIIAtenTensorHandle {cached_output_name};"
+                            )
+                            self.wrapper_call.writeline(
+                                f"{cached_output_name} = {output}.release();"
+                            )
+                            self.wrapper_call.writeline(
+                                f"convert_handle_to_arrayref_tensor({cached_output_name}, std::get<{idx}>(output_arrayref_tensors));"
+                            )
+                        else:
+                            self.wrapper_call.writeline(
+                                f"output_handles[{idx}] = {output}.release();"
+                            )
                     self.wrapper_call.writeline("} else {")
                     with self.wrapper_call.indent():
-                        cached_output_name = (
-                            f"cached_output_{next(self.cached_output_id)}"
-                        )
-                        self.wrapper_call.writeline(
-                            f"thread_local ThreadLocalCachedOutputTensor<std::decay_t<decltype({output})>> "
-                            f"{cached_output_name}({output});"
-                        )
-                        self.wrapper_call.writeline(
-                            f"{cached_output_name}.copy_data_from({output});"
-                        )
-                        self.wrapper_call.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
-                        )
-                        self.wrapper_call.writeline(
-                            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
-                            f"output_handles[{idx}]));"
-                        )
+                        use_thread_local_cached_output_tensor(idx, output)
                     self.wrapper_call.writeline("}")
 
                 else:
+                    assert (
+                        not arr_iface
+                    ), "minimal ArrayRef interface is only supported in ABI-compatible mode"
                     self.wrapper_call.writeline(
                         f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
                         + f"new at::Tensor({output}));"
                     )
+            if arr_iface:
+                self.wrapper_call.writeline("return output_arrayref_tensors;")
+
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
-    def generate_end(self, result):
+    def generate_before_suffix(self, result):
         if V.graph.aot_mode:
             result.writeline("} // AOTInductorModel::run_impl")
+
+    def generate_end(self, result):
+        if V.graph.aot_mode:
             result.writeline("} // namespace aot_inductor")
             result.writeline("} // namespace torch")
             return
@@ -1650,7 +1785,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
         shim_fn = f"aoti_torch_{kernel_suffix}"
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
+        wrapped_args = (f"convert_arrayref_tensor_to_tensor({x})" for x in args)
+        self.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+        )
 
     def generate_c_shim_extern_kernel_alloc_call(self, extern_kernel, args):
         output_args = []
@@ -1764,6 +1902,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
             or buffer.get_name() in self.stack_allocated_buffers
+            or (
+                config.use_minimal_arrayref_interface
+                and buffer.get_name() in V.graph.graph_inputs
+            )
             else f"{buffer.get_name()}.reset();"
         )
 
