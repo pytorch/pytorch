@@ -3,10 +3,10 @@
 #ifdef USE_C10D_NCCL
 
 #include <chrono>
-#include <queue>
 #include <iostream>
 #include <list>
 #include <mutex>
+#include <queue>
 #include <thread>
 #include <unordered_map>
 
@@ -45,6 +45,9 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
+constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
+    "TORCH_NCCL_ENABLE_MONITORING";
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
@@ -62,13 +65,6 @@ enum ErrorHandlingMode {
   TearDown = 1,
   CleanUpOnly = 2,
   SkipCleanUp = 3
-};
-
-struct HeartBeat {
-  int counter_ = 0; // incremented id in the heart beat
-  size_t pg_id_;
-  size_t seq_id_; // as tracked by the process group
-  OpType op_type_; // name of the collective
 };
 
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
@@ -601,12 +597,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::exception_ptr checkForNCCLErrorsInternal(
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
-  // Function that runs as part of a separate thread aside from watchdog
-  // thread because we need to check the heartbeat from watchdog thread
-  // so that when we get stuck in a collective or watchdog itself hangs,
-  // we can dump the debugging information and abort the process.
-  void ncclCommsMonitor();
-
   // Function that runs as part of a separate thread and checks for errors on
   // NCCL communicators. We need a separate thread to check for NCCL errors
   // since we can't rely on the user calling certain methods like wait(),
@@ -644,6 +634,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void logWorkEnd(WorkNCCL& work);
 
  protected:
+  // Function that runs as part of a separate thread aside from watchdog
+  // thread because we need to check the heartbeat from watchdog thread
+  // so that when we get stuck in a collective or watchdog itself hangs,
+  // we can dump the debugging information and abort the process.
+  virtual void ncclCommsMonitor();
+
   static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
@@ -706,12 +702,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
   std::mutex mutex_;
 
-  // Mutex to guard heartbeat read/write.
-  std::mutex heartbeatMutex_;
-  std::condition_variable heartBeatCV_;
+  // Heartbeat of watchdog thread.
+  std::atomic<int> heartbeat_;
 
-  // Heartbeat queue to track the status of the watchdog thread.
-  std::queue<HeartBeat> heartbeatQueue_;
+  std::atomic<bool> monitorThreadEnabled_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info

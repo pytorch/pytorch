@@ -871,6 +871,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  heartbeat_.store(0);
+  monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   enableTiming_.store(
       parseEnvVarFlag(NCCL_ENABLE_TIMING) || desyncDebug_ ||
@@ -907,8 +909,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  ncclCommMonitorThread_ =
-      std::thread(&ProcessGroupNCCL::ncclCommsMonitor, this);
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
 #endif
@@ -1159,52 +1159,18 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 }
 
 void dump_debugging_info() {
-  LOG(ERROR) << dump_nccl_trace();
-}
-
-size_t hashHeartBeat(const HeartBeat& heartBeat) {
-  std::hash<size_t> id_hasher;
-  std::hash<std::uint8_t> type_hasher;
-  return id_hasher(heartBeat.pg_id_) ^ id_hasher(heartBeat.seq_id_) ^
-      type_hasher(static_cast<std::uint8_t>(heartBeat.op_type_));
+  LOG(ERROR) << "Dumped debugging information: " << dump_nccl_trace();
 }
 
 void ProcessGroupNCCL::ncclCommsMonitor() {
-  size_t previousHashValue = 0;
-  int counter = -1;
-
+  int hearBeatCounter = -1;
   while (true) {
-    std::unique_lock<std::mutex> lock(heartbeatMutex_);
-    if (heartBeatCV_.wait_for(
-            lock,
-            std::chrono::milliseconds(kWatchdogThreadSleepMillis * 10),
-            [&] { return !heartbeatQueue_.empty(); })) {
-      TORCH_CHECK(
-          !heartbeatQueue_.empty(),
-          "Heartbeat queue should not be empty when notified!");
-      size_t hashValue = 0;
-      while (!heartbeatQueue_.empty()) {
-        HeartBeat hb = heartbeatQueue_.front();
-        heartbeatQueue_.pop();
-        if (counter < hb.counter_) {
-          counter = hb.counter_;
-        } else {
-          TORCH_CHECK(false, "Heartbeat counter should increase!");
-        }
-        hashValue ^= hashHeartBeat(hb);
-      }
-
-      if (hashValue != previousHashValue) {
-        previousHashValue = hashValue;
-        continue;
-      }
-
-      // Get stuck in some collectives, we will need to first
-      // dump debugging info and then do the attribution for why the collective
-      // hangs.
-      std::thread sideThread(dump_debugging_info);
-      sideThread.detach();
-      break;
+    auto heartbeat = heartbeat_.load();
+    if (heartbeat > hearBeatCounter) {
+      hearBeatCounter = heartbeat;
+      // Sleep for enough time so that heartBeat will at least increase.
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kWatchdogThreadSleepMillis * 3));
     } else {
       // Timeout case and we will first dump the flight recorder
       // to std::out, and we use a different detached thread to ensure
@@ -1216,21 +1182,24 @@ void ProcessGroupNCCL::ncclCommsMonitor() {
     }
   }
 
-  // Sleep for some time before killing watchdog
-  std::this_thread::sleep_for(
-      std::chrono::milliseconds(kWatchdogThreadSleepMillis * 300));
-
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
   const auto exitMsg = c10::str(
       "[Rank ", rank_, "] NCCL monitor thread terminated with timeout: ");
   monitorException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
-  std::rethrow_exception(monitorException_);
+  if (!terminateProcessGroup_.load()) {
+    LOG(ERROR) << "monitoring thread detects no heartbeat and throw a exception!";
+    std::rethrow_exception(monitorException_);
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    if(monitorThreadEnabled_.load()) {
+      ncclCommMonitorThread_ =
+      std::thread(&ProcessGroupNCCL::ncclCommsMonitor, this);
+    }
     workCleanupLoop();
     VLOG(2) << "[Rank " << rank_
             << "] NCCL watchdog thread terminated normally";
@@ -1293,7 +1262,6 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
-  int counter = 0;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
   while (!done || !terminateProcessGroup_.load()) {
@@ -1304,21 +1272,16 @@ void ProcessGroupNCCL::workCleanupLoop() {
         lock,
         std::chrono::milliseconds(kWatchdogThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
-    // Fetch lock for watchdog heartbeat
-    std::lock_guard<std::mutex> heartBeatLock(heartbeatMutex_);
+    // Bump up heart beat by one in case no collective call.
+    heartbeat_.fetch_add(1);
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
-      auto beat = HeartBeat{
-          counter++, // counters for heartbeat
-          uid_, // pg_id
-          work.seq_, // seq_id
-          work.opType_};
-      heartbeatQueue_.push(beat);
-
       work.checkAndSetException();
       bool timedOut = work.checkTimeout();
+      // Bump up heart beat by one.
+      heartbeat_.fetch_add(1);
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
@@ -1379,9 +1342,6 @@ void ProcessGroupNCCL::workCleanupLoop() {
         ++it;
       }
     }
-
-    // Send out watchdog heartbeat
-    heartBeatCV_.notify_one();
 
     done = workMetaList_.empty();
   }
