@@ -39,7 +39,8 @@ def range_pop():
 
 def range_start(msg) -> int:
     """
-    Mark the start of a range with string message. It returns an unique handle for this range to pass to the corresponding call to rangeEnd().
+    Mark the start of a range with string message. It returns an unique handle
+    for this range to pass to the corresponding call to rangeEnd().
 
     A key difference between this and range_push/range_pop is that the
     range_start/range_end version supports range across threads (start on one
@@ -76,7 +77,9 @@ def mark(msg):
 @contextmanager
 def range(msg, *args, **kwargs):
     """
-    Context manager / decorator that pushes an NVTX range at the beginning of its scope, and pops it at the end. If extra arguments are given, they are passed as arguments to msg.format().
+    Context manager / decorator that pushes an NVTX range at the beginning
+    of its scope, and pops it at the end. If extra arguments are given,
+    they are passed as arguments to msg.format().
 
     Args:
         msg (str): message to associate with the range

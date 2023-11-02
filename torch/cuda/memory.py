@@ -148,7 +148,9 @@ def set_per_process_memory_fraction(
 
 
 def empty_cache() -> None:
-    r"""Release all unoccupied cached memory currently held by the caching allocator so that those can be used in other GPU application and visible in `nvidia-smi`.
+    r"""Release all unoccupied cached memory currently held by the caching
+    allocator so that those can be used in other GPU application and visible in
+    `nvidia-smi`.
 
     .. note::
         :func:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
@@ -671,7 +673,9 @@ def _record_memory_history_legacy(
 
 
 def _record_memory_history(enabled="all", *args, **kwargs):
-    """Enable recording of stack traces associated with memory allocations, so you can tell what allocated any piece of memory in :func:`torch.cuda.memory._snapshot()`.
+    """Enable recording of stack traces associated with memory
+    allocations, so you can tell what allocated any piece of memory in
+    :func:`torch.cuda.memory._snapshot()`.
 
     In addition too keeping stack traces with each current allocation and free,
     this will also enable recording of a history of all alloc/free events.
@@ -834,7 +838,10 @@ def _set_allocator_settings(env: str):
 
 
 def get_allocator_backend() -> str:
-    r"""Return a string describing the active allocator backend as set by ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync`` (CUDA's built-in asynchronous allocator).
+    r"""Return a string describing the active allocator backend as set by
+    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
+    (CUDA's built-in asynchronous allocator).
 
     .. note::
         See :ref:`cuda-memory-management` for details on choosing the allocator backend.
