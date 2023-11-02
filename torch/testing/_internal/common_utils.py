@@ -2621,7 +2621,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
         # When strict mode is False, supress_errors is True
-        supress_errors = not strict_mode
+        if compiled:
+            supress_errors = not strict_mode
+        else:
+            suppress_errors = False
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
             if TEST_WITH_TORCHINDUCTOR:
                 super_run = torch._dynamo.optimize("inductor")(super_run)
