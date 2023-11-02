@@ -506,13 +506,13 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
         return obj
 
     if isinstance(obj, (list, tuple)):
-        # list of arrays *under torch.Dynamo*
         if obj and all(isinstance(x, torch.Tensor) for x in obj):
-            return ndarray(torch.stack(obj))
-
-        # XXX: remove tolist
-        # lists of ndarrays: [1, [2, 3], ndarray(4)] convert to lists of lists
-        obj = _tolist(obj)
+            # list of arrays: *under torch.Dynamo* these are FakeTensors
+            obj = torch.stack(obj)
+        else:
+            # XXX: remove tolist
+            # lists of ndarrays: [1, [2, 3], ndarray(4)] convert to lists of lists
+            obj = _tolist(obj)
 
     # is obj an ndarray already?
     if isinstance(obj, ndarray):
