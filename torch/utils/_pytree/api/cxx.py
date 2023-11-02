@@ -113,11 +113,11 @@ def register_pytree_node(
             how to convert the custom json dumpable representation of the context back to the
             original context. This is used for json deserialization, which is being used in
             :mod:`torch.export` right now.
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might
             register a different custom behavior for the same type. (default: :const:`"torch"`)
-        serialized_type_name (str, optional): A keyword argument used to specify the fully
-            qualified name used when serializing the tree spec.
 
     Example::
 
