@@ -79,12 +79,12 @@ def contract(state_cls: Type[_State] = _State):
                 modules = _get_root_modules(list(module))
             state = state_cls()  # shared across all modules
             registry_item = RegistryItem()  # shared across all modules
-            default_all_state: Dict[Callable, _State] = OrderedDict()
-            default_registry: Dict[str, RegistryItem] = OrderedDict()
             module_to_orig_named_params: Dict[nn.Module, Dict[str, nn.Parameter]] = {}
             module_to_orig_named_buffers: Dict[nn.Module, Dict[str, torch.Tensor]] = {}
             module_to_orig_named_modules: Dict[nn.Module, Dict[str, nn.Module]] = {}
             for module in modules:
+                default_all_state: Dict[Callable, _State] = OrderedDict()
+                default_registry: Dict[str, RegistryItem] = OrderedDict()
                 all_state: Dict[Callable, _State] = module.__dict__.setdefault(  # type: ignore[call-overload]
                     STATE_KEY, default_all_state
                 )
@@ -101,7 +101,7 @@ def contract(state_cls: Type[_State] = _State):
                 assert func not in all_state and func.__name__ not in registry, (
                     "Each distinct composable distributed API can only be applied to a "
                     f"module once. {func.__name__} has already been applied to the "
-                    f"following module.\n{module}"
+                    f"following module:\n{module}"
                 )
                 all_state.setdefault(func, state)
                 registry.setdefault(func.__name__, registry_item)
@@ -167,7 +167,9 @@ def contract(state_cls: Type[_State] = _State):
                 module_to_orig_named_modules.keys()
             ):
                 raise RuntimeError(
-                    f"{func.__name__} should not change the module structure"
+                    f"{func.__name__} should not change the module structure.\n"
+                    f"Before: {[str(type(m)) for m in module_to_orig_named_modules]}\n"
+                    f"After: {[str(type(m)) for m in module_to_new_named_modules]}"
                 )
             for module in module_to_new_named_modules:
                 check_fqn(
