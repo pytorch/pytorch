@@ -133,6 +133,7 @@ class CodeLocation(NamedTuple):
     filename: str
     lineno: int
     funcname: Optional[str]
+    instr_ptr: int
 
 
 compile_subgraph_loc = None
@@ -409,7 +410,10 @@ def break_graph_if_unsupported(*, push):
             global compile_subgraph_loc, compile_subgraph_reason
 
             code_loc = CodeLocation(
-                self.f_code.co_filename, self.lineno, self.f_code.co_name
+                self.f_code.co_filename,
+                self.lineno,
+                self.f_code.co_name,
+                self.instruction_pointer,
             )
             if not compile_subgraph_loc == code_loc:
                 state = self.copy_graphstate()
