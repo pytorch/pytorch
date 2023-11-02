@@ -16,11 +16,11 @@ import unittest
 from typing import List
 
 import torch
-from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch.testing._internal.inductor_utils import run_and_get_code
 from torch.utils._triton import has_triton
 
 
@@ -47,7 +47,7 @@ class TestMemoryPlanning(TestCase):
     def test_python_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
-        result, code = run_and_get_cpp_code(compiled, *args)
+        result, code = run_and_get_code(compiled, *args)
 
         FileCheck().check(
             "pool1 = empty_strided(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
@@ -60,12 +60,11 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
         with config.patch("cpp_wrapper", True):
-            result, code = run_and_get_cpp_code(compiled, *args)
+            result, code = run_and_get_code(compiled, *args)
 
         FileCheck().check(
             "auto pool1 = at::empty_strided({(4L*s0*s1) + (align(4L*(static_cast<long>(s0*s0)))), }, {1L, }"
@@ -88,7 +87,7 @@ class TestMemoryPlanning(TestCase):
             torch._export.dynamic_dim(args[0], 0) <= 2048,
         ]
         with config.patch("aot_inductor.abi_compatible", True):
-            result, code = run_and_get_cpp_code(
+            result, code = run_and_get_code(
                 lambda: AOTInductorModelRunner.run(
                     "cuda", f, args, constraints=constraints
                 )

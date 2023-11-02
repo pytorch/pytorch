@@ -21,13 +21,13 @@ from torch._inductor.comm_analysis import (
     NCCL_PROTO,
     NVIDIA_GPU_TYPE,
 )
-from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
+from torch.testing._internal.inductor_utils import run_and_get_code
 from torch.utils._triton import has_triton
 
 
@@ -91,7 +91,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            _, code = run_and_get_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `_wait_tensor` is delayed until right before first use
             FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
                 "_wait_tensor("
@@ -124,7 +124,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            _, code = run_and_get_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `dist.all_reduce` is raised above relu and matmul
             FileCheck().check("dist.all_reduce(").check("_wait_tensor(").check(
                 "triton_poi_fused_relu"
@@ -158,7 +158,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            _, code = run_and_get_code(compiled, inputs, **self.get_world_trs())
             # NOTE: notice that `dist.all_reduce` is raised above relu and matmul,
             # and `_wait_tensor` is delayed until right before first use
             FileCheck().check("dist.all_reduce(").check("triton_poi_fused_relu").check(
@@ -195,7 +195,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            _, code = run_and_get_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
             # 1. we first schedule the ops (c and d) that ARE required for second all_reduce but DO NOT depend on first all_reduce.
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
@@ -252,7 +252,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            _, code = run_and_get_code(compiled, inputs, **self.get_world_trs())
             # NOTE: after scheduling the first all_reduce:
             # 1. we first schedule the ops (c and d) that ARE required for second all_reduce but DO NOT depend on first all_reduce.
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.

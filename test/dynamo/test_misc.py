@@ -46,7 +46,6 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
-from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -76,6 +75,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     set_default_dtype,
 )
+from torch.testing._internal.inductor_utils import run_and_get_code
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
@@ -8190,13 +8190,13 @@ ShapeEnv not equal: field values don't match:
         x = np.arange(8)
         pow_opt = torch.compile(pow)
 
-        actual, source_code = run_and_get_code(pow_opt, x)
+        actual, code = run_and_get_code(pow_opt, x)
         expect = pow(x)
 
         self.assertEqual(expect, actual)
 
         self.assertTrue(
-            all("aten.pow" not in code for code in source_code),
+            all("aten.pow" not in code),
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 

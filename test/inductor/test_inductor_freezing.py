@@ -12,9 +12,10 @@ import torch
 
 from torch import nn
 from torch._inductor import config
-from torch._inductor.utils import override_lowering, run_and_get_code
+from torch._inductor.utils import override_lowering
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.inductor_utils import run_and_get_code
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -154,7 +155,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod(inp)
                 out_compiled, code = run_and_get_code(foo, mod, inp)
 
-                FileCheck().check_not("@triton.jit").run(code[0])
+                FileCheck().check_not("@triton.jit").run(code)
                 self.assertEqual(out_eager, out_compiled)
 
     def test_mm_concat(self):
@@ -221,7 +222,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
                     "mm(", count=1, exactly=True
-                ).run(code[0])
+                ).run(code)
                 self.assertEqual(out_eager, out)
 
             mod2 = mod_fn()
@@ -240,7 +241,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
                     "mm(", count=count, exactly=True
-                ).run(code[0])
+                ).run(code)
                 self.assertEqual(out_eager, out)
 
     def test_error_on_eager(self):
@@ -335,14 +336,14 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertNotIn(
                 "aten._native_batch_norm_legit_no_training(",
-                code[0],
+                code,
             )
 
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
                     "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+                ).check_not("frozen_param").check_next("return").run(code)
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2

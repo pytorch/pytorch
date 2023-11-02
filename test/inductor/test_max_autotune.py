@@ -22,7 +22,6 @@ from torch._inductor.select_algorithm import (
     ChoiceCaller,
     TritonTemplateCaller,
 )
-from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -33,7 +32,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, run_and_get_code
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -409,7 +408,7 @@ class TestMaxAutotune(TestCase):
             with torch.no_grad():
                 out, code = run_and_get_code(foo, conv1x1, input_tensor)
 
-            FileCheck().check_not("extern_kernels.convolution").run(code[0])
+            FileCheck().check_not("extern_kernels.convolution").run(code)
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
     def test_cat_addmm(self):

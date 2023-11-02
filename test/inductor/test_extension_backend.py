@@ -27,6 +27,7 @@ from torch._inductor.codegen.common import (
     register_backend_for_device,
 )
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
+from torch.testing._internal.inductor_utils import run_and_get_code
 
 try:
     try:
@@ -39,7 +40,6 @@ except unittest.SkipTest:
     raise
 
 
-run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 
 
@@ -130,7 +130,7 @@ class ExtensionBackendTests(TestCase):
 
         metrics.reset()
         opt_fn = torch.compile()(fn)
-        _, code = run_and_get_cpp_code(opt_fn, x, y, z)
+        _, code = run_and_get_code(opt_fn, x, y, z)
         FileCheck().check("void kernel").check("loadu").check("extension_device").run(
             code
         )

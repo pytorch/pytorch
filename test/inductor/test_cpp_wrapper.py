@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, run_and_get_code
 
 
 try:
@@ -104,9 +104,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
+            _, code = run_and_get_code(func, *func_inputs if func_inputs else [])
             self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()

@@ -31,13 +31,9 @@ importlib.import_module("filelock")
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_torchinductor import (
-    CommonTemplate,
-    copy_tests,
-    run_and_get_cpp_code,
-    run_and_get_triton_code,
-    TestFailure,
-)
+from torch.testing._internal.inductor_utils import run_and_get_code
+
+from inductor.test_torchinductor import CommonTemplate, copy_tests, TestFailure
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
 
 
@@ -81,11 +77,10 @@ def check_codegen(
 
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
+    _, code = run_and_get_code(run, *example_inputs, **kwargs)
     if is_cpp_code:
-        _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         _check_has_dynamic_shape(self, code)
     else:
-        code = run_and_get_triton_code(run, *example_inputs, **kwargs)
         triton_kernel_found = False
         lines = code.split("\n")
         for line in lines:

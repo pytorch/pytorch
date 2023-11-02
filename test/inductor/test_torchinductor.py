@@ -34,11 +34,7 @@ from torch._dynamo.testing import (
     same,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.utils import (
-    add_scheduler_init_hook,
-    run_and_get_code,
-    run_and_get_triton_code,
-)
+from torch._inductor.utils import add_scheduler_init_hook
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -85,7 +81,12 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    HAS_CPU,
+    HAS_CUDA,
+    run_and_get_code,
+    run_and_get_multiple_code,
+)
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -108,7 +109,7 @@ def run_fw_bw_and_get_code(fn):
         result.sum().backward()
         return result
 
-    return run_and_get_code(run_with_backward)
+    return run_and_get_multiple_code(run_with_backward)
 
 
 class TestCase(TorchTestCase):
@@ -220,29 +221,6 @@ def clone_preserve_strides(x, device=None):
         buffer = buffer.to(device, copy=True)
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
-
-
-def run_and_get_cpp_code(fn, *args, **kwargs):
-    # We use the patch context manager instead of using it as a decorator.
-    # In this way, we can ensure that the attribute is patched and unpatched correctly
-    # even if this run_and_get_cpp_code function is called multiple times.
-    with patch.object(config, "debug", True):
-        torch._dynamo.reset()
-        import io
-        import logging
-
-        log_capture_string = io.StringIO()
-        ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
-
-        output_code_log.addHandler(ch)
-        prev_level = output_code_log.level
-        output_code_log.setLevel(logging.DEBUG)
-        result = fn(*args, **kwargs)
-        s = log_capture_string.getvalue()
-        output_code_log.setLevel(prev_level)
-        output_code_log.removeHandler(ch)
-    return result, s
 
 
 def check_model(
@@ -499,30 +477,29 @@ def check_model_cuda(
 
 
 def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
-    result, source_codes = run_and_get_code(func, *args, **kwargs)
+    result, code = run_and_get_code(func, *args, **kwargs)
 
-    for code in source_codes:
-        for line in code.split("\n"):
-            stmt = None
-            # Find indexing expressions
-            if ".load(" in line:
-                stmt = line.split(".load")[-1]
-            elif "tl.store" in line:
-                stmt = line.split(".store")[-1]
-                stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
-            elif ".store" in line:
-                stmt = line.split(".store")[-1]
-            elif "[" in line:
-                stmt = line.split("[")[-1].split("]")[0]
+    for line in code.split("\n"):
+        stmt = None
+        # Find indexing expressions
+        if ".load(" in line:
+            stmt = line.split(".load")[-1]
+        elif "tl.store" in line:
+            stmt = line.split(".store")[-1]
+            stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
+        elif ".store" in line:
+            stmt = line.split(".store")[-1]
+        elif "[" in line:
+            stmt = line.split("[")[-1].split("]")[0]
 
-            if stmt is None:
-                continue
+        if stmt is None:
+            continue
 
-            # indirect indexing involves a `tmp` variable
-            test_case.assertTrue(
-                "tmp" not in stmt,
-                msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
-            )
+        # indirect indexing involves a `tmp` variable
+        test_case.assertTrue(
+            "tmp" not in stmt,
+            msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
+        )
 
     return result
 
@@ -631,7 +608,7 @@ class CommonTemplate:
         y = torch.tensor([1 + 1j, -1 + 1j, -2 + 2j, 3 - 3j, 0, 1j, 1, -1])
 
         _, code = run_and_get_code(fn, x, y)
-        self.assertEqual(code[0].count("aten.view"), 3)
+        self.assertEqual(code.count("aten.view"), 3)
 
     def test_concat_add_inplace(self):
         def fn(x, y, z):
@@ -833,7 +810,7 @@ class CommonTemplate:
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    _, code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
@@ -842,7 +819,7 @@ class CommonTemplate:
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
-                    code = run_and_get_triton_code(fn_opt, *inps)
+                    _, code = run_and_get_code(fn_opt, *inps)
                     self.assertTrue(("tl.where" in code) is has_wrapping)
                     self.assertTrue(("device_assert" in code) is has_assert)
                 self.assertEqual(fn(*inps), fn_opt(*inps))
@@ -3552,13 +3529,13 @@ class CommonTemplate:
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
 
         for fn in fns:
-            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            out, code = run_and_get_code(foo_opt, inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
             if self.device == "cpu":
-                FileCheck().check_not("cpp_fused").run(source_codes[0])
+                FileCheck().check_not("cpp_fused").run(code)
             else:
-                FileCheck().check_not("triton.jit").run(source_codes[0])
+                FileCheck().check_not("triton.jit").run(code)
 
         # test dtype conversion
         inps = [
@@ -3566,14 +3543,14 @@ class CommonTemplate:
             for _ in range(2)
         ]
         for fn in fns:
-            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            out = foo_opt(inps[0], inps[1], fn)
             self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
         # test broadcasted shape bail
         fn = lambda x: x + torch.zeros(  # noqa: E731
             [256, 256, 256], dtype=torch.bfloat16, device=self.device
         )
-        out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+        out = foo_opt(inps[0], inps[1], fn)
         self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_remove_noop_copy(self):
@@ -4244,13 +4221,12 @@ class CommonTemplate:
             return aten.upsample_bicubic2d(x, (256, 256), False)
 
         x = torch.randn(1, 1, 128, 128, dtype=torch.float32, device=self.device)
-        _, source_codes = run_and_get_code(fn, x)
+        _, code = run_and_get_code(fn, x)
 
         pattern = r"0\.50*\*[ix][\d]"
-        for code in source_codes:
-            self.assertIsNone(
-                re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
-            )
+        self.assertIsNone(
+            re.search(pattern, code), msg="Found bad index_expr in code:\n" + code
+        )
 
     def test_sort(self):
         def fn(a):
@@ -6008,7 +5984,7 @@ class CommonTemplate:
             random_tensor3 = torch.randint(10, [32], device=self.device)
             return random_tensor1, random_tensor2, random_tensor3
 
-        _, source_codes = run_and_get_code(fn1)
+        _, source_codes = run_and_get_multiple_code(fn1)
         if self.device == "cuda":
             self.assertEqual(len(source_codes), 1)
             self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
@@ -7618,7 +7594,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             fn_opt = torch._dynamo.optimize("inductor")(fn)
             inps = [torch.randn(2, 4, 16, 16, device="cuda")]
-            code = run_and_get_triton_code(fn_opt, *inps)
+            _, code = run_and_get_code(fn_opt, *inps)
             self.assertTrue("to(tl.int32)" in code)
             self.assertFalse("to(tl.int64)" in code)
 
@@ -7642,8 +7618,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._dynamo.mark_dynamic(b, 0)
             inps = [a, b]
 
-            code1 = run_and_get_triton_code(fn1_opt, *inps)
-            code2 = run_and_get_triton_code(fn2_opt, *inps)
+            _, code1 = run_and_get_code(fn1_opt, *inps)
+            _, code2 = run_and_get_code(fn2_opt, *inps)
 
             # The function with the constrained tensor should be optimized, but
             # the other should not:
@@ -7753,7 +7729,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn_opt = torch.compile(fn, dynamic=dynamic)
 
                 x = torch.randn(8, device="cuda")
-                code = run_and_get_triton_code(fn_opt, x)
+                _, code = run_and_get_code(fn_opt, x)
                 self.assertEqual(fn_opt(x), fn(x), msg=f"{dynamic=}")
 
                 # Check that there's indirect indexing...
@@ -7779,7 +7755,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 idx0 = torch.randint(32, (33,), device="cuda").view(33, 1, 1)
                 idx1 = torch.randint(32, (33,), device="cuda").view(33, 1)
                 inps = (a.clone(), z, b, idx0, idx1)
-                code = run_and_get_triton_code(fn_opt, *inps)
+                _, code = run_and_get_code(fn_opt, *inps)
 
                 # Correctness
                 out_opt = fn_opt(a.clone(), z, b, idx0, idx1)
@@ -7802,7 +7778,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, 1, K, device="cuda"),
                 torch.randn(1, N, K, device="cuda"),
             ]
-            code = run_and_get_triton_code(fn_opt, *inps)
+            _, code = run_and_get_code(fn_opt, *inps)
             self.assertEqual(code.count("tl.store"), 1)
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
@@ -7820,7 +7796,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return fn(x)
 
             r = fn_cuda(x)
-            code = run_and_get_triton_code(fn_cuda, x)
+            _, code = run_and_get_code(fn_cuda, x)
             self.assertIn("tl.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
@@ -7848,7 +7824,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = run_and_get_triton_code(fn_opt)
+                _, code = run_and_get_code(fn_opt)
 
                 # this cannot be optimized away, value too large
                 self.assertTrue("to(tl.int64)" in code)
@@ -7874,7 +7850,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return suffix(foo(ones()))
 
                 fn_opt = torch._dynamo.optimize("inductor")(fn)
-                code = run_and_get_triton_code(fn_opt)
+                _, code = run_and_get_code(fn_opt)
 
                 # this can be optimized away, value too large
                 self.assertTrue("to(tl.int64)" not in code)
@@ -7892,7 +7868,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch.randn(N, N, N, device="cuda").permute(2, 1, 0),
                 torch.randn(N, N, N, device="cuda").permute(1, 2, 0),
             )
-            code = run_and_get_triton_code(f, *inps)
+            _, code = run_and_get_code(f, *inps)
             self.assertTrue(
                 "tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last'"
                 in code
@@ -7911,7 +7887,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             x = torch.randn(8, device="cuda")
             fn_opt = torch.compile(fn)
-            code = run_and_get_triton_code(fn_opt, x, 8)
+            _, code = run_and_get_code(fn_opt, x, 8)
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
@@ -7959,7 +7935,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def test_funcs(func_and_kernel):
                 with torch.no_grad():
                     for fn, kernel_name, inps in func_and_kernel:
-                        code = run_and_get_triton_code(fn, *inps)
+                        _, code = run_and_get_code(fn, *inps)
                         if kernel_name not in code:
                             print(code)
                         self.assertTrue(kernel_name in code)
@@ -7981,7 +7957,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 return x
 
             inp = torch.randn(4, 4, device="cuda")
-            code = run_and_get_triton_code(fn, inp)
+            _, code = run_and_get_code(fn, inp)
             fn(inp)
             self.assertTrue("start_graph" in code)
             self.assertTrue("end_graph" in code)
@@ -8078,7 +8054,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     result[0].backward()
                     return result
 
-                res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
+                res, (fwd_code, bwd_code) = run_and_get_multiple_code(run_with_backward)
                 return fwd_code, bwd_code
 
             x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")

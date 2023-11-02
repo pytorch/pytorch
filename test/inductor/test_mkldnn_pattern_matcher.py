@@ -10,12 +10,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
-from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import (
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_qat_pt2e,
-)
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
@@ -23,7 +18,11 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
+from torch.testing._internal.inductor_utils import (
+    _check_has_dynamic_shape,
+    HAS_CPU,
+    run_and_get_code,
+)
 
 
 # The dict value is match_nodes(computation_op+unary_op)
@@ -163,7 +162,7 @@ class TestPatternMatcherBase(TestCase):
             if check_quantization:
                 mod = self._generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
-            actual, (source_code,) = run_and_get_code(
+            actual, source_code = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
                 *clone_inputs,
             )

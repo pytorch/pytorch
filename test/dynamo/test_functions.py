@@ -1904,7 +1904,7 @@ def forward(self, x_1, output_1):
     @common_utils.parametrize("grad", [False, True])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
     def test_triton_kernel_no_clones(self, grad):
-        from torch._inductor.utils import run_and_get_code
+        from torch.testing._internal.inductor_utils import run_and_get_code
 
         def call_triton_add(
             x: torch.Tensor,
@@ -1922,7 +1922,7 @@ def forward(self, x_1, output_1):
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
         torch_add = t1 + t2
-        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        test, code = run_and_get_code(torch.compile(call_triton_add), t1, t2)
         self.assertEqual(torch_add, test)
         self.assertTrue("aten.copy" not in code)
         self.assertTrue("aten.clone" not in code)

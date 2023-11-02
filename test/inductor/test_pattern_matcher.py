@@ -25,12 +25,11 @@ from torch._inductor.pattern_matcher import (
     PatternPrettyPrinter,
     register_graph_pattern,
 )
-from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, run_and_get_code
 
 
 class TestPatternMatcher(TestCase):
@@ -100,7 +99,7 @@ class TestPatternMatcher(TestCase):
         torch._dynamo.reset()
         counters.clear()
         ref = fn(*args)
-        test, (code,) = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
+        test, code = run_and_get_code(torch.compile(fn, mode="max-autotune"), *args)
         self.assertEqual("fused_int_mm_mul" in code, fused_int_mm_mul_expected)
         if fused_int_mm_mul_expected:
             indices = ~ref.isinf()
@@ -169,7 +168,7 @@ class TestPatternMatcher(TestCase):
         torch._dynamo.reset()
         counters.clear()
         ref = fn(*args)
-        test, (code,) = run_and_get_code(torch.compile(fn), *args)
+        test, code = run_and_get_code(torch.compile(fn), *args)
         torch.testing.assert_close(ref, test)
         self.assertEqual("mixed_mm" in code, mixed_mm_expected)
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
@@ -326,7 +325,7 @@ class TestPatternMatcher(TestCase):
             torch._dynamo.reset()
             counters.clear()
             ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            test, code = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
             self.assertTrue("uint4x2_mixed_mm" in code)
 
@@ -359,7 +358,7 @@ class TestPatternMatcher(TestCase):
             torch._dynamo.reset()
             counters.clear()
             ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            test, code = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
             self.assertTrue("uint4x2_mixed_mm" in code)
             self.assertTrue("fused_add_mm_mul" in code)
@@ -390,7 +389,7 @@ class TestPatternMatcher(TestCase):
             torch._dynamo.reset()
             counters.clear()
             ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            test, code = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
@@ -416,7 +415,7 @@ class TestPatternMatcher(TestCase):
             torch._dynamo.reset()
             counters.clear()
             ref = fn(*args)
-            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            test, code = run_and_get_code(torch.compile(fn), *args)
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
@@ -620,7 +619,7 @@ class TestPatternMatcher(TestCase):
             return torch.cumsum(x, 1)
 
         for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
-            result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+            result, code = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
@@ -822,10 +821,10 @@ class TestPatternMatcher(TestCase):
         def fn(a, b):
             return torch.mm(a, b).clone()
 
-        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        result, code = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
         # clone would create a buf1
-        self.assertIn("return (buf0, )", code[0])
-        self.assertNotIn("async_compile.cpp", code[0])
+        self.assertIn("return (buf0, )", code)
+        self.assertNotIn("async_compile.cpp", code)
 
     def test_unfuse_bias_addmm(self):
         args = [
@@ -838,15 +837,15 @@ class TestPatternMatcher(TestCase):
         def fn(inp, a, b):
             return torch.ops.aten.addmm(inp, a, b)
 
-        _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
-        FileCheck().check("extern_kernels.addmm(").run(code[0])
+        _, code = run_and_get_code(fn, args[0], args[1], args[2])
+        FileCheck().check("extern_kernels.addmm(").run(code)
 
         @torch.compile()
         def fn2(inp, a, b):
             return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
 
-        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
-        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+        _, code = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code)
 
         @torch.compile()
         def fn2(inp, a, b):
@@ -855,8 +854,8 @@ class TestPatternMatcher(TestCase):
             )
 
         # hit the view path
-        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
-        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+        _, code = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code)
 
     def test_fuse_attention_roundtrip_pattern(self):
         # are we losing anything in serialization
@@ -967,12 +966,12 @@ class TestPatternMatcher(TestCase):
                 counter = 0
                 expected = fn(*copy.deepcopy(args))
                 opt_fn = torch.compile(fn)
-                actual, (code) = run_and_get_code(opt_fn, args[0], args[1], args[2])
+                actual, code = run_and_get_code(opt_fn, args[0], args[1], args[2])
                 # pattern should match
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
                 # addmm should be replaced
-                FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+                FileCheck().check_not("extern_kernels.addmm(").run(code)
 
     def test_match_equivalent_function_invocations2(self):
         counter = 0

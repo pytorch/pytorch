@@ -878,35 +878,6 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
-    from .graph import GraphLowering
-
-    compile_to_module = GraphLowering.compile_to_module
-    source_codes = []
-
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__) as f:
-            source_codes.append(f.read())
-        return mod
-
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
-    return result, source_codes
-
-
-def run_and_get_triton_code(fn, *args, **kwargs):
-    _, source_codes = run_and_get_code(fn, *args, **kwargs)
-    # Can have two outputs if backwards was eagerly compiled
-    assert (
-        1 <= len(source_codes) <= 2
-    ), f"expected one or two code outputs got {len(source_codes)}"
-    return source_codes[0]
-
-
 @contextlib.contextmanager
 def override_lowering(aten_op, override_fn):
     """
