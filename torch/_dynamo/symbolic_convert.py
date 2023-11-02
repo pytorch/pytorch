@@ -901,6 +901,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
+    @break_graph_if_unsupported(push=1)
+    def RAISE_VARARGS(self, inst):
+        value = self.pop()
+        if isinstance(value, UserDefinedObjectVariable) and isinstance(
+            value.value, StopIteration
+        ):
+            raise StopIteration()
+        unimplemented(f"RAISE_VARARGS is not implemented for {value}")
+
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:

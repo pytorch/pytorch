@@ -1045,6 +1045,11 @@ class BuiltinVariable(VariableTracker):
                 {},
             )
 
+    def call_StopIteration(self, tx):
+        from .user_defined import UserDefinedObjectVariable
+
+        return UserDefinedObjectVariable(StopIteration())
+
     def call_reduce(self, tx, function, iterable, initializer=None):
         if iterable.has_unpack_var_sequence(tx):
             items = iterable.unpack_var_sequence(tx)

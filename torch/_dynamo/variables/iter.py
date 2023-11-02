@@ -26,6 +26,7 @@ class GenericIteratorVariable(IteratorVariable):
     def next_variables(self, tx):
         assert self.mutable_local
         from .builder import SourcelessBuilder
+        from .builtin import BuiltinVariable
 
         try:
             # We need this to polyfill because otherwise, `call_method` will
@@ -35,7 +36,7 @@ class GenericIteratorVariable(IteratorVariable):
             )
             next_iter = self.clone(iterator=self.iterator)
         except StopIteration:
-            return variables.BuiltinVariable(StopIteration), self
+            return BuiltinVariable(StopIteration), self
         tx.replace_all(self, next_iter)
         return next_item.add_options(self), next_iter
 

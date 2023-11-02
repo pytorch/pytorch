@@ -7884,6 +7884,48 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
 
+    def test_iter_user_defined_raises(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += 1
+                if self.a > 5:
+                    raise StopIteration()
+                return self.a
+
+        def fn(x):
+            for items in MyClass():
+                x += items
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+
+    def test_non_user_defined_raise_stop_iteration(self):
+        def fn(x):
+            items = iter([1, 2])
+            x += next(items)
+            x += next(items)
+            x += next(items)
+            return x
+
+        x = torch.zeros(3)
+        with self.assertRaises(StopIteration):
+            _ = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+            compiled = compiled_fn(x)
+
     def test_zip_user_defined(self):
         # https://github.com/pytorch/pytorch/issues/107691
         class MyClass:
