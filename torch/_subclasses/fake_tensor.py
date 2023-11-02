@@ -823,12 +823,24 @@ def infer_size(a, b):
         dimB = dimsB - 1 - offset
         sizeA = a[dimA] if dimA >= 0 else 1
         sizeB = b[dimB] if dimB >= 0 else 1
-        if not (sizeA == sizeB or sizeA == 1 or sizeB == 1):
-            raise RuntimeError(
-                f"The size of tensor a ({sizeA}) "
-                f"must match the size of tensor b ({sizeB}) "
-                f"at non-singleton dimension {i})"
-            )
+
+        # NB: It is very important to test for broadcasting, before testing
+        # sizeA == sizeB.  This is because the broadcasting tests are likely
+        # to be statically known (in particular, if sizeA/sizeB is unbacked
+        # but size-like, we will unsoundly assume they never equal 1), but
+        # the sizeA == sizeB test may not be statically known.  However, once
+        # we have established that no broadcasting is happening, the
+        # sizeA == sizeB is now expect_true and we can defer it as a runtime
+        # assert (this works because Python will return the terminal
+        # expression of an or statement as-is, without bool()'ing it; if this
+        # were not the case, we'd need to write this using torch.sym_or() or
+        # something like that).
+        torch._check(
+            sizeA == 1 or sizeB == 1 or sizeA == sizeB,
+            lambda: f"The size of tensor a ({sizeA}) "
+            f"must match the size of tensor b ({sizeB}) "
+            f"at non-singleton dimension {i})",
+        )
         expandedSizes[i] = sizeB if sizeA == 1 else sizeA
     return tuple(expandedSizes)
 
@@ -1416,6 +1428,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        elif func is torch.ops.aten.size.default:
+            return tuple(int(s) for s in args[0].size())
+        elif func is torch.ops.aten.stride.default:
+            return tuple(int(s) for s in args[0].stride())
+        elif func is torch.ops.aten.storage_offset.default:
+            return int(args[0].storage_offset())
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
