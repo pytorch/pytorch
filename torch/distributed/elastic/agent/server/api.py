@@ -251,6 +251,7 @@ class WorkerGroup:
     """
 
     __slots__ = ["spec", "workers", "store", "group_rank", "group_world_size", "state"]
+
     def __init__(self, spec: WorkerSpec):
         """Initialize the worker group."""
         self.spec = spec
