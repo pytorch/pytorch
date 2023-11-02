@@ -146,6 +146,13 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   TORCH_CHECK(
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      input1.sizes() == input2.sizes(),
+      "Expected input1 to be of same shape as input2, but got ",
+      input1.sizes(),
+      " and ",
+      input2.sizes(),
+      ".");
 
   if (targ_dim == 1) {
     TORCH_CHECK(
