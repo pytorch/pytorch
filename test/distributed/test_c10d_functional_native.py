@@ -194,10 +194,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
-            # Expect in-place
+            # Expect in-place with inductor allocated buf
             ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
             ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
-            # Expect no in-place
+            # Expect no in-place with graph input
             ar1 = torch.ops._c10d_functional.all_reduce(arg, "avg", "default")
             ar1 = torch.ops._c10d_functional.wait_tensor(ar1)
             return ar0, ar1
@@ -208,16 +208,14 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         (
             FileCheck()
             .check("buf0 = empty(")
-            # Expect in-place
-            .check("buf1 = buf0; del buf0  # reuse")
-            .check("buf2 = torch.ops._c10d_functional.all_reduce_.default(buf1")
-            .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf2")
-            # Expect no in-place
-            .check("buf4 = empty(")
-            .check("buf5 = torch.ops._c10d_functional.all_reduce_.default(buf4")
-            .check("buf6 = torch.ops._c10d_functional.wait_tensor.default(buf5")
+            # Expect in-place with inductor allocated buf
+            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("buf2 = torch.ops._c10d_functional.wait_tensor.default(buf1")
+            # Expect no in-place with graph input
+            .check("buf3 = torch.ops._c10d_functional.all_reduce.default(arg0_1")
+            .check("buf4 = torch.ops._c10d_functional.wait_tensor.default(buf3")
             # Expect no extra copy on return
-            .check("return (buf1, buf4, )")
+            .check("return (buf0, buf3, )")
             .run(code)
         )
         out = compiled(arg)
@@ -231,12 +229,12 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
-            # Expect in-place
+            # Expect in-place with inductor allocated buf
             ar0 = torch.ops._c10d_functional.all_reduce_coalesced(
                 bufs, "avg", "default"
             )
             ar0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ar0]
-            # Expect no in-place
+            # Expect no in-place with graph input
             ar1 = torch.ops._c10d_functional.all_reduce_coalesced(
                 args, "avg", "default"
             )
@@ -248,32 +246,26 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, args)
         (
             FileCheck()
-            # Expect in-place
+            # Expect in-place with inductor allocated buf
             .check("buf0 = empty(")
-            .check("buf1 = buf0; del buf0  # reuse")
-            .check("buf2 = empty(")
-            .check("buf3 = buf2; del buf2  # reuse")
+            .check("buf1 = empty(")
             .check(
-                "buf4 = torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf1, buf3]"
+                "buf2 = torch.ops._c10d_functional.all_reduce_coalesced_"
+                ".default([buf0, buf1]"
             )
-            .check("buf5 = buf4[0]")
-            .check("buf6 = buf4[1]")
-            # Expect no in-place
-            .check("buf7 = empty(")
-            .check("buf7.copy_(arg0_1)  # no reuse")
-            .check("buf8 = empty(")
-            .check("buf8.copy_(arg1_1)  # no reuse")
+            .check("buf3 = buf2[0]")
+            .check("buf4 = buf2[1]")
+            # Expect no in-place with graph input
             .check(
-                "buf9 = torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf7, buf8]"
+                "buf5 = torch.ops._c10d_functional.all_reduce_coalesced"
+                ".default([arg0_1, arg1_1]"
             )
-            .check("buf12 = torch.ops._c10d_functional.wait_tensor.default(buf5")
-            .check("buf13 = torch.ops._c10d_functional.wait_tensor.default(buf6")
-            .check("buf14 = torch.ops._c10d_functional.wait_tensor.default(buf10")
-            .check("buf15 = torch.ops._c10d_functional.wait_tensor.default(buf11")
+            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("buf9 = torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check("buf10 = torch.ops._c10d_functional.wait_tensor.default(buf6")
+            .check("buf11 = torch.ops._c10d_functional.wait_tensor.default(buf7")
             # Expect no extra copy on return
-            .check("return (buf1, buf3, buf7, buf8, )")
+            .check("return (buf0, buf1, buf6, buf7, )")
             .run(code)
         )
         out = compiled(args)
@@ -303,17 +295,16 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             FileCheck()
             # Expect allocation
             .check("buf0 = empty(")
-            .check("buf1 = buf0; del buf0  # reuse")
-            .check("buf2 = torch.ops._c10d_functional.all_reduce_.default(buf1")
-            .check("buf3 = torch.ops._c10d_functional.wait_tensor.default(buf2")
+            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("buf2 = torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect allocation
-            .check("buf4 = empty(")
-            .check("extern_kernels.mm(arg0_1, buf3, out=buf4")
+            .check("buf3 = empty(")
+            .check("extern_kernels.mm(arg0_1, buf2, out=buf3")
             # Expect buf0 to be reused
-            .check("buf5 = buf1; del buf1  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf4, out=buf5")
+            .check("buf4 = buf0; del buf0  # reuse")
+            .check("extern_kernels.mm(arg0_1, buf3, out=buf4")
             # Expect no extra copy on return
-            .check("return (buf4, buf5, )")
+            .check("return (buf3, buf4, )")
             .run(code)
         )
         out = compiled(arg)

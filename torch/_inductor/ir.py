@@ -751,6 +751,16 @@ class Reduction(Loops):
                         sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
+                        log.debug(
+                            "Use previous IRNode's range and reduction_ranges instead of split. "
+                            "current ranges: %s, current reduction ranges: %s, current split: %d, "
+                            "new ranges: %s, new reduction ranges: %s",
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
+                        )
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
@@ -2427,7 +2437,7 @@ class FlexibleLayout(Layout):
 class AliasedLayout(Layout):
     """Shares the same storage as another tensor"""
 
-    def __init__(self, view: IRNode):
+    def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2745,6 +2755,10 @@ class Buffer(IRNode):
         Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
         """
         return 0
+
+    def should_allocate(self):
+        # Returns False by default.
+        return False
 
 
 class InputBuffer(Buffer):
@@ -5396,7 +5410,34 @@ class QConvPointWisePT2E(ExternKernelAlloc):
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 5
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qconv2d_pointwise",
+            cpp_kernel="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_key = "qconv2d_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                bool fp32_output,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5423,27 +5464,32 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             unary_algorithm,
         ) = const_args[-12:]
 
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise"
         codegen_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {stride}"
-            + f", {padding}"
-            + f", {dilation}"
-            + f", {groups}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5498,7 +5544,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             output_zero_point,
             fp32_output,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
@@ -5533,7 +5579,40 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 6
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qconv2d_pointwise.binary",
+            cpp_kernel="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_key = "qconv2d_pointwise_binary"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor accum,
+                double accum_scale,
+                int64_t accum_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                bool fp32_output,
+                c10::string_view binary_attr,
+                c10::optional<at::Scalar> alpha,
+                c10::optional<c10::string_view> attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5563,32 +5642,38 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             unary_scalars,
             unary_algorithm,
         ) = const_args[-16:]
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise.binary"
         conv_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {accum}"
-            + f", {accum_scale}"
-            + f", {accum_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {stride}"
-            + f", {padding}"
-            + f", {dilation}"
-            + f", {groups}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {binary_attr}"
-            + f", {alpha}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            accum,
+            accum_scale,
+            accum_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            conv_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overlad_name,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5661,7 +5746,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             binary_attr,
             alpha,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
         if fp32_output:
@@ -5694,7 +5779,30 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 5
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qlinear_pointwise",
+            cpp_kernel="onednn::qlinear_pointwise",
+        )
+        self.cpp_kernel_key = "qlinear_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                bool fp32_output,
+                std::string post_op_name,
+                torch::List<c10::optional<at::Scalar>> post_op_args,
+                std::string post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5717,23 +5825,28 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             unary_algorithm,
         ) = const_args[-8:]
 
-        self.kernel = "torch.ops.onednn.qlinear_pointwise"
         codegen_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5771,7 +5884,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             output_zero_point,
             fp32_output,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
@@ -6156,7 +6269,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, add_asserts=True):
+            def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -6166,7 +6279,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, add_asserts)
+                        var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
                 tracer.create_proxy(
@@ -6418,9 +6531,9 @@ class InPlaceHint(ExternKernel):
 
     def codegen(self, wrapper):
         input_name = self.inputs[0].codegen_reference()
-        output_name = self.codegen_reference()
+        output_name = self.get_name()
         if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.codegen_tensor_copy(output_name, input_name, "no reuse")
+            wrapper.writeline(f"{output_name}.copy_({input_name}) #no reuse")
 
     def __init__(self, layout, input):
         input = self.realize_input(input)
@@ -6713,15 +6826,6 @@ class _CollectiveKernel(FallbackKernel):
             example_outputs,
         )
 
-    @staticmethod
-    def wrap_inplace_input(inp):
-        return TensorBox.create(
-            InPlaceHint(
-                FlexibleLayout(inp.get_device(), inp.get_dtype(), inp.get_size()),
-                inp,
-            )
-        )
-
     def should_allocate(self):
         return False
 
@@ -6753,7 +6857,7 @@ class _CollectiveKernel(FallbackKernel):
     @classmethod
     def create_inplace_single(cls, kernel, inp: TensorBox, *args, **kwargs):
         assert isinstance(inp, TensorBox)
-        inp = cls.wrap_inplace_input(inp)
+        inp.realize()
         output, _ = cls.make_fallback_kernel(
             MutationLayout(inp),
             kernel,
@@ -6769,7 +6873,8 @@ class _CollectiveKernel(FallbackKernel):
         assert isinstance(inputs, list) and all(
             isinstance(x, TensorBox) for x in inputs
         )
-        inputs = pytree.tree_map(cls.wrap_inplace_input, inputs)
+        for inp in inputs:
+            inp.realize()
         packed, _ = cls.make_fallback_kernel(
             MultiOutputLayout(inputs[0].get_device()),
             kernel,
@@ -6803,7 +6908,12 @@ class _CollectiveKernel(FallbackKernel):
     # availability, we add input buffers as read deps of wait_tensor kernels.
     #
     # To ensure the safety of output buffers, we model wait_tensor as a
-    # mutation to the output buffer.
+    # mutation to the output buffer. Note we also assumes the user program being
+    # correct and the output buffer is not consumed by kernels other than
+    # wait_tensor.
+    #
+    # TODO(yifu): add a pre-grad pass to validate the correctness of collective
+    # usage in the user program.
     @classmethod
     def create_out_of_place_single(cls, kernel, inp: TensorBox, *args, **kwargs):
         assert isinstance(inp, TensorBox)

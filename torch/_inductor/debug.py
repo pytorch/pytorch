@@ -70,7 +70,10 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
             continue
         group = node.meta["fusion_meta"].group
         if isinstance(group, tuple):
-            group = group[1]
+            if isinstance(group[1], int):
+                group = (group[1],)
+            else:
+                group = group[1]
 
         # gather meta data
         dtype = None
@@ -303,9 +306,10 @@ class DebugContext:
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
+        debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
-                get_debug_dir(),
+                debug_dir,
                 "torchinductor",
                 f"{folder_name}.{n}",
             )

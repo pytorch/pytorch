@@ -2196,7 +2196,7 @@ class TestWrapperSubclassAliasing(TestCase):
 
         result_test = op(*args_subclass, **kwargs_subclass)
 
-        args_ref_flat = pytree.tree_leaves((args, kwargs))
+        args_ref_flat = pytree.arg_tree_leaves(*args, **kwargs)
         args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
 
         args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))

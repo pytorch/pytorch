@@ -43,6 +43,7 @@ from .group_batch_fusion import group_batch_fusion_post_grad_passes
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+c10d_functional = torch.ops._c10d_functional
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -92,7 +93,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater.incremental_update()
     # Keep this last, since it introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-    reinplace_scatters(gm.graph)
+    reinplace_inplaceable_ops(gm.graph)
     gm.recompile()
     gm.graph.lint()
 
@@ -493,6 +494,7 @@ def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
         and val2 is not None
         and val1.size() == val2.size()
         and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
         and val1.device == val2.device
         and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
@@ -623,11 +625,11 @@ def remove_noop_ops(graph: torch.fx.Graph):
 InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
 
-def reinplace_scatters(graph):
+def reinplace_inplaceable_ops(graph):
     """
-    Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1), and the node being mutated
-    shares storage with no other nodes.
+    Reinplaces in-placeable ops in easy cases where the node being mutated is
+    only used by the op (users == 1), and the node being mutated shares storage
+    with no other nodes.
 
     Also handles input mutations when there is a corresponding copy node.
     """
@@ -653,6 +655,8 @@ def reinplace_scatters(graph):
             mutated_inputs.add(node.args[0])
 
     def can_inplace(node, mutated_arg):
+        if isinstance(mutated_arg, (list, tuple)):
+            return all(can_inplace(node, arg) for arg in mutated_arg)
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -665,7 +669,7 @@ def reinplace_scatters(graph):
             if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
                 return False
 
-            # # Check for any uses other than current node and copy_ epilogue
+            # Check for any uses other than current node and copy_ epilogue
             if len(mutated_arg.users) > 2:
                 return False
 
@@ -684,6 +688,12 @@ def reinplace_scatters(graph):
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
         aten._unsafe_index_put.default: InplaceableOp(
             inductor_prims._unsafe_index_put_, 0
+        ),
+        c10d_functional.all_reduce.default: InplaceableOp(
+            c10d_functional.all_reduce_.default, 0
+        ),
+        c10d_functional.all_reduce_coalesced.default: InplaceableOp(
+            c10d_functional.all_reduce_coalesced_.default, 0
         ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
