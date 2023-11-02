@@ -842,6 +842,9 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
 
 def to_fun(t):
     if isinstance(t, Tensor):
+        grad = None
+        if t.is_leaf:
+            grad = to_fun(t.grad)
         if is_traceable_wrapper_subclass(t):
             # See Note [Functionalization always runs last]
             # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
@@ -849,9 +852,14 @@ def to_fun(t):
             # recurse here, so we can support nested wrapper subclasses
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
             torch._mirror_autograd_meta_to(t, out)
+            if grad is not None:
+                out.grad = grad
             return out
         else:
-            return FunctionalTensor.to_functional(t)
+            out = FunctionalTensor.to_functional(t)
+            if grad is not None:
+                out.grad = grad
+            return out
     else:
         return t
 
@@ -866,6 +874,10 @@ def sync_functional_tensor(t):
 # When subclasses are involved, t here will usually look something like:
 # SubclassA(SubclassB(FunctionalTensor(_to_functional_tensor(FakeTensor))))
 def from_fun(t):
+    grad = None
+    if isinstance(t, Tensor) and t.is_leaf:
+        if t.grad is not None:
+            grad = from_fun(t.grad)
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
@@ -873,12 +885,16 @@ def from_fun(t):
         # recurse here, so we can support nested wrapper subclasses
         out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
         torch._mirror_autograd_meta_to(t, out)
+        if grad is not None:
+            out.grad = grad
         return out
 
     if not isinstance(t, FunctionalTensor):
         # quick sanity assert
         if isinstance(t, torch.Tensor):
             assert not torch._is_functional_tensor(t)
+        if grad is not None:
+            t.grad = grad
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)

@@ -1093,20 +1093,39 @@ class BuiltinVariable(VariableTracker):
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
-            if source:
-                # We are going to be raising this tensor as grapharg. So, ensure
-                # that we have real grad value instead of fake tensor value.
-                # Walk through the inputs of the subgraph and find if we already
-                # have the original tensor stored in the graphargs.
-                for grapharg in tx.output.graphargs:
-                    if grapharg.source == source.base:
-                        example_value = grapharg.example.grad
-                        return VariableBuilder(tx, source)(example_value).add_options(
-                            options
-                        )
-                unimplemented("tensor grad")
-            else:
-                unimplemented("tensor grad")
+            # if source:
+            #     # We are going to be raising this tensor as grapharg. So, ensure
+            #     # that we have real grad value instead of fake tensor value.
+            #     # Walk through the inputs of the subgraph and find if we already
+            #     # have the original tensor stored in the graphargs.
+            #     for grapharg in tx.output.graphargs:
+            #         if grapharg.source == source.base:
+            #             example_value = grapharg.example.grad
+            #             if example_value is None:
+            #                 from .builder import wrap_fx_proxy
+
+            #                 grad_proxy = obj.as_proxy().grad
+            #                 return wrap_fx_proxy(
+            #                     tx=tx,
+            #                     proxy=grad_proxy,
+            #                     example_value=obj.as_proxy().node.meta["example_value"].grad,
+            #                     **options,
+            #                 )
+            #             return VariableBuilder(tx, source)(example_value).add_options(
+            #                 options
+            #             )
+            #     unimplemented("tensor grad")
+            # else:
+            #     unimplemented("tensor grad")
+            from .builder import wrap_fx_proxy
+
+            grad_proxy = obj.as_proxy().grad
+            return wrap_fx_proxy(
+                tx=tx,
+                proxy=grad_proxy,
+                example_value=obj.as_proxy().node.meta["example_value"].grad,
+                **options,
+            )
         elif isinstance(
             obj,
             (
