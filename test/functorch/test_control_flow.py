@@ -1255,8 +1255,8 @@ def forward(self, arg0_1):
 
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    eq = sym_size_int == 4;  sym_size_int = None
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
@@ -1515,8 +1515,8 @@ def forward(self, arg0_1, arg1_1):
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
             self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    eq = sym_size_int == 4;  sym_size_int = None
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
