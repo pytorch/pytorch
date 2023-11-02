@@ -1468,10 +1468,10 @@ class TestCustomOp(CustomOpTestCaseBase):
             gm.code.strip(),
             """\
 def forward(self, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
-    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
+    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
     return numpy_view_copy""",  # noqa: B950
         )
 
