@@ -997,7 +997,7 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(arg, variables.BaseListVariable):
             return arg.items[0].add_options(self, arg)
 
-    def call_wrapped_next(self, tx, arg, kwargs=None):
+    def call___wrapped_next(self, tx, arg, kwargs=None):
         def _is_stop_iteration(vt):
             return vt.is_python_constant() and vt.as_python_constant() == StopIteration
 

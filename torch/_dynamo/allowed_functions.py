@@ -302,7 +302,7 @@ def _builtin_function_ids() -> Dict[int, str]:
     )
     rv.update({id(cast): "typing.cast"})
     rv[id(functools.reduce)] = "functools.reduce"
-    rv[id(polyfill.wrapped_next)] = "polyfill.wrapped_next"
+    rv[id(polyfill.__wrapped_next)] = "polyfill.__wrapped_next"
     return rv
 
 

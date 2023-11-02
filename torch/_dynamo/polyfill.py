@@ -23,17 +23,17 @@ def repeat(item, count):
         yield item
 
 
-def wrapped_next(x):
+def __wrapped_next(x):
     return next(x)
 
 
 def zip(*iterators):
     iterators = [iter(i) for i in iterators]
     while True:
-        nexts = tuple(wrapped_next(i) for i in iterators)
+        nexts = tuple(__wrapped_next(i) for i in iterators)
         # If one iterator yields StopIteration, then the FOR_ITER will return early.
         # Hence the lengths will be different.
-        if len([_ for _ in nexts]) != len(nexts):
+        if len(_ for _ in nexts) != len(nexts):
             return
         yield nexts
 

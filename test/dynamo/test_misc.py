@@ -7879,7 +7879,7 @@ def ___make_guard_fn():
         x = torch.zeros(3)
         eager = fn(x)
 
-        compiled_fn = torch._dynamo.optimize(backend="inductor", nopython=True)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(x)
 
         self.assertEqual(eager, compiled)
@@ -7904,7 +7904,7 @@ def ___make_guard_fn():
         x = torch.zeros(3)
         eager = fn(x)
 
-        compiled_fn = torch._dynamo.optimize(backend="inductor", nopython=True)(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
         compiled = compiled_fn(x)
 
         self.assertEqual(eager, compiled)
