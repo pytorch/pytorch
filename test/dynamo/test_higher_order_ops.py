@@ -1114,6 +1114,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result, (x.sin(), x.sin()))
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_map_kwargs(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return control_flow.map(lambda x: x.sin(), x=x)
+
+        x = torch.randn(3)
+        self.assertRaises(TypeError, lambda: f(x))
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_map_symint_input(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
