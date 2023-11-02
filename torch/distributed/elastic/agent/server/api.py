@@ -41,8 +41,9 @@ log = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """
+    r"""
     Contains blueprint information about a particular type of worker.
+
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
     that is each node runs the same number of workers for a particular spec.
@@ -98,7 +99,9 @@ class WorkerSpec:
         assert self.entrypoint
 
     def get_entrypoint_name(self):
-        """
+        r"""
+        Return the entrypoint of a :class:`WorkerSpec` object.
+
         If the entrypoint is a function (e.g. ``Callable``) returns its ``__qualname__``,
         else if the entrypoint is a binary (e.g. ``str``), returns the binary name.
         """
@@ -111,10 +114,11 @@ class WorkerSpec:
 
 class Worker:
     """
-    Represents a worker instance. Contrast this with ``WorkerSpec`` that
-    represents the specifications of a worker. A ``Worker`` is created from
-    a ``WorkerSpec``. A ``Worker`` is to a ``WorkerSpec`` as an object is to
-    a class.
+    Represents a worker instance.
+    
+    Contrast this with ``WorkerSpec`` that represents the specifications of 
+    a worker. A ``Worker`` is created from a ``WorkerSpec``. A ``Worker`` is
+    to a ``WorkerSpec`` as an object is to a class.
 
     The ``id`` of the worker is interpreted
     by the specific implementation of ``ElasticAgent``. For a local
@@ -186,6 +190,7 @@ class Worker:
 class WorkerState(str, Enum):
     """
     State of the ``WorkerGroup``. Workers in a worker group change state as a unit.
+
     If a single worker in a worker group fails the entire set is considered
     failed::
 
@@ -229,6 +234,8 @@ class WorkerState(str, Enum):
     @staticmethod
     def is_running(state: "WorkerState") -> bool:
         """
+        Boolean to Check the :class:`WorkerState`.
+        
         Returns:
              True if the worker state represents workers still running
              (e.g. that the process exists but not necessarily healthy).
@@ -237,9 +244,10 @@ class WorkerState(str, Enum):
 
 
 class WorkerGroup:
-    """
-    Represents the set of ``Worker`` instances for the given ``WorkerSpec``
-    managed by ``ElasticAgent``. Whether the worker group contains cross
+    r"""
+    Represents the set of ``Worker`` instances for the given ``WorkerSpec`` managed by ``ElasticAgent``.
+    
+    Whether the worker group contains cross
     instance workers or not depends on the implementation of the agent.
     """
 
@@ -260,6 +268,7 @@ class WorkerGroup:
 class _RoleInstanceInfo:
     """
     The class is used by the agent to exchange the information with other agents.
+
     The information is used to determine the rank of the workers that agent
     manages in heterogeneous environments, where different agents can have
     different number of workers.
@@ -268,14 +277,13 @@ class _RoleInstanceInfo:
     __slots__ = ["role", "rank", "local_world_size"]
 
     def __init__(self, role: str, rank: int, local_world_size: int):
-        r"""
+        r"""Initialize an object for ``_RoleInstanceInfo``.
 
         Args:
             role (str): user-defined role for the workers with this spec
             rank (int): the rank of the agent
             local_world_size (int): number of local workers to run
         """
-
         self.role = role
         self.rank = rank
         self.local_world_size = local_world_size
@@ -318,7 +326,9 @@ class _RoleInstanceInfo:
 @dataclass
 class RunResult:
     """
-    Results returned by the worker executions. Run results follow an "all-or-nothing" policy
+    Results returned by the worker executions.
+    
+    Run results follow an "all-or-nothing" policy
     where the run is successful if and only if ALL local workers managed by this agent
     complete successfully.
 
@@ -351,8 +361,9 @@ class RunResult:
 
 def _get_socket_with_port() -> socket.socket:
     """
-    Returns a free port on localhost that is "reserved" by binding a temporary
-    socket on it. Close the socket before passing the port to the entity
+    Return a free port on localhost that is "reserved" by binding a temporary socket on it.
+      
+    Close the socket before passing the port to the entity
     that requires it. Usage example
 
     ::
@@ -365,7 +376,6 @@ def _get_socket_with_port() -> socket.socket:
         # may grab this port before func() runs
         func(port)
     """
-
     addrs = socket.getaddrinfo(
         host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
     )
@@ -389,6 +399,7 @@ def _get_fq_hostname() -> str:
 class ElasticAgent(abc.ABC):
     """
     Agent process responsible for managing one or more worker processes.
+
     The worker processes are assumed to be regular distributed PyTorch scripts.
     When the worker process is created by the agent, the agent provides the
     necessary information for the worker processes to properly initialize
@@ -424,8 +435,7 @@ class ElasticAgent(abc.ABC):
     @abc.abstractmethod
     def run(self, role: str = DEFAULT_ROLE) -> RunResult:
         """
-        Runs the agent, retrying the worker group on failures up to
-        ``max_restarts``.
+        Run the agent, retrying the worker group on failures up to ``max_restarts``.
 
         Returns:
             The result of the execution, containing the return values or
@@ -439,6 +449,8 @@ class ElasticAgent(abc.ABC):
     @abc.abstractmethod
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
         """
+        Return the ``WorkerGroup`` for the given ``role``.
+
         Returns:
             The ``WorkerGroup`` for the given ``role``.
             Note that the worker group is a mutable object and hence in a
@@ -451,6 +463,8 @@ class ElasticAgent(abc.ABC):
 
 class SimpleElasticAgent(ElasticAgent):
     """
+    Agent that manages one particular types of worker roles.
+
     An ``ElasticAgent`` that manages workers (``WorkerGroup``)
     for a single ``WorkerSpec`` (e.g. one particular type of worker role).
     """
@@ -468,7 +482,9 @@ class SimpleElasticAgent(ElasticAgent):
     @abc.abstractmethod
     def _start_workers(self, worker_group: WorkerGroup) -> Dict[int, Any]:
         r"""
-        Starts ``worker_group.spec.local_world_size`` number of workers
+        Start the given workers of a worker group.
+
+        Start ``worker_group.spec.local_world_size`` number of workers
         according to worker spec for the worker group .
 
         Returns a map of ``local_rank`` to worker ``id``.
@@ -478,17 +494,20 @@ class SimpleElasticAgent(ElasticAgent):
     @abc.abstractmethod
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
         r"""
-        Stops all workers in the given worker group. Implementors
-        must deal with workers in all states defined by ``WorkerState``.
-        That is, it must gracefully handle stopping non-existent workers,
-        unhealthy (stuck) workers, etc.
+        Stop all workers in the given worker group.
+
+        Implementors must deal with workers in all states defined by 
+        ``WorkerState``. That is, it must gracefully handle stopping
+        non-existent workers, unhealthy (stuck) workers, etc.
         """
         raise NotImplementedError()
 
     @abc.abstractmethod
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
         r"""
-        Checks on the workers for the ``worker_group`` and returns
+        Monitor the workers of a given worker group.
+
+        Check on the workers for the ``worker_group`` and returns
         the new state of the worker group.
         """
         raise NotImplementedError()
@@ -496,7 +515,7 @@ class SimpleElasticAgent(ElasticAgent):
     @abc.abstractmethod
     def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """
-        Cleans up any resources that were allocated during the agent's work.
+        Clean up any resources that were allocated during the agent's work.
 
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
@@ -536,11 +555,11 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def _rendezvous(self, worker_group: WorkerGroup) -> None:
         r"""
-        Runs rendezvous for the workers specified by worker spec.
+        Run rendezvous for the workers specified by worker spec.
+
         Assigns workers a new global rank and world size.
         Updates the rendezvous store for the worker group.
         """
-
         spec = worker_group.spec
 
         store, group_rank, group_world_size = spec.rdzv_handler.next_rendezvous()
@@ -617,8 +636,9 @@ class SimpleElasticAgent(ElasticAgent):
         self, store, group_rank: int, group_world_size: int, spec: WorkerSpec
     ) -> List[Worker]:
         """
-        Determines proper ranks for worker processes. The rank assignment
-        is done according to the following algorithm:
+        Determine proper ranks for worker processes.
+
+        The rank assignment is done according to the following algorithm:
 
         1. Each agent writes its configuration(group_rank, group_world_size
            , num_workers) to the common store.
@@ -633,7 +653,6 @@ class SimpleElasticAgent(ElasticAgent):
            in the point 3 with the exception that the offset is done from the first
            agent that has the same role as current one and has the minimum group rank.
         """
-
         role_infos = self._share_and_gather(store, group_rank, group_world_size, spec)
         my_role_info = role_infos[group_rank]
         worker_world_size, worker_global_ranks = self._get_ranks(role_infos, group_rank)
@@ -685,7 +704,8 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def _initialize_workers(self, worker_group: WorkerGroup) -> None:
         r"""
-        Starts a fresh set of workers for the worker_group.
+        Start a fresh set of workers for the worker_group.
+
         Essentially a rendezvous followed by a start_workers.
 
         The caller should first call ``_stop_workers()`` to stop running workers
@@ -716,10 +736,7 @@ class SimpleElasticAgent(ElasticAgent):
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _restart_workers(self, worker_group: WorkerGroup) -> None:
-        """
-        Restarts (stops, rendezvous, starts) all local workers in the group.
-        """
-
+        """Restarts (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
         log.info("[%s] Stopping worker group", role)
         self._stop_workers(worker_group)
@@ -921,6 +938,8 @@ class SimpleElasticAgent(ElasticAgent):
 
     def _exit_barrier(self):
         """
+        Wait for exit timeout window for all agents to finish executing.
+
         Wait for ``exit_barrier_timeout`` seconds for all agents to finish
         executing their local workers (either successfully or not). This
         acts as a safety guard against user scripts that terminate at different

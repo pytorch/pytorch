@@ -8,7 +8,7 @@
 
 """
 
-Torchelastic agent and user worker failover contract:
+Torchelastic agent and user worker failover contract.
 
 **TL;DR;**:
 
