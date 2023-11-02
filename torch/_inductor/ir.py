@@ -2804,6 +2804,17 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    def get_computed_buffer_name(self):
+        """
+        Returns self.name if it exists, otherwise returns the name of the data node if that exists.
+        If neither exist, returns None.
+        """
+        if self.name is not None:
+            return self.name
+        if hasattr(self.data, "name"):
+            return self.data.name
+        return None
+
     @cache_on_self
     def num_reads(self):
         return len(self.get_read_writes().reads)

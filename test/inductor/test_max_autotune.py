@@ -8,6 +8,7 @@ import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -265,8 +266,6 @@ class TestMaxAutotune(TestCase):
         expected_fuse_count=1,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
     ):
-        from torch._inductor.codegen.cuda import cuda_cpp_scheduling
-
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
             mixed_precision
         )
@@ -293,12 +292,13 @@ class TestMaxAutotune(TestCase):
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
-            cuda_cpp_scheduling._cuda_epilogue_fusion_counter = 0
+            counters["inductor"]["cuda_epilogue_fusion_counter"] = 0
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
+            actual_count = counters["inductor"]["cuda_epilogue_fusion_counter"]
             assert (
-                cuda_cpp_scheduling._cuda_epilogue_fusion_counter == expected_fuse_count
-            ), f"Expected fuse count of {expected_fuse_count} but got {cuda_cpp_scheduling._cuda_epilogue_fusion_counter}"
+                actual_count == expected_fuse_count
+            ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")

@@ -8,9 +8,18 @@ from torch._inductor.ir import ComputedBuffer, FlexibleLayout, IRNode, Pointwise
 from torch._inductor.utils import IndentedBuffer, sympy_str
 
 
+# Used as a magic string to indicate an unsupported sympy expression
+# became part of generated C++ code.
+_MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
+
+
 def _arg_str(a):
     if isinstance(a, sympy.Expr):
-        return "@sympy_expr('" + sympy_str(a) + "')"
+        # If this return value containting the _MAGIC_SYMPY_ERROR_STRING
+        # is used as part of the final generated C++ code,
+        # a CUTLASSEVTOpNotImplementedError is raised to indicate that
+        # the op could not be converted to a valid EVT expression.
+        return f"{_MAGIC_SYMPY_ERROR_STRING}('{sympy_str(a)}')"
     return str(a)
 
 
@@ -91,7 +100,7 @@ class CutlassEVTEpilogueTypeFormatter:
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 formatter.aliases[node.name] = result
             res = formatter.getvalue(result)
-            if "@sympy_expr" in res:
+            if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
                 )
@@ -163,6 +172,9 @@ class CutlassEVTEpilogueTypeFormatter:
         return self._cutlass_binary_functional_op("multiplies", a, b)
 
     def _op_div(self, a, b):
+        return self._cutlass_binary_functional_op("divides", a, b)
+
+    def _op_truediv(self, a, b):
         return self._cutlass_binary_functional_op("divides", a, b)
 
     def _op_ge(self, a, b):
@@ -255,7 +267,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                     formatter.aliases[node.name] = result
 
             res: str = formatter.getvalue(result)
-            if "@sympy_expr" in res:
+            if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
                 )
@@ -303,6 +315,9 @@ class CutlassEVTEpilogueArgumentFormatter:
         return self._cutlass_binary_functional_op("multiplies", a, b)
 
     def _op_div(self, a, b):
+        return self._cutlass_binary_functional_op("divides", a, b)
+
+    def _op_truediv(self, a, b):
         return self._cutlass_binary_functional_op("divides", a, b)
 
     def _op_ge(self, a, b):

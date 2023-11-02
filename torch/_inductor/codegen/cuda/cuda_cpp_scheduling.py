@@ -1,6 +1,8 @@
 import logging
 from typing import cast, List
 
+from ...._dynamo.utils import counters
+
 from ... import config, ir
 from ...codecache import code_hash, get_path
 from ...ir import ComputedBuffer, CUDATemplateBuffer, Pointwise
@@ -25,9 +27,9 @@ _cuda_epilogue_fusion_counter: int = (
 
 class CUDACPPScheduling(BaseScheduling):
     """
-    Partial Scheduling implementation for CUDA C++ kernels.
-    This class is intended to be used in conjunction with TritonScheduling,
-    and delegated to by CUDAScheduling.
+    Partial Scheduling implementation for CUDA C++ Kernels.
+    This class is intended to be used in combination with TritonScheduling,
+    and delegated to by CUDACombinedScheduling.
 
     It handles fusion decisions and CUDA C++ specific template code generation.
     """
@@ -56,7 +58,6 @@ class CUDACPPScheduling(BaseScheduling):
         additional_node: ir.IRNode,
     ) -> bool:
         """
-
         Check if the given node can be fused with the epilogue. At the moment, Kernels
         support fusion with Pointwise operations, wrapped in (named) ComputedBuffer nodes.
 
@@ -68,20 +69,19 @@ class CUDACPPScheduling(BaseScheduling):
         - bool: True if the given node can be fused with the epilogue, False otherwise.
 
         """
+        if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
+            return False
         if not cuda_template_buffer.template.can_fuse_epilogue:
             # The used GEMM op does not support fusing epilogues
-            return False
-        if not isinstance(cuda_template_buffer, CUDATemplateBuffer):
             return False
         if not isinstance(additional_node, ComputedBuffer):
             return False
         if not isinstance(additional_node.data, Pointwise):
             return False
-
         # We can fuse a Pointwise op that depends on the last fused epilogue node
         # if any. If there is no epilogue node yet, it needs to depend on the template
         # node
-        node_name = additional_node.name if additional_node.name is not None else additional_node.data.name  # type: ignore[attr-defined] # noqa: B950
+        node_name = additional_node.get_computed_buffer_name()  # type: ignore[attr-defined]
         if node_name is None:
             return False
 
@@ -189,8 +189,7 @@ class CUDACPPScheduling(BaseScheduling):
         """
         Codegen a CUDA template, possibly with fused epilogues
         """
-        global _cuda_epilogue_fusion_counter
-        _cuda_epilogue_fusion_counter += len(epilogue_nodes)
+        counters["inductor"]["cuda_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cuda_cpp_template(
             template_node
         ), "Template node passed to CUDAScheduler.codegen_template must be a SchedulerNode that wraps a CUDATemplateBuffer"

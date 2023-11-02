@@ -154,10 +154,10 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
 
 
 class CUTLASSGemmTemplate(CUTLASSTemplate):
-    """ """
-
-    # CUTLASS GEMM template, which is used to generate CUTLASS GEMM kernels
-    # including those which allow flexible fusions with epilogues.
+    """
+    CUTLASS GEMM template, which is used to generate CUTLASS GEMM kernels
+    including those which allow flexible fusions with epilogues.
+    """
 
     def __init__(
         self,
