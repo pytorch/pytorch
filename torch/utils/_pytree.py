@@ -194,8 +194,8 @@ def _register_pytree_node(
         if previous_frame is not None and inspect.getmodule(previous_frame) is not cxx:
             cxx.register_pytree_node(
                 cls,
-                flatten_func,
-                unflatten_func,
+                flatten_fn,
+                unflatten_fn,
                 to_dumpable_context=to_dumpable_context,
                 from_dumpable_context=from_dumpable_context,
             )
