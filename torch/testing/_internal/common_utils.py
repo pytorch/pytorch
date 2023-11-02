@@ -1309,14 +1309,13 @@ def markDynamoStrictTest(cls_or_func):
         return cls_or_func
 
     fn = cls_or_func
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
         torch._dynamo.reset()
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", False):
             fn(*args, **kwargs)
         torch._dynamo.reset()
-    return wrapper
-
     return wrapper
 
 
