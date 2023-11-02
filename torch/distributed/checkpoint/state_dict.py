@@ -90,9 +90,9 @@ class StateDictOptions:
       or example, if the submodule is ``module.pretrain`` and the full FQN of
       the parameter is ``pretrain.layer1.weight`` of the param. When this option
       is True, the parameter's key in the returned state_dict will be
-      ``layer1.weight``. If the options is False, the key will be
-      ``pretrain.layer1.weight``.
-      Note that if ``keep_submodule_prefixes`` is False, there may be conflict
+      ``pretrain.layer1.weight``. If the options is False, the key will be
+      ``layer1.weight``.
+      Note that if ``keep_submodule_prefixes`` is False, there may be conflicted
       FQNs, hence there should be only one submodule in ``submodules``.
 
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
