@@ -453,10 +453,10 @@ class TestPySymInt(TestCase):
         self.assertEqual(len(gm.shape_env.guards), 0)
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 5
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
-    sym_ite = torch.sym_ite(eq, sym_size, sym_size_1);  eq = sym_size = sym_size_1 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 5
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
+    sym_ite = torch.sym_ite(eq, sym_size_int, sym_size_int_1);  eq = sym_size_int = sym_size_int_1 = None
     return sym_ite""")
         r1 = gm(torch.ones(4, 5))
         self.assertIsInstance(r1, int)
@@ -606,12 +606,12 @@ def forward(self, x_1):
 class f(torch.nn.Module):
     def forward(self, a_1: f32[s0, s1], b_1: f32[s2, s1]):
         # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(a_1, 0)
-        sym_size_1: Sym(s2) = torch.ops.aten.sym_size(b_1, 0)
-        add: Sym(s0 + s2) = sym_size + sym_size_1;  sym_size = sym_size_1 = None
-        sym_size_2: Sym(s1) = torch.ops.aten.sym_size(a_1, 1)
-        sym_size_3: Sym(s1) = torch.ops.aten.sym_size(b_1, 1);  b_1 = None
-        add_1: Sym(2*s1) = sym_size_2 + sym_size_3;  sym_size_2 = sym_size_3 = None
+        sym_size_int: Sym(s0) = torch.ops.aten.sym_size.int(a_1, 0)
+        sym_size_int_1: Sym(s2) = torch.ops.aten.sym_size.int(b_1, 0)
+        add: Sym(s0 + s2) = sym_size_int + sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+        sym_size_int_2: Sym(s1) = torch.ops.aten.sym_size.int(a_1, 1)
+        sym_size_int_3: Sym(s1) = torch.ops.aten.sym_size.int(b_1, 1);  b_1 = None
+        add_1: Sym(2*s1) = sym_size_int_2 + sym_size_int_3;  sym_size_int_2 = sym_size_int_3 = None
         new_empty: f32[s0 + s2, 2*s1] = torch.ops.aten.new_empty.default(a_1, [add, add_1], pin_memory = False);  a_1 = add = add_1 = None
         native_dropout = torch.ops.aten.native_dropout.default(new_empty, 0.5, True);  new_empty = None
         getitem: f32[s0 + s2, 2*s1] = native_dropout[0]
