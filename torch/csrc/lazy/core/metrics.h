@@ -278,5 +278,9 @@ class TORCH_API TimedSection {
       new torch::lazy::Metric(name, torch::lazy::MetricFnTime); \
   torch::lazy::TimedSection timed_section(timed_metric)
 
+#define TORCH_LAZY_FN_COUNTER_TIMED_TRACING(ns) \
+  TORCH_LAZY_FN_COUNTER(ns);                    \
+  TORCH_LAZY_TIMED("LazyTracing")
+
 } // namespace lazy
 } // namespace torch
