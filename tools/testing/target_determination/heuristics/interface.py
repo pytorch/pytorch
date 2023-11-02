@@ -24,10 +24,10 @@ from tools.testing.test_run import TestRun, TestRuns
 @total_ordering
 class Relevance(Enum):
     HIGH = 4
-    PROBABLE = 3
-    UNRANKED = 2
-    UNLIKELY = 1  # Not yet supported. Needs more infra to be usable
-    NONE = 0  # Not yet supported. Needs more infra to be usable
+    NONE = 3
+    PROBABLE = 2
+    UNLIKELY = 1
+    UNRANKED = 0
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Relevance):
@@ -44,10 +44,10 @@ class Relevance(Enum):
     @staticmethod
     def priority_traversal() -> Iterator["Relevance"]:
         yield Relevance.HIGH
-        yield Relevance.PROBABLE
-        yield Relevance.UNRANKED
-        yield Relevance.UNLIKELY
         yield Relevance.NONE
+        yield Relevance.PROBABLE
+        yield Relevance.UNLIKELY
+        yield Relevance.UNRANKED
 
 
 METRIC_RELEVANCE_GROUP = "relevance_group"
@@ -70,7 +70,7 @@ class TestPrioritizations:
                otherwise it breaks the test sharding logic
     """
 
-    _test_priorities: List[List[TestRun]]  # This list MUST be ordered by Relevance
+    _test_priorities: List[List[TestRun]]
     _original_tests: FrozenSet[str]
 
     def __init__(
@@ -223,7 +223,6 @@ class TestPrioritizations:
             if relevance > Relevance.UNRANKED:
                 for test in other._test_priorities[relevance.value]:
                     self.raise_test_relevance(test, relevance)
-                # TODO: Hande the case where a test is moved to a lower relevance group (once we support that scenario)
 
         self.validate_test_priorities()
         return
@@ -243,6 +242,12 @@ class TestPrioritizations:
 
     def get_unranked_relevance_tests(self) -> TestRuns:
         return tuple(test for test in self._test_priorities[Relevance.UNRANKED.value])
+
+    def get_unlikely_relevance_tests(self) -> TestRuns:
+        return tuple(test for test in self._test_priorities[Relevance.UNLIKELY.value])
+
+    def get_none_relevance_tests(self) -> TestRuns:
+        return tuple(test for test in self._test_priorities[Relevance.NONE.value])
 
     def print_info(self) -> None:
         def _print_tests(label: str, tests: List[TestRun]) -> None:
