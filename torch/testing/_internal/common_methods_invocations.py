@@ -507,6 +507,12 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
             yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
 
 
+def sample_inputs__weight_norm_interface(op_info, device, dtype, requires_grad, **kwargs):
+    g = torch.randn((3, 10, 10), device=device)
+    v = torch.randn((1, 1, 10), device=device)
+    yield SampleInput(args=(g, v, 2))
+
+
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -12442,8 +12448,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
-           )
-           ),
+           )),
+    OpInfo('_weight_norm_interface',
+           aten_name='_weight_norm_interface',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs__weight_norm_interface,
+    ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.half, torch.bfloat16),
