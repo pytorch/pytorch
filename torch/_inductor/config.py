@@ -29,6 +29,7 @@ static_weight_shapes = True
 
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
+nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -551,6 +552,10 @@ class cuda:
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+
+    # Save debug information to a temporary directory
+    # If not specified, a temp directory will be created by system
+    debug_dir = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
