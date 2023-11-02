@@ -4,6 +4,7 @@ import operator
 import types
 from typing import Dict, List
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -232,9 +233,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = ConstantVariable.create(self.dtype, **options)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
@@ -673,7 +674,8 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "register_hook":
+        elif name in {"register_hook", "register_post_accumulate_grad_hook"}:
+            # Note - do not arbitrarily add hooks here - make sure they match the same contract
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -697,10 +699,8 @@ class TensorVariable(VariableTracker):
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
@@ -747,7 +747,8 @@ class TensorVariable(VariableTracker):
                 fn = functools.partial(trace_wrapped, fn=fn)
 
                 def _register_hook_trampoline(tensor):
-                    tensor.register_hook(fn)
+                    hook_callable = getattr(tensor, name)
+                    hook_callable(fn)
                     return tensor
 
                 return wrap_fx_proxy(
@@ -761,7 +762,7 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
 
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
@@ -965,9 +966,9 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", None)
-        need_unwrap = kwargs.pop("need_unwrap", True)
+    def __init__(
+        self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
+    ):
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -980,17 +981,6 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
-
-    def as_specialized(self, tx):
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
 
 
 class FakeItemVariable(TensorVariable):
