@@ -1,0 +1,80 @@
+name: s390x-test-3
+on:
+  schedule:
+    - cron: 0 0 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 1440
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+        pip install --upgrade psutil
+        pip install --upgrade protobuf
+        pip install --upgrade optree
+        pip install --upgrade future
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        python setup.py bdist_wheel
+    - name: Install project
+      run: |
+        source venv/bin/activate
+
+        pip install dist/*.whl
+    - name: Run python tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        cd test
+
+        failedlist=""
+
+        for file in \
+            ./inductor/test_torchinductor_codegen_dynamic_shapes.py \
+            ./optim/test_optim.py \
+            ./test_foreach.py \
+            ./test_jit_autocast.py \
+            ./test_meta.py \
+            ./test_optim.py \
+            ./test_reductions.py \
+            ./test_schema_check.py \
+            ./test_sparse_csr.py \
+        ; do
+            echo "Running $file"
+            pytest -v "$file"
+            testresult=$?
+            if [ $testresult -ne 0 ] ; then
+                failedlist="$failedlist\n$file"
+            fi
+            echo "Finished running $file"
+        done
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi

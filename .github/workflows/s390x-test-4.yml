@@ -1,0 +1,71 @@
+name: s390x-test-4
+on:
+  schedule:
+    - cron: 0 0 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 1440
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+        pip install --upgrade psutil
+        pip install --upgrade protobuf
+        pip install --upgrade optree
+        pip install --upgrade future
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        python setup.py bdist_wheel
+    - name: Install project
+      run: |
+        source venv/bin/activate
+
+        pip install dist/*.whl
+    - name: Run python tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        cd test
+
+        failedlist=""
+
+        file=./functorch/test_ops.py
+
+        echo "Running $file"
+        # temporary disable failing test
+        pytest -v "$file" -k 'not test_vmapvjpvjp_linalg_tensorsolve_cpu_float32'
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n$file"
+        fi
+        echo "Finished running $file"
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi

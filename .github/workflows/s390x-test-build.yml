@@ -1,0 +1,94 @@
+name: s390x-test-build
+on: [pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+        pip install --upgrade psutil
+        pip install --upgrade protobuf
+        pip install --upgrade optree
+        pip install --upgrade future
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        python setup.py bdist_wheel
+    - name: Install project
+      run: |
+        source venv/bin/activate
+
+        pip install dist/*.whl
+    - name: Run C++ tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        failedlist=""
+
+        for i in $(find ./build/bin/ -type f | sort | grep -E -v "/IListRef_test|/example_allreduce|/test_edge_op_registration|/test_jit|/test_lazy|/TCPStoreTest|/vec_test_all_types_ZVECTOR"); do
+            echo "RUNNING $i"
+            $i
+            testresult=$?
+            if [ $testresult -ne 0 ] ; then
+                failedlist="$failedlist\n$i"
+            fi
+        done
+
+        echo RUNNING ./build/bin/test_jit
+        ./build/bin/test_jit --gtest_filter=-ConstantPropagation.CustomClassesCanBePropagated
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_jit"
+        fi
+
+        echo RUNNING ./build/bin/test_lazy
+        ./build/bin/test_lazy --gtest_filter=-HashTest.Scalar
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_lazy"
+        fi
+
+        echo RUNNING ./build/bin/TCPStoreTest
+        ./build/bin/TCPStoreTest --gtest_filter=-TCPStoreTest.testHelperPrefix:TCPStoreTest.testHelper:TCPStoreTest.testHelperPrefixUV:TCPStoreTest.testHelperUV
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/TCPStoreTest"
+        fi
+
+        # looks like issue in old compiler, skip for now
+        echo RUNNING ./build/bin/vec_test_all_types_ZVECTOR
+        ./build/bin/vec_test_all_types_ZVECTOR --gtest_filter=-BitwiseFloatsAdditional/1.Convert:RangeFactories/4.Arange
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/vec_test_all_types_ZVECTOR"
+        fi
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi

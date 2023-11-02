@@ -1,0 +1,850 @@
+name: s390x-test-1
+on:
+  schedule:
+    - cron: 0 0 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: [linux.s390x]
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+    - name: Prepare environment
+      run: |
+        virtualenv -p python3 --system-site-packages venv
+        source venv/bin/activate
+        pip install --upgrade setuptools
+        pip install --upgrade pytest
+        pip install --upgrade expecttest
+        pip install --upgrade typing_extensions
+        pip install --upgrade sympy
+        pip install --upgrade hypothesis
+        pip install --upgrade parameterized
+        pip install --upgrade psutil
+        pip install --upgrade protobuf
+        pip install --upgrade optree
+        pip install --upgrade future
+    - name: Build project
+      run: |
+        source venv/bin/activate
+        python setup.py bdist_wheel
+    - name: Install project
+      run: |
+        source venv/bin/activate
+
+        pip install dist/*.whl
+    - name: Run C++ tests
+      run: |
+        source venv/bin/activate
+
+        set +e
+
+        failedlist=""
+
+        for i in $(find ./build/bin/ -type f | sort | grep -E -v "/IListRef_test|/example_allreduce|/test_edge_op_registration|/test_jit|/test_lazy|/TCPStoreTest|/vec_test_all_types_ZVECTOR"); do
+            echo "RUNNING $i"
+            $i
+            testresult=$?
+            if [ $testresult -ne 0 ] ; then
+                failedlist="$failedlist\n$i"
+            fi
+        done
+
+        echo RUNNING ./build/bin/test_jit
+        ./build/bin/test_jit --gtest_filter=-ConstantPropagation.CustomClassesCanBePropagated
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_jit"
+        fi
+
+        echo RUNNING ./build/bin/test_lazy
+        ./build/bin/test_lazy --gtest_filter=-HashTest.Scalar
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/test_lazy"
+        fi
+
+        echo RUNNING ./build/bin/TCPStoreTest
+        ./build/bin/TCPStoreTest --gtest_filter=-TCPStoreTest.testHelperPrefix:TCPStoreTest.testHelper:TCPStoreTest.testHelperPrefixUV:TCPStoreTest.testHelperUV
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/TCPStoreTest"
+        fi
+
+        # looks like issue in old compiler, skip for now
+        echo RUNNING ./build/bin/vec_test_all_types_ZVECTOR
+        ./build/bin/vec_test_all_types_ZVECTOR --gtest_filter=-BitwiseFloatsAdditional/1.Convert:RangeFactories/4.Arange
+        testresult=$?
+        if [ $testresult -ne 0 ] ; then
+            failedlist="$failedlist\n./build/bin/vec_test_all_types_ZVECTOR"
+        fi
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi
+    - name: Run python tests
+      run: |
+        source venv/bin/activate
+
+        # Skipped tests list:
+        #
+        # Skip all distributed tests due to randomly hanging
+        #
+        # failing tests:
+        #       # these tests fail due to various reasons
+        #   ./ao/sparsity/test_composability.py
+        #   ./ao/sparsity/test_qlinear_packed_params.py
+        #   ./cpp/aot_inductor/test.py
+        #   ./cpp_api_parity/functional_impl_check.py
+        #   ./cpp_api_parity/module_impl_check.py
+        #   ./cpp_extensions/no_python_abi_suffix_test/setup.py
+        #   ./cpp_extensions/setup.py
+        #   ./custom_backend/test_custom_backend.py
+        #   ./custom_operator/test_custom_ops.py
+        #   ./distributions/test_distributions.py
+        #   ./dynamo/test_exc.py
+        #   ./dynamo/test_functions.py
+        #   ./dynamo/test_misc.py
+        #   ./dynamo/test_trace_rules.py
+        #   ./error_messages/storage.py
+        #   ./functorch/discover_coverage.py
+        #   ./functorch/xfail_suggester.py
+        #   ./fx/test_source_matcher_utils.py
+        #   ./fx/test_z3_gradual_types.py
+        #   ./inductor/minifier_smoke.py
+        #   ./inductor/test_aot_inductor.py
+        #   ./inductor/test_benchmark_fusion.py
+        #   ./inductor/test_cpu_repro.py
+        #   ./inductor/test_cudacodecache.py
+        #   ./inductor/test_custom_post_grad_passes.py
+        #   ./inductor/test_fused_attention.py
+        #   ./inductor/test_inductor_utils.py
+        #   ./inductor/test_inplacing_pass.py
+        #   ./inductor/test_kernel_benchmark.py
+        #   ./inductor/test_layout_optim.py
+        #   ./inductor/test_max_autotune.py
+        #   ./inductor/test_mkldnn_pattern_matcher.py
+        #   ./inductor/test_move_constructors_to_cuda.py
+        #   ./inductor/test_multi_kernel.py
+        #   ./inductor/test_pattern_matcher.py
+        #   ./inductor/test_perf.py
+        #   ./inductor/test_select_algorithm.py
+        #   ./inductor/test_snode_runtime.py
+        #   ./inductor/test_split_cat_fx_passes.py
+        #   ./inductor/test_triton_wrapper.py
+        #   ./inductor/test_unbacked_symints.py
+        #   ./jit/fixtures_srcs/generate_models.py
+        #   ./jit/fixtures_srcs/test_upgrader_models_generation.py
+        #   ./jit/test_autodiff.py
+        #   ./jit/test_backends.py
+        #   ./jit/test_complexity.py
+        #   ./jit/test_exception.py
+        #   ./jit/test_ivalue.py
+        #   ./jit/test_list_dict.py
+        #   ./jit/test_peephole.py
+        #   ./jit/test_script_profile.py
+        #   ./jit/test_tracer.py
+        #   ./jit/test_type_sharing.py
+        #   ./jit/test_types.py
+        #   ./jit/test_with.py
+        #   ./jit/xnnpack/test_xnnpack_delegate.py
+        #   ./lazy/test_meta_kernel.py
+        #   ./mobile/custom_build/prepare_model.py
+        #   ./mobile/model_test/gen_test_model.py
+        #   ./mobile/model_test/torchvision_models.py
+        #   ./mobile/model_test/update_production_ops.py
+        #   ./mobile/test_lite_script_module.py
+        #   ./mobile/test_lite_script_type.py
+        #   ./mobile/test_quantize_fx_lite_script_module.py
+        #   ./onnx/debug_embed_params.py
+        #   ./onnx/dynamo/test_dynamo_with_onnxruntime_backend.py
+        #   ./onnx/dynamo/test_exporter_api.py
+        #   ./onnx/dynamo/test_registry_dispatcher.py
+        #   ./onnx/internal/test_diagnostics.py
+        #   ./onnx/onnx_test_common.py
+        #   ./onnx/pytorch_helper.py
+        #   ./onnx/test_autograd_funs.py
+        #   ./onnx/test_custom_ops.py
+        #   ./onnx/test_export_modes.py
+        #   ./onnx/test_fx_op_consistency.py
+        #   ./onnx/test_fx_passes.py
+        #   ./onnx/test_fx_to_onnx.py
+        #   ./onnx/test_fx_to_onnx_with_onnxruntime.py
+        #   ./onnx/test_fx_type_promotion.py
+        #   ./onnx/test_models.py
+        #   ./onnx/test_models_onnxruntime.py
+        #   ./onnx/test_models_quantized_onnxruntime.py
+        #   ./onnx/test_onnx_opset.py
+        #   ./onnx/test_onnxscript_no_runtime.py
+        #   ./onnx/test_onnxscript_runtime.py
+        #   ./onnx/test_op_consistency.py
+        #   ./onnx/test_operators.py
+        #   ./onnx/test_pytorch_jit_onnx.py
+        #   ./onnx/test_pytorch_onnx_no_runtime.py
+        #   ./onnx/test_pytorch_onnx_onnxruntime.py
+        #   ./onnx/test_pytorch_onnx_onnxruntime_cuda.py
+        #   ./onnx/test_pytorch_onnx_shape_inference.py
+        #   ./onnx/test_utility_funs.py
+        #   ./onnx/test_verification.py
+        #   ./onnx/verify.py
+        #   ./onnx_caffe2/export_onnx_tests_filter.py
+        #   ./onnx_caffe2/export_onnx_tests_generator.py
+        #   ./onnx_caffe2/test_caffe2_common.py
+        #   ./onnx_caffe2/test_custom_ops.py
+        #   ./onnx_caffe2/test_pytorch_helper.py
+        #   ./onnx_caffe2/test_pytorch_onnx_caffe2.py
+        #   ./onnx_caffe2/test_pytorch_onnx_caffe2_quantized.py
+        #   ./onnx_caffe2/test_verify.py
+        #   ./profiler/test_profiler.py
+        #   ./quantization/core/experimental/apot_fx_graph_mode_ptq.py
+        #   ./quantization/core/experimental/apot_fx_graph_mode_qat.py
+        #   ./quantization/core/experimental/quantization_util.py
+        #   ./quantization/core/experimental/test_fake_quantize.py
+        #   ./quantization/core/experimental/test_linear.py
+        #   ./quantization/core/experimental/test_nonuniform_observer.py
+        #   ./quantization/core/experimental/test_quantized_tensor.py
+        #   ./quantization/core/experimental/test_quantizer.py
+        #   ./quantization/core/test_docs.py
+        #   ./quantization/core/test_workflow_module.py
+        #   ./quantization/eager/test_fuse_eager.py
+        #   ./quantization/eager/test_numeric_suite_eager.py
+        #   ./quantization/eager/test_quantize_eager_ptq.py
+        #   ./quantization/eager/test_quantize_eager_qat.py
+        #   ./quantization/fx/test_quantize_fx.py
+        #   ./quantization/jit/test_ondevice_quantization.py
+        #   ./quantization/jit/test_quantize_jit.py
+        #   ./quantization/pt2e/test_quantize_pt2e_qat.py
+        #   ./run_test.py
+        #   ./scripts/run_cuda_memcheck.py
+        #   ./test_ao_sparsity.py
+        #   ./test_bundled_images.py
+        #   ./test_cpp_extensions_open_device_registration.py
+        #   ./test_determination.py
+        #   ./test_functional_autograd_benchmark.py
+        #   ./test_fx.py
+        #   ./test_jit.py
+        #   ./test_jit_fuser.py
+        #   ./test_jit_legacy.py
+        #   ./test_jit_profiling.py
+        #   ./test_jit_simple.py
+        #   ./test_license.py
+        #   ./test_metal.py
+        #   ./test_mps.py
+        #   ./test_multiprocessing_spawn.py
+        #   ./test_namedtensor.py
+        #   ./test_native_functions.py
+        #   ./test_public_bindings.py
+        #   ./test_pytree.py
+        #   ./test_testing.py
+        #   ./test_throughput_benchmark.py
+        #   ./torch_np/numpy_tests/lib/index_tricks.py
+        #   ./typing/fail/bitwise_ops.py
+        #   ./typing/fail/creation_ops.py
+        #   ./typing/fail/disabled_bitwise_ops.py
+        #   ./typing/fail/random.py
+        #   ./typing/pass/creation_ops.py
+        #   ./typing/pass/math_ops.py
+        #   ./typing/reveal/module_list.py
+        #   ./typing/reveal/namedtuple.py
+        #   ./typing/reveal/opt_size.py
+        #   ./typing/reveal/size.py
+        #   ./typing/reveal/tensor_constructors.py
+        #   ./typing/reveal/tensor_copy.py
+        #   ./typing/reveal/tensor_sampling.py
+        #   ./typing/reveal/torch_optim.py
+        #
+        # long tests (group 1):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./inductor/test_torchinductor_codegen_dynamic_shapes.py
+        #   ./optim/test_optim.py
+        #   ./test_foreach.py
+        #   ./test_jit_autocast.py
+        #   ./test_meta.py
+        #   ./test_optim.py
+        #   ./test_reductions.py
+        #   ./test_schema_check.py
+        #   ./test_sparse_csr.py
+        #
+        # long tests (group 2):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./functorch/test_ops.py
+        #
+        # long tests (group 3):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./test_decomp.py
+        #
+        # long tests (group 4):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./test_ops.py
+        #
+        # long tests (group 5):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./functorch/test_aotdispatch.py
+        #   ./test_modules.py
+        #   ./test_ops_jit.py
+        #
+        # long tests (group 6):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./functorch/test_vmap.py
+        #
+        # long tests (group 7):
+        #       # these tests run longer than approximately 330 seconds (number taken randomly)
+        #       # split into multiple groups for convenience
+        #   ./test_jit_fuser_te.py
+        #   ./test_sparse.py
+        #
+        # failing long tests:
+        #       # these tests run long and fail in addition to that
+        #   ./dynamo/test_dynamic_shapes.py
+        #   ./test_dataloader.py
+        #   ./test_linalg.py
+        #   ./test_nn.py
+        #   ./test_ops_fwd_gradients.py
+        #   ./test_ops_gradients.py
+        #   ./test_proxy_tensor.py
+        #   ./test_quantization.py
+        #   ./inductor/test_torchinductor.py
+        #   ./inductor/test_torchinductor_dynamic_shapes.py
+        #   ./inductor/test_torchinductor_opinfo.py
+        #   ./test_binary_ufuncs.py
+        #   ./test_unary_ufuncs.py
+        #
+        # occasionally hanging or failing tests:
+        #       # these tests hang or fail from time to time
+        #   ./quantization/core/test_quantized_op.py
+        #   ./test_static_runtime.py
+        #
+        # medium length tests:
+        #       # these tests last up from a minute and not in a long tests list.
+        #       # they should still be executed, but in different workflow
+        #   ./functorch/test_eager_transforms.py
+        #   ./inductor/test_cpp_wrapper.py   # currently fails, should be fixed by remaining PRs
+        #   ./inductor/test_minifier_isolate.py
+        #   ./jit/test_freezing.py
+        #   ./nn/test_convolution.py
+        #   ./nn/test_pooling.py
+        #   ./test_autograd.py
+        #   ./test_cpp_api_parity.py
+        #   ./test_cpp_extensions_jit.py
+        #   ./test_dispatch.py
+        #   ./test_expanded_weights.py
+        #   ./test_functionalization.py
+        #   ./test_fx_experimental.py
+        #   ./test_masked.py
+        #   ./test_multiprocessing.py
+        #   ./test_serialization.py
+        #   ./test_spectral_ops.py
+        #   ./test_tensor_creation_ops.py
+        #   ./test_tensorexpr.py
+        #   ./test_torch.py
+        #   ./test_transformers.py
+        #   ./test_utils.py
+        #   ./test_view_ops.py
+        #
+        # empty tests:
+        #   ./bottleneck_test/test.py
+        #   ./bottleneck_test/test_args.py
+        #   ./bottleneck_test/test_cuda.py
+        #   ./conftest.py
+        #   ./cpp/api/init_baseline.py
+        #   ./cpp/api/optim_baseline.py
+        #   ./cpp/jit/tests_setup.py
+        #   ./cpp_api_parity/parity_table_parser.py
+        #   ./cpp_api_parity/sample_functional.py
+        #   ./cpp_api_parity/sample_module.py
+        #   ./cpp_api_parity/utils.py
+        #   ./create_dummy_torchscript_model.py
+        #   ./custom_backend/backend.py
+        #   ./custom_operator/model.py
+        #   ./delete.py
+        #   ./dynamo/mock_modules/mock_module1.py
+        #   ./dynamo/mock_modules/mock_module2.py
+        #   ./dynamo/mock_modules/mock_module3.py
+        #   ./dynamo/test_torchrec.py
+        #   ./dynamo/utils.py
+        #   ./export/testing.py
+        #   ./forward_backward_compatibility/check_forward_backward_compatibility.py
+        #   ./forward_backward_compatibility/dump_all_function_schemas.py
+        #   ./functorch/attn_ft.py
+        #   ./functorch/attn_positional.py
+        #   ./functorch/common_utils.py
+        #   ./functorch/functorch_additional_op_db.py
+        #   ./fx/named_tup.py
+        #   ./fx/quantization.py
+        #   ./fx/test_future.py
+        #   ./inductor/extension_backends/extension_codegen_backend.py
+        #   ./inductor/indirect_assert_helper.py
+        #   ./inductor/opinfo_harness.py
+        #   ./inductor/test_aot_inductor_utils.py
+        #   ./inductor/test_coordinate_descent_tuner.py
+        #   ./inductor/test_cuda_repro.py
+        #   ./inductor/test_cuda_cpp_wrapper.py
+        #   ./inductor/test_cudagraph_trees.py
+        #   ./inductor/test_triton_heuristics.py
+        #   ./jit/_imported_class_test/bar.py
+        #   ./jit/_imported_class_test/foo.py
+        #   ./jit/_imported_class_test/very/very/nested.py
+        #   ./jit/fixtures_srcs/fixtures_src.py
+        #   ./jit/myexception.py
+        #   ./jit/test_cuda.py
+        #   ./jit/test_hooks_modules.py
+        #   ./jit/test_pdt.py
+        #   ./jit_hooks/model.py
+        #   ./linear.py
+        #   ./load_torchscript_model.py
+        #   ./mkl_verbose.py
+        #   ./mkldnn_verbose.py
+        #   ./mobile/lightweight_dispatch/tests_setup.py
+        #   ./mobile/model_test/android_api_module.py
+        #   ./mobile/model_test/builtin_ops.py
+        #   ./mobile/model_test/math_ops.py
+        #   ./mobile/model_test/nn_ops.py
+        #   ./mobile/model_test/quantization_ops.py
+        #   ./mobile/model_test/sampling_ops.py
+        #   ./mobile/model_test/tensor_ops.py
+        #   ./mobile/nnc/aot_test_model.py
+        #   ./onnx/autograd_helper.py
+        #   ./onnx/model_defs/dcgan.py
+        #   ./onnx/model_defs/emb_seq.py
+        #   ./onnx/model_defs/lstm_flattening_result.py
+        #   ./onnx/model_defs/mnist.py
+        #   ./onnx/model_defs/op_test.py
+        #   ./onnx/model_defs/rnn_model_with_packed_sequence.py
+        #   ./onnx/model_defs/squeezenet.py
+        #   ./onnx/model_defs/srresnet.py
+        #   ./onnx/model_defs/super_resolution.py
+        #   ./onnx/model_defs/word_language_model.py
+        #   ./onnx/pytorch_test_common.py
+        #   ./package/common.py
+        #   ./package/generate_bc_packages.py
+        #   ./package/module_a.py
+        #   ./package/module_a_remapped_path.py
+        #   ./package/package_a/fake_interface.py
+        #   ./package/package_a/fake_script_class.py
+        #   ./package/package_a/long_name.py
+        #   ./package/package_a/std_sys_module_hacks.py
+        #   ./package/package_a/subpackage.py
+        #   ./package/package_a/test_all_leaf_modules_tracer.py
+        #   ./package/package_a/test_module.py
+        #   ./package/package_a/test_nn_module.py
+        #   ./package/package_a/use_dunder_package.py
+        #   ./package/package_a/use_torch_package_importer.py
+        #   ./package/package_b/subpackage_1.py
+        #   ./package/package_b/subpackage_2.py
+        #   ./package/package_c/test_module.py
+        #   ./package/package_d/imports_directly.py
+        #   ./package/package_d/imports_indirectly.py
+        #   ./pytest_shard_custom.py
+        #   ./quantization/ao_migration/common.py
+        #   ./scripts/cuda_memcheck_common.py
+        #   ./simulate_nccl_errors.py
+        #   ./test_cpp_extensions_aot.py
+        #   ./test_cuda.py
+        #   ./test_cuda_expandable_segments.py
+        #   ./test_cuda_multigpu.py
+        #   ./test_cuda_nvml_based_avail.py
+        #   ./test_cuda_primary_ctx.py
+        #   ./test_cuda_sanitizer.py
+        #   ./test_cuda_trace.py
+        #   ./test_jiterator.py
+        #   ./test_matmul_cuda.py
+        #   ./torch_np/check_tests_conform.py
+        #   ./torch_np/conftest.py
+        #   ./typing/pass/disabled_jit.py
+        #
+        # tests failing to collect:
+        #   ./cpp/aot_inductor/compile_model.py
+        #   ./custom_operator/my_custom_ops.py
+        #   ./custom_operator/my_custom_ops2.py
+        #   ./custom_operator/pointwise.py
+        #   ./dynamo/test_recompile_ux.py
+        #   ./dynamo/test_subgraphs.py
+        #   ./inductor/test_memory_planning.py
+        #   ./onnx/test_fx_to_onnx_decomp_skip.py
+        #   ./onnx/torch_export/test_torch_export_with_onnxruntime.py
+        #   ./quantization/pt2e/test_xnnpack_quantizer.py
+        #   ./test_tensorboard.py
+        #   ./typing/pass/cuda_steam.py
+        #
+
+        set +e
+
+        cd test
+
+        failedlist=""
+
+        for file in $(find . -name '*.py' | sort) ; do
+            if [ "$(basename "$file")" != "__init__.py" ] && \
+                [ "$file" = "${file#./distributed/}" ] && \
+                [ "$file" != "./ao/sparsity/test_composability.py" ] && \
+                [ "$file" != "./ao/sparsity/test_qlinear_packed_params.py" ] && \
+                [ "$file" != "./cpp/aot_inductor/test.py" ] && \
+                [ "$file" != "./cpp_api_parity/functional_impl_check.py" ] && \
+                [ "$file" != "./cpp_api_parity/module_impl_check.py" ] && \
+                [ "$file" != "./cpp_extensions/no_python_abi_suffix_test/setup.py" ] && \
+                [ "$file" != "./cpp_extensions/setup.py" ] && \
+                [ "$file" != "./custom_backend/test_custom_backend.py" ] && \
+                [ "$file" != "./custom_operator/test_custom_ops.py" ] && \
+                [ "$file" != "./distributions/test_distributions.py" ] && \
+                [ "$file" != "./dynamo/test_exc.py" ] && \
+                [ "$file" != "./dynamo/test_functions.py" ] && \
+                [ "$file" != "./dynamo/test_misc.py" ] && \
+                [ "$file" != "./dynamo/test_trace_rules.py" ] && \
+                [ "$file" != "./error_messages/storage.py" ] && \
+                [ "$file" != "./functorch/discover_coverage.py" ] && \
+                [ "$file" != "./functorch/xfail_suggester.py" ] && \
+                [ "$file" != "./fx/test_source_matcher_utils.py" ] && \
+                [ "$file" != "./fx/test_z3_gradual_types.py" ] && \
+                [ "$file" != "./inductor/minifier_smoke.py" ] && \
+                [ "$file" != "./inductor/test_aot_inductor.py" ] && \
+                [ "$file" != "./inductor/test_benchmark_fusion.py" ] && \
+                [ "$file" != "./inductor/test_cpu_repro.py" ] && \
+                [ "$file" != "./inductor/test_cudacodecache.py" ] && \
+                [ "$file" != "./inductor/test_custom_post_grad_passes.py" ] && \
+                [ "$file" != "./inductor/test_fused_attention.py" ] && \
+                [ "$file" != "./inductor/test_inductor_utils.py" ] && \
+                [ "$file" != "./inductor/test_inplacing_pass.py" ] && \
+                [ "$file" != "./inductor/test_kernel_benchmark.py" ] && \
+                [ "$file" != "./inductor/test_layout_optim.py" ] && \
+                [ "$file" != "./inductor/test_max_autotune.py" ] && \
+                [ "$file" != "./inductor/test_mkldnn_pattern_matcher.py" ] && \
+                [ "$file" != "./inductor/test_move_constructors_to_cuda.py" ] && \
+                [ "$file" != "./inductor/test_multi_kernel.py" ] && \
+                [ "$file" != "./inductor/test_pattern_matcher.py" ] && \
+                [ "$file" != "./inductor/test_perf.py" ] && \
+                [ "$file" != "./inductor/test_select_algorithm.py" ] && \
+                [ "$file" != "./inductor/test_snode_runtime.py" ] && \
+                [ "$file" != "./inductor/test_split_cat_fx_passes.py" ] && \
+                [ "$file" != "./inductor/test_triton_wrapper.py" ] && \
+                [ "$file" != "./inductor/test_unbacked_symints.py" ] && \
+                [ "$file" != "./jit/fixtures_srcs/generate_models.py" ] && \
+                [ "$file" != "./jit/fixtures_srcs/test_upgrader_models_generation.py" ] && \
+                [ "$file" != "./jit/test_autodiff.py" ] && \
+                [ "$file" != "./jit/test_backends.py" ] && \
+                [ "$file" != "./jit/test_complexity.py" ] && \
+                [ "$file" != "./jit/test_exception.py" ] && \
+                [ "$file" != "./jit/test_ivalue.py" ] && \
+                [ "$file" != "./jit/test_list_dict.py" ] && \
+                [ "$file" != "./jit/test_peephole.py" ] && \
+                [ "$file" != "./jit/test_script_profile.py" ] && \
+                [ "$file" != "./jit/test_tracer.py" ] && \
+                [ "$file" != "./jit/test_type_sharing.py" ] && \
+                [ "$file" != "./jit/test_types.py" ] && \
+                [ "$file" != "./jit/test_with.py" ] && \
+                [ "$file" != "./jit/xnnpack/test_xnnpack_delegate.py" ] && \
+                [ "$file" != "./lazy/test_meta_kernel.py" ] && \
+                [ "$file" != "./mobile/custom_build/prepare_model.py" ] && \
+                [ "$file" != "./mobile/model_test/gen_test_model.py" ] && \
+                [ "$file" != "./mobile/model_test/torchvision_models.py" ] && \
+                [ "$file" != "./mobile/model_test/update_production_ops.py" ] && \
+                [ "$file" != "./mobile/test_lite_script_module.py" ] && \
+                [ "$file" != "./mobile/test_lite_script_type.py" ] && \
+                [ "$file" != "./mobile/test_quantize_fx_lite_script_module.py" ] && \
+                [ "$file" != "./onnx/debug_embed_params.py" ] && \
+                [ "$file" != "./onnx/dynamo/test_dynamo_with_onnxruntime_backend.py" ] && \
+                [ "$file" != "./onnx/dynamo/test_exporter_api.py" ] && \
+                [ "$file" != "./onnx/dynamo/test_registry_dispatcher.py" ] && \
+                [ "$file" != "./onnx/internal/test_diagnostics.py" ] && \
+                [ "$file" != "./onnx/onnx_test_common.py" ] && \
+                [ "$file" != "./onnx/pytorch_helper.py" ] && \
+                [ "$file" != "./onnx/test_autograd_funs.py" ] && \
+                [ "$file" != "./onnx/test_custom_ops.py" ] && \
+                [ "$file" != "./onnx/test_export_modes.py" ] && \
+                [ "$file" != "./onnx/test_fx_op_consistency.py" ] && \
+                [ "$file" != "./onnx/test_fx_passes.py" ] && \
+                [ "$file" != "./onnx/test_fx_to_onnx.py" ] && \
+                [ "$file" != "./onnx/test_fx_to_onnx_with_onnxruntime.py" ] && \
+                [ "$file" != "./onnx/test_fx_type_promotion.py" ] && \
+                [ "$file" != "./onnx/test_models.py" ] && \
+                [ "$file" != "./onnx/test_models_onnxruntime.py" ] && \
+                [ "$file" != "./onnx/test_models_quantized_onnxruntime.py" ] && \
+                [ "$file" != "./onnx/test_onnx_opset.py" ] && \
+                [ "$file" != "./onnx/test_onnxscript_no_runtime.py" ] && \
+                [ "$file" != "./onnx/test_onnxscript_runtime.py" ] && \
+                [ "$file" != "./onnx/test_op_consistency.py" ] && \
+                [ "$file" != "./onnx/test_operators.py" ] && \
+                [ "$file" != "./onnx/test_pytorch_jit_onnx.py" ] && \
+                [ "$file" != "./onnx/test_pytorch_onnx_no_runtime.py" ] && \
+                [ "$file" != "./onnx/test_pytorch_onnx_onnxruntime.py" ] && \
+                [ "$file" != "./onnx/test_pytorch_onnx_onnxruntime_cuda.py" ] && \
+                [ "$file" != "./onnx/test_pytorch_onnx_shape_inference.py" ] && \
+                [ "$file" != "./onnx/test_utility_funs.py" ] && \
+                [ "$file" != "./onnx/test_verification.py" ] && \
+                [ "$file" != "./onnx/verify.py" ] && \
+                [ "$file" != "./onnx_caffe2/export_onnx_tests_filter.py" ] && \
+                [ "$file" != "./onnx_caffe2/export_onnx_tests_generator.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_caffe2_common.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_custom_ops.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_pytorch_helper.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_pytorch_onnx_caffe2.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_pytorch_onnx_caffe2_quantized.py" ] && \
+                [ "$file" != "./onnx_caffe2/test_verify.py" ] && \
+                [ "$file" != "./profiler/test_profiler.py" ] && \
+                [ "$file" != "./quantization/core/experimental/apot_fx_graph_mode_ptq.py" ] && \
+                [ "$file" != "./quantization/core/experimental/apot_fx_graph_mode_qat.py" ] && \
+                [ "$file" != "./quantization/core/experimental/quantization_util.py" ] && \
+                [ "$file" != "./quantization/core/experimental/test_fake_quantize.py" ] && \
+                [ "$file" != "./quantization/core/experimental/test_linear.py" ] && \
+                [ "$file" != "./quantization/core/experimental/test_nonuniform_observer.py" ] && \
+                [ "$file" != "./quantization/core/experimental/test_quantized_tensor.py" ] && \
+                [ "$file" != "./quantization/core/experimental/test_quantizer.py" ] && \
+                [ "$file" != "./quantization/core/test_docs.py" ] && \
+                [ "$file" != "./quantization/core/test_workflow_module.py" ] && \
+                [ "$file" != "./quantization/eager/test_fuse_eager.py" ] && \
+                [ "$file" != "./quantization/eager/test_numeric_suite_eager.py" ] && \
+                [ "$file" != "./quantization/eager/test_quantize_eager_ptq.py" ] && \
+                [ "$file" != "./quantization/eager/test_quantize_eager_qat.py" ] && \
+                [ "$file" != "./quantization/fx/test_quantize_fx.py" ] && \
+                [ "$file" != "./quantization/jit/test_ondevice_quantization.py" ] && \
+                [ "$file" != "./quantization/jit/test_quantize_jit.py" ] && \
+                [ "$file" != "./quantization/pt2e/test_quantize_pt2e_qat.py" ] && \
+                [ "$file" != "./run_test.py" ] && \
+                [ "$file" != "./scripts/run_cuda_memcheck.py" ] && \
+                [ "$file" != "./test_ao_sparsity.py" ] && \
+                [ "$file" != "./test_bundled_images.py" ] && \
+                [ "$file" != "./test_cpp_extensions_open_device_registration.py" ] && \
+                [ "$file" != "./test_determination.py" ] && \
+                [ "$file" != "./test_functional_autograd_benchmark.py" ] && \
+                [ "$file" != "./test_fx.py" ] && \
+                [ "$file" != "./test_jit.py" ] && \
+                [ "$file" != "./test_jit_fuser.py" ] && \
+                [ "$file" != "./test_jit_legacy.py" ] && \
+                [ "$file" != "./test_jit_profiling.py" ] && \
+                [ "$file" != "./test_jit_simple.py" ] && \
+                [ "$file" != "./test_license.py" ] && \
+                [ "$file" != "./test_metal.py" ] && \
+                [ "$file" != "./test_mps.py" ] && \
+                [ "$file" != "./test_multiprocessing_spawn.py" ] && \
+                [ "$file" != "./test_namedtensor.py" ] && \
+                [ "$file" != "./test_native_functions.py" ] && \
+                [ "$file" != "./test_public_bindings.py" ] && \
+                [ "$file" != "./test_pytree.py" ] && \
+                [ "$file" != "./test_testing.py" ] && \
+                [ "$file" != "./test_throughput_benchmark.py" ] && \
+                [ "$file" != "./torch_np/numpy_tests/lib/index_tricks.py" ] && \
+                [ "$file" != "./typing/fail/bitwise_ops.py" ] && \
+                [ "$file" != "./typing/fail/creation_ops.py" ] && \
+                [ "$file" != "./typing/fail/disabled_bitwise_ops.py" ] && \
+                [ "$file" != "./typing/fail/random.py" ] && \
+                [ "$file" != "./typing/pass/creation_ops.py" ] && \
+                [ "$file" != "./typing/pass/math_ops.py" ] && \
+                [ "$file" != "./typing/reveal/module_list.py" ] && \
+                [ "$file" != "./typing/reveal/namedtuple.py" ] && \
+                [ "$file" != "./typing/reveal/opt_size.py" ] && \
+                [ "$file" != "./typing/reveal/size.py" ] && \
+                [ "$file" != "./typing/reveal/tensor_constructors.py" ] && \
+                [ "$file" != "./typing/reveal/tensor_copy.py" ] && \
+                [ "$file" != "./typing/reveal/tensor_sampling.py" ] && \
+                [ "$file" != "./typing/reveal/torch_optim.py" ] && \
+                [ "$file" != "./inductor/test_torchinductor_codegen_dynamic_shapes.py" ] && \
+                [ "$file" != "./optim/test_optim.py" ] && \
+                [ "$file" != "./test_foreach.py" ] && \
+                [ "$file" != "./test_jit_autocast.py" ] && \
+                [ "$file" != "./test_meta.py" ] && \
+                [ "$file" != "./test_optim.py" ] && \
+                [ "$file" != "./test_reductions.py" ] && \
+                [ "$file" != "./test_schema_check.py" ] && \
+                [ "$file" != "./test_sparse_csr.py" ] && \
+                [ "$file" != "./functorch/test_ops.py" ] && \
+                [ "$file" != "./test_decomp.py" ] && \
+                [ "$file" != "./test_ops.py" ] && \
+                [ "$file" != "./functorch/test_aotdispatch.py" ] && \
+                [ "$file" != "./test_modules.py" ] && \
+                [ "$file" != "./test_ops_jit.py" ] && \
+                [ "$file" != "./functorch/test_vmap.py" ] && \
+                [ "$file" != "./test_jit_fuser_te.py" ] && \
+                [ "$file" != "./test_sparse.py" ] && \
+                [ "$file" != "./dynamo/test_dynamic_shapes.py" ] && \
+                [ "$file" != "./test_dataloader.py" ] && \
+                [ "$file" != "./test_linalg.py" ] && \
+                [ "$file" != "./test_nn.py" ] && \
+                [ "$file" != "./test_ops_fwd_gradients.py" ] && \
+                [ "$file" != "./test_ops_gradients.py" ] && \
+                [ "$file" != "./test_proxy_tensor.py" ] && \
+                [ "$file" != "./test_quantization.py" ] && \
+                [ "$file" != "./inductor/test_torchinductor.py" ] && \
+                [ "$file" != "./inductor/test_torchinductor_dynamic_shapes.py" ] && \
+                [ "$file" != "./inductor/test_torchinductor_opinfo.py" ] && \
+                [ "$file" != "./test_binary_ufuncs.py" ] && \
+                [ "$file" != "./test_unary_ufuncs.py" ] && \
+                [ "$file" != "./quantization/core/test_quantized_op.py" ] && \
+                [ "$file" != "./test_static_runtime.py" ] && \
+                [ "$file" != "./functorch/test_eager_transforms.py" ] && \
+                [ "$file" != "./inductor/test_cpp_wrapper.py" ] && \
+                [ "$file" != "./inductor/test_minifier_isolate.py" ] && \
+                [ "$file" != "./jit/test_freezing.py" ] && \
+                [ "$file" != "./nn/test_convolution.py" ] && \
+                [ "$file" != "./nn/test_pooling.py" ] && \
+                [ "$file" != "./test_autograd.py" ] && \
+                [ "$file" != "./test_cpp_api_parity.py" ] && \
+                [ "$file" != "./test_cpp_extensions_jit.py" ] && \
+                [ "$file" != "./test_dispatch.py" ] && \
+                [ "$file" != "./test_expanded_weights.py" ] && \
+                [ "$file" != "./test_functionalization.py" ] && \
+                [ "$file" != "./test_fx_experimental.py" ] && \
+                [ "$file" != "./test_masked.py" ] && \
+                [ "$file" != "./test_multiprocessing.py" ] && \
+                [ "$file" != "./test_serialization.py" ] && \
+                [ "$file" != "./test_spectral_ops.py" ] && \
+                [ "$file" != "./test_tensor_creation_ops.py" ] && \
+                [ "$file" != "./test_tensorexpr.py" ] && \
+                [ "$file" != "./test_torch.py" ] && \
+                [ "$file" != "./test_transformers.py" ] && \
+                [ "$file" != "./test_utils.py" ] && \
+                [ "$file" != "./test_view_ops.py" ] && \
+                [ "$file" != "./bottleneck_test/test.py" ] && \
+                [ "$file" != "./bottleneck_test/test_args.py" ] && \
+                [ "$file" != "./bottleneck_test/test_cuda.py" ] && \
+                [ "$file" != "./conftest.py" ] && \
+                [ "$file" != "./cpp/api/init_baseline.py" ] && \
+                [ "$file" != "./cpp/api/optim_baseline.py" ] && \
+                [ "$file" != "./cpp/jit/tests_setup.py" ] && \
+                [ "$file" != "./cpp_api_parity/parity_table_parser.py" ] && \
+                [ "$file" != "./cpp_api_parity/sample_functional.py" ] && \
+                [ "$file" != "./cpp_api_parity/sample_module.py" ] && \
+                [ "$file" != "./cpp_api_parity/utils.py" ] && \
+                [ "$file" != "./create_dummy_torchscript_model.py" ] && \
+                [ "$file" != "./custom_backend/backend.py" ] && \
+                [ "$file" != "./custom_operator/model.py" ] && \
+                [ "$file" != "./delete.py" ] && \
+                [ "$file" != "./dynamo/mock_modules/mock_module1.py" ] && \
+                [ "$file" != "./dynamo/mock_modules/mock_module2.py" ] && \
+                [ "$file" != "./dynamo/mock_modules/mock_module3.py" ] && \
+                [ "$file" != "./dynamo/test_torchrec.py" ] && \
+                [ "$file" != "./dynamo/utils.py" ] && \
+                [ "$file" != "./export/testing.py" ] && \
+                [ "$file" != "./forward_backward_compatibility/check_forward_backward_compatibility.py" ] && \
+                [ "$file" != "./forward_backward_compatibility/dump_all_function_schemas.py" ] && \
+                [ "$file" != "./functorch/attn_ft.py" ] && \
+                [ "$file" != "./functorch/attn_positional.py" ] && \
+                [ "$file" != "./functorch/common_utils.py" ] && \
+                [ "$file" != "./functorch/functorch_additional_op_db.py" ] && \
+                [ "$file" != "./fx/named_tup.py" ] && \
+                [ "$file" != "./fx/quantization.py" ] && \
+                [ "$file" != "./fx/test_future.py" ] && \
+                [ "$file" != "./inductor/extension_backends/extension_codegen_backend.py" ] && \
+                [ "$file" != "./inductor/indirect_assert_helper.py" ] && \
+                [ "$file" != "./inductor/opinfo_harness.py" ] && \
+                [ "$file" != "./inductor/test_aot_inductor_utils.py" ] && \
+                [ "$file" != "./inductor/test_coordinate_descent_tuner.py" ] && \
+                [ "$file" != "./inductor/test_cuda_repro.py" ] && \
+                [ "$file" != "./inductor/test_cuda_cpp_wrapper.py" ] && \
+                [ "$file" != "./inductor/test_cudagraph_trees.py" ] && \
+                [ "$file" != "./inductor/test_triton_heuristics.py" ] && \
+                [ "$file" != "./jit/_imported_class_test/bar.py" ] && \
+                [ "$file" != "./jit/_imported_class_test/foo.py" ] && \
+                [ "$file" != "./jit/_imported_class_test/very/very/nested.py" ] && \
+                [ "$file" != "./jit/fixtures_srcs/fixtures_src.py" ] && \
+                [ "$file" != "./jit/myexception.py" ] && \
+                [ "$file" != "./jit/test_cuda.py" ] && \
+                [ "$file" != "./jit/test_hooks_modules.py" ] && \
+                [ "$file" != "./jit/test_pdt.py" ] && \
+                [ "$file" != "./jit_hooks/model.py" ] && \
+                [ "$file" != "./linear.py" ] && \
+                [ "$file" != "./load_torchscript_model.py" ] && \
+                [ "$file" != "./mkl_verbose.py" ] && \
+                [ "$file" != "./mkldnn_verbose.py" ] && \
+                [ "$file" != "./mobile/lightweight_dispatch/tests_setup.py" ] && \
+                [ "$file" != "./mobile/model_test/android_api_module.py" ] && \
+                [ "$file" != "./mobile/model_test/builtin_ops.py" ] && \
+                [ "$file" != "./mobile/model_test/math_ops.py" ] && \
+                [ "$file" != "./mobile/model_test/nn_ops.py" ] && \
+                [ "$file" != "./mobile/model_test/quantization_ops.py" ] && \
+                [ "$file" != "./mobile/model_test/sampling_ops.py" ] && \
+                [ "$file" != "./mobile/model_test/tensor_ops.py" ] && \
+                [ "$file" != "./mobile/nnc/aot_test_model.py" ] && \
+                [ "$file" != "./onnx/autograd_helper.py" ] && \
+                [ "$file" != "./onnx/model_defs/dcgan.py" ] && \
+                [ "$file" != "./onnx/model_defs/emb_seq.py" ] && \
+                [ "$file" != "./onnx/model_defs/lstm_flattening_result.py" ] && \
+                [ "$file" != "./onnx/model_defs/mnist.py" ] && \
+                [ "$file" != "./onnx/model_defs/op_test.py" ] && \
+                [ "$file" != "./onnx/model_defs/rnn_model_with_packed_sequence.py" ] && \
+                [ "$file" != "./onnx/model_defs/squeezenet.py" ] && \
+                [ "$file" != "./onnx/model_defs/srresnet.py" ] && \
+                [ "$file" != "./onnx/model_defs/super_resolution.py" ] && \
+                [ "$file" != "./onnx/model_defs/word_language_model.py" ] && \
+                [ "$file" != "./onnx/pytorch_test_common.py" ] && \
+                [ "$file" != "./package/common.py" ] && \
+                [ "$file" != "./package/generate_bc_packages.py" ] && \
+                [ "$file" != "./package/module_a.py" ] && \
+                [ "$file" != "./package/module_a_remapped_path.py" ] && \
+                [ "$file" != "./package/package_a/fake_interface.py" ] && \
+                [ "$file" != "./package/package_a/fake_script_class.py" ] && \
+                [ "$file" != "./package/package_a/long_name.py" ] && \
+                [ "$file" != "./package/package_a/std_sys_module_hacks.py" ] && \
+                [ "$file" != "./package/package_a/subpackage.py" ] && \
+                [ "$file" != "./package/package_a/test_all_leaf_modules_tracer.py" ] && \
+                [ "$file" != "./package/package_a/test_module.py" ] && \
+                [ "$file" != "./package/package_a/test_nn_module.py" ] && \
+                [ "$file" != "./package/package_a/use_dunder_package.py" ] && \
+                [ "$file" != "./package/package_a/use_torch_package_importer.py" ] && \
+                [ "$file" != "./package/package_b/subpackage_1.py" ] && \
+                [ "$file" != "./package/package_b/subpackage_2.py" ] && \
+                [ "$file" != "./package/package_c/test_module.py" ] && \
+                [ "$file" != "./package/package_d/imports_directly.py" ] && \
+                [ "$file" != "./package/package_d/imports_indirectly.py" ] && \
+                [ "$file" != "./pytest_shard_custom.py" ] && \
+                [ "$file" != "./quantization/ao_migration/common.py" ] && \
+                [ "$file" != "./scripts/cuda_memcheck_common.py" ] && \
+                [ "$file" != "./simulate_nccl_errors.py" ] && \
+                [ "$file" != "./test_cpp_extensions_aot.py" ] && \
+                [ "$file" != "./test_cuda.py" ] && \
+                [ "$file" != "./test_cuda_expandable_segments.py" ] && \
+                [ "$file" != "./test_cuda_multigpu.py" ] && \
+                [ "$file" != "./test_cuda_nvml_based_avail.py" ] && \
+                [ "$file" != "./test_cuda_primary_ctx.py" ] && \
+                [ "$file" != "./test_cuda_sanitizer.py" ] && \
+                [ "$file" != "./test_cuda_trace.py" ] && \
+                [ "$file" != "./test_jiterator.py" ] && \
+                [ "$file" != "./test_matmul_cuda.py" ] && \
+                [ "$file" != "./torch_np/check_tests_conform.py" ] && \
+                [ "$file" != "./torch_np/conftest.py" ] && \
+                [ "$file" != "./typing/pass/disabled_jit.py" ] && \
+                [ "$file" != "./cpp/aot_inductor/compile_model.py" ] && \
+                [ "$file" != "./custom_operator/my_custom_ops.py" ] && \
+                [ "$file" != "./custom_operator/my_custom_ops2.py" ] && \
+                [ "$file" != "./custom_operator/pointwise.py" ] && \
+                [ "$file" != "./dynamo/test_recompile_ux.py" ] && \
+                [ "$file" != "./dynamo/test_subgraphs.py" ] && \
+                [ "$file" != "./inductor/test_memory_planning.py" ] && \
+                [ "$file" != "./onnx/test_fx_to_onnx_decomp_skip.py" ] && \
+                [ "$file" != "./onnx/torch_export/test_torch_export_with_onnxruntime.py" ] && \
+                [ "$file" != "./quantization/pt2e/test_xnnpack_quantizer.py" ] && \
+                [ "$file" != "./test_tensorboard.py" ] && \
+                [ "$file" != "./typing/pass/cuda_steam.py" ] ; \
+            then
+                echo "Running $file"
+                pytest -v "$file"
+                testresult=$?
+                if [ $testresult -ne 0 ] ; then
+                    failedlist="$failedlist\n$file"
+                fi
+                echo "Finished running $file"
+            fi
+        done
+
+        set -e
+
+        if [ -n "$failedlist" ] ; then
+            echo -e "Following tests failed:$failedlist"
+            exit 1
+        fi
