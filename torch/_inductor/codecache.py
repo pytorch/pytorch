@@ -1567,7 +1567,6 @@ class AotCodeCache:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
-        print(input_path)
 
         if key not in cls.cache or (
             specified_output_path

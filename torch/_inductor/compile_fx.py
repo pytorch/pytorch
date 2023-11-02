@@ -34,7 +34,7 @@ from torch._dynamo import (
 )
 from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
-from torch._inductor.codecache import CompiledFxGraph, FxGraphCache
+from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._ops import OpOverload
@@ -892,6 +892,15 @@ def compile_fx_aot(
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
     )
+    if (
+        "aot_inductor.output_path" not in config_patches
+        and not config.aot_inductor.output_path
+    ):
+        config_patches = {
+            **config_patches,
+            "aot_inductor.output_path": code_hash(model_.code),
+        }
+
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with V.set_aot_compilation(True):
         compiled_lib_path = compile_fx(
