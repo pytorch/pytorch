@@ -785,8 +785,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 tmp2 = self.conv4(tmp)
                 return self.relu2(self.add_fn2(tmp1, tmp2))
 
-        # for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
-        for add_fn in quantization_add_fn_list:
+        for add_fn in quantization_add_fn_list + quantization_inplace_add_fn_list:
             inplace_add = add_fn in quantization_inplace_add_fn_list
             mod = M(add_fn).eval()
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
