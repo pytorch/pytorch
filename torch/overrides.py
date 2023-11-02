@@ -1,5 +1,5 @@
 """
-Python implementation of ``__torch_function__``
+Python implementation of ``__torch_function__``.
 
 While most of the torch API and handling for ``__torch_function__`` happens
 at the C++ level, some of the torch API is written in Python so we need
@@ -54,8 +54,7 @@ __all__ = [
 def _disable_user_warnings(
         func: Callable, regex: str = '.*is deprecated, please use.*', module: str = 'torch') -> Callable:
     """
-    Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
-    given ``regex`` pattern.
+    Temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the given ``regex`` pattern.
 
     Arguments
     ---------
@@ -363,9 +362,9 @@ def get_ignored_functions() -> Set[Callable]:
 @functools.lru_cache(None)
 def get_default_nowrap_functions() -> Set[Callable]:
     """
-    Return public functions that do not wrap in a subclass when invoked by
-    the default ``Tensor.__torch_function__`` that preserves subclasses.  Typically,
-    these functions represent field accesses (i.e., retrieving a Tensor that
+    Return public functions that do not wrap in a subclass when invoked by the default ``Tensor.__torch_function__`` that preserves subclasses.
+    
+    Typically, these functions represent field accesses (i.e., retrieving a Tensor that
     is stored somewhere on the Tensor) as opposed to computation.  Users of
     these functions expect object identity to be preserved over multiple accesses
     (e.g., ``a.grad is a.grad``) which cannot be upheld if we're wrapping on
@@ -389,7 +388,7 @@ def get_default_nowrap_functions() -> Set[Callable]:
 @functools.lru_cache(None)
 @_disable_user_warnings
 def get_testing_overrides() -> Dict[Callable, Callable]:
-    """Return a dict containing dummy overrides for all overridable functions
+    """Return a dict containing dummy overrides for all overridable functions.
 
     Returns
     -------
@@ -1446,7 +1445,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     return ret
 
 def wrap_torch_function(dispatcher: Callable):
-    """Wraps a given function with ``__torch_function__`` -related functionality.
+    """Wrap a given function with ``__torch_function__`` -related functionality.
 
     Parameters
     ----------
@@ -1482,7 +1481,7 @@ def wrap_torch_function(dispatcher: Callable):
     return inner
 
 def _get_overloaded_args(relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None) -> List[Any]:
-    """Returns a list of arguments on which to call __torch_function__.
+    """Return a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
     storing references to the arguments and their types in overloaded_args and
@@ -1757,7 +1756,7 @@ def _get_overridable_functions() -> Tuple[Dict[Any, List[Callable]], Dict[Callab
 
 @_disable_user_warnings
 def get_overridable_functions() -> Dict[Any, List[Callable]]:
-    """List functions that are overridable via __torch_function__
+    """List functions that are overridable via __torch_function__.
 
     Returns
     -------
@@ -1769,8 +1768,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
 
 @_disable_user_warnings
 def resolve_name(f):
-    """Get a human readable string name for a function passed to
-    __torch_function__
+    """Get a human readable string name for a function passed to __torch_function__.
 
     Arguments
     ---------
@@ -1789,7 +1787,7 @@ def resolve_name(f):
 
 @functools.lru_cache(None)
 def _get_tensor_methods() -> Set[Callable]:
-    """ Returns a set of the overridable methods on ``torch.Tensor`` """
+    """Return a set of the overridable methods on ``torch.Tensor``."""
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
     return methods
@@ -1797,9 +1795,7 @@ def _get_tensor_methods() -> Set[Callable]:
 @_disable_user_warnings
 def is_tensor_method_or_property(func: Callable) -> bool:
     """
-    Returns True if the function passed in is a handler for a
-    method or property belonging to ``torch.Tensor``, as passed
-    into ``__torch_function__``.
+    Return True if the function passed in is a handler for a method or property belonging to ``torch.Tensor``, as passed into ``__torch_function__``.
 
     .. note::
        For properties, their ``__get__`` method must be passed in.
@@ -1821,7 +1817,7 @@ def is_tensor_method_or_property(func: Callable) -> bool:
 
 def is_tensor_like(inp):
     """
-    Returns ``True`` if the passed-in input is a Tensor-like.
+    Return ``True`` if the passed-in input is a Tensor-like.
 
     Currently, this occurs whenever there's a ``__torch_function__``
     attribute on the type of the input.
@@ -1857,8 +1853,9 @@ def is_tensor_like(inp):
 
 class TorchFunctionMode:
     """
-    A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    Override the meaning of all ``__torch_function__`` overrideable functions within a dynamic scope.
+    
+    Overrides all ``__torch_function__`` overrideable functions within a dynamic scope
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:
@@ -1885,6 +1882,7 @@ class TorchFunctionMode:
     ``enable_torch_function_mode(self, replace=self.inner)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+
     inner: "TorchFunctionMode"
 
     # Force metaclass to generate constructor at the base of the hierarchy
@@ -1943,6 +1941,15 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 
 @contextlib.contextmanager
 def enable_reentrant_dispatch():
+    """
+    Context manager to temporarily enable reentrant dispatch.
+
+    Operations can be dispatched in a reentrant manner 
+    without the risk of interfering with other operations.
+
+    Yields:
+        None
+    """
     # NB: this can't simply be
     # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`
     # because:
