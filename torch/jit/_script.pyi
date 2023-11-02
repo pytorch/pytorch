@@ -211,7 +211,7 @@ def script(  # type: ignore[misc]
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> torch.ScriptDict: ...
+) -> torch.ScriptDict: ...  # type: ignore[name-defined]
 @overload
 def script(  # type: ignore[misc]
     obj: List,
@@ -219,7 +219,7 @@ def script(  # type: ignore[misc]
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> torch.ScriptList: ...
+) -> torch.ScriptList: ...  # type: ignore[name-defined]
 @overload
 def script(  # type: ignore[misc]
     obj: Module,

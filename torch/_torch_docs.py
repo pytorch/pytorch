@@ -8,7 +8,7 @@ from torch._C import _add_docstr as add_docstr
 
 def parse_kwargs(desc):
     r"""Map a description of args to a dictionary of {argname: description}.
-    
+
     Input:
         ('    weight (Tensor): a weight tensor\n' +
          '        Some optional description')
@@ -32,10 +32,11 @@ def merge_dicts(*dicts):
         *dicts: A variable length list of dictionaries.
 
     Returns:
-        dict: A single dictionary containing the merged key-value pairs. If the same key exists in more than one input dictionary, the value from the last dictionary with that key is used.
+        dict: A single dictionary containing the merged key-value pairs.
+        If the same key exists in more than one input dictionary,
+        the value from the last dictionary with that key is used.
     """
     return {x: d[x] for d in dicts for x in d}
-
 
 
 common_args = parse_kwargs(

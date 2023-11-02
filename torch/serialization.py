@@ -81,7 +81,7 @@ _package_registry = []
 
 class LoadEndianness(Enum):
     """Enumeration representing the endianness of data to be loaded."""
-    
+
     NATIVE = 1
     LITTLE = 2
     BIG = 3
@@ -448,8 +448,8 @@ def normalize_storage_type(storage_type):
 def storage_to_tensor_type(storage):
     """Convert a given storage type to its corresponding tensor type.
 
-    This function maps a storage type to its equivalent tensor type by modifying the type name 
-    (replacing 'Storage' with 'Tensor') and retrieving the corresponding attribute from the module 
+    This function maps a storage type to its equivalent tensor type by modifying the type name
+    (replacing 'Storage' with 'Tensor') and retrieving the corresponding attribute from the module
     in which the storage type is defined.
 
     Args:
@@ -569,7 +569,7 @@ def _is_compressed_file(f) -> bool:
 
 def _should_read_directly(f):
     """Check if f is a file that should be read directly.
-    
+
     It should be read directly if it is backed by a real file (has a fileno) and is not a
     a compressed file (e.g. gzip)
     """
@@ -937,7 +937,7 @@ def load(
 
     load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
 
-   
+
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
     which underlie tensors, specially. They are first deserialized on the
     CPU and are then moved to the device they were saved from. If this fails

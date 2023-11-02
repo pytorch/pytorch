@@ -362,8 +362,10 @@ def get_ignored_functions() -> Set[Callable]:
 @functools.lru_cache(None)
 def get_default_nowrap_functions() -> Set[Callable]:
     """
-    Return public functions that do not wrap in a subclass when invoked by the default ``Tensor.__torch_function__`` that preserves subclasses.
-    
+    Return public functions that do not wrap in a subclass.
+
+    These functions are invoked by the default `Tensor.__torch_function__`, which preserves subclasses.
+
     Typically, these functions represent field accesses (i.e., retrieving a Tensor that
     is stored somewhere on the Tensor) as opposed to computation.  Users of
     these functions expect object identity to be preserved over multiple accesses
@@ -1795,7 +1797,9 @@ def _get_tensor_methods() -> Set[Callable]:
 @_disable_user_warnings
 def is_tensor_method_or_property(func: Callable) -> bool:
     """
-    Return True if the function passed in is a handler for a method or property belonging to ``torch.Tensor``, as passed into ``__torch_function__``.
+    Return True if the passed-in function is a handler for a method or property.
+
+    This applies to those belonging to torch.Tensor, as passed into __torch_function__.
 
     .. note::
        For properties, their ``__get__`` method must be passed in.
@@ -1854,7 +1858,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     Override the meaning of all ``__torch_function__`` overrideable functions within a dynamic scope.
-    
+
     Overrides all ``__torch_function__`` overrideable functions within a dynamic scope
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
@@ -1944,7 +1948,7 @@ def enable_reentrant_dispatch():
     """
     Context manager to temporarily enable reentrant dispatch.
 
-    Operations can be dispatched in a reentrant manner 
+    Operations can be dispatched in a reentrant manner
     without the risk of interfering with other operations.
 
     Yields:

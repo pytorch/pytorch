@@ -12,7 +12,7 @@ import torch
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):
     """Return the type if `dtype` is not provided, else casts this object to the specified type.
-    
+
     If this is already of the correct type, no copy is performed and the
     original object is returned.
 
@@ -194,7 +194,6 @@ def get_tensor_metadata(tensor):
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
-
 def set_tensor_metadata(tensor, metadata):
     """Set metadata to a PyTorch tensor.
 
@@ -206,7 +205,6 @@ def set_tensor_metadata(tensor, metadata):
     """
     # See `get_tensor_metadata` above
 
-    
     assert isinstance(metadata, dict)
     assert isinstance(tensor, torch.Tensor)
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
@@ -393,11 +391,11 @@ def _rebuild_qtensor(
     else:
         raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
     tensor.set_(storage, storage_offset, size, stride)
-    tensor.requires_grad = requires_grad
+    tensor.requires_grad = requires_grad  # type: ignore[has-type]
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
-    tensor._backward_hooks = backward_hooks
+    tensor._backward_hooks = backward_hooks  # type: ignore[has-type]
     return tensor
 
 
@@ -406,7 +404,7 @@ def _rebuild_parameter(data, requires_grad, backward_hooks):
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
-    param._backward_hooks = backward_hooks
+    param._backward_hooks = backward_hooks  # type: ignore[has-type]
 
     return param
 
@@ -416,7 +414,7 @@ def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
     # NB: This line exists only for backwards compatibility; the
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
-    param._backward_hooks = backward_hooks
+    param._backward_hooks = backward_hooks  # type: ignore[has-type]
 
     # Restore state on Parameter like python attr.
     param = _set_obj_state(param, state)
@@ -513,7 +511,9 @@ def _flatten_dense_tensors(tensors):
 
 
 def _flatten_sparse_tensors(tensors):
-    """Flatten sparse tensors into two contiguous 1D buffers, one of indices and one of values. Assume tensors are of same sparse type.
+    """Flatten sparse tensors into two contiguous 1D buffers, one of indices and one of values.
+
+       Assume tensors are of same sparse type.
 
     Args:
         tensors (Iterable[Tensor]): sparse tensors to flatten.
@@ -532,7 +532,9 @@ def _flatten_sparse_tensors(tensors):
 
 
 def _unflatten_dense_tensors(flat, tensors):
-    """View a flat buffer using the sizes of tensors. Assume that tensors are of same dense type, and that flat is given by _flatten_dense_tensors.
+    """View a flat buffer using the sizes of tensors.
+
+        Assume that tensors are of same dense type, and that flat is given by _flatten_dense_tensors.
 
     Args:
         flat (Tensor): flattened dense tensors to unflatten.
@@ -548,7 +550,7 @@ def _unflatten_dense_tensors(flat, tensors):
 
 def _unflatten_sparse_tensors(flat, tensors):
     """View flat buffer (containing indices and values) using the sizes of tensors.
-        
+
         Assume that tensors are of same sparse type, and that flat is given by _flatten_sparse_tensors.
 
     Args:
@@ -576,7 +578,7 @@ def _unflatten_sparse_tensors(flat, tensors):
 
 def _reorder_tensors_as(tensors, ordered_tensors):
     """Assume that tensors are of same order as ordered_tensors within their types, e.g., from _take_tensors.
-        
+
         Reorder them to be of same order as ordered_tensors.
 
     Args:
@@ -597,7 +599,10 @@ def _reorder_tensors_as(tensors, ordered_tensors):
 
 
 def _take_tensors(tensors, size_limit):
-    """Group tensors into chunks. This generator yields a chunk at each time, each containing tensors of same type up to certain byte limit in total size.
+    """Group tensors into chunks.
+
+    This generator yields a chunk at each time,
+    each containing tensors of same type up to certain byte limit in total size.
 
     Args:
         tensors (Sequence): A sequence of tensors to be separated into chunks.
@@ -640,7 +645,7 @@ def annotate(ret, **kwargs):
         **kwargs: Type annotations for function arguments.
 
     Returns:
-        A decorated function with the provided type annotations. 
+        A decorated function with the provided type annotations.
     """
 
     def dec(fun):
@@ -702,10 +707,10 @@ class ExceptionWrapper:
         """Initialize the ExceptionWrapper with exception information and its origin.
 
         Args:
-            exc_info (tuple, optional): A tuple of three elements: the exception type, 
-                the exception instance, and a traceback object. If not provided, 
+            exc_info (tuple, optional): A tuple of three elements: the exception type,
+                the exception instance, and a traceback object. If not provided,
                 it defaults to the result of `sys.exc_info()`.
-            where (str, optional): A description of where the exception occurred. 
+            where (str, optional): A description of where the exception occurred.
                 Defaults to "in background".
         """
         # It is important that we don't store exc_info, see
@@ -780,7 +785,10 @@ def _get_devices_properties(device_ids):
 
 
 def get_current_device_index() -> int:
-    r"""Check if there are CUDA devices available and returns the device index of the current default CUDA device. Returns -1 in case there are no CUDA devices available.
+    r"""Check if there are CUDA devices available.
+
+    Returns the device index of the current default CUDA device.
+    Returns -1 in case there are no CUDA devices available.
 
     Arguments: ``None``
     """
@@ -880,7 +888,7 @@ def classproperty(func):
             classmethod, or staticmethod.
 
     Returns:
-        _ClassPropertyDescriptor: A descriptor object that allows the decorated method 
+        _ClassPropertyDescriptor: A descriptor object that allows the decorated method
             to be used as a class-level property.
     """
     if not isinstance(func, (classmethod, staticmethod)):
@@ -924,14 +932,14 @@ def _functionalize_sync(t):
         # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
         #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
         #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
-        maybe_functional_mode = torch._C._unset_dispatch_mode(
-            torch._C._TorchDispatchModeKey.FUNCTIONAL
+        maybe_functional_mode = torch._C._unset_dispatch_mode(  # type: ignore[attr-defined]
+            torch._C._TorchDispatchModeKey.FUNCTIONAL  # type: ignore[attr-defined]
         )
         try:
             torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
         finally:
             if maybe_functional_mode is not None:
-                torch._C._set_dispatch_mode(maybe_functional_mode)
+                torch._C._set_dispatch_mode(maybe_functional_mode)  # type: ignore[attr-defined]
     else:
         torch._functionalize_sync(t)  # type: ignore[attr-defined]
 
