@@ -73,7 +73,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   // The master runs on a single thread so only
   // one handler can be executed at a time
-  void validateHandler(int socket);
   void setHandler(int socket);
   void compareSetHandler(int socket);
   void addHandler(int socket);
@@ -86,9 +85,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void multiGetHandler(int socket);
   void multiSetHandler(int socket);
   void cancelWaitHandler(int socket);
-  void addMiscellaneousSocket(int socket);
-  void removeMiscellaneousSocket(int socket);
-  bool isMiscellaneousSocket(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler
@@ -100,8 +96,6 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
-  // miscellaneous sockets 
-  std::unordered_set<int> miscellaneousSockets_; 
 
   Socket storeListenSocket_;
   std::vector<Socket> sockets_{};
@@ -256,16 +250,7 @@ void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
 void TCPStoreMasterDaemon::query(int socket) {
   QueryType qt;
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
-
-  if (isMiscellaneousSocket(socket)) {
-    removeMiscellaneousSocket(socket);
-    if (qt == QueryType::VALIDATE) {
-      validateHandler(socket);
-    } else {
-      // real miscellaneous client: the first msg is not VALIDATE
-      TORCH_CHECK(false, "Miscellaneous client without VALIDATE query is detected");
-    }
-  } else if (qt == QueryType::SET) {
+  if (qt == QueryType::SET) {
     setHandler(socket);
 
   } else if (qt == QueryType::COMPARE_SET) {
@@ -320,14 +305,6 @@ void TCPStoreMasterDaemon::doSet(
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
-}
-
-void TCPStoreMasterDaemon::validateHandler(int socket) {
-  uint32_t validateNumber;
-  tcputil::recvBytes<uint32_t>(socket, &validateNumber, 1);
-  if (validateNumber != detail::validationMagicNumber) {
-    TORCH_CHECK(false, "Miscellaneous client with incorrect VALIDATE query is detected");
-  }
 }
 
 void TCPStoreMasterDaemon::setHandler(int socket) {
@@ -482,23 +459,6 @@ bool TCPStoreMasterDaemon::checkKeys(
   });
 }
 
-void TCPStoreMasterDaemon::addMiscellaneousSocket(int socket) {
-  if (miscellaneousSockets_.find(socket) == miscellaneousSockets_.end()) {
-    miscellaneousSockets_.insert(socket);
-  }
-}
-
-void TCPStoreMasterDaemon::removeMiscellaneousSocket(int socket) {
-  auto it = miscellaneousSockets_.find(socket);
-  if (it != miscellaneousSockets_.end()) {
-    miscellaneousSockets_.erase(it);
-  }
-}
-
-bool TCPStoreMasterDaemon::isMiscellaneousSocket(int socket) {
-  return miscellaneousSockets_.find(socket) != miscellaneousSockets_.end();
-}
-
 #ifdef _WIN32
 void TCPStoreMasterDaemon::run() {
   std::vector<struct pollfd> fds;
@@ -577,8 +537,6 @@ void TCPStoreMasterDaemon::run() {
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
-      // all clients are miscellaneous before getting its validation query 
-      addMiscellaneousSocket(rawSocket);
     }
 
     // The pipe receives an event which tells us to shutdown the daemon
