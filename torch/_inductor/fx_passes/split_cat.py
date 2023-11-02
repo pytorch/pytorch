@@ -1126,6 +1126,8 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             indices = []
             for arg in cat_user.args[0]:
                 indices.append(arg.args[1])
+            # indices may not be necessarily sorted, we sort them first
+            indices.sort()
             # update the arg of cat user, only keep the first getitem
             cat_user.update_arg(0, cat_user.args[0][0])
             # calculate the fused tensor sizes in the indices
