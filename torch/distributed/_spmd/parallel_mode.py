@@ -160,7 +160,7 @@ class DTensorExpandMode(ParallelMode):
         args: Tuple[Any, ...],
         kwargs: Dict[str, Any],
     ) -> GraphModule:
-        flat_args = pytree.tree_leaves(list(args) + list(kwargs.values()))
+        flat_args = pytree.arg_tree_leaves(*args, **kwargs)
 
         mesh = DeviceMesh("cuda", torch.arange(dist.get_world_size()).cuda())
         shard_schema: Schema = Schema(mesh=mesh, placements=[Shard(0)])
