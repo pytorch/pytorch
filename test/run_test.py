@@ -1813,7 +1813,11 @@ def main():
                 # it was also really easy to write
                 emit_metric(
                     "td_number_ranking_experiment",
-                    {**get_experimental_rankings(), "failure": test},
+                    {
+                        **get_experimental_rankings(selected_tests),
+                        "failure": test,
+                        "tests": selected_tests,
+                    },
                 )
 
     if len(all_failures):
