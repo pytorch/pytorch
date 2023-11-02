@@ -1,9 +1,11 @@
 import functools
 import importlib
 
+from .allowed_functions import is_in_graph_function
+
 from .utils import hashable
 
-from .variables import TorchCtxManagerClassVariable
+from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
 
 """
@@ -71,4 +73,9 @@ def lookup(obj):
     if not hashable(obj):
         return None
     rule = get_torch_obj_rule_map().get(obj, None)
+    if rule is None:
+        if is_in_graph_function(obj):
+            rule = TorchInGraphFunctionVariable
+        else:
+            rule = None
     return rule
