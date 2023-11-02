@@ -842,7 +842,7 @@ class WrapperCodeGen(CodeGen):
             f"""
             @user_autotune(
                 configs={configs!r},
-                meta={triton_meta!r},
+                triton_meta={triton_meta!r},
                 filename=__file__
             )
             @triton.jit
