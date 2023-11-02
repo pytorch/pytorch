@@ -1,6 +1,8 @@
+import inspect
 from typing import Any, Dict, Union
 
 import torch
+from torch._streambase import _EventBase, _StreamBase
 
 if torch.cuda._is_compiled():
     from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
@@ -14,15 +16,25 @@ caching_worker_device_properties: Dict[str, Any] = {}
 caching_worker_current_devices: Dict[str, int] = {}
 
 
-class DeviceInterface:
+class DeviceInterfaceMeta(type):
+    def __new__(metacls, *args, **kwargs):
+        class_member = args[2]
+        if "Event" in class_member:
+            assert inspect.isclass(class_member["Event"]) and issubclass(
+                class_member["Event"], _EventBase
+            ), "DeviceInterface member Event should be inherit from _EventBase"
+        if "Stream" in class_member:
+            assert inspect.isclass(class_member["Stream"]) and issubclass(
+                class_member["Stream"], _StreamBase
+            ), "DeviceInterface member Stream should be inherit from _StreamBase"
+        return super().__new__(metacls, *args, **kwargs)
+
+
+class DeviceInterface(metaclass=DeviceInterfaceMeta):
     """
     This is a simple device runtime interface for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
     """
-
-    class Event:
-        def __new__(cls, *args, **kwargs):
-            raise NotImplementedError()
 
     class device:
         def __new__(cls, device: _device_t):
@@ -65,11 +77,19 @@ class DeviceInterface:
         raise NotImplementedError()
 
     @staticmethod
+    def stream(stream: torch.Stream):
+        raise NotImplementedError()
+
+    @staticmethod
     def current_stream():
         raise NotImplementedError()
 
     @staticmethod
     def set_stream(stream: torch.Stream):
+        raise NotImplementedError()
+
+    @staticmethod
+    def _set_stream_by_id(stream_id: int, device_index: int, device_type: int):
         raise NotImplementedError()
 
     @staticmethod
@@ -90,8 +110,12 @@ class DeviceInterface:
 
 
 class CudaInterface(DeviceInterface):
-    Event = torch.cuda.Event
     device = torch.cuda.device
+
+    # register Event and Stream class into the backend interface
+    # make sure Event and Stream are implemented and inherited from the _EventBase and _StreamBase
+    Event = torch.cuda.Event
+    Stream = torch.cuda.Stream
 
     class Worker:
         @staticmethod
@@ -127,8 +151,10 @@ class CudaInterface(DeviceInterface):
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
+    stream = staticmethod(torch.cuda.stream)
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)

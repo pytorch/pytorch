@@ -11,6 +11,7 @@ import logging
 import time
 from typing import Any, Dict, List, Tuple
 
+import torch
 import torch.distributed as dist
 
 from torch.distributed.logging_handlers import _log_handlers
@@ -53,6 +54,9 @@ def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
             "global_rank": f"{dist.get_rank()}",
             "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
         }
+        if msg_dict["backend"] == "nccl":
+            nccl_version = torch.cuda.nccl.version()
+            msg_dict["nccl_version"] = ".".join(str(v) for v in nccl_version)
     else:
         msg_dict = {
             "func_name": f"{func_name}",

@@ -1,11 +1,11 @@
 from typing import Tuple
 
-from .optimizer import Optimizer, params_t
+from .optimizer import Optimizer, ParamsT
 
 class SparseAdam(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: float = ...,
         betas: Tuple[float, float] = ...,
         eps: float = ...,

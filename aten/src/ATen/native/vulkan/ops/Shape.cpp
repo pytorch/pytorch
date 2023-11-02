@@ -21,6 +21,11 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
       inferred_size,
       self_arg.scalar_type(),
   };
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
 
   api::StorageBuffer buffer(context, at::kFloat, v_self.gpu_numel(), true);
 

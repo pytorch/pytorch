@@ -99,7 +99,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(

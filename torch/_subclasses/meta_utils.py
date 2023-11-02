@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, List, Optional
+from typing import ContextManager, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
@@ -13,13 +13,17 @@ from torch._C._functorch import (
 )
 from torch._guards import Source
 
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
 from torch.utils.weak import WeakIdRef
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # Do not import unconditionally, as they import sympy and importing sympy is very slow
+    from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 
 DimList = List
 
@@ -180,8 +184,8 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[DimList[DimDynamic]] = None,
-        constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
+        constraint_dims: "Optional[DimList[DimConstraint]]" = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -303,8 +307,9 @@ class MetaConverter:
                     assert t._is_view()
 
                     from torch._dynamo.source import AttrSource
+                    from torch.fx.experimental.symbolic_shapes import DimDynamic
 
-                    if shape_env:
+                    if shape_env and not t.is_nested:
                         base_dynamic_dims = [DimDynamic.STATIC] * t._base.dim()
                     else:
                         base_dynamic_dims = None
@@ -364,25 +369,45 @@ class MetaConverter:
                         #
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
-
-                        (
-                            sizes,
-                            strides,
-                            storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                        def _view_from_base(base, t):
+                            if t.is_nested:
+                                # Nested tensors do not support as_strided, and
+                                # hence,always have _view_func available.
+                                #
+                                # The unsafe version of _view_func omits
+                                # checking whether the base passed in has the same
+                                # metadata as the original base the view_func
+                                # was originally executed with. (1) It is OK here,
+                                # because we're calling it on the meta-ified base,
+                                # so the metadata is guaranteed to be the same.
+                                # (2) It is necessary because we don't actually
+                                # want to guard on the base's metadata here.
+                                return t._view_func_unsafe(base)
+                            else:
+                                (
+                                    sizes,
+                                    strides,
+                                    storage_offset,
+                                ) = sym_sizes_strides_storage_offset(t, source)
+                                return base.as_strided(sizes, strides, storage_offset)
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
                             with torch.no_grad(), maybe_suppress():
-                                r = base.as_strided(sizes, strides, storage_offset)
+                                r = _view_from_base(base, t)
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress():
-                                    r = base.as_strided(sizes, strides, storage_offset)
+                                    r = _view_from_base(base, t)
+
+                                # NB: We don't actaully faithfully replicate
+                                # autograd connectivity, but that doesn't matter
+                                # today. See following for more info:
+                                # https://gist.github.com/soulitzer/e03f015b314c3f5fcf80888c69390913
                             else:
                                 # Obscure case.  Create a leaf view and give it the
                                 # correct requires_grad, then do the final view.
@@ -392,7 +417,7 @@ class MetaConverter:
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
-                                    r = mid.as_strided(sizes, strides, storage_offset)
+                                    r = _view_from_base(mid, t)
                         # The CreationMeta influences whether or not inplace
                         # mutation is an error or not.  So we need to make
                         # sure we properly propagate this as well.
@@ -406,9 +431,14 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
-                    sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
-                    )
+                    if not t.is_nested:
+                        # Nested tensor subclasses have special logic for
+                        # creating symbolic size/strides/storage_offset
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(t, source)
 
                     def empty_create(inner_t, inner_src):
                         (
@@ -433,15 +463,55 @@ class MetaConverter:
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
-                        r = transform_subclass(
-                            t,
-                            lambda attr, inner_t: callback(
-                                lambda: empty_create(
-                                    inner_t,
-                                    AttrSource(source, attr),
+                        if t.is_nested:
+                            # Avoid circular import
+                            from torch._dynamo.source import (
+                                TensorProperty,
+                                TensorPropertySource,
+                            )
+
+                            # For nested tensors, manually do transform_subclass
+                            # so we can insert some special processing on ctx
+                            attrs, ctx = t.__tensor_flatten__()
+                            transformed_tensors_dict = {}
+                            for attr in attrs:
+                                inner_t = getattr(t, attr)
+                                transformed_tensors_dict[attr] = callback(
+                                    lambda: empty_create(
+                                        inner_t, AttrSource(source, attr)
+                                    )
                                 )
-                            ),
-                        )
+                            # We expect JaggedTensor to have a 'ragged_size' in
+                            # its context
+                            assert isinstance(ctx, dict) and "ragged_size" in ctx
+                            assert (
+                                isinstance(t._size[1], torch.SymInt)
+                                and t._size[1].node.singleton_int() is not None
+                            )
+                            # Replace the eager ragged size with our freshly
+                            # allocated jagged size that has a source
+                            ctx["ragged_size"] = shape_env.create_symintnode(
+                                shape_env.create_symbol(
+                                    t._size[1],
+                                    TensorPropertySource(
+                                        source, TensorProperty.SIZE, 1
+                                    ),
+                                ),
+                                hint=t._size[1],
+                            )
+                            r = type(t).__tensor_unflatten__(
+                                transformed_tensors_dict, ctx
+                            )
+                        else:
+                            r = transform_subclass(
+                                t,
+                                lambda attr, inner_t: callback(
+                                    lambda: empty_create(
+                                        inner_t,
+                                        AttrSource(source, attr),
+                                    )
+                                ),
+                            )
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
@@ -468,10 +538,12 @@ class MetaConverter:
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
-                    if (
-                        swr not in self.storage_memo
-                        and r.stride() == strides
-                        and r.storage_offset() == storage_offset
+                    if swr not in self.storage_memo and (
+                        r.is_nested
+                        or (
+                            r.stride() == strides
+                            and r.storage_offset() == storage_offset
+                        )
                     ):
                         # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.untyped_storage()
@@ -562,7 +634,6 @@ class MetaConverter:
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),

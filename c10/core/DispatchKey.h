@@ -17,7 +17,7 @@ namespace c10 {
 // a DispatchKeySet. The bits in the DispatchKeySet are split between the bottom
 // ~12 "BackendComponent" bits, while the remaining upper bits are assigned to
 // functionalities. When we encounter a functionality bit that is known to be
-// customizeable per-backend, then we also look at the lower BackendComponent
+// customizable per-backend, then we also look at the lower BackendComponent
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 

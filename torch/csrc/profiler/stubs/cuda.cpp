@@ -3,6 +3,7 @@
 #include <nvToolsExt.h>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
@@ -49,7 +50,7 @@ struct CUDAMethods : public ProfilerStubs {
     });
     auto stream = at::cuda::getCurrentCUDAStream();
     if (cpu_ns) {
-      *cpu_ns = torch::profiler::impl::getTime();
+      *cpu_ns = c10::getTime();
     }
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }

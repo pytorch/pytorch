@@ -195,8 +195,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *_pytree.tree_flatten(candidate_args)[0],
-            *_pytree.tree_flatten(candidate_kwargs)[0],
+            *_pytree.arg_tree_leaves(*candidate_args.values(), **candidate_kwargs),
             type_promotion_kind=self.promotion_kind,
         )
 

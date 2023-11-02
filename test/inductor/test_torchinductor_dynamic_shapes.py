@@ -204,6 +204,16 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_return(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            z = x.item()
+            return y + z
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
         lib = torch.library.Library("test", "DEF")

@@ -216,7 +216,7 @@ class GenLazyIR(ABC):
 
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
-        # Shape constuction.
+        # Shape construction.
         # Conditionally build shape depending on specified shape property
         if schema.properties.ShapePrecompute:
             shape_ctor_arg = "std::move(shapes),"

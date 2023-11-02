@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 
 using namespace at;
 
@@ -118,7 +118,9 @@ ASSERT_SAME_TYPE(traps);
 ASSERT_SAME_TYPE(tinyness_before);
 
 TEST(TestHalf, CommonMath) {
+#ifndef NDEBUG
   float threshold = 0.00001;
+#endif
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
   assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);

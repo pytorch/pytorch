@@ -18,6 +18,9 @@ class TORCH_API OperatorHandle;
 
 namespace at {
 
+// Function name to record NCCL metadata
+extern TORCH_API const std::string kParamCommsCallName;
+
 // Kind of record function scope;
 enum class C10_API_ENUM RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
@@ -392,8 +395,14 @@ struct TORCH_API RecordFunction {
   // profiling.
   void _setAsync();
 
-  // Returns whether this RecordFunction corresponds to an async event orn ot.
+  // Returns whether this RecordFunction corresponds to an async event or not.
   bool isAsync() const;
+
+  // Returns whether this RecordFunction corresponds to NCCL metadata collection
+  // or not.
+  bool isNcclMeta() const {
+    return is_nccl_meta_;
+  }
 
   // Internal-only, used to denote out variant used for Static Runtime execution
   void _setStaticRuntimeOutVariant();
@@ -462,7 +471,7 @@ struct TORCH_API RecordFunction {
   c10::ArrayRef<const IValue> inputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
@@ -483,6 +492,9 @@ struct TORCH_API RecordFunction {
   // Whether this RecordFunction is used for an out variant run with
   // Static Runtime
   bool is_static_runtime_out_variant_{false};
+
+  // Whether this RecordFunction is used for NCCL metadata collection
+  bool is_nccl_meta_{false};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);

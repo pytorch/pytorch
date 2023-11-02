@@ -5,6 +5,7 @@ from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tupl
 import torch
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import (
@@ -20,6 +21,7 @@ from torch.distributed._tensor.ops.utils import (
 )
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 aten = torch.ops.aten
 
@@ -610,16 +612,17 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (
-            global_out_shape,
-            shard_out,
-            shardable_dims,
-        ) = propagate_shape_and_sharding(
-            input_dtensor_spec.placements,
-            tuple(global_in_shape),
-            rules,
-            tuple(mesh.mesh.shape),
-        )
+        with disable_proxy_modes_tracing(), unset_fake_temporarily():
+            (
+                global_out_shape,
+                shard_out,
+                shardable_dims,
+            ) = propagate_shape_and_sharding(
+                input_dtensor_spec.placements,
+                tuple(global_in_shape),
+                rules,
+                mesh.shape,
+            )
 
         if shard_out is not None:
             # no reshard needed

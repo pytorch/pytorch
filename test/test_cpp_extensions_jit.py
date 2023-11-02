@@ -20,8 +20,9 @@ from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
 from torch.utils.cpp_extension import _TORCH_PATH, remove_extension_h_precompiler_headers, get_cxx_compiler, check_compiler_is_gcc
 
-TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+# define TEST_ROCM before changing TEST_CUDA
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith('linux')

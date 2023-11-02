@@ -15,7 +15,8 @@ ncclComm_t NCCLComm::getNcclComm() {
     auto commFailureMsg = commFailureReason_ != c10::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
         : "";
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(
+        DistBackendError,
         false,
         c10::str(
             "NCCL communicator was aborted on rank ",
@@ -47,6 +48,12 @@ std::string getNcclVersion() {
           version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
+#ifdef NCCL_SUFFIX
+      const auto ncclSuffix = std::string(NCCL_SUFFIX);
+      if (ncclSuffix.length()) {
+        versionString += "." + ncclSuffix;
+      }
+#endif
     }
   });
 

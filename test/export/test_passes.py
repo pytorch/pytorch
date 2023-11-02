@@ -13,7 +13,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing import FileCheck
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
-from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -27,7 +26,7 @@ from torch._export.passes.functionalize_side_effectful_ops_pass import (
 from functorch.experimental.control_flow import cond
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.infra.partitioner import Partition
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -56,7 +55,7 @@ def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
 
 def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     output_node = next(n for n in gm.graph.nodes if n.op == "output")
-    args = tree_flatten(output_node.args)[0]
+    args = pytree.tree_leaves(output_node.args)
     # if isinstance(args, tuple) and len(args) == 1:
     #     args = args[0]
     return [str(arg) for arg in args]
@@ -225,7 +224,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.item()
-                constrain_as_value(b, min=2, max=5)
+                torch._constrain_as_value(b, min=2, max=5)
                 return b
 
         x = torch.tensor([2])
@@ -245,7 +244,7 @@ class TestPasses(TestCase):
 
             def forward(self, x):
                 b = x.nonzero()
-                torch.export.constrain_as_value(b.shape[0], min=3, max=5)
+                torch._constrain_as_value(b.shape[0], min=3, max=5)
                 return b
 
         x = torch.tensor([2, 1, 2, 3, 5, 0])
@@ -259,9 +258,8 @@ class TestPasses(TestCase):
             ep.graph, torch.ops.aten.scalar_tensor.default
         )
 
-        # TODO: De-duplicate assertions for same symbol.
-        self.assertEqual(num_assert, 4)
-        self.assertEqual(num_scalar_tensor, 4)
+        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_scalar_tensor, 2)
 
         with self.assertRaisesRegex(
             RuntimeError, r"nonzero.shape\[0\] is outside of inline constraint \[3, 5\]."
@@ -284,12 +282,12 @@ class TestPasses(TestCase):
             def forward(self, pred, x, y):
                 def true_fn(x, y):
                     b = x.item()
-                    constrain_as_value(b, min=2, max=5)
+                    torch._constrain_as_value(b, min=2, max=5)
                     return x - b
 
                 def false_fn(x, y):
                     c = y.item()
-                    constrain_as_value(c, min=2, max=5)
+                    torch._constrain_as_value(c, min=2, max=5)
                     return y - c
 
                 ret = cond(pred, true_fn, false_fn, [x, y])
@@ -335,7 +333,7 @@ class TestPasses(TestCase):
     def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
-            constrain_as_value(a, 4, 7)
+            torch._constrain_as_value(a, 4, 7)
             return torch.empty((a, 4))
 
         ep = torch._export.export(f, (torch.tensor([7]),))

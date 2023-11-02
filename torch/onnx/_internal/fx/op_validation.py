@@ -121,7 +121,7 @@ def validate_op_between_ort_torch(
                     function_eager_attributes
                 )
             )
-        # NOTE: Imcompatible kwargs or missing required args
+        # NOTE: Incompatible kwargs or missing required args
         except TypeError as type_error:
             diagnostic = diagnostic_context.inflight_diagnostic()
             with diagnostic.log_section(logging.WARNING, "Op level debug is bypassed"):
@@ -359,8 +359,8 @@ def _convert_torch_args_to_onnxfunction_args(
 def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
-    except ImportError:
-        raise ImportError(f"{__name__} needs numpy, but it's not installed.")
+    except ImportError as exc:
+        raise ImportError(f"{__name__} needs numpy, but it's not installed.") from exc
 
     if isinstance(input, torch.Tensor):
         return input.detach().cpu().numpy()

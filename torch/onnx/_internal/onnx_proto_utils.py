@@ -44,10 +44,10 @@ def export_as_test_case(
     """
     try:
         import onnx
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Export test case to ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     test_case_dir = os.path.join(dir, "test_" + name)
     os.makedirs(test_case_dir, exist_ok=True)
@@ -99,10 +99,10 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     try:
         import onnx
         from onnx import numpy_helper
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Load test case from ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     with open(os.path.join(dir, "model.onnx"), "rb") as f:
         model_bytes = f.read()
@@ -135,8 +135,10 @@ def export_data(data, value_info_proto, f: str) -> None:
     """
     try:
         from onnx import numpy_helper
-    except ImportError:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.")
+    except ImportError as exc:
+        raise ImportError(
+            "Export data to ONNX format failed: Please install ONNX."
+        ) from exc
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):

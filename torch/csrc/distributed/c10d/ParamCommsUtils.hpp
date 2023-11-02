@@ -9,8 +9,6 @@
 
 namespace torch {
 
-extern TORCH_API const std::string kParamCommsCallName;
-
 class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
  public:
   ParamCommsDebugInfo() = default;
@@ -21,12 +19,17 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       int outSize,
       at::ScalarType dType,
       std::vector<int64_t> inSplitSizes,
-      std::vector<int64_t> outSplitSizes);
+      std::vector<int64_t> outSplitSizes,
+      int worldSize);
 
   ~ParamCommsDebugInfo() override = default;
 
   int getRank() const {
     return rank_;
+  }
+
+  int getWorldSize() const {
+    return worldSize_;
   }
 
   const std::string getColumnName() const {
@@ -55,6 +58,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
 
  private:
   int rank_{};
+  int worldSize_{};
   std::string columnName_;
   int inMessageSize_{};
   int outMessageSize_{};
@@ -72,9 +76,17 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     outSize,                                                                   \
     dType,                                                                     \
     inSplitSizes,                                                              \
-    outSplitSizes)                                                             \
+    outSplitSizes,                                                             \
+    worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
-      rank, colName, inSize, outSize, dType, inSplitSizes, outSplitSizes);     \
+      rank,                                                                    \
+      colName,                                                                 \
+      inSize,                                                                  \
+      outSize,                                                                 \
+      dType,                                                                   \
+      inSplitSizes,                                                            \
+      outSplitSizes,                                                           \
+      worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(seq),                                                        \
@@ -82,9 +94,10 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       rank,                                                                    \
       colName,                                                                 \
       inSplitSizes,                                                            \
-      outSplitSizes};                                                          \
+      outSplitSizes,                                                           \
+      worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
-  RECORD_FUNCTION(torch::kParamCommsCallName, paramInputs);
+  RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
 
 #define RECORD_PARAM_COMMS_DATA(                                               \
     seq,                                                                       \
@@ -97,9 +110,17 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     outSize,                                                                   \
     dType,                                                                     \
     inSplitSizes,                                                              \
-    outSplitSizes)                                                             \
+    outSplitSizes,                                                             \
+    worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
-      rank, colName, inSize, outSize, dType, inSplitSizes, outSplitSizes);     \
+      rank,                                                                    \
+      colName,                                                                 \
+      inSize,                                                                  \
+      outSize,                                                                 \
+      dType,                                                                   \
+      inSplitSizes,                                                            \
+      outSplitSizes,                                                           \
+      worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
       c10::IValue(InputTensors),                                               \
@@ -108,10 +129,11 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       rank,                                                                    \
       colName,                                                                 \
       inSplitSizes,                                                            \
-      outSplitSizes};                                                          \
+      outSplitSizes,                                                           \
+      worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(                                         \
-      torch::kParamCommsCallName,                                              \
+      at::kParamCommsCallName,                                                 \
       paramInputs,                                                             \
       std::vector<c10::IValue>(1, c10::IValue(OutputTensors)));
 } // namespace torch

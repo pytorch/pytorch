@@ -239,7 +239,7 @@ def grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info):
             result.append(pytree.tree_map(lambda x: None, arg_info))
             continue
         result.append(grad_inputs_dict[name])
-    return tuple(pytree.tree_flatten(result)[0])
+    return tuple(pytree.tree_leaves(result))
 
 # Saves "stuff" (a pytree) onto the ctx object. Use unpack_saved to unpack it.
 # autograd.Function prefers that users use ctx.save_for_backward to

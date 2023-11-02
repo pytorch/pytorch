@@ -106,6 +106,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!THPFunctionClass)
     return nullptr;
 
+  // NOTE: "leaks" GradientEdge
+  auto autograd_graph_mod =
+      THPObjectPtr(PyImport_ImportModule("torch.autograd.graph"));
+  THPGradientEdgeClass =
+      PyObject_GetAttrString(autograd_graph_mod, "GradientEdge");
+  if (!THPGradientEdgeClass)
+    return nullptr;
+
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;

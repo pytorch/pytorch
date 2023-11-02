@@ -1344,7 +1344,7 @@ struct Barrier {
 // each worker thread has a unique ID in `0...kNumberOfWorkers-1`.
 // There is a hard-coded ordering, `kOrderInWhichWorkersReturnTheirBatch`, in
 // which we want the worker threads to return. For this, an iterator into this
-// order is maintained. When the derferenced iterator (the current order index)
+// order is maintained. When the dereferenced iterator (the current order index)
 // matches the thread ID of a worker, it knows it can now return its index as
 // well as progress the iterator. Inside the dataloader, the sequencer should
 // buffer these indices such that they are ultimately returned in order.
@@ -2003,7 +2003,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
           // statues, there are three possible scenarios for the writer thread:
           // 1. it hasn't started loading the next chunk data yet, so the
           // sequential sampler index is still 0;
-          // 2. it started to load the second chunk, so the sequencial sampler
+          // 2. it started to load the second chunk, so the sequential sampler
           // index is at 1;
           // 3. it finished loading the second chunk, and start to load the
           // third chunk, because the cache is still fully occupied by the data
@@ -2124,7 +2124,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       indices_.resize(size_);
       size_t index = 0;
 
-      // Repeatly sample every 5 indices.
+      // Repeatedly sample every 5 indices.
       for (const auto i : c10::irange(batch_size)) {
         for (size_t j = 0; j < size_ / batch_size; ++j) {
           indices_[index++] = i + batch_size * j;

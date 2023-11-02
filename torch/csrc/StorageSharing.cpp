@@ -335,7 +335,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
         static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
-    _ref_counter_offset = THPUtils_packInt64(sent_data->offset());
+    _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcEventHandle_t ipc_event_handle;
@@ -464,7 +464,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   ptrdiff_t storage_offset_bytes =
       (ptrdiff_t)THPUtils_unpackLong(_offset_bytes);
 
-  int64_t device = THPUtils_unpackLong(_device);
+  const auto device = c10::checked_convert<c10::DeviceIndex>(
+      THPUtils_unpackLong(_device), "c10::DeviceIndex");
   at::cuda::CUDAGuard device_guard(device);
 
   if (PyObject_IsTrue(_event_sync_required)) {
@@ -501,8 +502,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
 
   struct IpcDeleterContext {
     std::string ref_counter_handle;
-    ptrdiff_t ref_counter_offset;
-    int64_t device;
+    ptrdiff_t ref_counter_offset{};
+    c10::DeviceIndex device{-1};
     torch::CudaIPCReceivedData received_data;
   };
 

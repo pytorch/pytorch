@@ -200,8 +200,8 @@ def replace_pattern(
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
+    pattern: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule],
     match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
@@ -220,8 +220,8 @@ def replace_pattern_with_filters(
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
+    pattern: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule],
     match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
@@ -236,11 +236,15 @@ def _replace_pattern(
 
     if isinstance(pattern, GraphModule):
         pattern_graph = pattern.graph
+    elif isinstance(pattern, Graph):
+        pattern_graph = pattern
     else:
         pattern_graph = symbolic_trace(pattern).graph
 
     if isinstance(replacement, GraphModule):
         replacement_graph = replacement.graph
+    elif isinstance(replacement, Graph):
+        replacement_graph = replacement
     else:
         replacement_graph = symbolic_trace(replacement).graph
 

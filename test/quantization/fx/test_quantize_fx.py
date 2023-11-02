@@ -1,5 +1,5 @@
 # Owner(s): ["oncall: quantization"]
-import pickle
+
 from collections import OrderedDict
 import contextlib
 import torch
@@ -9714,18 +9714,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted_ref(inp)
 
             torch.testing.assert_close(out, out_ref)
-
-    @override_qengines
-    def test_qat_pickle(self):
-        model = torch.nn.Sequential(nn.Conv2d(3, 32, 5), nn.BatchNorm2d(32), nn.ReLU())
-        example_inputs = torch.randn(1, 3, 128, 128)
-
-        qengine = torch.backends.quantized.engine
-        qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig(qengine)}
-        model = prepare_qat_fx(model, qconfig_dict, example_inputs)
-        pickle.dumps(model)
-
-
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

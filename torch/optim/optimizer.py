@@ -125,6 +125,12 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
     )
     return fused, foreach
 
+def _view_as_real(params, *state_and_grads):
+    for i, p in enumerate(params):
+        if torch.is_complex(p):
+            params[i] = torch.view_as_real(params[i])
+            for s in state_and_grads:
+                s[i] = torch.view_as_real(s[i])
 
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
@@ -204,7 +210,7 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     _global_optimizer_post_hooks[handle.id] = hook
     return handle
 
-params_t: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
+ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
 
 _P = ParamSpec("_P")
 R = TypeVar("R")
@@ -236,7 +242,7 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
+    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()

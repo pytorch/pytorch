@@ -64,9 +64,10 @@ class _FunctionalAdadelta:
                 + f"Params length: {len(params)}. "
                 + f"Gradients length: {len(gradients)}"
             )
-
+        has_complex = False
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
@@ -97,4 +98,5 @@ class _FunctionalAdadelta:
                 weight_decay=weight_decay,
                 foreach=self.foreach,
                 maximize=self.maximize,
+                has_complex=has_complex
             )

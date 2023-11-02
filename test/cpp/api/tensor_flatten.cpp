@@ -28,7 +28,7 @@ TEST(UnflattenDenseTensorTest, TestEmptyTensor) {
   ASSERT_EQ(unflatten_results.at(2).data_ptr(), nullptr);
   // without fix in unflatten_dense_tensors() for empty tensors,
   // unflattend empty tensor unflatten_results.at(1) will share the same storage
-  // as other non-empty tenosr like unflatten_results.at(3).
+  // as other non-empty tensor like unflatten_results.at(3).
   // after fix, the empty tensor and non-empty tensor do not share the same
   // storage.
   ASSERT_NE(

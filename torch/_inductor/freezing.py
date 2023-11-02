@@ -18,8 +18,6 @@ from torch._inductor.fx_passes.post_grad import view_to_reshape
 from . import config
 
 aten = torch.ops.aten
-
-aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
@@ -125,7 +123,7 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0

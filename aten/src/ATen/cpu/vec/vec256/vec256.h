@@ -28,8 +28,7 @@
 #include <cstring>
 #include <ostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -277,4 +276,4 @@ inline Vectorized<uint8_t> flip(const Vectorized<uint8_t> & v) {
 
 #endif // (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-}}}
+}} // namepsace at::vec::CPU_CAPABILITY

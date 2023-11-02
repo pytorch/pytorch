@@ -117,6 +117,7 @@ torch.backends.cudnn
     available algorithm. Note that this setting only affects convolutions dispatched via the
     cuDNN v8 API.
 
+.. py:module:: torch.backends.cudnn.rnn
 
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
@@ -187,3 +188,4 @@ torch.backends.opt_einsum
 torch.backends.xeon
 ^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xeon
+.. py:module:: torch.backends.xeon.run_cpu

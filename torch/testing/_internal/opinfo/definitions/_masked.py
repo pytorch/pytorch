@@ -561,8 +561,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "masked.cumsum",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -833,7 +832,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "masked.median",
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
         supports_out=False,
@@ -1032,8 +1031,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.softmax",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1053,8 +1051,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.log_softmax",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(
@@ -1081,8 +1078,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.softmin",
         method_variant=None,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
             DecorateInfo(

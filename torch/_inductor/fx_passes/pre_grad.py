@@ -31,9 +31,11 @@ merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
+    merge_getitem_cat_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,

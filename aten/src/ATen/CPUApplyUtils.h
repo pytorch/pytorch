@@ -67,9 +67,10 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
   void operator=(strided_tensor_iter_fixed const& x) = delete;
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
-  strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
+  strided_tensor_iter_fixed(
+      Tensor& tensor,
+      C10_UNUSED bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
-    (void)sort_strides; // Suppress unused variable warning
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
       std::memcpy(

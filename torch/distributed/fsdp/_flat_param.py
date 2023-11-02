@@ -1341,6 +1341,15 @@ class FlatParamHandle:
                 sharded_flat_param,
                 self.process_group,
             )
+
+        if self._offload_params:
+            # In case of offloading, `flat_param.data` (i.e. sharded param) is
+            # created on the pre-unshard stream. We need to hand it over to the
+            # unshard stream for all-gather
+            _no_dispatch_record_stream(
+                sharded_flat_param,
+                self._device_handle.current_stream(),  # unshard_stream
+            )
         return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(

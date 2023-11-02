@@ -9,7 +9,7 @@ import torch
 from torch._C._profiler import _EventType, _TensorMetadata
 from torch.profiler import _memory_profiler, _utils
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 profile = functools.partial(
@@ -74,7 +74,7 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
 
     @staticmethod
     def flat_ids(args):
-        flat_args = tree_flatten(args)[0]
+        flat_args = pytree.tree_leaves(args)
         return tuple(
             (t._cdata, t.storage().data_ptr())
             for t in flat_args
@@ -882,7 +882,7 @@ class TestMemoryProfilerE2E(TestCase):
         # TensorKey representation.
         for op in memory_profile._op_tree.dfs():
             if op.typed[0] == _EventType.TorchOp:
-                inputs = tree_flatten(op.typed[1].inputs)[0]
+                inputs = pytree.tree_leaves(op.typed[1].inputs)
                 for t in (i for i in inputs if isinstance(i, _TensorMetadata)):
                     key = _memory_profiler.TensorKey.from_tensor(t)
                     if key:

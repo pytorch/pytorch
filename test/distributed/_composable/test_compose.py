@@ -253,7 +253,7 @@ class TestFSDPCheckpoint(FSDPTest):
     def test_composable_fsdp_replicate(self):
         # Verify how the APIs can be composed, e.g. if both `fully_shard` and
         # `replicate` are applied on the same module, it should raise exception.
-        model = CompositeModel(device=torch.device("cpu"))
+        model = CompositeModel(device=torch.device("cuda"))
         fully_shard(model.l1)
         with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
             replicate(model.l1)

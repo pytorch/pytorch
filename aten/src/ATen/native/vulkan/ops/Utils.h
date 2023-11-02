@@ -45,7 +45,7 @@ void pack_buffer_to_vtensor(
 
 void pack_staging_to_vtensor(api::VulkanBuffer&, vTensor&);
 
-void pack_vtensor_to_staging(
+bool pack_vtensor_to_staging(
     vTensor&,
     api::VulkanBuffer&,
     const VkFence fence_handle = VK_NULL_HANDLE);

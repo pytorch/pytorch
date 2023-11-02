@@ -8,9 +8,9 @@ import torch.distributed._tensor.random as random
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.device_mesh import (
+    _mesh_resources,
     DeviceMesh,
     init_device_mesh,
-    mesh_resources,
 )
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
@@ -34,7 +34,7 @@ def _dtensor_init_helper(
     **kwargs,
 ) -> DTensor:
     # if device_mesh is None, use the one from mesh resources
-    device_mesh = device_mesh or mesh_resources.get_current_mesh()
+    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
 
     # set default placements to replicated if not specified

@@ -285,12 +285,3 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
         linearity=linearity,
         enforce_sharding=enforce_sharding,
     )
-
-
-def linear_pointwise_rule(op_schema: OpSchema) -> OutputSharding:
-    """
-    Linear pointwise operators can propagate pending reductions.
-    For example, c = add(a, b); if a is pending sum, then c will be
-    pending sum as well without any communication overhead.
-    """
-    return pointwise_rule(op_schema, linearity=True)

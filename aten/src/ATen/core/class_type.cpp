@@ -390,7 +390,7 @@ void ClassType::unsafeRemoveMethod(const std::string& name) {
   size_t slot = 0;
   for (auto method : methods_) {
     if (method->name() == name) {
-      methods_.erase(methods_.begin() + slot);
+      methods_.erase(methods_.begin() + static_cast<std::ptrdiff_t>(slot));
       return;
     }
     slot++;
@@ -573,12 +573,12 @@ size_t ClassType::addAttribute(
 
 void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
-  attributes_.erase(attributes_.begin() + slot);
-  attributeTypes_.erase(attributeTypes_.begin() + slot);
+  attributes_.erase(attributes_.begin() + static_cast<std::ptrdiff_t>(slot));
+  attributeTypes_.erase(attributeTypes_.begin() + static_cast<std::ptrdiff_t>(slot));
   AT_ASSERT(attributes_.size() == attributeTypes_.size());
 }
 
-void ClassType::unsafeChangeAttributeType(const std::string& name, TypePtr new_ty) {
+void ClassType::unsafeChangeAttributeType(const std::string& name, const TypePtr& new_ty) {
   auto slot = getAttributeSlot(name);
   auto old_attr_info = attributes_[slot];
   AT_ASSERT(old_attr_info.getKind() == AttributeKind::REGULAR_ATTRIBUTE);
@@ -633,8 +633,8 @@ c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
 
 void ClassType::unsafeRemoveConstant(const std::string& name) {
   auto slot = getConstantSlot(name);
-  constantNames_.erase(constantNames_.begin() + slot);
-  constantValues_.erase(constantValues_.begin() + slot);
+  constantNames_.erase(constantNames_.begin() + static_cast<std::ptrdiff_t>(slot));
+  constantValues_.erase(constantValues_.begin() + static_cast<std::ptrdiff_t>(slot));
 }
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {

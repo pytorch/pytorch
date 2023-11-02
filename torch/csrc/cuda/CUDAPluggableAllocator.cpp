@@ -13,7 +13,7 @@ int device_count = 0;
 void custom_raw_deleter(void* ptr);
 
 _AllocationMetadata::_AllocationMetadata()
-    : size(0), device_idx(-1), stream(0) {}
+    : size(0), device_idx(-1), stream{} {}
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
@@ -28,7 +28,7 @@ _AllocationMetadata::_AllocationMetadata(
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
-    : alloc_fn_(alloc_fn), free_fn_(free_fn) {}
+    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
     : alloc_fn_(other.alloc_fn_),
@@ -44,42 +44,42 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       relase_pool_fn_(other.relase_pool_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
-  init_fn_ = init_fn;
+  init_fn_ = std::move(init_fn);
 }
 
 void CUDAPluggableAllocator::set_reset_fn(std::function<void()> reset_fn) {
-  reset_fn_ = reset_fn;
+  reset_fn_ = std::move(reset_fn);
 }
 
 void CUDAPluggableAllocator::set_memory_fraction_fn(
     std::function<void(double, int)> memory_fraction_fn) {
-  memory_fraction_fn_ = memory_fraction_fn;
+  memory_fraction_fn_ = std::move(memory_fraction_fn);
 }
 
 void CUDAPluggableAllocator::set_base_alloc_fn(
     std::function<void*(void*, size_t*)> base_alloc_fn) {
-  base_alloc_fn_ = base_alloc_fn;
+  base_alloc_fn_ = std::move(base_alloc_fn);
 }
 
 void CUDAPluggableAllocator::set_record_stream_fn(
     std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn) {
-  record_stream_fn_ = record_stream_fn;
+  record_stream_fn_ = std::move(record_stream_fn);
 }
 
 void CUDAPluggableAllocator::set_begin_allocate_stream_to_pool(
     std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
         capture_begin_fn) {
-  begin_allocate_stream_to_pool_fn_ = capture_begin_fn;
+  begin_allocate_stream_to_pool_fn_ = std::move(capture_begin_fn);
 }
 
 void CUDAPluggableAllocator::set_end_allocate_stream_to_pool_fn(
     std::function<void(int, cudaStream_t)> capture_about_to_end_fn) {
-  end_allocate_stream_to_pool_fn_ = capture_about_to_end_fn;
+  end_allocate_stream_to_pool_fn_ = std::move(capture_about_to_end_fn);
 }
 
 void CUDAPluggableAllocator::set_release_pool(
     std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn) {
-  relase_pool_fn_ = capture_destroy_fn;
+  relase_pool_fn_ = std::move(capture_destroy_fn);
 }
 
 void* CUDAPluggableAllocator::malloc(
@@ -95,13 +95,18 @@ void* CUDAPluggableAllocator::malloc(
 }
 
 c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) const {
-  int device;
+  int device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-  cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
+  cudaStream_t stream =
+      c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
   void* r =
       const_cast<CUDAPluggableAllocator*>(this)->malloc(size, device, stream);
   c10::DataPtr data_ptr = {
-      r, r, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
+      r,
+      r,
+      raw_deleter(),
+      c10::Device(
+          c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device))};
   return data_ptr;
 }
 
@@ -110,24 +115,25 @@ c10::DeleterFnPtr CUDAPluggableAllocator::raw_deleter() const {
 }
 
 void* CUDAPluggableAllocator::raw_alloc(size_t nbytes) {
-  int device;
+  int device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-  cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
+  cudaStream_t stream =
+      c10::cuda::getCurrentCUDAStream(static_cast<c10::DeviceIndex>(device));
   return malloc(nbytes, device, stream);
 }
 
 void* CUDAPluggableAllocator::raw_alloc_with_stream(
     size_t nbytes,
     cudaStream_t stream) {
-  int device;
+  int device = -1;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   return malloc(nbytes, device, stream);
 }
 
 void CUDAPluggableAllocator::raw_delete(void* ptr) {
-  cudaStream_t stream;
-  int device_idx;
-  size_t size;
+  cudaStream_t stream{};
+  int device_idx = -1;
+  size_t size = 0;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     TORCH_CHECK(
@@ -159,7 +165,7 @@ void CUDAPluggableAllocator::setMemoryFraction(double fraction, int device) {
   }
 }
 
-void CUDAPluggableAllocator::emptyCache(void) {
+void CUDAPluggableAllocator::emptyCache() {
   if (reset_fn_) {
     return reset_fn_();
   }
@@ -291,7 +297,7 @@ c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
 }
 
 void CUDAPluggableAllocator::enablePeerAccess(int dev, int dev_to_access) {
-  c10::cuda::CUDAGuard device_guard(dev);
+  c10::cuda::CUDAGuard device_guard(static_cast<c10::DeviceIndex>(dev));
   cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
   if (err == cudaErrorPeerAccessAlreadyEnabled) {
     // ignore and clear the error if access was already enabled
@@ -330,13 +336,14 @@ createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
-      new CUDAPluggableAllocator(alloc_fn, free_fn));
+      new CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn)));
   allocator->init(device_count);
   return allocator;
 }
 
 void changeCurrentAllocator(
-    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator) {
+    const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
+        allocator) {
   TORCH_CHECK(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");

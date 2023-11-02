@@ -136,10 +136,10 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   auto col_indices = input.col_indices();
   auto values = input.values();
   auto nnz = values.size(-1);
+  c10::MaybeOwned<Tensor> values_ = values.expect_contiguous();
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(crow_indices.is_contiguous());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(col_indices.is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_contiguous());
 
   cusparseIndexType_t index_type =
       getCuSparseIndexType(crow_indices.scalar_type());
@@ -152,7 +152,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
   auto col_indices_batch_stride =
       col_indices.dim() >= 2 && batch_offset >= 0 ? col_indices.stride(-2) : 0;
   auto values_batch_stride =
-      values.dim() >= 2 && batch_offset >= 0 ? values.stride(-2) : 0;
+      values.dim() >= 2 && batch_offset >= 0 ? values_->stride(-2) : 0;
 
   cusparseSpMatDescr_t raw_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
@@ -167,7 +167,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
       static_cast<char*>(col_indices.data_ptr()) +
           batch_offset * col_indices_batch_stride * col_indices.itemsize(),
       // values of the sparse matrix, size = nnz
-      static_cast<char*>(values.data_ptr()) +
+      static_cast<char*>(values_->data_ptr()) +
           batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices
@@ -189,7 +189,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           raw_descriptor,
           batch_count,
           crow_indices.stride(-2),
-          values.stride(-2)));
+          values_->stride(-2)));
     } else {
       // cuSPARSE allows broadcasting of indices and values across batches for
       // batched matmul

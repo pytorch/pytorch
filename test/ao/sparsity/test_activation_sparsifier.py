@@ -172,7 +172,7 @@ class TestActivationSparsifier(TestCase):
             data (torch tensor)
                 dummy batched data
         """
-        # create a forward hook for checking ouput == layer(input * mask)
+        # create a forward hook for checking output == layer(input * mask)
         def check_output(name):
             mask = activation_sparsifier.get_mask(name)
             features = activation_sparsifier.data_groups[name].get('features')
@@ -271,7 +271,7 @@ class TestActivationSparsifier(TestCase):
             return torch.mean(x, dim=0)
 
         def _vanilla_norm_sparsifier(data, sparsity_level):
-            r"""Similar to data norm spasifier but block_shape = (1,1).
+            r"""Similar to data norm sparsifier but block_shape = (1,1).
             Simply, flatten the data, sort it and mask out the values less than threshold
             """
             data_norm = torch.abs(data).flatten()

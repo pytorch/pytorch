@@ -1,6 +1,8 @@
 from typing import (
     List, Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+import operator
+import itertools
 
 import torch
 from torch._C import _add_docstr
@@ -38,6 +40,7 @@ __all__ = [
     'tensordot',
     'unique',
     'unique_consecutive',
+    'unravel_index',
 ]
 
 
@@ -520,6 +523,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         Note that :func:`torch.view_as_real` can be used to recover a real
         tensor with an extra last dimension for real and imaginary components.
 
+    .. warning::
+        From version 2.1, a warning will be provided if a :attr:`window` is
+        not specified. In a future release, this attribute will be required.
+        Not providing a window currently defaults to using a rectangular window,
+        which may result in undesirable artifacts. Consider using tapered windows,
+        such as :func:`torch.hann_window`.
+
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
     time. The interface of this function is modeled after (but *not* a drop-in
@@ -657,6 +667,11 @@ istft = _add_docstr(
     "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
     r"""
 Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
+
+.. warning::
+    From version 2.1, a warning will be provided if a :attr:`window` is
+    not specified. In a future release, this attribute will be required.
+    Please provide the same window used in the stft call.
 
 It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (
@@ -1674,6 +1689,87 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
+def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> List[Tensor]:
+    r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
+    index into an arbitrary tensor of the specified shape.
+
+    Args:
+        indices (Tensor): An integer tensor containing indices into the
+            flattened version of an arbitrary tensor of shape :attr:`shape`.
+            All elements must be in the range ``[0, prod(shape) - 1]``.
+
+        shape (int, sequence of ints, or torch.Size): The shape of the arbitrary
+            tensor. All elements must be non-negative.
+
+    Returns:
+        tuple of Tensors: Each ``i``-th tensor in the ouput corresponds with
+        dimension ``i`` of :attr:`shape`. Each tensor has the same shape as
+        ``indices`` and contains one index into dimension ``i`` for each of the
+        flat indices given by ``indices``.
+
+    Example::
+
+        >>> import torch
+        >>> torch.unravel_index(torch.tensor(4), (3, 2))
+        (tensor(2),
+         tensor(0))
+
+        >>> torch.unravel_index(torch.tensor([4, 1]), (3, 2))
+        (tensor([2, 0]),
+         tensor([0, 1]))
+
+        >>> torch.unravel_index(torch.tensor([0, 1, 2, 3, 4, 5]), (3, 2))
+        (tensor([0, 0, 1, 1, 2, 2]),
+         tensor([0, 1, 0, 1, 0, 1]))
+
+        >>> torch.unravel_index(torch.tensor([1234, 5678]), (10, 10, 10, 10))
+        (tensor([1, 5]),
+         tensor([2, 6]),
+         tensor([3, 7]),
+         tensor([4, 8]))
+
+        >>> torch.unravel_index(torch.tensor([[1234], [5678]]), (10, 10, 10, 10))
+        (tensor([[1], [5]]),
+         tensor([[2], [6]]),
+         tensor([[3], [7]]),
+         tensor([[4], [8]]))
+
+        >>> torch.unravel_index(torch.tensor([[1234], [5678]]), (100, 100))
+        (tensor([[12], [56]]),
+         tensor([[34], [78]]))
+    """
+    if has_torch_function_unary(indices):
+        return handle_torch_function(
+            unravel_index, (indices,), indices, shape=shape)
+    res_tensor = _unravel_index(indices, shape)
+    return res_tensor.unbind(-1)
+
+def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
+    torch._check_type(
+        not indices.is_complex() and not indices.is_floating_point() and not indices.dtype == torch.bool,
+        lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}")
+
+    torch._check_type(
+        isinstance(shape, (int, Sequence)),
+        lambda: f"expected 'shape' to be int or sequence of ints, but got {type(shape)}")
+
+    if isinstance(shape, int):
+        shape = torch.Size([shape])
+    else:
+        for dim in shape:
+            torch._check_type(
+                isinstance(dim, int),
+                lambda: f"expected 'shape' sequence to only contain ints, but got {type(dim)}")
+        shape = torch.Size(shape)
+
+    torch._check_value(
+        all(dim >= 0 for dim in shape),
+        lambda: f"'shape' cannot have negative values, but got {tuple(shape)}")
+
+    coefs = list(reversed(list(itertools.accumulate(reversed(shape[1:] + torch.Size([1])), func=operator.mul))))
+    return indices.unsqueeze(-1).floor_divide(
+        torch.tensor(coefs, device=indices.device, dtype=torch.int64)
+    ) % torch.tensor(shape, device=indices.device, dtype=torch.int64)
 
 def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed

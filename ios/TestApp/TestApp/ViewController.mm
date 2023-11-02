@@ -31,9 +31,11 @@
     NSLog(@"Parse config.json failed!");
     return;
   }
-
+// NB: When running tests on device, we need an empty app to launch the tests
+#ifdef RUN_BENCHMARK
   [Benchmark setup:config];
   [self runBenchmark];
+#endif
 #endif
 }
 

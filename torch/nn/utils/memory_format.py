@@ -2,7 +2,8 @@ import torch
 
 
 def convert_conv2d_weight_memory_format(module, memory_format):
-    r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``
+    r"""Convert ``memory_format`` of ``nn.Conv2d.weight`` to ``memory_format``.
+
     The conversion recursively applies to nested ``nn.Module``, including ``module``.
     Note that it only changes the memory_format, but not the semantics of each dimensions.
     This function is used to facilitate the computation to adopt NHWC kernels, which
@@ -20,9 +21,9 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         Hence our strategy here is to convert only the weight of convolution to
         channels_last. This ensures that;
         1. Fast convolution kernels will be used, the benefit of which could
-           outweigh overhead of permutation (if input is not in the same format)
+        outweigh overhead of permutation (if input is not in the same format)
         2. No unnecessary permutations are applied on layers that do not benefit
-           from memory_format conversion.
+        from memory_format conversion.
 
         The optimal case is that, layers between convolution layers are channels
         last compatible. Input tensor would be permuted to channels last when it
@@ -61,7 +62,6 @@ def convert_conv2d_weight_memory_format(module, memory_format):
         >>> model = nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
         >>> out = model(input)
     """
-
     # TODO: expand this to `_ConvNd` when channels_last support is extended
     # beyond only 4d tensors.
     if isinstance(module, (torch.nn.Conv2d, torch.nn.ConvTranspose2d)):

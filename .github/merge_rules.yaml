@@ -125,9 +125,6 @@
 
 - name: PrimTorch
   patterns:
-  - aten/src/ATen/native_functions.yaml
-  - aten/src/ATen/native/**
-  - test/**
   - torch/_meta_registrations.py
   - torch/_decomp/**
   - torch/_refs/**

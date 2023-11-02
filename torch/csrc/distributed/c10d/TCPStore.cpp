@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -371,7 +372,13 @@ void TCPStore::waitForWorkers() {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        break;
+        C10_THROW_ERROR(
+            DistStoreError,
+            fmt::format(
+                "Timed out after {} seconds waiting for clients. {}/{} clients joined.",
+                elapsed.count(),
+                numWorkersCompleted,
+                *numWorkers_));
       }
       /* sleep override */
       std::this_thread::sleep_for(std::chrono::milliseconds(10));

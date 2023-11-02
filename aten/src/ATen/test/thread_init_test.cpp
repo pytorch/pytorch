@@ -14,8 +14,7 @@ void test(int given_num_threads) {
   ASSERT_TRUE(given_num_threads >= 0);
   ASSERT_EQ(at::get_num_threads(), given_num_threads);
   auto t_sum = t.sum();
-  for (const auto i : c10::irange(1000)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(1000)) {
     t_sum = t_sum + t.sum();
   }
 }

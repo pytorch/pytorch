@@ -46,9 +46,9 @@
 // however hipblas v1 is still using its custom type
 #define HIP_R_16F  HIPBLAS_R_16F
 #define HIP_R_32F  HIPBLAS_R_32F
-#else // __HIP_PLATFORM_HCC
+#else // USE_ROCM
 #define CUBLAS_HALF_TYPE __half
-#endif // __HIP_PLATFORM_HCC
+#endif // USE_ROCM
 
 #include "caffe2/utils/math/utils.h"
 

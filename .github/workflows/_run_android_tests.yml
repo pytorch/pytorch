@@ -41,9 +41,17 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
+    # NB: This job can only run on GitHub Linux runner atm. This is an ok thing though
+    # because that runner is ephemeral and could access upload secrets
     runs-on: ${{ matrix.runner }}
+    env:
+      # GitHub runner installs Android SDK on this path
+      ANDROID_ROOT: /usr/local/lib/android
+      ANDROID_NDK_VERSION: '21.4.7075529'
+      BUILD_LITE_INTERPRETER: ${{ matrix.use_lite_interpreter }}
+      # 4 of them are supported atm: armeabi-v7a, arm64-v8a, x86, x86_64
+      SUPPORT_ABI: '${{ matrix.support_abi }}'
     steps:
-      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
@@ -51,7 +59,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
           python-version: 3.8
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}.txt
 
       - name: Install NDK
         uses: nick-fields/retry@v2.8.2
@@ -60,12 +68,12 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
+            set -eux
+
             # Install NDK 21 after GitHub update
             # https://github.com/actions/virtual-environments/issues/5595
-            ANDROID_ROOT="/usr/local/lib/android"
             ANDROID_SDK_ROOT="${ANDROID_ROOT}/sdk"
             ANDROID_NDK="${ANDROID_SDK_ROOT}/ndk-bundle"
-            ANDROID_NDK_VERSION="21.4.7075529"
 
             SDKMANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
             # NB: This step downloads and installs NDK, thus it could be flaky.
@@ -86,8 +94,10 @@ jobs:
 
       - name: Build PyTorch Android
         run: |
+          set -eux
+
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
-          ${CONDA_RUN} ./scripts/build_pytorch_android.sh x86
+          ${CONDA_RUN} ./scripts/build_pytorch_android.sh "${SUPPORT_ABI}"
 
       - name: Run tests
         uses: reactivecircus/android-emulator-runner@v2

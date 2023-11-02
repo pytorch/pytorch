@@ -144,6 +144,50 @@ def is_hip_clang() -> bool:
         return False
 
 
+# TODO Remove once the following submodules are updated
+hip_platform_files = [
+    "third_party/fbgemm/fbgemm_gpu/CMakeLists.txt",
+    "third_party/fbgemm/fbgemm_gpu/cmake/Hip.cmake",
+    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_dense_host.cpp",
+    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_host_template.cpp",
+    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_backward_split_template.cu",
+    "third_party/fbgemm/fbgemm_gpu/codegen/embedding_forward_quantized_split_lookup.cu",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/fbgemm_cuda_utils.cuh",
+    "third_party/fbgemm/fbgemm_gpu/include/fbgemm_gpu/sparse_ops.cuh",
+    "third_party/fbgemm/fbgemm_gpu/src/jagged_tensor_ops.cu",
+    "third_party/fbgemm/fbgemm_gpu/src/quantize_ops.cu",
+    "third_party/fbgemm/fbgemm_gpu/src/sparse_ops.cu",
+    "third_party/fbgemm/fbgemm_gpu/src/split_embeddings_cache_cuda.cu",
+    "third_party/fbgemm/fbgemm_gpu/src/topology_utils.cpp",
+    "third_party/fbgemm/src/EmbeddingSpMDM.cc",
+    "third_party/gloo/cmake/Dependencies.cmake",
+    "third_party/gloo/gloo/cuda.cu",
+    "third_party/kineto/libkineto/CMakeLists.txt",
+    "third_party/nvfuser/CMakeLists.txt",
+    "third_party/tensorpipe/cmake/Hip.cmake",
+]
+
+
+def remove_hcc(line: str) -> str:
+    line = line.replace("HIP_PLATFORM_HCC", "HIP_PLATFORM_AMD")
+    line = line.replace("HIP_HCC_FLAGS", "HIP_CLANG_FLAGS")
+    return line
+
+
+for hip_platform_file in hip_platform_files:
+    do_write = False
+    if os.path.exists(hip_platform_file):
+        with open(hip_platform_file) as sources:
+            lines = sources.readlines()
+        newlines = [remove_hcc(line) for line in lines]
+        if lines == newlines:
+            print(f"{hip_platform_file} skipped")
+        else:
+            with open(hip_platform_file, "w") as sources:
+                for line in newlines:
+                    sources.write(line)
+            print(f"{hip_platform_file} updated")
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,

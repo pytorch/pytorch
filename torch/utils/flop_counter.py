@@ -1,13 +1,17 @@
 import torch
 import torch.nn as nn
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from typing import List, Any, Dict, Optional, Union, NamedTuple
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.hooks import RemovableHandle
+from torch._decomp import register_decomposition
 from math import prod
+from functools import wraps
 
-__all__ = ["FlopCounterMode"]
+
+
+__all__ = ["FlopCounterMode", "register_flop_formula"]
 
 aten = torch.ops.aten
 
@@ -16,6 +20,25 @@ def get_shape(i):
         return i.shape
     return i
 
+flop_registry: Dict[Any, Any] = {}
+
+def shape_wrapper(f):
+    @wraps(f)
+    def nf(*args, out=None, **kwargs):
+        args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
+        return f(*args, out_shape=out_shape, **kwargs)
+    return nf
+
+def register_flop_formula(targets, get_raw=False):
+    def register_fun(flop_formula):
+        if not get_raw:
+            flop_formula = shape_wrapper(flop_formula)
+        register_decomposition(targets, registry=flop_registry, unsafe=True)(flop_formula)
+        return flop_formula
+
+    return register_fun
+
+@register_flop_formula(aten.mm)
 def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for matmul.
@@ -28,12 +51,14 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
+@register_flop_formula(aten.addmm)
 def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for addmm
     """
     return mm_flop(a_shape, b_shape)
 
+@register_flop_formula(aten.bmm)
 def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the bmm operation.
@@ -48,6 +73,7 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     flop = b * m * n * 2 * k
     return flop
 
+@register_flop_formula(aten.baddbmm)
 def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the baddbmm operation.
@@ -85,6 +111,7 @@ def conv_flop_count(
     flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
     return flop
 
+@register_flop_formula([aten.convolution, aten._convolution])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for convolution.
@@ -94,6 +121,7 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
 def transpose_shape(shape):
     return [shape[1], shape[0]] + list(shape[2:])
 
+@register_flop_formula(aten.convolution_backward)
 def conv_backward_flop(
         grad_out_shape,
         x_shape,
@@ -135,7 +163,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
     return total_flops
 
 
-
+@register_flop_formula([aten._scaled_dot_product_efficient_attention, aten._scaled_dot_product_flash_attention])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention.
@@ -171,13 +199,14 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     return total_flops
 
 
+@register_flop_formula([aten._scaled_dot_product_efficient_attention_backward, aten._scaled_dot_product_flash_attention_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention backward.
     """
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
 
-flop_mapping = {
+flop_registry = {
     aten.mm: mm_flop,
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
@@ -214,12 +243,29 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
+def convert_to_percent_str(num, denom):
+    if denom == 0:
+        return "0%"
+    return f"{num / denom:.2%}"
+
+def _pytreeify_preserve_structure(f):
+    @wraps(f)
+    def nf(args):
+        flat_args, spec = tree_flatten(args)
+        out = f(*flat_args)
+        return tree_unflatten(out, spec)
+
+    return nf
+
+
 class FlopCounterMode(TorchDispatchMode):
     """
     ``FlopCounterMode`` is a context manager that counts the number of
     flops within its context. It does this using a ``TorchDispatchMode``.
 
-    It also supports hierarchical output by passing a module (or list of modules) to FlopCounterMode on construction.
+    It also supports hierarchical output by passing a module (or list of
+    modules) to FlopCounterMode on construction. If you do not need hierarchical
+    output, you do not need to use it with a module.
 
     Example usage
 
@@ -248,7 +294,10 @@ class FlopCounterMode(TorchDispatchMode):
         self.mods = mods
         # Keys will include the modules in `mods` and their submodules
         self._module_to_forward_hook_handles: Dict[nn.Module, _ForwardHookHandles] = {}
-        self.flop_mapping = {**flop_mapping, **custom_mapping}
+        self.flop_registry = {
+            **flop_registry,
+            **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
+        }
 
     def _register_forward_hooks(self):
         if self.mods is None:
@@ -260,6 +309,7 @@ class FlopCounterMode(TorchDispatchMode):
                     name = prefix
                 else:
                     name = ".".join([prefix, name])
+
                 forward_pre_hook_handle = module.register_forward_pre_hook(self._enter_module(name))
                 forward_hook_handle = module.register_forward_hook(self._exit_module(name))
                 self._module_to_forward_hook_handles[module] = _ForwardHookHandles(
@@ -274,16 +324,15 @@ class FlopCounterMode(TorchDispatchMode):
 
     def _enter_module(self, name):
         def f(module, inputs):
-            inputs = normalize_tuple(inputs)
-            out = self._create_pre_module(name)(*inputs)
+            out = _pytreeify_preserve_structure(self._create_pre_module(name))(inputs)
             return out
 
         return f
 
     def _exit_module(self, name):
         def f(module, inputs, outputs):
-            outputs = normalize_tuple(outputs)
-            return self._create_post_module(name)(*outputs)
+            outputs = _pytreeify_preserve_structure(self._create_post_module(name))(outputs)
+            return outputs
         return f
 
     def _create_post_module(self, name):
@@ -293,8 +342,6 @@ class FlopCounterMode(TorchDispatchMode):
                 assert(self.parents[-1] == name)
                 self.parents.pop()
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
-                if len(args) == 1:
-                    return args[0]
                 return args
 
             @staticmethod
@@ -310,8 +357,6 @@ class FlopCounterMode(TorchDispatchMode):
             def forward(ctx, *args):
                 self.parents.append(name)
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
-                if len(args) == 1:
-                    return args[0]
                 return args
 
             @staticmethod
@@ -361,13 +406,13 @@ class FlopCounterMode(TorchDispatchMode):
             values.append([
                 padding + mod_name,
                 convert_num_with_suffix(total_flops, global_suffix),
-                f"{total_flops / global_flops * 100:.2f}%"
+                convert_to_percent_str(total_flops, global_flops)
             ])
             for k, v in self.flop_counts[mod_name].items():
                 values.append([
                     padding + " - " + str(k),
                     convert_num_with_suffix(v, global_suffix),
-                    f"{v / global_flops * 100:.2f}%"
+                    convert_to_percent_str(v, global_flops)
                 ])
             return values
 
@@ -412,10 +457,9 @@ class FlopCounterMode(TorchDispatchMode):
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
         func_packet = func._overloadpacket
-        if func_packet in self.flop_mapping:
-            flop_count_func = self.flop_mapping[func_packet]
-            args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
-            flop_count = flop_count_func(*args, **kwargs, out_shape=out_shape)  # type: ignore[operator]
+        if func_packet in self.flop_registry:
+            flop_count_func = self.flop_registry[func_packet]
+            flop_count = flop_count_func(*args, **kwargs, out=out)  # type: ignore[operator]
             for par in self.parents:
                 self.flop_counts[par][func_packet] += flop_count
 

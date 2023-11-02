@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import functools
 
 import torch
 import torch._dynamo
@@ -9,10 +10,19 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    PrepareModuleInput,
+    RowwiseParallel,
+)
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
@@ -29,6 +39,27 @@ class SimpleModel(nn.Module):
 
     def forward(self, input):
         return self.mlp_1(self.mlp_0(input))
+
+
+def extract_graph(fx_g, _, graph_cell):
+    graph_cell[0] = fx_g
+    return fx_g
+
+
+# Make a custom compiler that runs aot autograd but extracts the fw graph
+fw_graph_cell = [None]
+bw_graph_cell = [None]
+fw_compiler = functools.partial(extract_graph, graph_cell=fw_graph_cell)
+bw_compiler = functools.partial(extract_graph, graph_cell=bw_graph_cell)
+
+from functorch.compile import min_cut_rematerialization_partition
+from torch._dynamo.backends.common import aot_autograd
+
+aot_eager_graph = aot_autograd(
+    fw_compiler=fw_compiler,
+    bw_compiler=bw_compiler,
+    partition_fn=min_cut_rematerialization_partition,
+)
 
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
@@ -61,7 +92,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -75,7 +106,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = DTensor.from_local(torch.rand(1), mesh, [Shard(0)], run_check=False)
         ref = fn(x)
 
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -100,7 +131,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -113,7 +144,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         ref = from_local_kwargs_fn(x)
         opt_kwargs_fn = torch.compile(
-            from_local_kwargs_fn, backend="eager", fullgraph=True
+            from_local_kwargs_fn, backend="aot_eager", fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
@@ -129,7 +160,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -143,7 +174,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         ref = redistribute_kwargs_fn(x)
         opt_kwargs_fn = torch.compile(
-            redistribute_kwargs_fn, backend="eager", fullgraph=True
+            redistribute_kwargs_fn, backend="aot_eager", fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
@@ -155,14 +186,43 @@ class TestDTensorCompileE2E(DTensorTestBase):
         return 4
 
     @with_comms
-    def test_tp_compile_fullgraph(self):
+    @parametrize("is_seq_parallel", [True, False])
+    def test_tp_compile_fullgraph(self, is_seq_parallel):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        model = MLPModule(self.device_type)
-        model = parallelize_module(model, mesh, PairwiseParallel())
+        model = SimpleModel(self.device_type)
+        module_prepare_input = (
+            PrepareModuleInput()
+            if is_seq_parallel
+            else PrepareModuleInput(input_layouts=Replicate())
+        )
+        no_input_prepare_colwise_style = ColwiseParallel(input_layouts=None)
+        colwise_style = (
+            ColwiseParallel(input_layouts=Shard(0))
+            if is_seq_parallel
+            else ColwiseParallel()
+        )
+        rowwise_style = (
+            RowwiseParallel(output_layouts=Shard(0))
+            if is_seq_parallel
+            else RowwiseParallel()
+        )
+        model = parallelize_module(
+            model,
+            mesh,
+            parallelize_plan={
+                "mlp_0": module_prepare_input,
+                "mlp_0.net1": no_input_prepare_colwise_style,
+                "mlp_0.net2": rowwise_style,
+                "mlp_1.net1": colwise_style,
+                "mlp_1.net2": rowwise_style,
+            },
+        )
+        rng_seed = self.rank if is_seq_parallel else 0
+        torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
-        compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
+        compiled_mod = torch.compile(model, backend="aot_eager", fullgraph=True)
         compiled_out = compiled_mod(inp)
         self.assertEqual(compiled_out, out)
 
@@ -183,15 +243,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
         fsdp_pg = twod_mesh.get_dim_groups()[0]
 
         inp = torch.rand(20, 10, device=self.device_type)
-        tp_model = parallelize_module(
-            model, twod_mesh, PairwiseParallel(), tp_mesh_dim=1
-        )
+        parallelize_plan = {
+            "mlp_0.net1": ColwiseParallel(),
+            "mlp_0.net2": RowwiseParallel(),
+            "mlp_1.net1": ColwiseParallel(),
+            "mlp_1.net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, twod_mesh, parallelize_plan, tp_mesh_dim=1)
         eager_2d = FSDP(
             tp_model, process_group=fsdp_pg, device_id=self.rank, use_orig_params=True
         )
         out = eager_2d(inp)
         tp_model2 = parallelize_module(
-            model_copy, twod_mesh, PairwiseParallel(), tp_mesh_dim=1
+            model_copy, twod_mesh, parallelize_plan, tp_mesh_dim=1
         )
         fsdp_2d = FSDP(
             tp_model2,
@@ -201,11 +265,46 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
 
         # TODO: once aot autograd support is ready we can just use default backend
-        compiled_2d = torch.compile(fsdp_2d, backend="eager")
+        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager")
         compiled_output = compiled_2d(inp)
 
         self.assertEqual(out, compiled_output)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_compile_dtensor_redistribute_backward(self):
+        mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
+        #            device_type="cuda",
+        #            mesh=torch.arange(0, self.world_size).view(data_parallel_size, -1),
+
+        def fn(x, y):
+            dt = DTensor.from_local(x.reshape(2, 4), mesh, [Shard(0)], run_check=False)
+            dt2 = DTensor.from_local(y.reshape(4, 2), mesh, [Shard(1)], run_check=False)
+            dt_out = torch.matmul(dt, dt2)
+            dt_out_redistribute = dt_out.redistribute(mesh, [Replicate()])
+            return dt_out.to_local()
+
+        opt_fn = torch.compile(fn, backend=aot_eager_graph, fullgraph=True)
+
+        x_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        y_ref = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        ref = fn(x_ref, y_ref)
+
+        x = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        y = torch.arange(8, requires_grad=True, dtype=torch.float32)
+        res = opt_fn(x, y)
+
+        self.assertEqual(res, ref)
+
+        # Now run and assert the backward + gradients
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(x_ref.grad, x.grad)
+        self.assertEqual(y_ref.grad, y.grad)
+
+
+instantiate_parametrized_tests(TestDTensorCompileE2E)
 
 if __name__ == "__main__":
     run_tests()

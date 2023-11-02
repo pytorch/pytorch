@@ -1668,7 +1668,7 @@ class TestUtilityFuns(_BaseTestCase):
         self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_fuse_resnet18(self):
-        model = torchvision.models.resnet18(pretrained=False)
+        model = torchvision.models.resnet18(weights=None)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         graph, _, __ = self._model_to_graph(
             model,

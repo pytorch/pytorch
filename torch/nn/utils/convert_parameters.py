@@ -3,10 +3,10 @@ from typing import Iterable, Optional
 
 
 def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:
-    r"""Convert parameters to one vector
+    r"""Flatten an iterable of parameters into a single vector.
 
     Args:
-        parameters (Iterable[Tensor]): an iterator of Tensors that are the
+        parameters (Iterable[Tensor]): an iterable of Tensors that are the
             parameters of a model.
 
     Returns:
@@ -25,11 +25,11 @@ def parameters_to_vector(parameters: Iterable[torch.Tensor]) -> torch.Tensor:
 
 
 def vector_to_parameters(vec: torch.Tensor, parameters: Iterable[torch.Tensor]) -> None:
-    r"""Convert one vector to the parameters
+    r"""Copy slices of a vector into an iterable of parameters.
 
     Args:
-        vec (Tensor): a single vector represents the parameters of a model.
-        parameters (Iterable[Tensor]): an iterator of Tensors that are the
+        vec (Tensor): a single vector representing the parameters of a model.
+        parameters (Iterable[Tensor]): an iterable of Tensors that are the
             parameters of a model.
     """
     # Ensure vec of type Tensor

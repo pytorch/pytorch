@@ -14,7 +14,7 @@ import sys
 import unittest
 from contextlib import closing
 
-from torch.distributed import DistNetworkError
+from torch.distributed import DistNetworkError, DistStoreError
 from torch.distributed.elastic.utils.distributed import (
     create_c10d_store,
     get_socket_with_port,
@@ -98,7 +98,7 @@ class DistributedUtilTest(TestCase):
         self.assertEqual(0, worker1.exitcode)
 
     def test_create_store_timeout_on_server(self):
-        with self.assertRaises(TimeoutError):
+        with self.assertRaises(DistStoreError):
             # use any available port (port 0) since timeout is expected
             create_c10d_store(
                 is_server=True,

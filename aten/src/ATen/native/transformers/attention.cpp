@@ -555,8 +555,13 @@ at::Tensor preprocess_mask(
     return pad_bias<mem_eff_alignment>(attn_mask);
   }
   // Check and make the tensor contiguous if needed
-  if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
+  auto needs_contig = [](const c10::SymInt& stride) {
+    return (stride % 16 != 0) || (stride == 0);
+  };
+  if (needs_contig(attn_mask.sym_stride(0)) ||
+      needs_contig(attn_mask.sym_stride(1)) ||
+      needs_contig(attn_mask.sym_stride(2)) ||
+      needs_contig(attn_mask.sym_stride(3))) {
     return attn_mask.contiguous();
   }
 
@@ -744,8 +749,8 @@ std::tuple<
     at::Tensor,
     at::Tensor,
     at::Tensor,
-    int64_t,
-    int64_t,
+    c10::SymInt,
+    c10::SymInt,
     at::Tensor,
     at::Tensor,
     at::Tensor>

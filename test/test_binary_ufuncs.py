@@ -3486,6 +3486,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
+    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):

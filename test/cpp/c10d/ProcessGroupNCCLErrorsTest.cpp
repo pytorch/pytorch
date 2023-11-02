@@ -63,8 +63,8 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       int rank,
       c10d::OpType opType,
       const char* profilingTitle,
-      const c10::optional<std::vector<at::Tensor>>& inputs =
-          c10::nullopt) override {
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
         devices, simulate_error_, rank, opType, seq_);
   }
@@ -123,8 +123,8 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       int rank,
       c10d::OpType opType,
       const char* profilingTitle,
-      const c10::optional<std::vector<at::Tensor>>& inputs =
-          c10::nullopt) override {
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {}) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
         devices, set_timedout_error_, rank, opType, seq_);
   }
@@ -224,7 +224,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   // Now run all reduce with errors.
   pg.set_timedout_error();
   work = pg.allreduce(tensors_);
-  EXPECT_THROW(work->wait(), std::runtime_error);
+  EXPECT_THROW(work->wait(), c10::DistBackendError);
 
   // Communicators might be aborted here, further operations would fail.
 }

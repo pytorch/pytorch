@@ -1201,6 +1201,32 @@ class TestIndexing(TestCase):
         self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
                                                 [6, 7, 8]])
 
+    def test_unravel_index_errors(self, device):
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor(0.5, device=device),
+                (2, 2))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'indices' to be integer"):
+            torch.unravel_index(
+                torch.tensor([], device=device),
+                (10, 3, 5))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' to be int or sequence"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                torch.tensor([1, 2, 3]))
+
+        with self.assertRaisesRegex(TypeError, r"expected 'shape' sequence to only contain ints"):
+            torch.unravel_index(
+                torch.tensor([1], device=device, dtype=torch.int64),
+                (1, 2, 2.0))
+
+        with self.assertRaisesRegex(ValueError, r"'shape' cannot have negative values, but got \(2, -3\)"):
+            torch.unravel_index(
+                torch.tensor(0, device=device),
+                (2, -3))
+
     def test_invalid_index(self, device):
         x = torch.arange(0, 16, device=device).view(4, 4)
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])

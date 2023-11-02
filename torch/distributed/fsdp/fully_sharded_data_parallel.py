@@ -99,7 +99,7 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from .wrap import ModuleWrapPolicy
+from .wrap import CustomPolicy, ModuleWrapPolicy
 
 
 __all__ = [
@@ -261,7 +261,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy]]):
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy, CustomPolicy]]):
             This specifies a policy to apply FSDP to submodules of ``module``,
             which is needed for communication and computation overlap and thus
             affects performance. If ``None``, then FSDP only applies to
@@ -411,7 +411,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
+        auto_wrap_policy: Optional[
+            Union[Callable, ModuleWrapPolicy, CustomPolicy]
+        ] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
@@ -1241,6 +1243,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         rank0_only: bool = True,
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
+        cpu_offload: bool = True,
     ) -> Dict[str, Any]:
         """
         The internal API that is used by all the optim_state_dict implementations.
@@ -1275,6 +1278,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             group=group,
             using_optim_input=using_optim_input,
             use_orig_params=use_orig_params,
+            cpu_offload=cpu_offload,
         )
 
     @staticmethod
@@ -1848,6 +1852,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             full_state_dict=state_dict_settings.state_dict_type
             == StateDictType.FULL_STATE_DICT,
             group=group,
+            cpu_offload=getattr(
+                state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
+            ),
         )
 
     @staticmethod

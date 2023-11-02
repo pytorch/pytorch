@@ -186,7 +186,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
                 concrete_args[param_name] = param_value
 
         # Merge kwargs back into args since that is the format FX graph expects.
-        merge_kwargs_step = io_adapter.MergeKwargsIntoArgsStep()
+        merge_kwargs_step = io_adapter.MergeKwargsIntoArgsInputStep()
         self.input_adapter.append_step(merge_kwargs_step)
         return _module_expansion_symbolic_trace(model, concrete_args=concrete_args)
 
@@ -220,7 +220,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         )
         graph_module = replace_get_attr_with_placeholder_pass.run()
         replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
-        append_extra_input_step = io_adapter.LiftParametersAndBuffersIntoArgsStep(
+        append_extra_input_step = io_adapter.LiftParametersAndBuffersIntoArgsInputStep(
             replaced_attrs
         )
         self.input_adapter.append_step(append_extra_input_step)
@@ -231,4 +231,18 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         # Finalize the graph editing.
         graph_module.recompile()
 
-        return graph_module
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    @_beartype.beartype
+    def pre_export_passes(
+        self,
+        options: exporter.ResolvedExportOptions,
+        original_model: Union[torch.nn.Module, Callable],
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return exporter.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )

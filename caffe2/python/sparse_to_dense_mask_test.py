@@ -150,7 +150,7 @@ class TestSparseToDenseMask(TestCase):
         expected_output = np.array([[11, -1], [-1, 12]], dtype=np.float)
         expected_presence_mask = np.array(
             [[True, False], [False, True]],
-            dtype=np.bool)
+            dtype=bool)
         self.assertEqual(output.shape, expected_output.shape)
         np.testing.assert_array_equal(output, expected_output)
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)

@@ -52,7 +52,7 @@ def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
 
     ::
 
-      from torch.distributed.elastid.rendezvous import rendezvous_handler_registry
+      from torch.distributed.elastic.rendezvous import rendezvous_handler_registry
       from torch.distributed.elastic.rendezvous.registry import get_rendezvous_handler
 
       def create_my_rdzv(params: RendezvousParameters):

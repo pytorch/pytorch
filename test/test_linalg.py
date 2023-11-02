@@ -29,7 +29,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, _get_magma_version, \
+from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -2413,7 +2413,7 @@ class TestLinalg(TestCase):
                 self.assertEqual(v.mT.matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (4, (17, 4), all_batches),
                 (4, (17, 17), all_batches),
@@ -5236,6 +5236,7 @@ class TestLinalg(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
     @skipCPUIfNoLapack
+    @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
     @onlyCPU
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
@@ -5769,6 +5770,123 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertRaisesRegex(RuntimeError,
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
+
+    def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
+        assert w.dim() == 2
+        w = w.transpose(0, 1).contiguous()
+        assert q_group_size > 1
+        assert w.shape[-1] % q_group_size == 0
+
+        to_quant = w.reshape(-1, q_group_size)
+        assert torch.isnan(to_quant).sum() == 0
+
+        max_val = to_quant.amax(dim=1, keepdim=True)
+        min_val = to_quant.amin(dim=1, keepdim=True)
+        max_int = 2 ** n_bit - 1
+        min_int = 0
+        scales = (max_val - min_val).clamp(min=1e-6) / max_int
+        assert torch.isnan(scales).sum() == 0
+
+        zeros = min_val + scales * (2 ** (n_bit - 1))
+        assert torch.isnan(zeros).sum() == 0
+
+        out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
+        assert torch.isnan(out).sum() == 0
+
+        out = out.to(dtype=torch.int32).reshape(w.shape)
+
+        # Scales and zeros for the same q-group should be contiguous, so we can
+        # load as a 32-bit word
+        scales = scales.view(w.shape[0], -1)
+        zeros = zeros.view(w.shape[0], -1)
+        scales_and_zeros = (
+            torch.cat(
+                [
+                    scales.reshape(scales.size(0), scales.size(1), 1),
+                    zeros.reshape(zeros.size(0), zeros.size(1), 1),
+                ],
+                2,
+            ).transpose(0, 1).contiguous()
+        )
+
+        return out, scales_and_zeros
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @onlyCUDA
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int4_mm(self, device, m, k, n):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int4_mm not compiled for ROCM")
+
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int4pack(b):
+            b_int32, b_scales_and_zeros = self._group_quantize_tensor(
+                b, n_bit=4, q_group_size=q_group
+            )
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32, inner_k_tiles
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        b_int4pack, b_scales_and_zeros = convert_weight_to_int4pack(b)
+        res = weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros)
+        ref = torch.mm(a, b)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @onlyCUDA
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test_compile_int4_mm(self, device, m, k, n):
+        if TEST_WITH_ROCM:
+            self.skipTest("_int4_mm not compiled for ROCM")
+
+        q_group = 32
+        inner_k_tiles = 2
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+
+        b_int32, b_scales_and_zeros = self._group_quantize_tensor(
+            b, n_bit=4, q_group_size=q_group
+        )
+
+        @torch.compile
+        def int4_mm(a, b_int32, b_scales_and_zeros):
+            b_int4pack = torch._convert_weight_to_int4pack(
+                b_int32, inner_k_tiles
+            )
+            return torch._weight_int4pack_mm(
+                a, b_int4pack, q_group, b_scales_and_zeros
+            )
+
+        res = int4_mm(a, b_int32, b_scales_and_zeros)
+        ref = torch.mm(a, b)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
 
     @slowTest
     @onlyNativeDeviceTypes
@@ -6329,6 +6447,29 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # check 1x1 matrices
         x = torch.randn(3, 3, 1, 1)
         self.assertEqual(expm(x), x.exp())
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_linalg_matrix_exp_perverse_nan_values(self, device, dtype):
+        expm = torch.linalg.matrix_exp
+
+        def with_nan(x):
+            x[0, 0, 0] = torch.nan
+            return x
+
+        # Check small batches
+        x = with_nan(torch.randn(1, 1, 1))
+        self.assertTrue(torch.isnan(expm(x)).any())
+        x = with_nan(torch.randn(1, 2, 2))
+        for v in [1, 2, 3, 4, 5, 6, 7, 8, 9, 100, 1000]:
+            self.assertTrue(torch.isnan(expm(x / v)).any())
+
+        # Check large batches
+        x = with_nan(torch.randn(2, 2, 2))
+        self.assertTrue(torch.isnan(expm(x)).any())
+        x = with_nan(torch.randn(4096, 2, 2))
+        self.assertTrue(torch.isnan(expm(x)).any())
 
     @slowTest
     @skipCUDAIfNoMagma
@@ -7274,7 +7415,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
 
         all_batches = [(), (1,), (3,), (2, 3)]
-        for actual_rank, size, all_batches in [
+        for actual_rank, size, all_batches in [  # noqa: B020
                 (2, (17, 4), all_batches),
                 (2, (100, 4), all_batches),
                 (6, (100, 40), all_batches),
@@ -7593,6 +7734,18 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         b = torch.ones(300)
         check_correctness(torch.dot, torch.bfloat16, a, b)
         check_correctness(torch.dot, torch.half, a, b)
+
+    @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 1e-4})
+    def test_1_sized_with_0_strided(self, device, dtype):
+        a = make_tensor((8, 1, 64), dtype=dtype, device=device)
+        a_strided = torch.as_strided(a, size=[8, 1, 64], stride=[64, 0, 1])
+        b = make_tensor((8, 64, 512), dtype=dtype, device=device)
+        b_strided = torch.as_strided(b, size=[8, 64, 512], stride=[64, 1, 512])
+        res = torch.bmm(a_strided, b_strided)
+        expect = torch.from_numpy(
+            a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
+        self.assertEqual(expect, res)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

@@ -596,7 +596,7 @@ class TestBaseStructuredSparsifier(TestCase):
         # Conv2d with Activation and no Bias
         configs, shapes = [], []
 
-        # conv2d(no bias) -> activatation -> conv2d(no bias)
+        # conv2d(no bias) -> activation -> conv2d(no bias)
         configs.append(
             [
                 {"tensor_fqn": "seq.4.weight"},
@@ -604,7 +604,7 @@ class TestBaseStructuredSparsifier(TestCase):
         )
         shapes.append((1, 52, 18, 18))
 
-        # conv2d(bias) -> activatation -> conv2d(bias)
+        # conv2d(bias) -> activation -> conv2d(bias)
         configs.append(
             [
                 {"tensor_fqn": "seq.0.weight"},

@@ -20,6 +20,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -994,6 +995,26 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   return at::stack(grads_tensors, dim);
 }
 
+Tensor unbind_backward_nested(
+    const variable_list& grads,
+    const Tensor& nt_sizes,
+    int64_t dim,
+    const at::TensorOptions& options) {
+  std::vector<Tensor> grads_tensors;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_tensors.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto component_size = nt_sizes[i].contiguous();
+      const c10::IntArrayRef grad_size(
+          component_size.data_ptr<int64_t>(), component_size.size(0));
+      grads_tensors.push_back(at::zeros(grad_size, options));
+    }
+  }
+
+  return at::_nested_tensor_from_tensor_list(grads_tensors);
+}
+
 Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   auto result = self;
 
@@ -1253,12 +1274,12 @@ Tensor convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups) {
+    const c10::SymInt& groups) {
   auto bias_t_opt =
       bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
@@ -1291,12 +1312,12 @@ Tensor _convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
@@ -2095,8 +2116,35 @@ Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    const Tensor& self) {
-  return not_implemented("aten::split_with_sizes");
+    const Tensor& nt_sizes,
+    const at::TensorOptions& options) {
+  // add 1 to account for batch dim
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  // it's possible some of the grads are not defined (represents tensors of all
+  // 0s). Since at::cat can't handle those, let's define them
+  std::vector<Tensor> grads_all_defined;
+  for (int64_t i : c10::irange(static_cast<int64_t>(grads.size()))) {
+    if (grads[i].defined()) {
+      grads_all_defined.push_back(static_cast<Tensor>(grads[i]));
+    } else {
+      const auto& length = split_sizes[i].expect_int();
+      auto nt_split_size = nt_sizes.clone();
+      auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
+      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+        // subtract 1 to account for batch dim
+        nt_split_size_ptr
+            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+      }
+      Tensor zeros_buffer = at::zeros(
+          {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
+          options);
+      auto nt_split_grad = at::native::wrap_buffer(zeros_buffer, nt_split_size);
+      grads_all_defined.push_back(nt_split_grad);
+    }
+  }
+
+  auto ret = at::cat(grads_all_defined, dim);
+  return ret;
 }
 
 Tensor split_backward(
@@ -6622,30 +6670,31 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    at::IntArrayRef padding,
-    at::IntArrayRef output_padding,
-    at::IntArrayRef stride,
-    at::IntArrayRef dilation,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef output_padding,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef dilation,
     bool transposed,
-    int64_t groups,
+    c10::SymInt groups,
     ::std::array<bool, 2> output_mask) {
   if (!grad_output.defined()) {
     return std::tuple<Tensor, Tensor>();
   }
 
   // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
-      grad_output,
-      self,
-      weight,
-      c10::nullopt,
-      stride,
-      padding,
-      dilation,
-      transposed,
-      output_padding,
-      groups,
-      {output_mask[0], output_mask[1], false});
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs =
+      at::convolution_backward_symint(
+          grad_output,
+          self,
+          weight,
+          c10::nullopt,
+          stride,
+          padding,
+          dilation,
+          transposed,
+          output_padding,
+          std::move(groups),
+          {output_mask[0], output_mask[1], false});
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;

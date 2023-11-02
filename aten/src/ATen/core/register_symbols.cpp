@@ -1,22 +1,24 @@
 // aten_interned_strings.h includes the names of all operators
 #undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/interned_strings_class.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/interned_strings_class.h>
 
 namespace c10 {
 
 namespace {
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-const-or-ref-data-members)
 struct Entry {
   const char* const namespace_;
   const char* const unqual_name;
   const Symbol sym;
   const Symbol ns_sym;
 };
+// NOLINTEND(cppcoreguidelines-avoid-const-or-ref-data-members)
 
 std::string qual_name_for_entry(const Entry& entry) {
-  const char *const sep = "::";
+  const char* const sep = "::";
   const auto namespace_len = strlen(entry.namespace_);
   const auto sep_len = strlen(sep);
   const auto unqual_name_len = strlen(entry.unqual_name);
@@ -58,7 +60,7 @@ InternedStrings::InternedStrings()
     auto qual_name = qual_name_for_entry(entry);
     string_to_sym_[qual_name] = entry.sym;
     sym_to_info_[entry.sym] = {
-      entry.ns_sym, std::move(qual_name), entry.unqual_name};
+        entry.ns_sym, std::move(qual_name), entry.unqual_name};
   }
 }
 

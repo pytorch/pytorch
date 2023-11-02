@@ -237,7 +237,7 @@ struct unroll {
 // all tensors are contiguous, that is: stride == sizeof(type) for all tensors
 // Note:
 // Functions in vectorized policy does not do boundary check. It assumes the whole block
-// has its job to do. So the reminders should be handled by the the caller manually.
+// has its job to do. So the reminders should be handled by the caller manually.
 template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 

@@ -10,7 +10,7 @@ c10::optional<GeneratorFuncType>& GetGeneratorPrivate() {
   return generator_privateuse1;
 }
 
-_GeneratorRegister::_GeneratorRegister(GeneratorFuncType func) {
+_GeneratorRegister::_GeneratorRegister(const GeneratorFuncType& func) {
   std::lock_guard<std::mutex> lock(_generator_mutex_lock);
   TORCH_CHECK(
       !GetGeneratorPrivate().has_value(),

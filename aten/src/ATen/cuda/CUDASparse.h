@@ -1,6 +1,10 @@
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
+#if defined(USE_ROCM)
+#include <hipsparse/hipsparse-version.h>
+#define HIPSPARSE_VERSION ((hipsparseVersionMajor*100000) + (hipsparseVersionMinor*100) + hipsparseVersionPatch)
+#endif
 
 // cuSparse Generic API added in CUDA 10.1
 // Windows support added in CUDA 11.0
@@ -25,19 +29,36 @@
 #define AT_USE_CUSPARSE_CONST_DESCRIPTORS() 0
 #endif
 
+#if defined(USE_ROCM)
+
+// hipSparse const API added in v2.4.0
+#if HIPSPARSE_VERSION >= 200400
+#define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 1
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#define AT_USE_HIPSPARSE_GENERIC_API() 1
+#else
+#define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 0
+
 // hipSparse Generic API ROCm 5.2
-#if defined(USE_ROCM) && ROCM_VERSION >= 50200
+#if ROCM_VERSION >= 50200
 #define AT_USE_HIPSPARSE_GENERIC_52_API() 1
 #else
 #define AT_USE_HIPSPARSE_GENERIC_52_API() 0
 #endif
 
 // hipSparse Generic API ROCm 5.1
-#if defined(USE_ROCM) && ROCM_VERSION >= 50100
+#if ROCM_VERSION >= 50100
 #define AT_USE_HIPSPARSE_GENERIC_API() 1
 #else
 #define AT_USE_HIPSPARSE_GENERIC_API() 0
 #endif
+
+#endif // HIPSPARSE_VERSION >= 200400
+#else // USE_ROCM
+#define AT_USE_HIPSPARSE_CONST_DESCRIPTORS() 0
+#define AT_USE_HIPSPARSE_GENERIC_52_API() 0
+#define AT_USE_HIPSPARSE_GENERIC_API() 0
+#endif // USE_ROCM
 
 // cuSparse Generic API spsv function was added in CUDA 11.3.0
 #if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION >= 11500)

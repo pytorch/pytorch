@@ -841,6 +841,9 @@ class OpInfo:
     # whether the op supports sparse bsc inputs, defaults to False
     supports_sparse_bsc: bool = None
 
+    # whether the op promotes integer inputs to float
+    promotes_int_to_float: bool = False
+
     # the following metadata relates to complex support and is checked in test_ops.py
 
     test_conjugated_samples: bool = True
@@ -1302,21 +1305,18 @@ class OpInfo:
         return result
 
     def supported_dtypes(self, device_type):
-        if device_type == "cpu":
-            return self.dtypes
+        device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
-        else:
-            return self.dtypes
+        return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
             return set()
 
+        device_type = torch.device(device_type).type
         backward_dtypes = None
-        if device_type == "cpu":
-            backward_dtypes = self.backward_dtypes
-        elif device_type == "cuda":
+        if device_type == "cuda":
             backward_dtypes = (
                 self.backward_dtypesIfROCM
                 if TEST_WITH_ROCM
@@ -1330,7 +1330,7 @@ class OpInfo:
         )
         return set(allowed_backward_dtypes).intersection(backward_dtypes)
 
-    def supports_dtype(self, dtype, device_type):
+    def supports_dtype(self, dtype, device_type) -> bool:
         return dtype in self.supported_dtypes(device_type)
 
     @property
@@ -1499,12 +1499,11 @@ class ReductionOpInfo(OpInfo):
         # Override OpInfo defaults and call base class __init__
         kwargs.setdefault("inplace_variant", None)
         kwargs.setdefault("sample_inputs_func", sample_inputs_func)
-        super().__init__(name, **kwargs)
+        super().__init__(name, promotes_int_to_float=promotes_int_to_float, **kwargs)
 
         self.identity = identity
         self.nan_policy = nan_policy
         self.supports_multiple_dims = supports_multiple_dims
-        self.promotes_int_to_float = promotes_int_to_float
         self.promotes_int_to_int64 = promotes_int_to_int64
         self.complex_to_real = complex_to_real
         self.result_dtype = result_dtype
@@ -2061,7 +2060,6 @@ class BinaryUfuncInfo(OpInfo):
         error_inputs_func=None,
         lhs_make_tensor_kwargs=None,
         rhs_make_tensor_kwargs=None,
-        promotes_int_to_float=False,  # Set to true if the op promotes integer inputs to float
         always_returns_bool=False,  # Set to true if the op always returns bool tensors
         supports_rhs_python_scalar=True,  # Whether the operator allows Tensor x scalar inputs
         supports_one_python_scalar=False,  # Whether the operator allows scalar x tensor and tensor x scalar inputs
@@ -2098,7 +2096,6 @@ class BinaryUfuncInfo(OpInfo):
             rhs_make_tensor_kwargs = {}
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
-        self.promotes_int_to_float = promotes_int_to_float
         self.always_returns_bool = always_returns_bool
         self.supports_rhs_python_scalar = supports_rhs_python_scalar
         self.supports_one_python_scalar = supports_one_python_scalar

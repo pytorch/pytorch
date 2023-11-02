@@ -14,6 +14,8 @@ from torch.distributed.tensor.parallel.style import (
     make_output_tensor,
     PairwiseParallel,
     ParallelStyle,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
     SequenceParallel,
 )
@@ -22,6 +24,8 @@ __all__ = [
     "ColwiseParallel",
     "PairwiseParallel",
     "ParallelStyle",
+    "PrepareModuleInput",
+    "PrepareModuleOutput",
     "RowwiseParallel",
     "SequenceParallel",
     "make_input_replicate_1d",

@@ -174,7 +174,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 
 // NOTE: [Computing output strides]
 // We use the following algorithm to compute output strides
-// If correctly sized output is provided, we respect its stides and don't change them
+// If correctly sized output is provided, we respect its strides and don't change them
 // Otherwise, if provided output is of incorrect size or no output is provided,
 // we try to recover permutation that was applied to the inputs
 // by sorting the strides of the inputs. Precedence is given to the inputs in the order they were added,
@@ -314,7 +314,7 @@ static TensorOptions original_options(const OperandInfo& op) {
   }
 }
 
-// Implements the the behavior of the following flags:
+// Implements the behavior of the following flags:
 //   - check_all_same_dtype_
 //   - check_all_same_device_
 //   - enforce_safe_casting_to_output_

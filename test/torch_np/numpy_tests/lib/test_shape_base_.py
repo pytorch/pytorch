@@ -5,33 +5,61 @@ import sys
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
-import torch._numpy as np
-
 from pytest import raises as assert_raises
-from torch._numpy import (
-    array_split,
-    column_stack,
-    dsplit,
-    dstack,
-    expand_dims,
-    hsplit,
-    kron,
-    put_along_axis,
-    split,
-    take_along_axis,
-    tile,
-    vsplit,
-)
 
-from torch._numpy.random import rand, randint
-
-from torch._numpy.testing import assert_, assert_array_equal, assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
+    xpassIfTorchDynamo,
 )
+
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import (
+        apply_along_axis,
+        array_split,
+        column_stack,
+        dsplit,
+        dstack,
+        expand_dims,
+        hsplit,
+        kron,
+        put_along_axis,
+        split,
+        take_along_axis,
+        tile,
+        vsplit,
+    )
+    from numpy.random import rand, randint
+
+    from numpy.testing import assert_, assert_array_equal, assert_equal
+
+else:
+    import torch._numpy as np
+    from torch._numpy import (
+        array_split,
+        column_stack,
+        dsplit,
+        dstack,
+        expand_dims,
+        hsplit,
+        kron,
+        put_along_axis,
+        split,
+        take_along_axis,
+        tile,
+        vsplit,
+    )
+    from torch._numpy.random import rand, randint
+    from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+
 
 skip = functools.partial(skipif, True)
 
@@ -126,7 +154,7 @@ class TestPutAlongAxis(TestCase):
 
             assert_equal(i_min, i_max)
 
-    @xfail  # (
+    @xpassIfTorchDynamo  # (
     # reason="RuntimeError: Expected index [1, 2, 5] to be smaller than self [3, 4, 1] apart from dimension 1")
     def test_broadcast(self):
         """Test that non-indexing dimensions are broadcast in both directions"""
@@ -136,7 +164,7 @@ class TestPutAlongAxis(TestCase):
         assert_equal(take_along_axis(a, ai, axis=1), 20)
 
 
-@xfail  # (reason="apply_along_axis not implemented")
+@xpassIfTorchDynamo  # (reason="apply_along_axis not implemented")
 class TestApplyAlongAxis(TestCase):
     def test_simple(self):
         a = np.ones((20, 10), "d")
@@ -679,6 +707,8 @@ class TestSqueeze(TestCase):
         assert_equal(res.ndim, 0)
         assert type(res) is np.ndarray
 
+    @xfailIfTorchDynamo
+    def test_basic_2(self):
         aa = np.ones((3, 1, 4, 1, 1))
         assert aa.squeeze().tensor._base is aa.tensor
 
@@ -712,7 +742,7 @@ class TestSqueeze(TestCase):
         assert_(a.flags.f_contiguous)
         assert_(b.flags.f_contiguous)
 
-    @xfail  # (reason="XXX: noop in torch, while numpy raises")
+    @xpassIfTorchDynamo  # (reason="XXX: noop in torch, while numpy raises")
     def test_squeeze_axis_handling(self):
         with assert_raises(ValueError):
             np.squeeze(np.array([[1], [2], [3]]), axis=0)
@@ -749,6 +779,7 @@ class TestKron(TestCase):
         k = np.array([[[1, 2], [3, 4]], [[2, 4], [6, 8]]])
         assert_array_equal(np.kron(a, b), k)
 
+    @skip(reason="NP_VER: fails on CI")
     @parametrize(
         "shape_a,shape_b",
         [
@@ -810,7 +841,7 @@ class TestTile(TestCase):
                 assert_equal(large, klarge)
 
 
-@xfail  # (reason="TODO: implement")
+@xpassIfTorchDynamo  # (reason="TODO: implement")
 class TestMayShareMemory(TestCase):
     def test_basic(self):
         d = np.ones((50, 60))

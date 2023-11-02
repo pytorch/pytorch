@@ -24,7 +24,7 @@ from ._normalizations import (
 def _deco_axis_expand(func):
     """
     Generically handle axis arguments in reductions.
-    axis is *always* the 2nd arg in the funciton so no need to have a look at its signature
+    axis is *always* the 2nd arg in the function so no need to have a look at its signature
     """
 
     @functools.wraps(func)

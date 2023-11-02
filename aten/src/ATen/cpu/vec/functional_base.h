@@ -6,7 +6,7 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace vec {
+namespace at::vec {
 
 // slow path
 template <typename scalar_t, typename Op>
@@ -326,4 +326,4 @@ inline void map4(
   }
 }
 
-}} // namespace at::vec
+} // namespace at::vec

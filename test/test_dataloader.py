@@ -35,7 +35,8 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS, TEST_CUDA)
+                                                  IS_MACOS, TEST_CUDA, parametrize)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 import functools
 import operator
 
@@ -108,6 +109,11 @@ JOIN_TIMEOUT = 60.0  # seconds
 
 
 supported_multiprocessing_contexts = [None] + list(torch.multiprocessing.get_all_start_methods())
+
+
+# collate_fn that returns the batch cloned; defined globally here for pickle purposes.
+def _clone_collate(b):
+    return [x.clone() for x in b]
 
 
 @unittest.skipIf(
@@ -409,6 +415,80 @@ class TestStackDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i]['a'])
             self.assertEqual(l[i], source[i]['b'])
+
+    def test_getitems(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i][0])
+            self.assertEqual(l[i], batch[i][1])
+
+        source = StackDataset(t=t, l=l)
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i]['t'])
+            self.assertEqual(l[i], batch[i]['l'])
+
+    def test_getitems_raises_index_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaises(IndexError):
+            source.__getitems__([0, 4])
+
+    def test_getitems_value_error(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items][:-1]  # return less
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+
+        with self.assertRaisesRegex(ValueError,
+                                    "Nested dataset's output size mismatch. Expected 4, got 3"):
+            source.__getitems__([0, 1, 2, 3])
 
 
 @unittest.skipIf(
@@ -2266,6 +2346,47 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
+class TestDataLoaderDeviceType(TestCase):
+    @parametrize("context", [ctx for ctx in supported_multiprocessing_contexts if ctx is not None])
+    def test_nested_tensor_multiprocessing(self, device, context):
+        # The 'fork' multiprocessing context doesn't work for CUDA so skip it
+        if 'cuda' in device and context == "fork":
+            # TODO: Skip this better in a better way when the test framework allows
+            return
+
+        dataset = [torch.nested.nested_tensor([torch.randn(5)], device=device) for _ in range(10)]
+
+        pin_memory_settings = [False]
+        if device == 'cpu' and torch.cuda.is_available():
+            pin_memory_settings.append(True)
+
+        for pin_memory in pin_memory_settings:
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                collate_fn=_clone_collate,
+                pin_memory=pin_memory,
+                multiprocessing_context=context,
+            )
+
+            for i, batch in enumerate(loader):
+                self.assertEqual(batch[0], dataset[i])
+
+        # Error case: default collate_fn doesn't currently support batches of nested tensors.
+        # Following the current semantics, we'd need to stack them, which isn't possible atm.
+        with self.assertRaisesRegex(
+                RuntimeError, "not currently supported by the default collate_fn"):
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=4,
+                multiprocessing_context=context,
+            )
+
+            next(iter(loader))
+
+
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
     Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
@@ -2771,6 +2892,9 @@ class TestConvAfterFork(TestCase):
         loader = DataLoader(ConvDataset(), num_workers=1)
         for x in loader:
             self.assertEqual(x.shape, (1, 1, 1, 23999))
+
+
+instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
 
 
 if __name__ == '__main__':

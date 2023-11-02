@@ -128,8 +128,9 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
 
-class AllGatherOptions:
+class AllgatherOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class GatherOptions:
     rootRank: int
@@ -142,6 +143,7 @@ class ScatterOptions:
 class ReduceScatterOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
 
 class BarrierOptions:
     device_ids: List[int]

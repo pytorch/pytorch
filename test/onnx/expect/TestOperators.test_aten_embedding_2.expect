@@ -6,7 +6,7 @@ graph {
     input: "emb.weight"
     input: "input_1"
     output: "onnx::Add_3"
-    name: "ATen_0"
+    name: "ATen_1"
     op_type: "ATen"
     attribute {
       name: "custom_attributes_json"
@@ -29,18 +29,18 @@ graph {
     input: "onnx::Add_3"
     input: "input_2"
     output: "onnx::Shape_4"
-    name: "Add_1"
+    name: "Add_2"
     op_type: "Add"
   }
   node {
     input: "onnx::Shape_4"
     output: "onnx::Gather_5"
-    name: "Shape_2"
+    name: "Shape_3"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_6"
-    name: "Constant_3"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -55,7 +55,7 @@ graph {
     input: "onnx::Gather_5"
     input: "onnx::Gather_6"
     output: "onnx::Unsqueeze_7"
-    name: "Gather_4"
+    name: "Gather_5"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -66,7 +66,7 @@ graph {
   node {
     input: "onnx::Unsqueeze_7"
     output: "onnx::Concat_8"
-    name: "Unsqueeze_5"
+    name: "Unsqueeze_6"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -77,7 +77,7 @@ graph {
   node {
     input: "onnx::Concat_8"
     output: "onnx::ConstantOfShape_9"
-    name: "Concat_6"
+    name: "Concat_7"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -88,7 +88,7 @@ graph {
   node {
     input: "onnx::ConstantOfShape_9"
     output: "10"
-    name: "ConstantOfShape_7"
+    name: "ConstantOfShape_8"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"

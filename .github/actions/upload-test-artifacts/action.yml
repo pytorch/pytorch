@@ -43,14 +43,14 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # Remove any previous test reports if they exist
-        rm -f usage-log-*.zip
+        rm -f logs-*.zip
         # this workflow is also run in bazel build test, but we dont generate usage reports for it
         # so check to see if the file exists first
         if [ -f 'usage_log.txt' ]; then
-            zip "usage-log-${FILE_SUFFIX}.zip" 'usage_log.txt'
+            zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt'
         fi
         if ls test/**/*.log 1> /dev/null 2>&1; then
-            zip -r "usage-log-${FILE_SUFFIX}.zip" test -i '*.log'
+            zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
         fi
 
     # Windows zip
@@ -80,7 +80,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "usage-log-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
+        7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
@@ -112,7 +112,7 @@ runs:
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: ignore
-        path: usage-log-*.zip
+        path: logs-*.zip
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
@@ -146,7 +146,7 @@ runs:
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
-        name: usage-log-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
+        name: logs-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
         if-no-files-found: ignore
         path: |

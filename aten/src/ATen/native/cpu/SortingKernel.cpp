@@ -223,7 +223,7 @@ static void topk_kernel(
   auto mode_indices_stride = indices.strides()[dim];
   auto tmp_values_stride = self.strides()[dim];
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "topk_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "topk_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       if (self.scalar_type() == ScalarType::BFloat16) {
         return topk_impl_loop<scalar_t, float>(

@@ -1,11 +1,19 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import cast, Iterable, List, Sequence, Union
+from typing import cast, Iterable, List, Sequence, Tuple, Union
 
 import torch
+from torch.distributed._tensor._collective_utils import redistribute_cost
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import DTensorSpec, Shard
+from torch.distributed._tensor.op_schema import OpStrategy
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 # convenient wrapper to register sharding propagation rules
@@ -100,3 +108,60 @@ def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
 def is_tensor_partial(spec: DTensorSpec) -> bool:
     """Return True if tensor is partial on the mesh"""
     return any(p.is_partial() for p in spec.placements)
+
+
+def infer_broadcast_dims_map(
+    common_shape: torch.Size, input_shape: torch.Size
+) -> List[int]:
+    # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
+    # this is aligned with the broadcast semantics
+    common_ndim = len(common_shape)
+    input_ndim = len(input_shape)
+    broadcast_dims_map = [-1] * common_ndim
+    for idx in range(-1, -1 - input_ndim, -1):
+        if input_shape[idx] == common_shape[idx]:
+            broadcast_dims_map[common_ndim + idx] = input_ndim + idx
+    return broadcast_dims_map
+
+
+def map_placements_after_broadcast(
+    placements: Tuple[Placement, ...],
+    shape: torch.Size,
+    broadcast_dims_map: List[int],
+) -> Tuple[Placement, ...]:
+    """
+    Map each placement based on the output shape after broadcast.
+    """
+    new_placements: List[Placement] = []
+    for placement in placements:
+        if isinstance(placement, (Replicate, _Partial)):
+            new_placements.append(placement)
+        else:
+            assert isinstance(placement, Shard)
+            shard_dim = normalize_dim(placement.dim, len(shape))
+            new_shard_dim = broadcast_dims_map[shard_dim]
+            if new_shard_dim != -1:
+                # there's a map from the common shape shard dim to
+                # the input shape shard dim before broadcasting,
+                # use that instead
+                new_placements.append(Shard(new_shard_dim))
+            else:
+                # there's no map between common shape shard dim and
+                # the input shape shard dim before broadcasting,
+                # in this case it means implicit broadcasting happen
+                # in this dim, so we can just mark it as replicate
+                # and implict broadcast will broadcast automatically
+                # to the sharded shape
+                new_placements.append(Replicate())
+
+    return tuple(new_placements)
+
+
+def generate_redistribute_costs(
+    src_strategy: OpStrategy, dst_spec: DTensorSpec
+) -> List[float]:
+    redistribute_costs: List[float] = []
+    for strat in src_strategy.strategies:
+        redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
+
+    return redistribute_costs

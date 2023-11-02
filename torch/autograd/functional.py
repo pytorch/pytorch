@@ -550,9 +550,9 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         is_outputs_tuple, outputs = output_info
         # Step 3: for each of the output tangents, split along dim 0
         jacobian_input_output = []
-        for jac, output_i in zip(outputs_before_split, outputs):
+        for jac_output_i, output_i in zip(outputs_before_split, outputs):
             jacobian_output_i_output = []
-            for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):
+            for jac, input_j in zip(jac_output_i.split(input_numels, dim=0), inputs):
                 # We need to transpose the Jacobian because in forward AD, the
                 # batch dimension represents that of the inputs
                 jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0).reshape(
@@ -758,9 +758,11 @@ def jacobian(
             # Step 3: The returned jacobian is one big tensor per input. In this step,
             # we split each Tensor by output.
             jacobian_input_output = []
-            for jac, input_i in zip(jacobians_of_flat_output, inputs):
+            for jac_input_i, input_i in zip(jacobians_of_flat_output, inputs):
                 jacobian_input_i_output = []
-                for jac, output_j in zip(jac.split(output_numels, dim=0), outputs):
+                for jac, output_j in zip(
+                    jac_input_i.split(output_numels, dim=0), outputs
+                ):
                     jacobian_input_i_output_j = jac.view(output_j.shape + input_i.shape)
                     jacobian_input_i_output.append(jacobian_input_i_output_j)
                 jacobian_input_output.append(jacobian_input_i_output)

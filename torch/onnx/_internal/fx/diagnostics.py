@@ -253,7 +253,7 @@ class UnsupportedFxNodeDiagnostic(Diagnostic):
         super().__post_init__()
         # NOTE: This is a hack to make sure that the additional fields must be set and
         # not None. Ideally they should not be set as optional. But this is a known
-        # limiation with `dataclasses`. Resolvable in Python 3.10 with `kw_only=True`.
+        # limitation with `dataclasses`. Resolvable in Python 3.10 with `kw_only=True`.
         # https://stackoverflow.com/questions/69711886/python-dataclasses-inheritance-and-default-values
         if self.unsupported_fx_node is None:
             raise ValueError("unsupported_fx_node must be specified.")

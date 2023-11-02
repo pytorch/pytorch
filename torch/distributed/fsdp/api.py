@@ -364,7 +364,6 @@ class OptimStateDictConfig:
             enabled). (Default: ``True``)
     """
 
-    # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
 
 

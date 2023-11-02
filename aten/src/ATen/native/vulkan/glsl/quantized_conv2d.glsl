@@ -135,7 +135,7 @@ void main() {
         //   | x |              | A0 | A1 | A2 | A3 |
         //   +---+              +----+----+----+----+
         //
-        // In the uKernel graphic, cells sharing the the same letter are from
+        // In the uKernel graphic, cells sharing the same letter are from
         // the same batch/output channel index, and the number denotes a unique
         // channel index. To calculate the output texel, the following
         // calculation is performed:

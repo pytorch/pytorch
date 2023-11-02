@@ -18,7 +18,7 @@ import transformers  # type: ignore[import]
 from torch import nn
 
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import (
     fx_symbolic_graph_extractor,
     patcher,
@@ -261,7 +261,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # So we are explicitly calling `model.eval()` for any model that contains
         # batch norm.
         # Ref: https://github.com/pytorch/pytorch/issues/99662#issuecomment-1528178221
-        model = torchvision.models.resnet18(pretrained=False).eval()
+        model = torchvision.models.resnet18(weights=None).eval()
         dummy_input = torch.randn(1, 3, 224, 224)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
@@ -276,7 +276,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         # TODO(bowbao): see Note [training vs eval in dynamo_export]
-        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False).eval()
+        model = torchvision.models.shufflenet_v2_x0_5(weights=None).eval()
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=False)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=False)
 
@@ -684,9 +684,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     dynamic_shapes=self.dynamic_shapes,
                     op_level_debug=self.op_level_debug,
                 )
-                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
-                    options
-                )
+                export_options = exporter.ResolvedExportOptions(options)
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
@@ -813,6 +811,19 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_pytorch_only_extra_kwargs,
+        )
+
+    def test_exported_program_as_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        # TODO: Support dynamic shape
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
 

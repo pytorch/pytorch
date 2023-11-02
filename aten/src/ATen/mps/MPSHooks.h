@@ -7,7 +7,7 @@
 #include <ATen/mps/MPSEvent.h>
 #include <c10/util/Optional.h>
 
-namespace at { namespace mps {
+namespace at::mps {
 
 // The real implementation of MPSHooksInterface
 struct MPSHooks : public at::MPSHooksInterface {
@@ -48,4 +48,4 @@ struct MPSHooks : public at::MPSHooksInterface {
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const override;
 };
 
-}} // at::mps
+} // namespace at::mps

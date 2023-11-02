@@ -435,9 +435,9 @@ function(torch_compile_options libname)
     list(APPEND private_compile_options
       -Wall
       -Wextra
+      -Wdeprecated
       -Wno-unused-parameter
       -Wno-unused-function
-      -Wno-unused-result
       -Wno-missing-field-initializers
       -Wno-unknown-pragmas
       -Wno-type-limits
@@ -445,14 +445,8 @@ function(torch_compile_options libname)
       -Wno-unknown-pragmas
       -Wno-strict-overflow
       -Wno-strict-aliasing
-      # Clang has an unfixed bug leading to spurious missing braces
-      # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-      -Wno-missing-braces
       )
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options
-        -Wno-range-loop-analysis)
-    else()
+    if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608

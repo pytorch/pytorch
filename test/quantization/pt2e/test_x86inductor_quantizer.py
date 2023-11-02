@@ -8,6 +8,7 @@ from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
+    prepare_qat_pt2e,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -29,27 +30,39 @@ class Conv2DType(Enum):
 
 class TestHelperModules:
     class SingleConv2dModule(torch.nn.Module):
-        def __init__(self, ) -> None:
+        def __init__(self, with_bn=False) -> None:
             super().__init__()
             self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
+            self.bn = torch.nn.BatchNorm2d(6)
+            self.with_bn = with_bn
 
         def forward(self, x):
-            return self.conv(x)
+            x = self.conv(x)
+            if self.with_bn:
+                x = self.bn(x)
+            return x
 
     class Conv2dReLUModule(torch.nn.Module):
-        def __init__(self, inplace_relu: bool = False, use_bias: bool = False) -> None:
+        def __init__(self, inplace_relu: bool = False, use_bias: bool = False, with_bn=False) -> None:
             super().__init__()
             self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
             self.relu = nn.ReLU(inplace=inplace_relu)
+            self.bn = torch.nn.BatchNorm2d(6)
+            self.with_bn = with_bn
 
         def forward(self, x):
-            return self.relu(self.conv(x))
+            x = self.conv(x)
+            if self.with_bn:
+                x = self.bn(x)
+            x = self.relu(x)
+            return x
 
     class Conv2dAddModule(torch.nn.Module):
         def __init__(self,
                      inplace_add: bool = False,
                      conv2d_type: Conv2DType = Conv2DType.left,
                      use_bias: bool = False,
+                     with_bn: bool = False,
                      ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
@@ -61,15 +74,22 @@ class TestHelperModules:
             self.relu = nn.ReLU()
             self.inplace_add = inplace_add
             self.conv2d_type = conv2d_type
+            self.bn = torch.nn.BatchNorm2d(3)
+            self.with_bn = with_bn
 
         def forward(self, x):
             if self.conv2d_type == Conv2DType.left:
                 if self.inplace_add:
                     tmp = self.conv(x)
+                    if self.with_bn:
+                        tmp = self.bn(tmp)
                     tmp += self.relu(x)
                     return tmp
                 else:
-                    return self.conv(x) + self.relu(x)
+                    tmp = self.conv(x)
+                    if self.with_bn:
+                        tmp = self.bn(tmp)
+                    return tmp + self.relu(x)
             elif self.conv2d_type == Conv2DType.right:
                 if self.inplace_add:
                     tmp = self.relu(x)
@@ -91,6 +111,7 @@ class TestHelperModules:
                      conv2d_type: Conv2DType = Conv2DType.left,
                      inplace_relu: bool = False,
                      use_bias: bool = False,
+                     with_bn: bool = False,
                      ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
@@ -103,15 +124,22 @@ class TestHelperModules:
             self.inplace_add = inplace_add
             self.conv2d_type = conv2d_type
             self.relu2 = nn.ReLU(inplace=inplace_relu)
+            self.bn = torch.nn.BatchNorm2d(3)
+            self.with_bn = with_bn
 
         def forward(self, x):
             if self.conv2d_type == Conv2DType.left:
                 if self.inplace_add:
                     tmp = self.conv(x)
+                    if self.with_bn:
+                        tmp = self.bn(tmp)
                     tmp += self.relu(x)
                     return self.relu2(tmp)
                 else:
-                    return self.relu2(self.conv(x) + self.relu(x))
+                    tmp = self.conv(x)
+                    if self.with_bn:
+                        tmp = self.bn(tmp)
+                    return self.relu2(tmp + self.relu(x))
             elif self.conv2d_type == Conv2DType.right:
                 if self.inplace_add:
                     tmp = self.relu(x)
@@ -238,8 +266,9 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         quantizer,
         expected_node_occurrence,
         expected_node_list=None,
+        is_qat=False,
     ):
-        m_eager = model.eval()
+        m_eager = model.train() if is_qat else model.eval()
 
         # program capture
         m = copy.deepcopy(m_eager)
@@ -248,8 +277,9 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             example_inputs,
         )
 
-        export_model = copy.deepcopy(m)
-        m = prepare_pt2e(m, quantizer)
+        # QAT Model failed to deepcopy
+        export_model = m if is_qat else copy.deepcopy(m)
+        m = prepare_qat_pt2e(m, quantizer) if is_qat else prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
@@ -270,7 +300,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
 @skipIfNoDynamoSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
-    def test_conv2d_with_quantizer_api(self):
+    def test_conv2d(self):
         """
         Test pattern of single conv2d with X86InductorQuantizer.
         """
@@ -304,7 +334,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             )
 
     @skipIfNoX86
-    def test_conv2d_unary_with_quantizer_api(self):
+    def test_conv2d_unary(self):
         """
         Test pattern of conv2d with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
         Currently, only relu as unary post op is supported.
@@ -343,7 +373,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_binary_with_quantizer_api(self):
+    def test_conv2d_binary(self):
         """
         Test pattern of conv2d with binary post ops (such as add) with X86InductorQuantizer.
         Currently, only add as binary post op is supported.
@@ -397,7 +427,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_binary_unary_with_quantizer_api(self):
+    def test_conv2d_binary_unary(self):
         """
         Test pattern of conv2d with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
         Currently, only add as binary post op and relu as unary post op are supported.
@@ -453,7 +483,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
     @skipIfNoX86
-    def test_conv2d_serials_binary_unary_with_quantizer_api(self):
+    def test_conv2d_serials_binary_unary(self):
         """
         Test pattern of 2 following up conv2d add relu with X86InductorQuantizer.
         """
@@ -873,3 +903,164 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
+
+    @skipIfNoX86
+    def test_qat_conv2d(self):
+        """
+        Test QAT pattern of conv2d_bn with X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"):
+            m = TestHelperModules.SingleConv2dModule(with_bn=True)
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+            )
+            node_occurrence = {
+                # one for input and weight of the conv, one for output for the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                # BN should be folded into Conv
+                torch.ops.aten._native_batch_norm_legit.default: 0,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )
+
+    @skipIfNoX86
+    def test_qat_conv2d_unary(self):
+        """
+        Test QAT pattern of conv2d_bn with unary post ops (such as relu, sigmoid) with X86InductorQuantizer.
+        Currently, only relu as unary post op is supported.
+        """
+        inplace_relu_list = [True, False]
+        with override_quantized_engine("x86"):
+            for inplace_relu in itertools.product(inplace_relu_list):
+                m = TestHelperModules.Conv2dReLUModule(inplace_relu=inplace_relu, with_bn=True)
+                example_inputs = (torch.randn(2, 3, 16, 16),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the relu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    # note: quantize op for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                    # BN should be folded into Conv
+                    torch.ops.aten._native_batch_norm_legit.default: 0,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                    is_qat=True,
+                )
+
+    @skipIfNoX86
+    def test_qat_conv2d_binary(self):
+        """
+        Test qat pattern of conv2d_bn with binary post ops (such as add) with X86InductorQuantizer.
+        Currently, only add as binary post op is supported.
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+        )
+        with override_quantized_engine("x86"):
+            for inplace_add in [True, False]:
+                m = TestHelperModules.Conv2dAddModule(inplace_add=inplace_add, with_bn=True)
+                node_occurrence = {
+                    # one for input and weight of the conv
+                    # one for output for the add
+                    # one for extra input node of add
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                    # BN should be folded into Conv
+                    torch.ops.aten._native_batch_norm_legit.default: 0,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.conv2d.default,
+                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                    is_qat=True,
+                )
+
+    @skipIfNoX86
+    def test_qat_conv2d_binary_unary(self):
+        """
+        Test QAT pattern of conv2d_bn with binary + unary post ops (such as add + relu) with X86InductorQuantizer.
+        Currently, only add as binary post op and relu as unary post op are supported.
+        """
+        example_inputs = (torch.randn(2, 3, 6, 6),)
+        quantizer = X86InductorQuantizer().set_global(
+            xiq.get_default_x86_inductor_quantization_config(is_qat=True)
+        )
+        with override_quantized_engine("x86"):
+            m = TestHelperModules.Conv2dAddReLUModule(with_bn=True)
+            node_occurrence = {
+                # one for input for conv
+                # one for output for the relu
+                # one for extra input node of add
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                # BN should be folded into Conv
+                torch.ops.aten._native_batch_norm_legit.default: 0,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.add.Tensor,
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+                is_qat=True,
+            )

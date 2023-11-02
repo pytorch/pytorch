@@ -336,21 +336,11 @@ class DTensorConverter:
         if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
-                # We cannot use distribute_tensor for bool tensors as c10d
-                # collectives does not support the dtype, we assume op with
-                # bool tensor args the same tensor so we don't need to broadcast
-                # TODO: add bool tensor dtype support in c10d collective
-                if t.dtype == torch.bool:
-                    r = DTensor(
-                        t,
-                        mesh,
-                        tuple(placements),
-                        size=t.size(),
-                        dtype=torch.bool,
-                        requires_grad=t.requires_grad,
-                        stride=t.stride()
-                    )
+                if t.ndim == 0:
+                    # scalar tensor by default will be replicated
+                    r = distribute_tensor(t, mesh, [Replicate()] * mesh.ndim)
                 else:
+                    # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(  # type: ignore[assignment]

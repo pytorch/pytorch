@@ -18,7 +18,7 @@ from typing import (
 )
 
 import torch
-from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor
+from torch import contiguous_format, Generator, inf, memory_format, strided, SymInt, Tensor
 from torch.types import (
     _bool,
     _complex,
@@ -31,7 +31,6 @@ from torch.types import (
     _size,
     Device,
     Number,
-    SymInt,
 )
 
 ${function_hints}
