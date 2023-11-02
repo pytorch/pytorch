@@ -947,6 +947,10 @@ def aot_compile(
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
     gm = _export_to_torch_ir(f, args, kwargs, constraints)
+
+    from torch._export.passes.fake_tensor_prop import FakeTensorProp
+    FakeTensorProp(gm).run()
+
     flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():
