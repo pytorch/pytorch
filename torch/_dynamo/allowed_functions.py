@@ -239,8 +239,18 @@ def _allowed_function_ids() -> Dict[int, str]:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
+                    try:
+                        if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                            obj = obj.__wrapped__
+                    except Exception:
+                        pass
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
+                    try:
+                        if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                            obj = obj.__wrapped__
+                    except Exception:
+                        pass
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -376,6 +386,26 @@ def is_allowed(obj) -> bool:
     return isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
+    )
+
+
+def is_in_graph_function(obj) -> bool:
+    if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+        obj = obj.__wrapped__
+    if isinstance(
+        obj,
+        (
+            types.FunctionType,
+            types.MethodType,
+            types.BuiltinFunctionType,
+            types.MethodDescriptorType,
+            types.WrapperDescriptorType,
+        ),
+    ):
+        return is_allowed(obj)
+    return isinstance(
+        obj,
+        (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
     )
 
 
