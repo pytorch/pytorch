@@ -4,7 +4,6 @@ import base64
 import copyreg
 import dataclasses
 import functools
-import getpass
 import hashlib
 import importlib
 import io
@@ -49,7 +48,7 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import developer_warning, is_linux
+from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
@@ -110,15 +109,6 @@ def _compile_end() -> None:
 
 
 log = logging.getLogger(__name__)
-
-
-@functools.lru_cache(None)
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
 
 
 def cpp_wrapper_cache_dir(name: str) -> str:

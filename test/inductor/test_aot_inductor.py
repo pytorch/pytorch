@@ -13,7 +13,7 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
-from torch._inductor.utils import aot_inductor_launcher
+from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
 
@@ -92,7 +92,7 @@ class AOTInductorModelRunner:
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher(so_path, device)],
                 # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(),
+                build_directory=tempfile.mkdtemp(dir=cache_dir()),
                 functions=["run", "get_call_spec"],
                 with_cuda=(device == "cuda"),
             )
@@ -245,7 +245,7 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, 10, device=self.device),
         )
-        expected_path = os.path.join(tempfile.mkdtemp(), "model.so")
+        expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
         actual_path = AOTInductorModelRunner.compile(
             model, example_inputs, options={"aot_inductor.output_path": expected_path}
         )
