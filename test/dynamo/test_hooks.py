@@ -563,6 +563,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
                 def hook(input_t):
                     input_t.mul_(input_t.grad)
+                    input_t.grad.mul_(5)
 
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
@@ -587,6 +588,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     self.assertEqual(cnts.frame_count, 1)
                     # X goes to x*2 becaue of mul_
                     self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
+                    # This test proves grad aliasing works -
+                    self.assertEqual(x.grad, b * 5)
 
 
 if __name__ == "__main__":

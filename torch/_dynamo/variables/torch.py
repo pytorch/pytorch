@@ -19,7 +19,6 @@ import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-import torch.utils._pytree as pytree
 from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
@@ -672,8 +671,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     **options,
                 )
                 args = [stacked]
-
-            flat_args, _ = pytree.tree_flatten((args, kwargs))
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
