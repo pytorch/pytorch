@@ -662,6 +662,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
                 args = [stacked]
 
+            example_value = None
+            accumulate_grad = False
+            if self.value == torch.ops.inductor.accumulate_grad_.default:
+                accumulate_grad = True
+                arg0 = args[0]  # var
+                arg1 = args[1]  # grad
+                for grapharg in tx.output.graphargs:
+                    if grapharg.source == arg0.source:
+                        var_example = grapharg.example
+                for grapharg in tx.output.graphargs:
+                    if grapharg.source == arg1.source:
+                        grad_example = grapharg.example
+                if var_example.grad is None:
+                    # Dumpster simulation time.
+                    # Why do we do this? Because if a grad started out as None, and we have n accumulate_grad_
+                    # in the graph, we will not properly update the grapharg.example. This grapharg.example is load
+                    # bearing in that in builtins.py we try to use it as a hint for what the underlying value of grad is when accessed.
+                    # This is fine in most cases, EXCEPT when something in the graph sets the grad, in our case, accumulate_grad_.
+                    # In our case, the initial None value is no longer correct.
+                    # By setting it to a dummy zeros tensor, we are guaranteed to have a valid tensor here to coerce the creation of basically
+                    # a dummy TensorVariable instead of a ConstantVariable.
+                    var_example.grad = torch.zeros_like(grad_example)
+
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.

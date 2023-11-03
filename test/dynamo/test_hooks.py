@@ -562,7 +562,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
 
                 def hook(input_t):
-                    input_t.mul_(2)
+                    input_t.mul_(input_t.grad)
 
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
@@ -582,7 +582,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                     else contextlib.nullcontext()
                 )
                 with compiled_bwd_ctx:
-                    b = torch.zeros(3, requires_grad=True)
+                    b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True)
                     x.backward(b)
                     self.assertEqual(cnts.frame_count, 1)
                     # X goes to x*2 becaue of mul_
