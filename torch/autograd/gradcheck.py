@@ -24,7 +24,8 @@ __all__ = [
 
 
 class GradcheckError(RuntimeError):
-    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`"""
+    r"""Error raised by `gradcheck` and `gradgradcheck` functions."""
+    
     pass
 
 
@@ -255,7 +256,10 @@ def _iter_tensor(x_tensor):
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
 ) -> List[Tuple[torch.Tensor, ...]]:
-    """Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
+    """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`, returning M * N Jacobians.
+    
+    Description -
+    Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
     not specified, targets are the input. Returns M * N Jacobians where N is the
     number of tensors in target that require grad and M is the number of non-integral
     outputs.
@@ -305,7 +309,7 @@ def _get_numerical_jacobian(
 
 
 def get_numerical_jacobian(fn, inputs, target=None, eps=1e-3, grad_out=1.0):
-    """Deprecated API to compute the numerical Jacobian for a given fn and its inputs.
+    """Deprecate the API for computing numerical Jacobians of a given function and its inputs.
 
     Args:
         fn: the function to compute the Jacobian for (must take inputs as a tuple)
@@ -485,12 +489,12 @@ def get_numerical_jacobian_wrt_specific_input(
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
-    to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
-    M is the number of non-integral outputs.
-    Contrary to other functions here, this function requires "inputs" to actually be used by the function.
-    The computed value is expected to be wrong if the function captures the inputs by side effect instead of
-    using the passed ones (many torch.nn tests do this).
+    """Calculate analytical Jacobian using forward mode AD for `fn(inputs)` w.r.t. `target`, with N * M Jacobians.
+    
+    Description-
+    Compute the analytical Jacobian using forward mode AD of `fn(inputs)` with respect to `target`, 
+    returning N * M Jacobians, with N as target tensors requiring grad and M as non-integral outputs. 
+    Note: This function requires "inputs" to be used directly by the function.
 
     Args:
         fn: the function to compute the jacobian for
@@ -1941,11 +1945,11 @@ def gradcheck(
     fast_mode: bool = False,
     masked: Optional[bool] = None,
 ) -> bool:
-    r"""Check gradients computed via small finite differences against analytical
-    gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
-    and with ``requires_grad=True``.
-
-    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
+    r"""Verify gradients via numerical vs. analytical comparisons with `torch.allclose`.
+    
+    Description -
+    Validate gradients by comparing numerical to analytical gradients for float or complex 
+    tensors in `inputs` with `requires_grad=True`, using `torch.allclose`.
 
     For most of the complex functions we consider for optimization purposes, no notion of
     Jacobian exists. Instead, gradcheck verifies if the numerical and analytical values of
@@ -2130,15 +2134,13 @@ def gradgradcheck(
     fast_mode: bool = False,
     masked: bool = False,
 ) -> bool:
-    r"""Check gradients of gradients computed via small finite differences
-    against analytical gradients wrt tensors in :attr:`inputs` and
-    :attr:`grad_outputs` that are of floating point or complex type and with
-    ``requires_grad=True``.
-
-    This function checks that backpropagating through the gradients computed
-    to the given :attr:`grad_outputs` are correct.
-
-    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
+    r"""Verify gradient of gradients using torch.allclose for correct backpropagation.
+    
+    Description -
+    Validate gradient of gradients by comparing numerical to analytical 
+    gradients for relevant tensors with `requires_grad=True` in 
+    `inputs` and `grad_outputs`, ensuring correctness during backpropagation, 
+    using `torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` and
