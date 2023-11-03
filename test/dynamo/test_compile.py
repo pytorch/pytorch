@@ -136,6 +136,7 @@ class ResumeAfterRegionTests(DynamoTestCase):
                     raise AssertionError()
                 except AssertionError:
                     x += 4
+                raise AssertionError()
             except AssertionError:
                 x += 5
             # Should resume at here
