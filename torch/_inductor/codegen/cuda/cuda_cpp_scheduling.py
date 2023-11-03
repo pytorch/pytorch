@@ -20,9 +20,6 @@ from ..common import IndentedBuffer
 from .cutlass_epilogue_gen import CUTLASSEVTOpNotImplementedError
 
 log = logging.getLogger(__name__)
-_cuda_epilogue_fusion_counter: int = (
-    0  # used by unit tests to verify number of fused epilogues
-)
 
 
 class CUDACPPScheduling(BaseScheduling):
