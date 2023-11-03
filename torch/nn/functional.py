@@ -1028,8 +1028,9 @@ def lp_pool2d(
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Apply a 2D power-average pooling over an input signal composed of
-    several input planes.
+    r"""
+    
+    Apply a 2D power-average pooling over an input signal composed of several input planes.
     
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -1055,8 +1056,7 @@ def lp_pool1d(
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Apply a 1D power-average pooling over an input signal composed of
-    several input planes.
+    r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
     
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
@@ -1120,8 +1120,7 @@ def adaptive_max_pool2d_with_indices(
     input: Tensor, output_size: BroadcastingList2[int],
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
-    r"""
-    adaptive_max_pool2d(input, output_size, return_indices=False).
+    r"""adaptive_max_pool2d(input, output_size, return_indices=False).
 
     Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1221,10 +1220,7 @@ Args:
 
 
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
-    r"""
-    
-    Apply a 2D adaptive average pooling over an input signal composed of
-    several input planes.
+    r"""Apply a 2D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
@@ -1239,10 +1235,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
 
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
-    r"""
-    
-    Apply a 3D adaptive average pooling over an input signal composed of
-    several input planes.
+    r"""Apply a 3D adaptive average pooling over an input signal composed of several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
 
@@ -1258,11 +1251,9 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
 
 # Activation functions
 def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
+    r"""During training, randomly zeroes some elements of the input tensor with probability :attr:`p`.
     
-    During training, randomly zeroes some of the elements of the input
-    tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution.
+    Uses samples from a Bernoulli distribution.
 
     See :class:`~torch.nn.Dropout` for details.
 
@@ -1378,7 +1369,7 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     r"""
     
     Randomly zero out entire channels (a channel is a 3D feature map.
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
