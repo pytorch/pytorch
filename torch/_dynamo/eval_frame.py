@@ -535,14 +535,14 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                 skip_reason = (
                     "traced frame already"
                     if frame.f_lasti >= first_real_inst_idx(frame.f_code)
-                    else "function is in skipfiles"
+                    else "in skipfiles"
                     if skipfiles.check(frame.f_code)
                     else "dynamo tracing is disabled"
                 )
                 log.debug(
-                    "skipping due to: %s - %s %s ",
-                    skip_reason,
+                    "skipping: %s (reason: %s, file: %s)",
                     frame.f_code.co_name,
+                    skip_reason,
                     frame.f_code.co_filename,
                 )
             return None
