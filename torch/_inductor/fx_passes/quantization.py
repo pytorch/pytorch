@@ -58,7 +58,8 @@ dequantize_per_channel_weight_pattern = CallFunction(
 )
 
 dequantize_per_channel_to_bf16_weight_pattern = _generate_pattern_with_dtype_convert(
-    dequantize_per_channel_weight_pattern
+    dequantize_per_channel_weight_pattern,
+    KeywordArg("autocast_wgt_dtype"),
 )
 
 dequantize_per_channel_clone_weight_pattern = CallFunction(
@@ -179,7 +180,10 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             aten.mul.Tensor,
                             computation_call
                             if dtype == torch.float32
-                            else _generate_pattern_with_dtype_convert(computation_call),
+                            else _generate_pattern_with_dtype_convert(
+                                computation_call,
+                                KeywordArg("autocast_output_quant_dtype"),
+                            ),
                             KeywordArg("o_inv_scale"),
                         ),
                     ),
@@ -1097,7 +1101,8 @@ def _generate_dequant_convolution_node_pattern(
         dequantize_per_tensor_activation_pattern
         if dtype == torch.float32
         else _generate_pattern_with_dtype_convert(
-            dequantize_per_tensor_activation_pattern
+            dequantize_per_tensor_activation_pattern,
+            KeywordArg("autocast_act_dtype"),
         ),
         _dequant_per_channel_pattern,
         KeywordArg("b"),
@@ -1285,7 +1290,7 @@ def _generate_dequant_linear_node_pattern(
         if dtype == torch.float32
         else _generate_pattern_with_dtype_convert(
             _dequant_per_channel_pattern,
-            KeywordArg("autocast_weight_convert_dtype"),
+            KeywordArg("autocast_wgt_dtype"),
         ),
         KeywordArg("permute_axes"),
     )
@@ -1296,7 +1301,7 @@ def _generate_dequant_linear_node_pattern(
         if dtype == torch.float32
         else _generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
-            KeywordArg("autocast_activation_convert_dtype"),
+            KeywordArg("autocast_act_dtype"),
         ),
         t_pattern,
     )
@@ -1306,7 +1311,7 @@ def _generate_dequant_linear_node_pattern(
         if dtype == torch.float32
         else _generate_pattern_with_dtype_convert(
             dequantize_per_tensor_activation_pattern,
-            KeywordArg("autocast_activation_convert_dtype"),
+            KeywordArg("autocast_act_dtype"),
         ),
         t_pattern,
     )
@@ -1327,7 +1332,8 @@ def _register_quantization_weight_pack_pass():
             dequantize_per_tensor_activation_pattern
             if dtype == torch.float32
             else _generate_pattern_with_dtype_convert(
-                dequantize_per_tensor_activation_pattern
+                dequantize_per_tensor_activation_pattern,
+                KeywordArg("autocast_act_dtype"),
             ),
             pass_number=0,
             dtype=dtype,

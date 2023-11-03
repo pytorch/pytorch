@@ -767,7 +767,7 @@ def partition_data_parallel(
     states to DTensors.
     """
     num_params_buffers = len(params_buffers)
-    flattened_states = pytree.tree_flatten(named_states)[0]
+    flattened_states = pytree.tree_leaves(named_states)
     num_states = len(flattened_states)
 
     changed = graph.graph.eliminate_dead_code()
