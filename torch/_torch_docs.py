@@ -7848,7 +7848,7 @@ sample index is drawn for a row, it cannot be drawn again for that row.
     Please keep in mind that torch.multinomial(replacement=False) actually models univariate categorical distribution instead of (multivariate) multinomial distribution. There is no such concept as sampling "without replacement" in multinomial distribution:
     
     (1) By definition of multinomial distribution, each trial is independent. Thus, we can observe any outcomes (according to p_k) at any trials. If replacement=False, then each trial is not independent (e.g., we cannot observe eye 3 after we once observe eye 3).
-    (2) By definition of multinomial distribution, n>0 and there is no constraint on n. If replacement=False, then n is constrained to n <= K.
+    (2) By definition of multinomial distribution, n > 0 and there is no constraint on n. If replacement=False, then n is constrained to n <= K.
     (3) If replacement=False, then the sample point x, [x_1, x_2, …, x_k, …, x_K], is always [1, …, 1]. In other words, regardless of the values of the parameter p, [p_1, p_2, …, p_k, …, p_K], torch.multinomial(replacement=False) always behaves in a uniform fashion as if p were [1/K, …, 1/K].
 
 Args:
