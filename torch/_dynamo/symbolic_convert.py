@@ -130,6 +130,45 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
+class SpeculationEntry:
+    def __init__(self, instruction_pointer: int):
+        self.instruction_pointer = instruction_pointer  # debug asserts only
+        self.failed = False
+        self.reason: Optional[GraphCompileReason] = None
+
+    def restart_analysis(self):
+        """
+        Start tracing of the current frame over again, and don't take this branch.
+        """
+        self.failed = True
+        raise exc.SpeculationRestartAnalysis()
+
+
+class SpeculationLog:
+    def __init__(self):
+        self.entries: List[SpeculationEntry] = []
+        self.index = 0
+
+    def restart(self):
+        self.index = 0
+
+    def next(self, instruction_pointer) -> SpeculationEntry:
+        """
+        Lookup or create a SpeculationEntry() that is shared across RestartAnalysis calls.
+
+        Args:
+            instruction_pointer: Snapshot of InstructionTranslator.instruction_pointer for debug asserts
+        """
+        if len(self.entries) == self.index:
+            self.entries.append(SpeculationEntry(instruction_pointer))
+        entry = self.entries[self.index]
+        self.index += 1
+        assert (
+            entry.instruction_pointer == instruction_pointer
+        ), "Speculation log diverged"
+        return entry
+
+
 @functools.lru_cache(None)
 def _step_logger():
     return torchdynamo_logging.get_step_logger(log)
@@ -400,7 +439,6 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
-            reason = None
             try:
                 TracingContext.set_current_loc(
                     self.f_code.co_filename, self.lineno, self.f_code.co_name
@@ -524,8 +562,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     prefix_insts: List[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
-
-    checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
+    current_speculation: Optional[SpeculationEntry]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
@@ -660,7 +697,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.log_starts_line()
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
-            self.checkpoint = inst, self.copy_graphstate()
+            self.current_speculation = self.speculate()
+            if self.current_speculation.failed:
+                return self.step_graph_break(inst)
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
@@ -714,17 +753,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
-            if self.checkpoint is None:
+            if self.current_speculation is None:
                 log.debug("empty checkpoint")
                 raise
-
             log.debug("step triggered compile", exc_info=True)
+        self.current_speculation.restart_analysis()
 
+    def step_graph_break(self, continue_inst):
         # generate code from checkpoint
         assert not self.output.output_instructions
-        assert self.checkpoint is not None
-        continue_inst, state = self.checkpoint
-        self.restore_graphstate(state)
+        assert self.current_speculation is not None
         self.output.compile_subgraph(
             self,
             partial_convert=True,
@@ -1908,6 +1946,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         finally:
             self.strict_checks_enabled = False
 
+    def speculate(self) -> SpeculationEntry:
+        return self.speculation_log.next(self.instruction_pointer)
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1921,8 +1962,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
+        speculation_log: SpeculationLog,
     ):
         super().__init__()
+        self.speculation_log = speculation_log
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -1962,7 +2005,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         self._fake_mode = output.tracing_context.fake_mode
 
-        self.checkpoint = None
+        self.current_speculation = None
         self.random_calls = []
 
         self.strict_checks_enabled = False
@@ -2003,6 +2046,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
+        speculation_log: SpeculationLog,
     ):
         _step_logger()(
             logging.INFO,
@@ -2031,6 +2075,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
             inline_depth=0,
+            speculation_log=speculation_log,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2422,6 +2467,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_code=code,
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
+            speculation_log=parent.speculation_log,
         )
         self.parent = parent
         self.symbolic_result = None
@@ -2471,7 +2517,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
-                    raise exc.RestartAnalysis()
+                    raise exc.UnspecializeRestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
