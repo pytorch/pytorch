@@ -142,7 +142,12 @@ def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
 
 
 def process_signature(line: str) -> str:
-    """Given a raw function signature, clean it up by removing the self-referential datapipe argument, default arguments of input functions, newlines, and spaces."""
+    """
+    Clean up a given raw function signature.
+
+    This includes removing the self-referential datapipe argument, default
+    arguments of input functions, newlines, and spaces.
+    """
     tokens: List[str] = split_outside_bracket(line)
     for i, token in enumerate(tokens):
         tokens[i] = token.strip(' ')

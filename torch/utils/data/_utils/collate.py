@@ -1,5 +1,6 @@
-r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers to collate samples fetched from dataset into Tensor(s).
+r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
+These methods are used to collate samples fetched from dataset into Tensor(s).
 These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 

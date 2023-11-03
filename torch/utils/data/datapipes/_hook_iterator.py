@@ -117,8 +117,9 @@ def hook_iterator(namespace):
 
     class IteratorDecorator:
         r"""
-        Wrap the iterator and modifying its `__next__` method. This decorator is applied to DataPipes of which `__iter__` method is NOT a generator function.
+        Wrap the iterator and modifying its `__next__` method.
 
+        This decorator is applied to DataPipes of which `__iter__` method is NOT a generator function.
         Those `__iter__` method commonly returns `self` but not necessarily.
         """
 
