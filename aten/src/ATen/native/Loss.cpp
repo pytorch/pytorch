@@ -10,7 +10,6 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
 #include <ATen/TensorSubclassLikeUtils.h>
-#include <ATen/ExpandUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
