@@ -16,6 +16,7 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -92,6 +93,9 @@ class elementwise_type_promotion_wrapper:
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
 
+    The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
+    not None.
+
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
     """
@@ -117,7 +121,7 @@ class elementwise_type_promotion_wrapper:
                 if x in bound.arguments.keys()
             )
 
-            flattened_type_promoting_args = tree_flatten(type_promoting_args)[0]
+            flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
             compute_dtype, result_dtype = utils.elementwise_dtypes(
                 *flattened_type_promoting_args,
                 type_promotion_kind=self.type_promotion_kind,
@@ -131,6 +135,12 @@ class elementwise_type_promotion_wrapper:
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)
+
+            # Override the return_dtype if a dtype arg is present and not None
+            if "dtype" in bound.arguments:
+                maybe_dtype = bound.arguments["dtype"]
+                if maybe_dtype:  # dtype cannot be None
+                    result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)

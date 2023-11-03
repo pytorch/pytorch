@@ -769,6 +769,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
+        "logit",
     ]
 
     @common_device_type.ops(
