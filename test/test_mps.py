@@ -508,7 +508,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_0': None,
         '__rsub__': None,
         'angle': None,
-        'bucketize': None,
         'cauchy_': None,
         'cauchy': None,
         'cholesky': None,
