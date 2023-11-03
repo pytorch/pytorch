@@ -8,6 +8,7 @@ from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, Replicate
 
+__all__ = []
 
 def _all_gather_sharded_tensor(
     sharded_tensor: ShardedTensor,
@@ -63,7 +64,7 @@ def _iterate_state_dict(
         ret = sharded_tensor_func(iter_object, pg, device)
     elif isinstance(iter_object, DTensor):
         ret = dtensor_func(iter_object, pg, device)
-    elif isinstance(iter_object, torch.Tensor):
+    elif isinstance(iter_object, (torch.Tensor, int, float, str)) or iter_object is None:
         ret = iter_object
     elif isinstance(iter_object, dict):
         ret = {
