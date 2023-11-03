@@ -3512,7 +3512,7 @@ def cosine_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean').
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
@@ -3720,7 +3720,9 @@ def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Opti
 
 
 def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
-    r"""Upsamples the input to either the given :attr:`size` or the given
+    r"""Upsample input.
+    
+    Provided tensor is upsampled to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     .. warning::
@@ -3786,6 +3788,7 @@ if upsample.__doc__:
 
 def _is_integer(x) -> bool:
     r"""Type check the input number is an integer.
+    
     Will return True for int, SymInt, Numpy integers and Tensors with integer elements.
     """
     if isinstance(x, (int, torch.SymInt)):
@@ -3823,7 +3826,9 @@ def interpolate(  # noqa: F811
     pass
 
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
-    r"""Down/up samples the input to either the given :attr:`size` or the given
+    r"""Down/up samples the input. 
+    
+    Tensor interpolated to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     The algorithm used for interpolation is determined by :attr:`mode`.
@@ -4176,7 +4181,9 @@ def grid_sample(
     padding_mode: str = "zeros",
     align_corners: Optional[bool] = None,
 ) -> Tensor:
-    r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
+    r"""grid_sample(input, grid, mode, padding_mode, align_corners).
+    
+    Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
     Currently, only spatial (4-D) and volumetric (5-D) :attr:`input` are
@@ -4317,8 +4324,7 @@ def grid_sample(
 
 
 def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = None) -> Tensor:
-    r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
-    affine matrices :attr:`theta`.
+    r"""Generate 2D or 3D flow field (sampling grid), given a batch of affine matrices :attr:`theta`.
 
     .. note::
         This function is often used in conjunction with :func:`grid_sample`
@@ -4707,7 +4713,7 @@ def triplet_margin_with_distance_loss(
 
 
 def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12, out: Optional[Tensor] = None) -> Tensor:
-    r"""Performs :math:`L_p` normalization of inputs over specified dimension.
+    r"""Perform :math:`L_p` normalization of inputs over specified dimension.
 
     For a tensor :attr:`input` of sizes :math:`(n_0, ..., n_{dim}, ..., n_k)`, each
     :math:`n_{dim}` -element vector :math:`v` along dimension :attr:`dim` is transformed as
@@ -4745,7 +4751,7 @@ def unfold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    r"""Extracts sliding local blocks from a batched input tensor.
+    r"""Extract sliding local blocks from a batched input tensor.
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are
@@ -4775,8 +4781,8 @@ def fold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    r"""Combines an array of sliding local blocks into a large containing
-    tensor.
+    r"""
+    Combine an array of sliding local blocks into a large containing tensor.
 
     .. warning::
         Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
@@ -4803,7 +4809,8 @@ def _in_projection_packed(
     b: Optional[Tensor] = None,
 ) -> List[Tensor]:
     r"""
-    Performs the in-projection step of the attention operation, using packed weights.
+    Perform the in-projection step of the attention operation, using packed weights.
+    
     Output is a triple containing projection tensors for query, key and value.
 
     Args:
@@ -4870,8 +4877,10 @@ def _in_projection(
     b_v: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
-    Performs the in-projection step of the attention operation. This is simply
-    a triple of linear projections, with shape constraints on the weights which
+    Perform the in-projection step of the attention operation.
+    
+    This is simply a triple of linear projections,
+    with shape constraints on the weights which
     ensure embedding dimension uniformity in the projected outputs.
     Output is a triple containing projection tensors for query, key and value.
 
