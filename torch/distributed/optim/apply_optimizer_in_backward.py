@@ -19,6 +19,8 @@ def _apply_optimizer_in_backward(
     register_hook: bool = True,
 ) -> None:
     """
+    Apply optimizer for each parameter after gradient accumulation.
+
     Upon ``backward()``, the optimizer specified for each parameter will fire after
     the gradient has been accumulated into the parameter.
 
@@ -97,9 +99,10 @@ def _apply_optimizer_in_backward(
 
 def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
     """
-    Return a list of in-backward optimizers applied to ``module``'s parameters. Note that these
-    optimizers are not intended to directly have their ``step`` or ``zero_grad`` methods called
-    by the user and are intended to be used for things like checkpointing.
+    Return a list of in-backward optimizers applied to ``module``'s parameters.
+    
+    Note that these optimizers are not intended to directly have their ``step`` or
+    ``zero_grad`` methods called by the user and are intended to be used for things like checkpointing.
 
     Args:
         module: (torch.nn.Module): model to retrieve in-backward optimizers for

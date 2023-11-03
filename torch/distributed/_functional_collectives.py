@@ -130,8 +130,7 @@ def wait_tensor(tensor):
 
 def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
-    Reduces the tensor data across all machines in such a way that all get
-    the final result.
+    Reduces the tensor data across all machines in such a way that all get the final result.
 
     The input tensor is left unmodified.
 
@@ -189,9 +188,7 @@ def reduce_scatter_tensor(
     tag: str = "",
 ):
     """
-    Reduces the tensor data across all machines in such a way that all get
-    the final result, then scatter the results to corresponding ranks.
-
+    Scatter the tensor data across all machine corresponding to their ranks.
 
     The input tensor is left unmodified.
     Group can be one of:
@@ -218,8 +215,7 @@ def reduce_scatter_tensor(
 
 def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TYPES, tag: str = "") -> List[torch.Tensor]:
     """
-    Reduces a list of tensors across all machines in such a way that all get
-    the final result.
+    Reduces a list of tensors across all machines in such a way that all get the final result.
 
     The all tensors in the input list are left unmodified.
 
@@ -268,8 +264,7 @@ def reduce_scatter_tensor_coalesced(
     tag: str = "",
 ) -> List[torch.Tensor]:
     """
-    Reduces a list of tensors across all machines in such a way that all get
-    the final result, then scatter the results to corresponding ranks.
+    Scatter the tensor data across all machine corresponding to their ranks.
 
     The input tensors are left unmodified.
     Group can be one of:
@@ -316,8 +311,9 @@ def all_to_all_single(
     tag: str = "",
 ) -> torch.Tensor:
     """
-    Each process splits input tensor and then scatters the split list
-    to all processes in a group. Then concatenate the received tensors from all
+    Each process splits input tensor and then scatters the split list to all processes in a group.
+
+    Then concatenate the received tensors from all
     the processes in the group and return single output tensor.
 
     Group can be one of:
@@ -341,14 +337,15 @@ def all_to_all_single(
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
-    A Tensor wrapper subclass that is used to trigger a call to wait
-    prior to first use of the underlying tensor.
+    A Tensor wrapper subclass that is used to trigger a call to wait prior to first use of the underlying tensor.
+
     Use it inside functional collective pytorch wrappers like the following:
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
         return _maybe_wrap_tensor(tensor)
     """
+
     elem: torch.Tensor
 
     __slots__ = ['elem']
@@ -389,7 +386,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return self
 
     def _get_acs_underlying_tensor(self):
-        """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
+        """Enable  _functional_collectives_impl to test if a tensor is an ACS."""
         return self.elem
 
     @classmethod

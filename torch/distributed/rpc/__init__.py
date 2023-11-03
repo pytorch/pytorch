@@ -88,6 +88,8 @@ if is_available():
         rpc_backend_options=None,
     ):
         r"""
+        Initialize RPC primitives to send and receive RPCs.
+        
         Initializes RPC primitives such as the local RPC agent
         and distributed autograd, which immediately makes the current
         process ready to send and receive RPCs.

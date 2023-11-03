@@ -1,4 +1,6 @@
 """
+DistributedOptimizer that runs locally on the workers from a list of remote parameters.
+
 :mod:`torch.distributed.optim` exposes DistributedOptimizer, which takes a list
 of remote parameters (:class:`~torch.distributed.rpc.RRef`) and runs the
 optimizer locally on the workers where the parameters live.  The distributed
