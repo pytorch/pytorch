@@ -8570,10 +8570,7 @@ class ForeachSampleInput(SampleInput):
 
     def __init__(self, *args, disable_fastpath=False, ref_args=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if ref_args:
-            self.ref_args = ref_args
-        else:
-            self.ref_args = self.args
+        self.ref_args = ref_args or self.args
         self.disable_fastpath = disable_fastpath
 
 
@@ -9092,14 +9089,15 @@ foreach_binary_op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            # Samples have complex types and inplace only works if the dtype is complex.
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
         ),
     ),
     ForeachFuncInfo(
@@ -9127,13 +9125,13 @@ foreach_binary_op_db: List[OpInfo] = [
         skips=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
         ),
     ),
     ForeachFuncInfo(
@@ -9144,22 +9142,22 @@ foreach_binary_op_db: List[OpInfo] = [
         skips=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
-                dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             # fails with div_cpu is not implemented with ComplexHalf
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
-                dtypes=(torch.float16,), device_type='cpu'),
+                         dtypes=(torch.float16,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                dtypes=(torch.float16,), device_type='cpu'),
+                         dtypes=(torch.float16,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
-                dtypes=(torch.float16,), device_type='cpu'),
+                         dtypes=(torch.float16,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                dtypes=(torch.float16,), device_type='cpu'),
+                         dtypes=(torch.float16,), device_type='cpu'),
         ),
     ),
     ForeachFuncInfo(
@@ -9317,23 +9315,13 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
-foreach_lerp_op_db: List[ForeachFuncInfo] = [
+foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
         foreach_lerp_sample_func(3, True, False),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
     ),
 ]
 
