@@ -16,6 +16,7 @@ from typing import (
     List,
     Optional,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -570,7 +571,7 @@ def load(
     )
 
 
-def register_dataclass(cls: Any) -> None:
+def register_dataclass(cls: Type[Any]) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
