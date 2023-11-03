@@ -719,7 +719,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
 
         trained_params = get_full_params(model)
-        # Ensure some training occured
+        # Ensure some training occurred
         self.assertNotEqual(initial_params, trained_params)
         # Save a copy of the state_dict
         fsd_mgr = self._get_state_dict_mgr(
