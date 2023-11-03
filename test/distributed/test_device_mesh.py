@@ -196,7 +196,7 @@ class InitDeviceMeshTest(DTensorTestBase):
     def test_raises_duplicate_mesh_dim_names(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "Each mesh_dim_name must be uqique.",
+            "Each mesh_dim_name must be unique.",
         ):
             mesh = init_device_mesh(
                 self.device_type,
