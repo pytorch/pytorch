@@ -277,6 +277,9 @@ report_all_guard_failures = False
 # [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
+# [@compile_ignored: debug] Validate that ShapeEnv's version key is updated correctly
+validate_shape_env_verison_key = False
+
 # [@compile_ignored: debug] Uses z3 for validating the guard optimizations transformations.
 translation_validation = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
