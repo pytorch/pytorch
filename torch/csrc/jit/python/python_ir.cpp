@@ -1012,7 +1012,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &StringType::get);
   py::class_<DeviceObjType, Type, DeviceObjTypePtr>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
-  py::class_<GeneratorType, Type, GeneratorTypePtr>(m, "GeneratorType")
+  // TODO(antoniojkim): Add GeneratorType to the public API once its been added
+  //                    to the public documentation
+  py::class_<GeneratorType, Type, GeneratorTypePtr>(m, "_GeneratorType")
       .def_static("get", &GeneratorType::get);
   py::class_<StreamObjType, Type, StreamObjTypePtr>(m, "StreamObjType")
       .def_static("get", &StreamObjType::get);

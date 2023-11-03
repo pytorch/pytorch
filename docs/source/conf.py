@@ -2153,7 +2153,6 @@ coverage_ignore_classes = [
     "FileCheck",
     "FloatType",
     "FunctionSchema",
-    "GeneratorType",
     "Gradient",
     "Graph",
     "GraphExecutorState",
