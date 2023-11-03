@@ -7834,7 +7834,7 @@ sample index is drawn for a row, it cannot be drawn again for that row.
        x_1 + x_2 + … + x_K = n
        
     The random variable x of multinomial distribution is a vector [x_1, x_2, …, x_k, …, x_K]. 
-    However, torch.multinomial(replacement=True) generates "outcomes of n trials" instead of random variable x that consists of "the number of trial for which the outcome falls into class k".
+    However, the output of torch.multinomial(replacement=True) is "outcomes of n trials". To convert the ouptut to random variable x that consists of "the number of trial for which the outcome falls into class k", can use a method like below:
     
     >>> p = torch.tensor([2/10, 3/10, 5/10])
     >>> n = 10
