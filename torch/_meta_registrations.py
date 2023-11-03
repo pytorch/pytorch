@@ -2124,7 +2124,7 @@ if torch._C._has_mkldnn:
         groups,
         output_scale,
         output_zero_point,
-        fp32_output,
+        output_dtype,
         attr,
         scalars,
         algorithm,
@@ -2139,7 +2139,8 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        out = x.new_empty(shape_out, dtype=(torch.float32 if fp32_output else None))
+        assert output_dtype in [torch.float32, torch.bfloat16]
+        out = x.new_empty(shape_out, dtype=output_dtype)
         out = out.to(memory_format=torch.channels_last)
         return out
 
