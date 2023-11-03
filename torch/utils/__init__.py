@@ -29,4 +29,15 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different number of slots.
     """
-    torch._C._swap(t1, t2)
+    # torch._C._swap(t1, t2)
+
+    # First move type
+    def swap_attr(name):
+        tmp = getattr(t1, name)
+        setattr(t1, name, (getattr(t2, name)))
+        setattr(t2, name, tmp)
+
+    swap_attr("__class__")
+    swap_attr("__dict__")
+
+    torch._C._swap_tensor_impl(t1, t2)

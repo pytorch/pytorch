@@ -326,6 +326,53 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* a_ = nullptr;
+  PyObject* b_ = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &a_, &b_)) {
+    return nullptr;
+  }
+
+  //// Part 1: Basic type checks
+  // Ensure we have Tensors and their c++ structs are the same size
+  TORCH_CHECK(THPVariable_Check(a_));
+  TORCH_CHECK(THPVariable_Check(b_));
+
+  THPVariable* a = reinterpret_cast<THPVariable*>(a_);
+  THPVariable* b = reinterpret_cast<THPVariable*>(b_);
+
+  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = b->cdata;
+  b->cdata = tmp;
+
+  //// Part 2: Fix weakrefs
+  // Move the lists and fix their content
+  // Note that the tp_weaklistoffset is always correct, even in the managed case
+#define GET_WR_OBJECT(obj) \
+  ((PyWeakReference**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset))
+
+  PyWeakReference* list = *GET_WR_OBJECT(a_);
+  *GET_WR_OBJECT(a_) = *GET_WR_OBJECT(b_);
+  *GET_WR_OBJECT(b_) = list;
+
+  PyWeakReference* head = *GET_WR_OBJECT(a_);
+  while (head != NULL) {
+    head->wr_object = a_;
+    head = head->wr_next;
+  }
+  head = *GET_WR_OBJECT(b_);
+  while (head != NULL) {
+    head->wr_object = b_;
+    head = head->wr_next;
+  }
+
+#undef GET_WR_OBJECT
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* a_ = nullptr;
@@ -1199,6 +1246,7 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
     {"_swap", THPModule_swap, METH_VARARGS, nullptr},
+    {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",
