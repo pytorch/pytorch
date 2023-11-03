@@ -609,7 +609,6 @@ def mps_ops_modifier(ops):
         'scatter_reducemean': None,
         'scatter_reduceprod': None,
         'scatter_reducesum': None,
-        'searchsorted': None,
         'segment_reduce': None,
         '_segment.reduce': None,
         'segment.reduce': None,
