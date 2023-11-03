@@ -943,6 +943,11 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
+        # RuntimeError: linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel()
+        # INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/aten/src/ATen/native/cuda/Indexing.cu":496,
+        # please report a bug to PyTorch. number of flattened indices did not match number of elements
+        # in the value tensor: 20 vs 40
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
         # ---------------------------------------------------------------------
     })
 
@@ -1282,6 +1287,11 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         xfail('__getitem__', ''),
         xfail('index_put', ''),
+        # RuntimeError: linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel()
+        # INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/aten/src/ATen/native/cuda/Indexing.cu":496,
+        # please report a bug to PyTorch. number of flattened indices did not match number of elements
+        # in the value tensor: 20 vs 40
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
@@ -1492,6 +1502,10 @@ class TestOperators(TestCase):
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided', 'partial_views'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
+        # RuntimeError:
+        # The expanded size of the tensor (1) must match the existing size (2) at non-singleton dimension 2.
+        # Target sizes: [2, 2, 1, 2, 5].  Tensor sizes: [2, 1, 1]
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
         xfail('bernoulli'),  # calls random op
         xfail('bfloat16'),  # required rank 4 tensor to use channels_last format
         xfail('cdist'),  # Forward AD not implemented and no decomposition

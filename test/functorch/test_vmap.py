@@ -3639,6 +3639,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
+        # RuntimeError: linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel()
+        # INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/aten/src/ATen/native/cuda/Indexing.cu":496,
+        # please report a bug to PyTorch. number of flattened indices did not match number of elements
+        # in the value tensor: 20 vs 40
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
         xfail('isin'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
