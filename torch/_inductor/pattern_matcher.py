@@ -86,7 +86,7 @@ class Match:
         if self.kwargs:
             for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
-                    raise FailedMatch(f"kwarg mismatch: {key}")
+                    raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
         self.nodes.extend(other.nodes)
         self.kwargs.update(other.kwargs)
@@ -141,7 +141,7 @@ class FailedMatch(RuntimeError):
         self.format_string = format_string
         # We want to construct error messages lazily instead of eagerly, as
         # constructing them eagerly can significantly worsen compile times.
-        if len(format_string) > 500:
+        if len(format_string) > 200:
             raise RuntimeError(
                 f"Format string too long - use lazy construction of strings instead. Format string is\n {format_string}"
             )
@@ -567,7 +567,7 @@ class ListOf(PatternExpr):
             pattern_to_node = child_ctx.filter_multi_user_patterns()
             if not child_match:
                 if not self.partial:
-                    return FailedMatch(f"list[{i}]: {child_match}")
+                    return FailedMatch("list[{}]: {}", i, child_match)
                 continue
             matched = True
             m.extend(child_match.bundle())
