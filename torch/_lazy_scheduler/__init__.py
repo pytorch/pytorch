@@ -4,6 +4,7 @@ from typing import Optional, Dict, Callable
 from torch._subclasses.fake_tensor import FakeTensorMode
 from collections import defaultdict, OrderedDict
 import weakref
+import threading
 
 fake_mode = FakeTensorMode()
 
@@ -22,7 +23,6 @@ class NoneWithUsageDetector:
     pass
 
   def __getattribute__(self, attr):
-    print(f"NoneWithUsageDetector attr: {attr}")
     # breakpoint()
     return super().__getattribute__(attr)
 
@@ -45,28 +45,8 @@ class AsyncTensor(torch.Tensor):
   # NOTE: Any non-PyTorch reads or mutations in eager region will need to access one of these APIs: `.data_ptr` / `.storage` / `.data`.
   # We materialize the tensor before executing those calls, so that non-PyTorch reads or mutations in eager region still work normally.
 
-  def data_ptr(self):
-    if self._handle is not None:
-      AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.data_ptr()
-    else:
-      raise Exception("Calling data_ptr on an unmaterialized AsyncTensor!")
-
-  def storage(self):
-    if self._handle is not None:
-      AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.storage()
-    else:
-      raise Exception("Calling storage on an unmaterialized AsyncTensor!")
-
-  # TODO: implement `.data = X`
-  @property
-  def data(self):
-    if self._handle is not None:
-      AsyncTensor.wait_until_materialized([self])
-      return self._materialized_tensor.data
-    else:
-      raise Exception("Calling data on an unmaterialized AsyncTensor!")
+  def async_repr(self):
+    return f"AsyncTensor({self._handle}, {self._fake})"
 
   def __repr__(self):
     # NOTE: `print(tensor)` goes through this
@@ -76,14 +56,25 @@ class AsyncTensor(torch.Tensor):
     else:
       return self.async_repr()
 
-  def async_repr(self):
-    return f"AsyncTensor({self._handle}, {self._fake})"
-
   def __getattribute__(self, attr):
-    print(f"attr: {attr}")
-    # if attr == "_materialized_tensor":
-    #   breakpoint()
-    return super().__getattribute__(attr)
+    if attr in dir(torch.Tensor):
+      if self._handle is not None:
+        AsyncTensor.wait_until_materialized([self])
+        return getattr(self._materialized_tensor, attr)
+      else:
+        raise Exception(f"Getting {attr} on an AsyncTensor that doesn't have handle is not allowed")
+    else:
+      return super().__getattribute__(attr)
+
+  def __setattr__(self, attr, value):
+    if attr in dir(torch.Tensor):
+      if self._handle is not None:
+        AsyncTensor.wait_until_materialized([self])
+        return setattr(self._materialized_tensor, attr, value)
+      else:
+        raise Exception(f"Setting {attr} on an AsyncTensor that doesn't have handle is not allowed")
+    else:
+      return super().__setattr__(attr, value)
 
   def handle(self):
     assert self._handle is not None
@@ -119,8 +110,6 @@ class AsyncTensor(torch.Tensor):
   def wait_until_materialized(async_tensors):
     # breakpoint()
     for async_tensor in async_tensors:
-      if isinstance(async_tensor, AsyncTensor):
-        print(f"looking at: {async_tensor.async_repr()}")
       if not AsyncTensor.check_materialized([async_tensor]):
         # NOTE: recursively schedule the deps first
         print(f"waiting on deps for {async_tensor.async_repr()}")
@@ -131,29 +120,34 @@ class AsyncTensor(torch.Tensor):
         async_tensor.handle().wait_for_completion()
         print(f"done waiting for completion {async_tensor.async_repr()}")
 
+
+# TODO: dedup info and simplify all classes below
 class AsyncFuncHandle:
-  def __init__(self, compiled_fn, gm, segment, args, outs_async, scheduler):
+  _gm_to_handle_mapping: Dict[torch.fx.GraphModule, "AsyncFuncHandle"] = {}
+
+  def __init__(self, compiled_fn, segment, args, outs_async, scheduler):
     self.cuda_event = torch.cuda.Event()
     self.compiled_fn: Callable = compiled_fn
-    self.gm: torch.fx.GraphModule = gm
     self.segment: str = segment  # for bookkeeping
     # dependency graph is built implicitly as we run the program
     self.args = args
     self.outs_async = outs_async
     self.outs = None
-    self.is_scheduled = False
+    self.is_going_to_be_scheduled = False
     self._scheduler = weakref.ref(scheduler)
 
   def schedule(self):
-    print(f"scheduling {self.gm} ... from segment: {self.segment}")
     # make sure to schedule only once
-    if self.is_scheduled:
+    if self.is_going_to_be_scheduled:
       return
+    self.is_going_to_be_scheduled = True
+    gm = self._scheduler()._handle_to_gm_map[self]
     AsyncTensor.wait_until_materialized(self.args)
     print(f"self.args: {self.args}")
+    print(f"handle id: {id(self)}, scheduling {gm} ... with id {id(gm)} ... from segment: {self.segment}")
+    self._scheduler().add_to_recorded_execution_order(self.segment)
     self.outs = self.compiled_fn(*self.args)
     self.cuda_event.record()
-    self.is_scheduled = True
 
   def wait_for_completion(self):
     print("wait_for_completion is called")
@@ -196,10 +190,23 @@ class LazyGraphModule(torch.nn.Module):  # TODO: better name?
 
 class LazyScheduler:
   def __init__(self, schedule):
+    mapped_segments = set(Segment._func_to_segment_mapping.values())
+    segments_in_schedule = set(schedule)
+    assert mapped_segments == segments_in_schedule
     self._schedule = schedule
     self._gm_to_handle_map = OrderedDict()
+    self._handle_to_gm_map = OrderedDict()
     self._segment_to_gms_map = defaultdict(list)
-    self._next_segment_index = 0
+    # self._next_segment_index = 0
+    self._recorded_execution_order = []
+
+  def add_to_recorded_execution_order(self, segment):
+    self._recorded_execution_order.append(segment)
+
+  def is_expected_execution_order_for_named_segments(self, expected_execution_order_for_named_segments):
+    recorded_execution_order_for_named_segments = [s for s in self._recorded_execution_order if s in self._schedule]
+    return recorded_execution_order_for_named_segments == expected_execution_order_for_named_segments, \
+      f"{recorded_execution_order_for_named_segments} vs. {expected_execution_order_for_named_segments}"
 
   def compile(self, gm, example_inputs):
     # breakpoint()
@@ -224,12 +231,19 @@ class LazyScheduler:
       qualname_map=qualname_map,
       keep_original_order=True,
     )
-    gm_node_list = list(gm.graph.nodes)
-    gm_after_split_node_list = list(gm_after_split.graph.nodes)
-    gm_after_split_children_list = list(gm_after_split.children())
-    # breakpoint()
+
+    print(f"gm.graph: {gm.graph}")
+    print(f"gm_after_split: {gm_after_split.graph}")
     for name, sub_gm in gm_after_split.named_children():
-      print(f"subgraph: {str(sub_gm.graph)}")
+      print(f"subgraph {name}: {str(sub_gm.graph)}")
+
+    print(f"gm.graph: {gm.code}")
+    print(f"gm_after_split: {gm_after_split.code}")
+    for name, sub_gm in gm_after_split.named_children():
+      print(f"subgraph {name}: {str(sub_gm.code)}")
+
+    for name, sub_gm in gm_after_split.named_children():
+      print(f"subgraph {name}: {str(sub_gm.graph)}")
       for node in sub_gm.graph.nodes:
         print(f"node: {node}")
         if "segment" not in node.meta:
@@ -247,21 +261,10 @@ class LazyScheduler:
       # so its segment tag will actually match what we expect.
       assert node_list[-2].op != "placeholder"
       segment = node_list[-2].meta["segment"]
-      print(f"segment: {segment}")
       # Replace subgraph with the lazy version
       lazy_sub_gm = LazyGraphModule(sub_gm, self, segment)
       setattr(gm_after_split, name, lazy_sub_gm)
       self._segment_to_gms_map[segment].append(sub_gm)
-
-    print(f"gm.graph: {gm.graph}")
-    print(f"gm_after_split: {gm_after_split.graph}")
-    for name, sub_gm in gm_after_split.named_children():
-      print(f"subgraph {name}: {str(sub_gm.gm.graph)}")
-
-    print(f"gm.graph: {gm.code}")
-    print(f"gm_after_split: {gm_after_split.code}")
-    for name, sub_gm in gm_after_split.named_children():
-      print(f"subgraph {name}: {str(sub_gm.gm.code)}")
 
     # breakpoint()
     return gm_after_split
@@ -281,52 +284,56 @@ class LazyScheduler:
         args_fake.append(arg._fake)
       elif isinstance(arg, torch.Tensor):
         args_fake.append(fake_mode.from_tensor(arg))
-    print(f"gm: {str(gm.graph)}")
-    print(f"args: {args}")
-    print(f"args_fake: {args_fake}")
     with fake_mode:
       outs_fake = gm(*args_fake)
-    print(f"outs_fake: {outs_fake}")
     # NOTE: important to make sure the same async tensor is used in downstream user code
     # as well as materialized when handle is finally run.
     outs_async = tuple(AsyncTensor(out_fake) for out_fake in outs_fake)
-    # breakpoint()
-    cur_handle = AsyncFuncHandle(compiled_fn, gm, segment, args=args, outs_async=outs_async, scheduler=self)
-    self._gm_to_handle_map[gm] = cur_handle
+    if gm in self._gm_to_handle_map:
+      cur_handle = self._gm_to_handle_map[gm]
+    else:
+      cur_handle = AsyncFuncHandle(compiled_fn, segment, args=args, outs_async=outs_async, scheduler=self)
+      self._gm_to_handle_map[gm] = cur_handle
+      self._handle_to_gm_map[cur_handle] = gm
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
 
     # First, schedule all graphs from all segments that are before the incoming graph in the schedule.
     all_preceding_graph_handles = []
-    reached_current_segment = False
-    while self._next_segment_index < len(self._schedule):
-      segment = self._schedule[self._next_segment_index]
+    reached_current_graph = False
+    # TODO: for now, we always check the schedule from the beginning.
+    # We can optimize this by keeping track of which segments have been scheduled already.
+    _next_segment_index = 0
+    while _next_segment_index < len(self._schedule):
+      segment = self._schedule[_next_segment_index]
       for g in self._segment_to_gms_map[segment]:
-        if g == gm:
-          reached_current_segment = True
+        if str(g.graph) == str(gm.graph):  # TODO: is there a better way to check graph equivalence?
+          reached_current_graph = True
           break
         all_preceding_graph_handles.append(
           self._gm_to_handle_map.get(g, None)
         )
-      self._next_segment_index += 1
-      if reached_current_segment:
+      if reached_current_graph:
         break
+      else:
+        _next_segment_index += 1
 
     all_preceding_graph_handles_are_scheduled = True
     for handle in all_preceding_graph_handles:
       if handle is not None:
-        print(f"will run: {str(handle.gm.code)}")
+        print(f"will run preceding graph: {str(self._handle_to_gm_map[handle].code)}")
         handle.schedule()
       else:
-        # Some preceding graph is not recorded yet
+        # Some preceding graph is not scheduled yet
+        print(f"some preceding graphs are not scheduled yet, skipping current graph")
         all_preceding_graph_handles_are_scheduled = False
         break
 
     # Then, if all preceding graph handles are scheduled, then we schedule the incoming graph; otherwise, we don’t schedule the incoming graph.
     if all_preceding_graph_handles_are_scheduled:
+      print(f"will run current graph: {str(self._handle_to_gm_map[cur_handle].code)}")
       cur_handle.schedule()
 
-    # TODO: at end of loop slice, we need to schedule all remaining unscheduled handles
     assert isinstance(outs_async, tuple)
     if len(outs_async) == 1:
       return outs_async[0]
