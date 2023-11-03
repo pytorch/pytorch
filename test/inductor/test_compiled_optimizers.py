@@ -225,5 +225,5 @@ class CompiledOptimizerTests(TestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA):
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

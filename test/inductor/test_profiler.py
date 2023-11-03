@@ -45,10 +45,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             return kernel_name in event_name
 
         self.assertTrue(
-            any(
-                ("name" in event and kernel_name == event["name"])
-                for event in events
-            )
+            any(("name" in event and kernel_name == event["name"]) for event in events)
         )
 
     def _test_profiling_kernel_names(self, fn, args, kernel_name_str: str):
