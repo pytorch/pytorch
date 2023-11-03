@@ -4,7 +4,7 @@
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 #include <vector>
