@@ -115,9 +115,7 @@ AOTITorchError aoti_torch_get_data_ptr(
   });
 }
 
-AOTITorchError aoti_torch_get_dim(
-    AtenTensorHandle tensor,
-    int64_t* ret_dim) {
+AOTITorchError aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret_dim = t->dim();
