@@ -195,7 +195,8 @@ class ArrayRefTensor {
         device_idx_(device_idx),
         numel_(arr.size()) {
     assert(sizes.size() == strides.size());
-    assert(is_contiguous_strides_for_shape(sizes.size(), strides.data(), sizes.data()));
+    assert(is_contiguous_strides_for_shape(
+        sizes.size(), strides.data(), sizes.data()));
   }
 
   AtenTensorHandle expensiveCopyToTensor() const {
