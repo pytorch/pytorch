@@ -188,26 +188,26 @@ Example::
         raise RuntimeError(f"Specified layout is unsupported for nested tensors: {layout}")
 
 
-def narrow(tensor: Tensor, dim: int, start: Union[int, Tensor], length: Union[int, Tensor], layout=torch.jagged):
+def narrow(tensor: Tensor, dim: int, start: Union[int, Tensor], length: Union[int, Tensor], layout=torch.strided):
     r"""
 Constructs a nested tensor (which might be a view) from :attr:`tensor`, a strided tensor. This follows
-similar semantics ot torch.Tensor.narrow, where in the :attr:`dim`-th dimension the new nested tensor
+similar semantics to torch.Tensor.narrow, where in the :attr:`dim`-th dimension the new nested tensor
 (maybe view) shows only the elements in the interval `[start, start+length]`. As nested representations
 allow for a different `start` and `length` at each 'row' of that dimension, :attr:`start` and :attr:`length`
-can also be tensors of shape `tensor.shape[0] x 1`.
+can also be tensors of shape `tensor.shape[0]`.
 
 
 Args:
     tensor (:class:`torch.Tensor`): a strided tensor, which will be used as the underlying data
-    for the nested tensor if using the jagged layout or will be copied for the strided layout.
+        for the nested tensor if using the jagged layout or will be copied for the strided layout.
     dim (int): the dimension where narrow will be applied. Only `dim=1` is supported for the
-    jagged layout, while strided supports all dim
+        jagged layout, while strided supports all dim
     start (Union[int, :class:`torch.Tensor`]): starting element for the narrow operation
     length (Union[int, :class:`torch.Tensor`]): number of elements taken during the narrow op
 
 Keyword arguments:
     layout (:class:`torch.layout`, optional): the desired layout of returned nested tensor.
-        Only strided and jagged layouts are supported. Default: if None, the jagged layout.
+        Only strided and jagged layouts are supported. Default: if None, the strided layout.
 
 Example::
 
@@ -217,13 +217,16 @@ Example::
     >>> nt.is_leaf
     True
     """
-    if not isinstance(start, int) or isinstance(start, Tensor):
+    if not isinstance(start, (int, SymInt, Tensor)):
         raise RuntimeError("start must be an integer or a tensor")
 
-    if not isinstance(length, int) or isinstance(length, Tensor):
+    if not isinstance(length, (int, SymInt, Tensor)):
         raise RuntimeError("length must be an integer or a tensor")
 
     if layout == torch.strided:
+        if isinstance(start, Tensor) or isinstance(length, Tensor):
+            raise RuntimeError("start and length must be integers for the strided layout NT impl")
+        # TODO: switch to as_nested_tensor(tensor) when it is available
         nt = as_nested_tensor(torch.unbind(tensor), layout=torch.strided).narrow(dim, start, length)
     elif layout == torch.jagged:
         if dim != 1:
@@ -231,10 +234,10 @@ Example::
 
         from torch.nested._internal.nested_tensor import jagged_from_tensor_and_lengths
 
-        if isinstance(start, int):
+        if isinstance(start, (int, SymInt)):
             start = torch.tensor([start], device=tensor.device, dtype=torch.int64)
 
-        if isinstance(length, int):
+        if isinstance(length, (int, SymInt)):
             length = torch.tensor([length], device=tensor.device, dtype=torch.int64)
 
         nt, _, _ = jagged_from_tensor_and_lengths(tensor, start, length)

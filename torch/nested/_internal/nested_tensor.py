@@ -85,7 +85,10 @@ class NestedTensor(torch.Tensor):
             # we perform operations on fake nested tensors.
             # Calling get_tensor_id won't work in those cases because we want
             # the existing symbolic ragged_size to be propagated.
-            ragged_size = get_tensor_id(offsets, coeff=1)
+            if lengths is None:
+                ragged_size = get_tensor_id(offsets, coeff=1)
+            else:
+                ragged_size = get_tensor_id(lengths, coeff=1)
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
@@ -310,11 +313,11 @@ def jagged_from_tensor_and_lengths(
 ) -> Tuple[NestedTensor, torch.Tensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
-    if is_expandable_to(starts.shape, (batch_size, 1)) and is_expandable_to(
-        lengths.shape, (batch_size, 1)
+    if is_expandable_to(starts.shape, (batch_size,)) and is_expandable_to(
+        lengths.shape, (batch_size,)
     ):
-        start_list = starts.expand(batch_size, 1)
-        length_list = lengths.expand(batch_size, 1)
+        start_list = starts.expand(batch_size)
+        length_list = lengths.expand(batch_size)
     else:
         raise RuntimeError(
             "When constructing a jagged nested tensor using narrow(), "
@@ -332,11 +335,11 @@ def jagged_from_tensor_and_lengths(
     # Jagged layout specifies that offsets are stored as int64 on the same device as values.
     offsets = start_list + offset_lengths
 
-    # Reshape buffer to flatten the 1st and 2nd dimension
+    # Reshape buffer to flatten the 1st and 2nd dimension (view used to enforce non-copy)
     if len(tensor.shape) > 2:
-        values = tensor.reshape(-1, *tensor.shape[2:])
+        values = tensor.view(-1, *tensor.shape[2:])
     else:
-        values = tensor.reshape(-1)
+        values = tensor.view(-1)
 
     return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
 

@@ -37,7 +37,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
         "jt": lambda x: isinstance(x, NestedTensor) and x._lengths is None,
-        "jt_nc": lambda x: isinstance(x, NestedTensor),
+        "jt_all": lambda x: isinstance(x, NestedTensor),
         "any": lambda x: True,
     }
     for i, named_arg_type in enumerate(named_arg_types):
