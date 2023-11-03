@@ -422,14 +422,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
-    xfail("index_put",
-          matcher=lambda sample: len(sample.args[0]) == 1 and sample.args[0][0].dim() == 0,
-          reason=(
-              "fixme: "
-              "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code "
-              "returned while running Gather node. Name:'_inline_aten_index_putn7"
-              "Status Message: indices element out of data bounds, idx=0 must be within the inclusive range [0,-1]"
-                 )
+    xfail(
+        "index_put",
+        matcher=lambda sample: len(sample.args[0]) == 1 and sample.args[0][0].dim() == 0,
+        reason=(
+            "fixme: "
+            "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Non-zero status code "
+            "returned while running Gather node. Name:'_inline_aten_index_putn7"
+            "Status Message: indices element out of data bounds, idx=0 must be within the inclusive range [0,-1]"
+        )
     ),
     xfail(
         "index_put",
@@ -441,7 +442,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
             "Status Message: Non-zero status code returned while running ScatterElements node. "
             "Name:'_inline_aten_index_putn0' Status Message: Indices and updates must have "
             "the same rank"
-               )
+        )
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
