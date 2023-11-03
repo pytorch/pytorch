@@ -13717,7 +13717,7 @@ op_db: List[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipCUDAIf(not SM90OrLater, 'Requires CUDA SM >= 9.0')],
+        decorators=[skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 9.0')],
         skips=()
     ),
     OpInfo(
