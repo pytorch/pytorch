@@ -549,8 +549,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
-        matcher=lambda sample: sample.input.dtype in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16, uint8"),
+        matcher=lambda sample: sample.input.dtype
+        in (torch.uint8, torch.int8, torch.int16),
+        reason=onnx_test_common.reason_onnx_script_does_not_support(
+            "Add", "int8, int16, uint8"
+        ),
     ),
     skip(
         "amax",
@@ -569,8 +572,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "index_put",
-        matcher=lambda sample: (sample.args[0][0].dtype == torch.bool) and (sample.kwargs.get("accumulate") is False),
-        reason=onnx_test_common.reason_dynamo_does_not_support("https://github.com/pytorch/pytorch/issues/101150"),
+        matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
+        and (sample.kwargs.get("accumulate") is False),
+        reason=onnx_test_common.reason_dynamo_does_not_support(
+            "https://github.com/pytorch/pytorch/issues/101150"
+        ),
     ),
     xfail(
         "native_batch_norm",
@@ -585,7 +591,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: (sample.kwargs.get("ceil_mode") is True)
         and (
             sample.kwargs.get("count_include_pad") is True
-            or sample.input.shape[2] % (sample.args[0][0] if isinstance(sample.args[0], tuple) else sample.args[0]) != 0
+            or sample.input.shape[2]
+            % (
+                sample.args[0][0]
+                if isinstance(sample.args[0], tuple)
+                else sample.args[0]
+            )
+            != 0
         ),
         reason="fixme: ORT doesn't match PyTorch when ceil_mode=True until opset 19",
     ),
@@ -632,12 +644,14 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip(
         "nn.functional.max_pool3d",
-        matcher=lambda sample: sample.kwargs.get("ceil_mode") is True and sample.kwargs.get("padding") == 1,
+        matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
+        and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
     ),
     xfail(
         "nonzero",
-        matcher=lambda sample: len(sample.input.shape) == 0 and sample.kwargs.get("as_tuple", False) is False,
+        matcher=lambda sample: len(sample.input.shape) == 0
+        and sample.kwargs.get("as_tuple", False) is False,
         reason="Output 'shape' do not match: torch.Size([0, 1]) != torch.Size([0, 0]).",
     ),
     xfail(
@@ -680,7 +694,9 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
-def _should_skip_xfail_test_sample(op_name: str, sample) -> Tuple[Optional[str], Optional[str]]:
+def _should_skip_xfail_test_sample(
+    op_name: str, sample
+) -> Tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
     if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
         return None, None
@@ -719,7 +735,9 @@ def _run_test_output_match(
             kwargs=repr(cpu_sample.kwargs),
         ):
             test_behavior, reason = _should_skip_xfail_test_sample(op.name, cpu_sample)
-            with onnx_test_common.normal_xfail_skip_test_behaviors(test_behavior, reason):
+            with onnx_test_common.normal_xfail_skip_test_behaviors(
+                test_behavior, reason
+            ):
                 model = SingleOpModel(op.op, cpu_sample.kwargs)
                 model.eval()
 
@@ -727,14 +745,19 @@ def _run_test_output_match(
                     # Relax atol and rtol for float32 based on empirical results
                     rtol = 1e-5
                     atol = 2e-5
-                elif dtype == torch.float16 and op.name in test_suite.fp16_low_precision_list:
+                elif (
+                    dtype == torch.float16
+                    and op.name in test_suite.fp16_low_precision_list
+                ):
                     rtol = 1e-2
                     atol = 1e-3
                 else:
                     rtol = None
                     atol = None
                 # Run the test
-                test_suite.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(model, inputs, rtol=rtol, atol=atol)
+                test_suite.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                    model, inputs, rtol=rtol, atol=atol
+                )
 
 
 def _get_test_class_name(cls, num, params_dict) -> str:
@@ -806,7 +829,9 @@ for opset in onnx_test_common.FX_TESTED_OPSETS:
         skip_or_xfails=EXPECTED_SKIPS_OR_FAILS,
     )
 
-    common_device_type.instantiate_device_type_tests(globals()[test_class_name], globals(), only_for="cpu")
+    common_device_type.instantiate_device_type_tests(
+        globals()[test_class_name], globals(), only_for="cpu"
+    )
 
 if __name__ == "__main__":
     common_utils.run_tests()
