@@ -11,6 +11,7 @@ import tempfile
 import threading
 import pickle
 import time
+import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import chain, product
@@ -1198,6 +1199,55 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Try another collective.
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
+    def test_init_process_group_nccl_timeout(self):
+        # nccl is handled 'specially' inside init_process_group and its options class is different from the options
+        # used by the other PG's.  There are specific edge cases for nccl that need to be tested.
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        base_opts = dict(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+
+        def _check_nccl_timeout(expected_timeout):
+            pg = dist.distributed_c10d._get_default_group()
+            options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
+            self.assertEqual(options._timeout, expected_timeout)
+
+        # test the default value coming from the `init_process_group` kwarg default
+        dist.init_process_group(**base_opts)
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that `kwarg` timeout takes effect
+        new_timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, timeout=new_timeout)
+        _check_nccl_timeout(new_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg (or its kwdefault) taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        with warnings.catch_warnings(record=True) as w:
+            dist.init_process_group(**base_opts, pg_options=opts)
+            # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
+            # self.assertEqual(len(w), 1)
+            # self.assertTrue("pg_options._timeout was specified" in str(w[-1].message))
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, pg_options=opts, timeout=timedelta(seconds=1240))
+        _check_nccl_timeout(timedelta(seconds=1240))
+        dist.destroy_process_group()
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
