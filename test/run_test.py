@@ -1738,6 +1738,16 @@ def main():
             test_prioritizations.get_unranked_relevance_tests(),
             True,
         ),
+        TestBatch(
+            "unlikely_relevance",
+            test_prioritizations.get_unlikely_relevance_tests(),
+            True,
+        ),
+        TestBatch(
+            "none_relevance",
+            test_prioritizations.get_none_relevance_tests(),
+            True,
+        ),
     ]
 
     for test_batch in test_batches:

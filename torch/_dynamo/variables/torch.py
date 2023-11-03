@@ -662,10 +662,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 )
                 args = [stacked]
 
-            example_value = None
-            accumulate_grad = False
             if self.value == torch.ops.inductor.accumulate_grad_.default:
-                accumulate_grad = True
                 arg0 = args[0]  # var
                 arg1 = args[1]  # grad
                 for grapharg in tx.output.graphargs:
