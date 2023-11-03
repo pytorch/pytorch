@@ -240,7 +240,7 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
-    def create_load_attr(self, name) -> List[Instruction]:
+    def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)

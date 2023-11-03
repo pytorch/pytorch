@@ -13,13 +13,15 @@ from typing import (
     Union,
 )
 
+from typing_extensions import TypeAlias
+
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
 
-    DynamoFrameType = eval_frame._PyInterpreterFrame
+    DynamoFrameType: TypeAlias = eval_frame._PyInterpreterFrame
 else:
-    DynamoFrameType = types.FrameType
+    DynamoFrameType: TypeAlias = types.FrameType
 
 import torch
 
