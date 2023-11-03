@@ -131,6 +131,7 @@ class ResumeAfterRegionTests(DynamoTestCase):
             x = x + 1
             # Should fallback on eager here
             try:
+                # How can we trace here too?
                 x += 3
                 try:
                     raise AssertionError()
