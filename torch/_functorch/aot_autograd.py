@@ -1823,6 +1823,34 @@ def create_functionalized_fn(
             # Run the joint
             f_outs = fn(*f_args)
 
+        # We support a limited amount of mutation of graph inputs during the backward pass.
+        # (This is used e.g. by Float8, which needs to update buffers during the backward pass)
+        maybe_mutated_tangents: Optional[List[bool]] = None
+        if trace_joint:
+            # Here, we perform extra checks for primals that were mutated in the **backward**
+            # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
+            # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
+            #   during the forward, because the handling is different: some input mutations from the the forward
+            #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
+            #   types of mutations in the backward we would need a bw-only runtime epilogue.
+            # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
+            #   the bw by running our analysis first on the fw-only graph, and then on the joint graph. This would
+            #   require an extra round of tracing though, so it's more efficient to do in-line here.
+            assert isinstance(args, tuple) and len(args) == 2 and isinstance(args[0], list)
+            primals_before = args[0]
+            primals_after = pytree.tree_map(from_fun, f_args[0])
+            for before, after, inpt_info in zip(primals_before, primals_after, meta.input_info):
+                # Ban metadata mutations on fw inputs during the bw
+                if not inpt_info.mutates_metadata:
+                    assert not was_metadata_updated(before, after), \
+                        "Found a graph input that had its metadata mutated in the backward. This is not supported"
+                # Allow data mutations on fw inputs during the bw, but only if they do not require grad
+                # So we can guarantee that we can keep the mutations in the graph
+                if was_updated(before, after) and not inpt_info.mutates_data:
+                    assert not inpt_info.requires_grad, \
+                        "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
+                    before.copy_(after)
+
         if aot_config.keep_inference_input_mutations and not trace_joint:
             # Note: This is a bit annoying. There's a layering issue here, where:
             # (1) functionalization needs to operate on **synthetic base** inputs, before unpacking them into the "real" inputs.
@@ -2106,7 +2134,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is aten.copy_.default and allow_input_mutations:
+            if n.target is aten.copy_.default:
                 suffix = True
                 # Can only copy_ into an input, and can only do so once
                 assert n.args[0] in placeholders
