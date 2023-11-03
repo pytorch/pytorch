@@ -33,7 +33,7 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     Work
 )
-from .constants import default_pg_timeout
+from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 DistStoreError = torch._C._DistStoreError
@@ -575,6 +575,19 @@ class GroupMember(metaclass=_WorldMeta):
     NON_GROUP_MEMBER = -100
 
 
+def _get_default_timeout(backend: Backend) -> timedelta:
+    # see note on nccl vs other backend timeout (constants.py)
+    if backend == Backend.NCCL:
+        return default_pg_nccl_timeout
+    else:
+        return default_pg_timeout
+
+def _check_valid_timeout(timeout: Any) -> None:
+    if not isinstance(timeout, timedelta):
+        raise TypeError(
+            "Expected timeout argument to be of type datetime.timedelta"
+        )
+
 # Default process group state
 _default_pg_init_method = None
 
@@ -1015,7 +1028,7 @@ _exception_logger
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
-    timeout: timedelta = default_pg_timeout,
+    timeout: timedelta = None,
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
@@ -1105,11 +1118,6 @@ def init_process_group(
     global _backend
     global _default_pg_init_method
 
-    if not isinstance(timeout, timedelta):
-        raise TypeError(
-            "Expected timeout argument to be of type datetime.timedelta"
-        )
-
     if GroupMember.WORLD is not None:
         raise ValueError("trying to initialize the default process group twice!")
 
@@ -1127,6 +1135,11 @@ def init_process_group(
         backend = Backend(backend)
     else:
         backend = Backend("undefined")
+
+    if timeout is None:
+        timeout = _get_default_timeout(backend)
+
+    _check_valid_timeout(timeout)
 
     """
     Group name is not visible to users unless they access
@@ -1205,7 +1218,7 @@ def _new_process_group_helper(
     store,
     group_name,
     pg_options=None,
-    timeout=default_pg_timeout,
+    timeout=None,
     pg_tag=None
 ):
     """
@@ -1225,10 +1238,8 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if not isinstance(timeout, timedelta):
-        raise TypeError(
-            "Expected timeout argument to be of type datetime.timedelta"
-        )
+    # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
+    _check_valid_timeout(timeout)
 
     if pg_tag not in [None, ""]:
         # creating with the same tag and rank set results in the same underlying PG
@@ -3789,7 +3800,8 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
         raise ValueError("monitored_barrier is only implemented for GLOO backend.")
 
     if timeout is None:
-        timeout = default_pg_timeout
+        timeout = _get_default_timeout(get_backend(group))
+    _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
@@ -3803,6 +3815,8 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
+    # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
+
     # Create a separate prefix store for the helper process group.
     prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
     store = PrefixStore(prefix, store)
@@ -3832,7 +3846,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
 
 
 @_time_logger
-def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
+def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
 
@@ -3908,7 +3922,7 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
 
 def _new_group_with_tag(
     ranks=None,
-    timeout=default_pg_timeout,
+    timeout=None,
     backend=None,
     pg_options=None,
     pg_tag=None,
@@ -3927,11 +3941,19 @@ def _new_group_with_tag(
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
+
     # Default to the same backend as the global process group
     # if the backend is not specified.
     if not backend:
         backend = default_backend
     backend = Backend(backend)
+
+    # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
+    # which may just pass their timeout value (or None)
+    if timeout is None:
+        timeout = _get_default_timeout(backend)
+    _check_valid_timeout(timeout)
+
     if use_local_synchronization:
         # MPI backend doesn't have have a way for us to perform a partial sync
         if backend == Backend.MPI:
@@ -4013,7 +4035,7 @@ def _new_group_with_tag(
 def new_subgroups(
     group_size=None,
     group=None,
-    timeout=default_pg_timeout,
+    timeout=None,
     backend=None,
     pg_options=None,
 ):
@@ -4144,7 +4166,7 @@ def new_subgroups(
 
 def new_subgroups_by_enumeration(
     ranks_per_subgroup_list,
-    timeout=default_pg_timeout,
+    timeout=None,
     backend=None,
     pg_options=None,
 ):

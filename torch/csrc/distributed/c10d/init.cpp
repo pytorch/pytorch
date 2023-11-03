@@ -2659,6 +2659,8 @@ Example::
 
   module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
+  module.attr("_DEFAULT_PG_NCCL_TIMEOUT") =
+      py::cast(::c10d::kProcessGroupNCCLDefaultTimeout);
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
   module.def(
