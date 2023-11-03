@@ -30,7 +30,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
@@ -64,7 +64,7 @@ foreach_op_db = (
     foreach_binary_op_db +
     foreach_pointwise_op_db +
     foreach_reduce_op_db +
-    foreach_lerp_op_db
+    foreach_other_op_db
 )
 
 
