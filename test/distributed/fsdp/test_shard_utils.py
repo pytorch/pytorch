@@ -1,11 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed as dist
-import torch.distributed._functional_collectives as funcol
 
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import Shard
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._shard_utils import (
     _create_chunk_dtensor,

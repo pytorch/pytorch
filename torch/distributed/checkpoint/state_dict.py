@@ -367,7 +367,17 @@ def _get_model_state_dict(
         if p.is_meta:
             state_dict.pop(key)
 
-    return state_dict
+    if options.full_state_dict:
+        ranks_only = tuple() if not options.cpu_offload else tuple([0])
+        return _gather_state_dict(
+            state_dict, cpu_offload=options.cpu_offload, ranks_only=ranks_only
+        )
+    elif options.cpu_offload:
+        return _offload_state_dict_to_cpu(
+            state_dict, cpu_offload=options.cpu_offload, ranks_only=[0]
+        )
+    else:
+        return state_dict
 
 
 def _load_model_state_dict(
