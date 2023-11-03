@@ -139,6 +139,12 @@ class Match:
 class FailedMatch(RuntimeError):
     def __init__(self, format_string, *args, **kwargs):
         self.format_string = format_string
+        # We want to construct error messages lazily instead of eagerly, as
+        # constructing them eagerly can significantly worsen compile times.
+        if len(format_string) > 500:
+            raise RuntimeError(
+                f"Format string too long - use lazy construction of strings instead. Format string is\n {format_string}"
+            )
         self.args = args
         self.kwargs = kwargs
 
@@ -403,7 +409,7 @@ class _TargetArgsExpr(_TargetExpr):
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if not self._match_fns(node) or len(node.args) != len(self.args):
-            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users {}", self)
@@ -418,14 +424,14 @@ class _TargetArgsExpr(_TargetExpr):
             )
 
             if normalized_args_and_kwargs is None:
-                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
             else:
                 _args, _kwargs = normalized_args_and_kwargs
                 if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
                     _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
                 else:
                     return FailedMatch(
-                        f"function_mismatch: node={node}, pattern={self}"
+                        "function_mismatch: node={}, pattern={}", node, self
                     )
         else:
             _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
