@@ -586,7 +586,7 @@ def _get_default_timeout(backend: Backend) -> timedelta:
 def _check_valid_timeout(timeout: Any) -> None:
     if not isinstance(timeout, timedelta):
         raise TypeError(
-            "Expected timeout argument to be of type datetime.timedelta"
+            f"Expected timeout argument to be of type datetime.timedelta, got {timeout}"
         )
 
 # Default process group state
@@ -3790,6 +3790,14 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
 
     if timeout is None:
         timeout = _get_default_timeout(get_backend(group))
+    elif isinstance(timeout, float):
+        # TODO(whc) aparently some existing test case for monitored_barrier passes in a timeout in float format?
+        warnings.warn(
+            "Please specify timeout arg as a timedelta. "
+            f"Converting current value of {timeout} assuming it represents seconds",
+        )
+        timeout = timedelta(seconds=timeout)
+
     _check_valid_timeout(timeout)
 
     group_to_use = _get_default_group() if group is None else group
