@@ -5121,6 +5121,30 @@ class TestSparseAny(TestCase):
 
                 gradcheck(func, x.requires_grad_(True), masked=masked, fast_mode=fast_mode)
 
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    @dtypes(torch.double)
+    def test_dataloader(self, device, layout, dtype):
+
+        class SparseDataset(torch.utils.data.Dataset):
+
+            def __init__(self, sparse_tensors):
+                self.sparse_tensors = sparse_tensors
+
+            def __len__(self):
+                return len(self.sparse_tensors)
+
+            def __getitem__(self, index):
+                return self.sparse_tensors[index]
+
+        data = list(self.generate_simple_inputs(layout, device=device, dtype=dtype))
+
+        dataset = SparseDataset(data)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=None, num_workers=2)
+
+        loaded_data = list(loader)
+        self.assertEqual(data, loaded_data)
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')
