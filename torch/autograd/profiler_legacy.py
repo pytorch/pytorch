@@ -24,7 +24,7 @@ __all__ = ["profile"]
 
 
 class profile:
-    """DEPRECATED: use torch.profiler instead"""
+    """DEPRECATED: use torch.profiler instead."""
 
     def __init__(
         self,
@@ -167,9 +167,7 @@ class profile:
 
     @property
     def self_cpu_time_total(self):
-        """Returns total time spent on CPU obtained as a sum of
-        all self times across all the events.
-        """
+        """Return CPU time as the sum of self times across all events."""
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.self_cpu_time_total
@@ -177,10 +175,7 @@ class profile:
 
 def _parse_legacy_records(thread_records):
     def _get_record_key(record):
-        """
-        Returns a tuple to be used by _parse_legacy_records for correlating start and
-        end records.
-        """
+        """Return a tuple for correlating start and end records in `_parse_legacy_records`."""
         return (record.handle(), record.node_id())
 
     next_id = 0

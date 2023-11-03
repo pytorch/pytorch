@@ -26,7 +26,7 @@ __all__ = [
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
     def save_for_backward(self, *tensors: torch.Tensor):
-        r"""Saves given tensors for a future call to :func:`~Function.backward`.
+        r"""Save given tensors for a future call to :func:`~Function.backward`.
 
         ``save_for_backward`` should be called at most once, only from inside the
         :func:`forward` method, and only with tensors.
@@ -85,7 +85,7 @@ class FunctionCtx:
         self.to_save = tensors
 
     def save_for_forward(self, *tensors: torch.Tensor):
-        r"""Saves given tensors for a future call to :func:`~Function.jvp`.
+        r"""Save given tensors for a future call to :func:`~Function.jvp`.
 
         ``save_for_forward`` should be only called once, from inside the :func:`forward`
         method, and only be called with tensors.
@@ -138,7 +138,7 @@ class FunctionCtx:
         self.saved_for_forward = tensors
 
     def mark_dirty(self, *args: torch.Tensor):
-        r"""Marks given tensors as modified in an in-place operation.
+        r"""Mark given tensors as modified in an in-place operation.
 
         **This should be called at most once, only from inside the**
         :func:`forward` **method, and all arguments should be inputs.**
@@ -182,7 +182,7 @@ class FunctionCtx:
         )
 
     def mark_non_differentiable(self, *args: torch.Tensor):
-        r"""Marks outputs as non-differentiable.
+        r"""Mark outputs as non-differentiable.
 
         **This should be called at most once, only from inside the**
         :func:`forward` **method, and all arguments should be tensor outputs.**
@@ -214,7 +214,7 @@ class FunctionCtx:
         self.non_differentiable = args
 
     def set_materialize_grads(self, value: bool):
-        r"""Sets whether to materialize grad tensors. Default is ``True``.
+        r"""Set whether to materialize grad tensors. Default is ``True``.
 
         **This should be called only from inside the** :func:`forward` **method**
 
@@ -319,9 +319,9 @@ class _SingleLevelFunction(
 ):
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
-        r"""
-        This function is to be overridden by all subclasses. There are two ways
-        to define forward:
+        r"""Override this function in all subclasses.
+        
+        There are two ways to define forward:
 
         Usage 1 (Combined forward and ctx)::
 
@@ -381,8 +381,7 @@ class _SingleLevelFunction(
 
     @staticmethod
     def backward(ctx: Any, *grad_outputs: Any) -> Any:
-        r"""Defines a formula for differentiating the operation with backward mode
-        automatic differentiation (alias to the vjp function).
+        r"""Formulate differentiation with backward mode automatic differentiation. (vjp alias).
 
         This function is to be overridden by all subclasses.
 
@@ -413,8 +412,8 @@ class _SingleLevelFunction(
 
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
-        r"""Defines a formula for differentiating the operation with forward mode
-        automatic differentiation.
+        r"""Formulate differentiation with forward mode automatic differentiation.
+        
         This function is to be overridden by all subclasses.
         It must accept a context :attr:`ctx` as the first argument, followed by
         as many inputs as the :func:`forward` got (None will be passed in
@@ -436,7 +435,7 @@ class _SingleLevelFunction(
 
 
 class Function(_SingleLevelFunction):
-    r"""Base class to create custom `autograd.Function`
+    r"""Base class to create custom `autograd.Function`.
 
     To create a custom `autograd.Function`, subclass this class and implement
     the :meth:`forward` and :meth:`backward` static methods. Then, to use your custom
@@ -502,10 +501,11 @@ class Function(_SingleLevelFunction):
 
     @staticmethod
     def vmap(info, in_dims, *args):
-        r"""Defines a rule for the behavior of this autograd.Function underneath
-        :func:`torch.vmap`. For a :func:`torch.autograd.Function` to support
-        :func:`torch.vmap`, you must either override this staticmethod, or set
-        ``generate_vmap_rule`` to ``True`` (you may not do both).
+        r"""Define vmap behavior for autograd functions, override or set "generate_vmap_rule" to enable "torch.vmap".
+        
+        This static method sets the behavior for autograd functions within 
+        torch.vmap. To enable "torch.vmap", you can either override this 
+        method or set "generate_vmap_rule" to "True," but not both.
 
         If you choose to override this staticmethod: it must accept
 
@@ -609,7 +609,7 @@ def once_differentiable(fn):
 
 
 def traceable(fn_cls):
-    r"""Marks Function as traceable for the JIT.
+    r"""Mark Function as traceable for the JIT.
 
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
