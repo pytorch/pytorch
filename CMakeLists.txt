@@ -484,7 +484,7 @@ if(MSVC)
   # appropriate value given the requested --std option. This fixes a compilation issue mismatch
   # between GCC/Clang and MSVC.
   #
-  # See
+  # See:
   # * https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
