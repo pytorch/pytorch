@@ -1,6 +1,6 @@
 #include <ATen/cpu/FlushDenormal.h>
 #include <ATen/cpu/vec/intrinsics.h>
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 
