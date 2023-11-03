@@ -317,7 +317,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
         The reconstructed pytree, containing the ``leaves`` placed in the structure described by
         ``treespec``.
     """
-    if not isinstance(treespec, PyTreeSpec):
+    if not isinstance(treespec, TreeSpec):
         raise TypeError(
             f"tree_unflatten(values, spec): Expected `spec` to be instance of "
             f"TreeSpec but got item of type {type(treespec)}."
@@ -908,14 +908,11 @@ def treespec_pprint(treespec: TreeSpec) -> str:
     return repr(dummy_tree)
 
 
-class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
+class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
     def __instancecheck__(self, instance: object) -> bool:
-        return isinstance(instance, PyTreeSpec) and instance.is_leaf()
+        return isinstance(instance, TreeSpec) and instance.is_leaf()
 
 
-class PyTreeLeafSpec(TreeSpec, metaclass=PyTreeLeafSpecMeta):
-    def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
+class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
+    def __new__(cls, none_is_leaf: bool = True) -> "LeafSpec":
         return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
-
-
-LeafSpec = PyTreeLeafSpec
