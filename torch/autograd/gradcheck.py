@@ -2132,13 +2132,17 @@ def gradgradcheck(
     fast_mode: bool = False,
     masked: bool = False,
 ) -> bool:
-    r"""Verify gradient of gradients using torch.allclose for correct backpropagation.
+    r"""Verify gradient of gradients using :func:`~torch.allclose` for correct backpropagation.
     
-    Description -
-    Validate gradient of gradients by comparing numerical to analytical 
-    gradients for relevant tensors with `requires_grad=True` in 
-    `inputs` and `grad_outputs`, ensuring correctness during backpropagation, 
-    using `torch.allclose`.
+    Check gradients of gradients computed via small finite differences
+    against analytical gradients wrt tensors in :attr:`inputs` and
+    :attr:`grad_outputs` that are of floating point or complex type and with
+    ``requires_grad=True``.
+    
+    This function checks that backpropagating through the gradients computed
+    to the given :attr:`grad_outputs` are correct.
+    
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
         The default values are designed for :attr:`input` and
