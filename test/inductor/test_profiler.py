@@ -9,7 +9,7 @@ import torch._inductor.utils
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
-from torch.testing._internal.common_utils import TemporaryFileName, skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TemporaryFileName
 
 from torch.utils._triton import has_triton
 
