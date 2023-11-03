@@ -65,6 +65,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "flatten",
         "hstack",
         "logical_not",
+        "linalg.vector_norm",
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
         "repeat",

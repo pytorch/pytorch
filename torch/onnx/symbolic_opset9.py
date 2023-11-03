@@ -6022,6 +6022,12 @@ def linalg_vector_norm(
                 ord_op,
             ),
         )
+
+        out_dtype = _type_utils.JitScalarType.from_value(self)
+        # Cast to bf16 requires opset>=13
+        if out_dtype not in [_type_utils.JitScalarType.FLOAT, _type_utils.JitScalarType.BFLOAT16]:
+            result = g.op("Cast", result, to_i=out_dtype.onnx_type())
+
     return result
 
 
