@@ -586,7 +586,8 @@ namespace detail {
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
 #define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
-  TORCH_CHECK_WITH_MSG(ErrorAlwaysShowCppStacktrace, cond, "TYPE", __VA_ARGS__)
+  TORCH_CHECK_WITH_MSG(                                   \
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \
