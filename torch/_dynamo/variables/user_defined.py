@@ -215,7 +215,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
-        self._is_iterator = hasattr(self.value, "__next__")
+        try:
+            self._is_iterator = self._getattr_static("__next__") is not None
+        except Exception:
+            self._is_iterator = _is_iterator
+
         assert type(value) is self.value_type
 
     def __str__(self):
