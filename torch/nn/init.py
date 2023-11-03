@@ -471,8 +471,8 @@ def kaiming_normal_(
 def orthogonal_(tensor, gain=1):
     r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
 
-    The method is described in `Exact solutions to the nonlinear dynamics of learning
-    in deep linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
+    Described in `Exact solutions to the nonlinear dynamics of learning in deep
+    linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
     trailing dimensions are flattened.
 
