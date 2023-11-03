@@ -47,12 +47,12 @@ def query_changed_files() -> List[str]:
 def normalize_ratings(ratings: Dict[str, float], max_value: float) -> Dict[str, float]:
     # Assumes all rankings are >= 0
     # Don't modify in place
+    if len(ratings) == 0:
+        return ratings
     min_rating = min(ratings.values())
-    assert min_rating >= 0
+    assert min_rating > 0
     max_rating = max(ratings.values())
-    if max_rating == 0:
-        # Nothing got a meaningful ranking
-        return {}
+    assert max_rating > 0
     normalized_ratings = {}
     for tf, rank in ratings.items():
         normalized_ratings[tf] = rank / max_rating * max_value
