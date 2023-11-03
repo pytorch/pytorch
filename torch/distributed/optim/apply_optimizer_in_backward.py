@@ -100,7 +100,7 @@ def _apply_optimizer_in_backward(
 def _get_in_backward_optimizers(module: torch.nn.Module) -> List[torch.optim.Optimizer]:
     """
     Return a list of in-backward optimizers applied to ``module``'s parameters.
-    
+
     Note that these optimizers are not intended to directly have their ``step`` or
     ``zero_grad`` methods called by the user and are intended to be used for things like checkpointing.
 

@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class _NamedOptimizer(optim.Optimizer):
     """
     ``_NamedOptimizer`` takes a dict of parameters and exposes ``state_dict`` by parameter key.
-    
+
     We replace the original key (number) in an optim to the
     fully qualified name (FQN) string. User can initialize the optim as they
     initialize a PyTorch optim, the only difference is that they also need to
@@ -122,7 +122,7 @@ class _NamedOptimizer(optim.Optimizer):
     def state_dict(self) -> Dict[str, Any]:
         """
         Return the ``state_dict`` of the optimizer.
-        
+
         Instead of using number to index parameters,
         we will use module fully qualified name (FQN) as the key.
         """

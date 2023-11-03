@@ -102,7 +102,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
         r"""
         Set device mapping between each RPC caller and callee pair.
-        
+
         This function can be called multiple times to incrementally add
         device placement configurations.
 
@@ -161,7 +161,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def set_devices(self, devices: List[DeviceType]):
         r"""
         Set local devices used by the TensorPipe RPC agent.
-        
+
         When processing CUDA RPC requests, the TensorPipe RPC agent will properly synchronize
         CUDA streams for all devices in this ``List``.
 

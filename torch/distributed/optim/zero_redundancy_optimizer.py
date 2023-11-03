@@ -32,7 +32,7 @@ def _recursive_copy_to_device(
 ) -> Any:
     r"""
     Recursively searches lists, tuples, dicts and copies tensors to device if possible.
-    
+
     Non-tensor values are passed as-is in the result.
 
     .. note:  These are all copies, so if there are two objects that reference
@@ -121,7 +121,7 @@ class _ZeROJoinHook(JoinHook):
     def main_hook(self):
         """
         Perform an optimizer step.
-        
+
         Updates the joined process's shard of
         the parameters and broadcasts those parameters.
         """
@@ -177,7 +177,7 @@ class _OverlapStatus(enum.IntEnum):
         ``INITIALIZED``: The ZeRO instance is fully initialized and can now
             optimize parameters.
     """
-    
+
     UNINITIALIZED = 0
     DDP_HAS_REBUILT_BUCKETS = 1
     INITIALIZED = 2
@@ -252,7 +252,7 @@ class _OverlapInfo:
     def wait_for_broadcasts(self) -> None:
         r"""
         Wait for all parameter broadcasts.
-        
+
         This should be called once all broadcasts have been scheduled, meaning
         ``self.broadcast_handles`` is filled. This clears ``self.broadcast_handles``
         in preparation for the next iteration.
@@ -1117,7 +1117,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def join_hook(self, **kwargs):
         r"""
         Return the ZeRO join hook.
-         
+
         The hook enables training on uneven inputs by
         shadowing the collective communications in the optimizer step.
 
@@ -1145,7 +1145,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""
         Load the state pertaining to the given rank from the input ``state_dict``.
-        
+
         Updating the local optimizer as needed.
 
         Arguments:
@@ -1275,7 +1275,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _build_param_buckets(self) -> None:
         r"""
         Build parameter buckets if ``parameters_as_bucket_view=True``.
-        
+
         So that for each device that stores this rank's parameters, there is a
         bucket (represented as a tensor) containing all of the parameters on
         that device that are assigned to a given rank in the parameter update
@@ -1574,7 +1574,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _check_overlap_initialized(self):
         r"""
         Check for delayed initialization when ``overlap_with_ddp`` is set to True.
-         
+
         Checks that the delayed initialization has occurred (see
         :meth:`_init_zero_for_overlap`) if ``overlap_with_ddp=True``, and
         raises a ``RuntimeError`` if not. This should preface methods that

@@ -290,7 +290,7 @@ def _barrier(worker_names):
 def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Block until all local and remote RPC processes reach this method and wait for all outstanding work to complete.
-    
+
     Every RPC process must call this method before exit to perform a graceful
     shutdown. This should be used to terminate the RPC framework, and there is
     no guarantee that the RPC framework will work after this method returns.
@@ -308,7 +308,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
 def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     r"""
     Perform a shutdown of the RPC agent, and then destroy the RPC agent.
-    
+
     This stops the local agent from accepting outstanding requests, and shuts
     down the RPC framework by terminating all RPC threads. If ``graceful=True``,
     this will block until all local and remote RPC processes reach this method
@@ -744,7 +744,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout: float =
 def rpc_sync(to, func, args=None, kwargs=None, timeout: float = UNSET_RPC_TIMEOUT):
     r"""
     Make a blocking RPC call to run function ``func`` on worker ``to``.
-    
+
     RPC messages are sent and received in parallel to execution of Python code. This
     method is thread-safe.
 

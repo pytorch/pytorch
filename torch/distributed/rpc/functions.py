@@ -4,7 +4,7 @@ import functools
 def async_execution(fn):
     r"""
     Decorate a function to run asynchronously on the RPC callee.
-    
+
     A decorator for a function indicating that the return value of the function
     is guaranteed to be a :class:`~torch.futures.Future` object and this
     function can run asynchronously on the RPC callee. More specifically, the

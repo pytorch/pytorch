@@ -29,7 +29,7 @@ if is_available():
 class context:
     """
     Context object to wrap forward and backward passes when using distributed autograd.
-    
+
     The ``context_id`` generated in the ``with``
     statement  is required to uniquely identify a distributed backward pass
     on all workers. Each worker stores metadata associated with this

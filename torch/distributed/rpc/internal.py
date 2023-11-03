@@ -30,7 +30,7 @@ class RPCExecMode(Enum):
 class _InternalRPCPickler:
     r"""
     Provide interfaces to serialize data to be "binary string + tensor table" format.
-    
+
     So for RPC python UDF function and args, non tensor data will be serialized
     into regular binary string, tensor data will be put into thread local tensor
     tables, this serialization format is consistent with builtin operator and args
@@ -248,7 +248,7 @@ def _build_rpc_profiling_key(
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
     """
     Call from RPC/RRef functions to create a RecordFunction object for profiling.
-    
+
     This function also runs the before callbacks that start the profiling, though the user is responsible for
     running the appropriate callbacks when the function to be profiled finishes.
 
