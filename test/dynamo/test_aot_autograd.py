@@ -940,6 +940,42 @@ SeqNr|OrigAten|SrcFn
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
 
+    def test_aot_grad_mode_mutation(self):
+        for compiler in ["aot_eager", "inductor"]:
+
+            def f(x):
+                y = x * x
+                torch.set_grad_enabled(False)
+                return y.clone(), y
+
+            f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
+
+            torch.set_grad_enabled(True)
+            x = torch.ones(3, requires_grad=True) * 3
+            y_ref = f(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            y = f_compiled(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            self.assertEqual(y_ref, y)
+
+            self.assertIsNone(y_ref[0].grad_fn)
+            self.assertIsNone(y[0].grad_fn)
+
+            self.assertIsNotNone(y_ref[1].grad_fn)
+            self.assertIsNotNone(y[1].grad_fn)
+
+            # Check that the grad computed for the inputs, given the input, is the same
+            # The tangent to `y[0]`, which has grad_required=False, is irrelevant
+            self.assertEqual(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(
+                    x
+                    for x in y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))
+                    if x is not None
+                ),
+            )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
