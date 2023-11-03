@@ -29,7 +29,6 @@ __all__ = [
     "prepare",
 ]
 
-_global_allow_transitive_sharing = False
 
 def _find_root(edge_or_node: EdgeOrNode, shared_with_map: Dict[EdgeOrNode, EdgeOrNode]) -> EdgeOrNode:
     """Find the root node for the sharing tree
