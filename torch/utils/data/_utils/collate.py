@@ -18,7 +18,7 @@ np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
 def default_convert(data):
     r"""
-    Define function that converts each NumPy array element into a :class:`torch.Tensor`.
+    Convert each NumPy array element into a :class:`torch.Tensor`.
 
     If the input is a `Sequence`, `Collection`, or `Mapping`, it tries to convert each element inside to a :class:`torch.Tensor`.
     If the input is not an NumPy array, it is left unchanged.
@@ -209,7 +209,7 @@ default_collate_fn_map[bytes] = collate_str_fn
 
 def default_collate(batch):
     r"""
-    Define function that takes in a batch of data and puts the elements within the batch into a tensor with an additional outer dimension - batch size.
+    Take in a batch of data and put the elements within the batch into a tensor with an additional outer dimension - batch size.
 
     The exact output type can be a :class:`torch.Tensor`, a `Sequence` of :class:`torch.Tensor`, a
     Collection of :class:`torch.Tensor`, or left unchanged, depending on the input type.
