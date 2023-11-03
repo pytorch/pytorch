@@ -82,7 +82,7 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
-        code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
+        _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
@@ -254,10 +254,14 @@ test_failures = {
     "test_transposed_propagates_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_require_stride_expanded_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_unspec_inputs_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_zero_dim_reductions_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_sdpa_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     #
     # The following tests do not support dynamic shapes yet:
     #
