@@ -1468,7 +1468,7 @@ def _unflatten_orig_param_states(
                 )
         elif not cpu_offload:
             with SimpleProfiler.profile("clone"):
-                value = value.detach.clone()
+                value = value.detach().clone()
 
         if cpu_offload:
             with SimpleProfiler.profile(SimpleProfiler.Type.D2H):

@@ -18,9 +18,14 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.state_dict_utils import (
+    _gather_state_dict,
+    _offload_state_dict_to_cpu,
+)
 from torch.distributed.fsdp import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -228,7 +233,7 @@ def _verify_options(
             optim_state_dict_config = ShardedOptimStateDictConfig(
                 offload_to_cpu=options.cpu_offload,
             )
-            state_dict_tyupe = StateDictType.SHARDED_STATE_DICT
+            state_dict_type = StateDictType.SHARDED_STATE_DICT
 
         fsdp_context = functools.partial(
             FSDP.state_dict_type,
@@ -275,15 +280,19 @@ def _verify_state_dict(
         and not model_state_dict
         and not info.submodule_prefixes
         and not info.ignore_frozen_params
+        and not (info.cpu_offload and info.full_state_dict)
         and info.strict
     ):
         raise RuntimeError(
             "The option indicates that model state_dict is required to save "
             "or load, but model state_dict is empty."
+            f"rank = {dist.get_rank()=}."
         )
 
     if info.handle_optim:
-        if not (optim_state_dict and optim_state_dict[STATE]):
+        if not (optim_state_dict and optim_state_dict[STATE]) and not (
+            info.cpu_offload and info.full_state_dict
+        ):
             raise RuntimeError(
                 "The option indicates that model state_dict is required to save, "
                 f"or load but optim state_dict is empty. {optim_state_dict}"
@@ -367,15 +376,13 @@ def _get_model_state_dict(
         if p.is_meta:
             state_dict.pop(key)
 
-    if options.full_state_dict:
-        ranks_only = tuple() if not options.cpu_offload else tuple([0])
+    if info.full_state_dict:
+        ranks_only = tuple() if not info.cpu_offload else tuple([0])
         return _gather_state_dict(
-            state_dict, cpu_offload=options.cpu_offload, ranks_only=ranks_only
+            state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
         )
-    elif options.cpu_offload:
-        return _offload_state_dict_to_cpu(
-            state_dict, cpu_offload=options.cpu_offload, ranks_only=[0]
-        )
+    elif info.cpu_offload:
+        return _offload_state_dict_to_cpu(state_dict)
     else:
         return state_dict
 
@@ -463,10 +470,21 @@ def _get_optim_state_dict(
             for group in osd[PG]:
                 group[PARAMS] = [fqn_pid_mapping[pid] for pid in group[PARAMS]]
 
+        if not osd:
+            continue
+
         cast(DictValueType, optim_state_dict[STATE]).update(osd[STATE])
         cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
 
-    return optim_state_dict
+    if info.full_state_dict:
+        ranks_only = tuple() if not info.cpu_offload else tuple([0])
+        return _gather_state_dict(
+            optim_state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
+        )
+    elif info.cpu_offload:
+        return _offload_state_dict_to_cpu(optim_state_dict)
+    else:
+        return optim_state_dict
 
 
 def _split_optim_state_dict(
