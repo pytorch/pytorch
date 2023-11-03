@@ -101,7 +101,7 @@ class TestDropout(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X], 0, [0])
 
         def reference_dropout_ratio1(x):
-            return (x,) if is_test else (np.zeros(x.shape, dtype=np.float), np.zeros(x.shape, dtype=bool))
+            return (x,) if is_test else (np.zeros(x.shape, dtype=np.float64), np.zeros(x.shape, dtype=bool))
         self.assertReferenceChecks(
             gc, op, [X], reference_dropout_ratio1,
             # Don't check the mask with cuDNN because it's packed data
