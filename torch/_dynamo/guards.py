@@ -128,6 +128,7 @@ CLOSURE_VARS = collections.OrderedDict(
             if isinstance(a, (np.generic, np.ndarray))
             else a,
         ),
+        ("torch", torch),
     ]
 )
 
@@ -411,12 +412,6 @@ class GuardBuilder(GuardBuilderBase):
                 val,
                 ok_types,
             ), t.__name__
-
-        if istype(val, (torch.device, torch.dtype)):
-            # TODO(jansel): is this slow? perhaps optimize it
-            code = [f"str({ref}) == {str(val)!r}"]
-            self._produce_guard_code(guard, code)
-            return
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -1252,36 +1247,45 @@ def get_guard_fail_reason(
     f_locals: Dict[str, object],
 ) -> str:
     """
-    called to compute a guard failure's reason.
+    Return the reason why `guard_fn` failed.
+    Updates `guard_failures` with the generated reason.
+    If `config.report_all_guard_failures` is enabled,
+    all failures in `guard_fn` are reported - otherwise,
+    only the first one is reported.
     """
-    if not is_guard_failure_reporting_enabled() and guard_fn.guard_fail_fn is None:
-        return ""
-
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reason = ""
+    reasons: List[str] = []
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason = eval(part, global_scope, scope)
+            fail_reason = False
+            try:
+                fail_reason = eval(part, global_scope, scope)
+            except Exception:
+                # evaluating after the first failure can cause
+                # errors, e.g. if the check len(L['args']) > 0 fails,
+                # a subsequent check on L['args'][0] will error.
+                pass
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
 
         if isinstance(fail_reason, bool) and not fail_reason:
             fail_reason = part
         if isinstance(fail_reason, str):
-            reason += fail_reason
+            reasons.append(fail_reason)
             if not config.report_all_guard_failures:
                 break
 
-    guard_failures[orig_code_map[code]].append(reason)
+    reason_str = "\n".join(reasons)
+    guard_failures[orig_code_map[code]].append(reason_str)
 
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
-                GuardFail(reason or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
         log.error(
@@ -1289,14 +1293,19 @@ def get_guard_fail_reason(
             exc_info=True,
         )
 
-    return reason
+    return reason_str
 
 
-def log_recompilation_reason(cache_entry, frame: types.FrameType) -> List[str]:
-    if not recompiles_log.isEnabledFor(logging.DEBUG) and not config.error_on_recompile:
-        return []
-
-    # compute guard failure reasons using cache_entry
+def get_and_maybe_log_recompilation_reason(
+    cache_entry, frame: types.FrameType
+) -> List[str]:
+    """
+    Return the list of guard failure reasons using cache_entry.
+    If `config.report_all_guard_failures` is disabled, only the last reason
+    of the last guard is returned.
+    Logs the recompilation reason if `recompiles` logging is enabled.
+    Raises a RecompileError if `config.error_on_recompile` is enabled.
+    """
     reasons = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
@@ -1308,7 +1317,9 @@ def log_recompilation_reason(cache_entry, frame: types.FrameType) -> List[str]:
 
     code = frame.f_code
 
-    if is_guard_failure_reporting_enabled():
+    if is_guard_failure_reporting_enabled() and recompiles_log.isEnabledFor(
+        logging.DEBUG
+    ):
         if config.report_all_guard_failures:
             failures = "\n".join(reasons)
         else:

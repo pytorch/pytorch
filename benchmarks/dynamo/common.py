@@ -68,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -638,17 +638,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    with torch._dynamo.utils.CompileProfiler() as prof:
-        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-            model_iter_fn
-        )
-        opt_model_iter_fn(model, example_inputs)
-        output_csv(
-            output_filename, ["model", "profiler report"], [current_name, prof.report()]
-        )
-        met = prof.get_metrics()
-        guard_failures = len(met["guard_failures"])
-        return [guard_failures]
+    prof = torch._dynamo.utils.CompilerProfiler()
+    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+        model_iter_fn
+    )
+    opt_model_iter_fn(model, example_inputs)
+    output_csv(
+        output_filename, ["model", "profiler report"], [current_name, prof.report()]
+    )
+    met = prof.get_metrics()
+    guard_failures = len(met["guard_failures"])
+    return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -3882,6 +3882,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

@@ -4,6 +4,7 @@ import itertools
 import logging
 import os
 import random
+import textwrap
 import types
 import typing
 import weakref
@@ -53,7 +54,11 @@ from .exc import (
     unimplemented,
     Unsupported,
 )
-from .guards import CheckFunctionManager, GuardedCode, log_recompilation_reason
+from .guards import (
+    CheckFunctionManager,
+    get_and_maybe_log_recompilation_reason,
+    GuardedCode,
+)
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
@@ -268,7 +273,9 @@ def convert_frame_assert(
         cache_size = compute_cache_size(frame, cache_entry)
         recompile_reasons = None
         if is_recompilation(cache_size):
-            recompile_reasons = log_recompilation_reason(cache_entry, frame)
+            recompile_reasons = get_and_maybe_log_recompilation_reason(
+                cache_entry, frame
+            )
 
         input_codes.add(code)
         if code in output_codes:
@@ -321,19 +328,20 @@ def convert_frame_assert(
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
 
             def format_guard_failures(code):
-                # For the common case, it's sufficient to see just the most recent failure.
-                # We could add a verbose mode if needed
                 assert recompile_reasons, "TODO(whc) any other recompile reasons?"
+                if config.report_all_guard_failures:
+                    return "\n".join(recompile_reasons)
                 return recompile_reasons[-1]
 
             log.warning(
                 "torch._dynamo hit config.cache_size_limit (%s)\n"
                 "   function: %s\n"
-                "   reasons:  %s\n"
+                "   reasons:\n"
+                "%s\n"
                 "to diagnose recompilation issues, see %s.",
                 config.cache_size_limit,
                 format_func_info(code),
-                format_guard_failures(code),
+                textwrap.indent(format_guard_failures(code), " " * 6),
                 troubleshooting_url,
             )
             unimplemented("cache_size_limit reached")
