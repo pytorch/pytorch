@@ -72,13 +72,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 example,
                 **self.get_world_trs(),
             )
-            def inputs():
-                return (
+            inputs = (
                     torch.ones(4, 4, device="cuda") if self.rank == 0 else torch.zeros(4,4, device="cuda"),
                     0
                 )
-            compiled_func = compile(example, inputs())
-            compiled_out = compiled_func(*inputs())
+            compiled_func = compile(example, inputs)
+            compiled_out = compiled_func(*inputs)
             self.assertTrue(same(torch.ones(4,4, device="cuda"), compiled_out))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

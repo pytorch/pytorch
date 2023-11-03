@@ -137,9 +137,6 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         group (ProcessGroup or List[int]): The process group to work on.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
-    # if _are_we_tracing():
-    #     raise NotImplementedError("broadcast is not currently supported with torch.compile")
-
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
     return _maybe_wrap_tensor(tensor)
