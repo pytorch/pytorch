@@ -63,7 +63,7 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
-# TestCase for _slice_argnums, an important helper funciton
+# TestCase for _slice_argnums, an important helper function
 
 
 class TestSliceArgnums(TestCase):
