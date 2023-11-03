@@ -24,7 +24,7 @@ __all__ = [
 
 
 class GradcheckError(RuntimeError):
-    r"""Error raised by `gradcheck` and `gradgradcheck` functions."""
+    r"""Error raised by :func:`gradcheck` and :func:`gradgradcheck`."""
     
     pass
 
