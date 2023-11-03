@@ -7816,6 +7816,43 @@ sample index is drawn for a row, it cannot be drawn again for that row.
     When drawn without replacement, :attr:`num_samples` must be lower than
     number of non-zero elements in :attr:`input` (or the min number of non-zero
     elements in each row of :attr:`input` if it is a matrix).
+    
+.. note::
+    Please keep in mind that torch.multinomial(replacement=True) generates "outcomes of n trials" instead of "the number of trial for which the outcome falls into class k".
+
+    In probability theory, multinomial distribution is defined as follows.
+    
+    x ~ Multinomial(n, p)
+    n: the number of independent trials (e.g., n=100 rolls of a dice)
+    K: the number of classes (e.g., K=6 for a dice, K=2 for a coin)
+       the outcome of each trial falls into one of K classes
+    p: [p_1, p_2, …, p_k, …, p_K], probabability parameter, a vector
+       p_k = the probability that the outcome of a single trial falls into class k
+       p_1 + p_2 + ... + p_K = 1
+    x: [x_1, x_2, …, x_k, …, x_K], a sample point, a vector
+       x_k = the number of trials for which the outcome falls into class k
+       x_1 + x_2 + … + x_K = n
+       
+    The sample point x of multinomial distribution is a vector [x_1, x_2, …, x_k, …, x_K]. 
+    However, torch.multinomial(replacement=True) generates "outcomes of n trials" instead of random variable x that consists of "the number of trial for which the outcome falls into class k".
+    
+    >>> p = torch.tensor([2/10, 3/10, 5/10])
+    >>> n = 10
+    >>> out = torch.multinomial(p, n, replacement=True)
+    tensor([1, 2, 1, 2, 2, 2, 1, 2, 0, 2])
+    # convert to vector [x_1, x_2, …, x_k, …, x_K]
+    >>> x = out.unique(return_counts=True)[1]
+    tensor([1, 3, 6]) # x ~ Multinomail(n, p)
+
+.. note::
+    Please keep in mind that torch.multinomial(replacement=False), there is no such concept as sampling "without replacement" in multinomial distribution:
+    
+    (1) By definition of multinomial distribution, each trial is independent. Thus, we can observe any outcomes (according to p_k) at any trials. If replacement=False, then each trial is not independent (e.g., we cannot observe eye 3 after we once observe eye 3).
+    (2) By definition of multinomial distribution, n > 0 and there is no constraint on n. If replacement=False, then n is constrained to n <= K.
+    (3) If replacement=False, then the sample point x, [x_1, x_2, …, x_k, …, x_K], is always [1, …, 1]. In other words, regardless of the values of the parameter p, [p_1, p_2, …, p_k, …, p_K], torch.multinomial(replacement=False) always behaves in a uniform fashion as if p were [1/K, …, 1/K].
+    
+    torch.multinomial(replacement=False) behaves like np.random.choice, which does not model multinomial distribution.
+    The sample point x of np.random.choice follows univariate categorical distribution, while the sample point x of multinomial distribution follows multivariate distrubtion.
 
 Args:
     input (Tensor): the input tensor containing probabilities
