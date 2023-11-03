@@ -803,7 +803,9 @@ class BuiltinVariable(VariableTracker):
 
         # For list iterator and itertools iterators, we know that they return `self` when
         # calling `iter` on them.
-        if self.fn is iter and isinstance(obj, (variables.ItertoolsIteratorVariable, ListIteratorVariable)):
+        if self.fn is iter and isinstance(
+            obj, (variables.ItertoolsIteratorVariable, ListIteratorVariable)
+        ):
             return obj
 
         # TODO This should probably be treated as a dict, or dicts should also be treated here
