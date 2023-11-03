@@ -433,7 +433,7 @@ def kaiming_normal_(
 ):
     r"""Fill the input `Tensor` with values using a Kaiming normal distribution.
 
-    The method is Described in `Delving deep into rectifiers: Surpassing
+    The method is described in `Delving deep into rectifiers: Surpassing
     human-level performance on ImageNet classification` - He, K. et al. (2015).
     The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std}^2)` where
