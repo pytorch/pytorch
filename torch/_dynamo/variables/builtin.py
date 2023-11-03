@@ -1100,10 +1100,14 @@ class BuiltinVariable(VariableTracker):
                 # have the original tensor stored in the graphargs.
                 for grapharg in tx.output.graphargs:
                     if grapharg.source == source.base:
-                        example_value = grapharg.example.grad
-                        return VariableBuilder(tx, source)(example_value).add_options(
-                            options
+                        f_example_value = obj.as_proxy().node.meta["example_value"].grad
+                        grad_shape_specialized = [int(x) for x in f_example_value.shape]
+                        grapharg.example.grad = torch.zeros(
+                            grad_shape_specialized, device=f_example_value.device
                         )
+                        return VariableBuilder(tx, source)(
+                            grapharg.example.grad
+                        ).add_options(options)
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
