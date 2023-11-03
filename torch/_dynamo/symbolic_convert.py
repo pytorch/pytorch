@@ -1092,7 +1092,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
+        if isinstance(
+            it, (variables.ListIteratorVariable, variables.IteratorVariable)
+        ) or (isinstance(it, variables.UserDefinedObjectVariable) and it.is_iterator()):
             self.output.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables(self)
@@ -2598,6 +2600,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 return
             if isinstance(
                 tos, (variables.ListIteratorVariable, variables.IteratorVariable)
+            ) or (
+                isinstance(tos, variables.UserDefinedObjectVariable)
+                and tos.is_iterator()
             ):
                 self.output.guards.update(tos.guards)
                 try:

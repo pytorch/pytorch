@@ -842,7 +842,7 @@ class BuiltinVariable(VariableTracker):
                 guards=guards,
             ).add_options(self, obj)
         elif obj is not None:
-            # Handle as `UserDefinedIteratorVariable` if it implements `__iter__`
+            # Handle as `UserDefinedObjectVariable` if it implements `__iter__`
             return obj.call_method(tx, "__iter__", [], {})
 
     call_iter = _call_iter_tuple_list
@@ -985,6 +985,8 @@ class BuiltinVariable(VariableTracker):
     def call_next(self, tx, arg):
         if isinstance(
             arg, (variables.ListIteratorVariable, variables.IteratorVariable)
+        ) or (
+            isinstance(arg, variables.UserDefinedObjectVariable) and arg.is_iterator()
         ):
             val, next_iter = arg.next_variables(tx)
             return val
@@ -1033,7 +1035,7 @@ class BuiltinVariable(VariableTracker):
     def call_StopIteration(self, tx):
         from .user_defined import UserDefinedObjectVariable
 
-        return UserDefinedObjectVariable.create(StopIteration())
+        return UserDefinedObjectVariable(StopIteration())
 
     def call_reduce(self, tx, function, iterable, initializer=None):
         if iterable.has_unpack_var_sequence(tx):

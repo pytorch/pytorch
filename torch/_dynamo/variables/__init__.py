@@ -65,11 +65,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchVariable
-from .user_defined import (
-    UserDefinedClassVariable,
-    UserDefinedIteratorVariable,
-    UserDefinedObjectVariable,
-)
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -96,7 +92,6 @@ __all__ = [
     "CycleIteratorVariable",
     "LambdaVariable",
     "ListIteratorVariable",
-    "UserDefinedIteratorVariable",
     "ItertoolsIteratorVariable",
     "ListVariable",
     "NNModuleVariable",

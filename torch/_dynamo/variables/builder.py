@@ -399,7 +399,7 @@ class VariableBuilder:
 
         elif value is torch.utils._pytree.SUPPORTED_NODES:
             result = {
-                k: UserDefinedObjectVariable.create(
+                k: UserDefinedObjectVariable(
                     value[k],
                     source=GetItemSource(self.get_source(), k),
                     # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
@@ -814,7 +814,7 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
-            result = UserDefinedObjectVariable.create(
+            result = UserDefinedObjectVariable(
                 value,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
@@ -1341,9 +1341,7 @@ def _dataclasses_fields_lambda(obj):
             source = GetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
-        items.append(
-            UserDefinedObjectVariable.create(field, source=source).add_options(obj)
-        )
+        items.append(UserDefinedObjectVariable(field, source=source).add_options(obj))
     return TupleVariable(items).add_options(obj)
 
 
@@ -1519,7 +1517,7 @@ def wrap_fx_proxy_cls(
     ):
         from . import UserDefinedObjectVariable
 
-        return UserDefinedObjectVariable.create(example_value)
+        return UserDefinedObjectVariable(example_value)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
@@ -1847,7 +1845,7 @@ class SourcelessBuilder:
             # This is always valid to call, and useful for recursive calls.
             return value
         if isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
-            return UserDefinedObjectVariable.create(value)
+            return UserDefinedObjectVariable(value)
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
