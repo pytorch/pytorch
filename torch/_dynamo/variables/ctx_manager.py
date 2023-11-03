@@ -1,5 +1,6 @@
+import dataclasses
 import inspect
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch._C
 from torch._guards import Guard
@@ -18,6 +19,16 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
+
+
+@dataclasses.dataclass
+class CleanupOnce:
+    fn: Any
+
+    def __call__(self, *args, **kwargs):
+        if self.fn is not None:
+            self.fn(*args, **kwargs)
+        self.fn = None
 
 
 class ContextWrappingVariable(VariableTracker):
@@ -66,8 +77,7 @@ class ContextWrappingVariable(VariableTracker):
 
 
 class GenericContextWrappingVariable(ContextWrappingVariable):
-    def __init__(self, target_values, initial_values=None, **kwargs):
-        cm_obj = kwargs.pop("cm_obj", None)
+    def __init__(self, target_values, initial_values=None, *, cm_obj=None, **kwargs):
         assert cm_obj is not None
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
@@ -173,9 +183,13 @@ class InferenceModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+        self,
+        target_values,
+        initial_values=torch.is_inference_mode_enabled(),
+        *,
+        mode=None,
+        **kwargs,
     ):
-        mode = kwargs.pop("mode", None)
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
@@ -372,8 +386,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs):
-        mode = kwargs.pop("mode", None)
+    def __init__(self, target_values, initial_values=None, *, mode=None, **kwargs):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
