@@ -19,6 +19,7 @@ from typing import (
     Optional,
     OrderedDict,
     Set,
+    Tuple,
     Union,
 )
 
@@ -33,6 +34,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._guards import (
     Checkpointable,
+    GlobalContextCheckpointState,
     Guard,
     GuardsCheckpointState,
     Source,
@@ -465,8 +467,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def nn_modules(self) -> Dict[str, torch.nn.Module]:
         return self.tracing_context.module_context.nn_modules
 
-    def save_global_state(self):
-        global_state = self.tracing_context.global_context.global_state
+    def save_global_state(self, out=None):
+        """
+        Saves to out if it is provided. Else saves to the tracing context's global_state.
+        """
+        global_state = (
+            out if out is not None else self.tracing_context.global_context.global_state
+        )
 
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
@@ -964,6 +971,24 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         )
         return graph_sizes_str
 
+    @contextlib.contextmanager
+    def restore_global_state(self):
+        """
+        Momentarily restores the global state to what it was prior to tracing the current output
+        """
+        prior_global_state = self.tracing_context.global_context.copy_graphstate()
+        current_global_state: Dict[str, Tuple[Any, bool]] = {}
+        self.save_global_state(out=current_global_state)
+        try:
+            # Set to state prior to tracing the graph
+            self.tracing_context.global_context.restore_graphstate(prior_global_state)
+            yield
+        finally:
+            # Reset to state at the current time (e.g. before calling the user compiler)
+            self.tracing_context.global_context.restore_graphstate(
+                GlobalContextCheckpointState(current_global_state)
+            )
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -1002,7 +1027,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-        compiled_fn = self.call_user_compiler(gm)
+        with self.restore_global_state():
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
