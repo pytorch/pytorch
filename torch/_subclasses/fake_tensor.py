@@ -1634,6 +1634,13 @@ class FakeTensorMode(TorchDispatchMode):
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations:
+            if func in (
+                aten._nested_tensor_from_tensor_list.default,
+                aten._nested_tensor_from_tensor_list.out,
+            ):
+                raise UnsupportedOperatorException(
+                    "torch.compile does not support strided NestedTensor"
+                )
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out != NotImplemented:

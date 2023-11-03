@@ -97,6 +97,7 @@ def register_func(tables, aten_ops, schema_str):
 
             for table in tables:
                 table[aten_op] = get_inner(aten_op)
+        return func
 
     return wrapper
 
@@ -282,15 +283,18 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
 def is_contiguous_general(func, *args, **kwargs):
+    from torch._prims_common import is_contiguous_for_memory_format
+
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
-
-    from torch._prims_common import is_contiguous
-
-    return is_contiguous(inp, **new_kwargs)
+    new_kwargs["memory_format"] = new_kwargs.get(
+        "memory_format", torch.contiguous_format
+    )
+    if new_kwargs["memory_format"] == torch.preserve_format:
+        return True
+    return is_contiguous_for_memory_format(inp, **new_kwargs)
 
 
 register_jagged_func(
