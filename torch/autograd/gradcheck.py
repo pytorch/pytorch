@@ -1949,6 +1949,8 @@ def gradcheck(
     gradients wrt tensors in :attr:`inputs` that are of floating point or complex type
     and with ``requires_grad=True``.
 
+    The check between numerical and analytical gradients uses :func:`~torch.allclose`.
+
     For most of the complex functions we consider for optimization purposes, no notion of
     Jacobian exists. Instead, gradcheck verifies if the numerical and analytical values of
     the Wirtinger and Conjugate Wirtinger derivatives are consistent. Because the gradient
