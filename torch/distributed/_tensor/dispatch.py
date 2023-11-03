@@ -125,6 +125,12 @@ def _operator_dispatch(
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
 ) -> Tuple[object, OpSchema, OutputSharding]:
+    # operators that does not need to go through sharding propagation
+    if op_call == aten.is_same_size.default:
+        assert isinstance(args[0], torch.Tensor)
+        assert isinstance(args[1], torch.Tensor)
+        return args[0].shape == args[1].shape, None, None  # type: ignore[return-value]
+
     runtime_schema_info = sharding_propagator.op_to_schema_info.get(op_call, None)
 
     if runtime_schema_info is not None and runtime_schema_info.needs_pytree:

@@ -41,9 +41,7 @@ aten = torch.ops.aten
         aten.contiguous.default,
         aten.copy_.default,
         aten.detach.default,
-        aten.equal.default,
         aten.fill_.Scalar,
-        aten.is_same_size.default,
         aten.zero_.default,
     ]
 )
@@ -57,6 +55,45 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             for arg_strategy in select_strategy.strategies
         ]
     )
+
+
+@register_op_strategy(
+    [
+        aten.equal.default,
+        aten.is_same_size.default,
+    ]
+)
+def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    # equal_strategy deals with ops that comparing two tensor, we need to make sure
+    # sharding layout the same with two operands, we choose to follow the arg with max
+    # num of shards, still keep is_same_size here for completeness as they share the
+    # same strategy in theory.
+    self_strategy, other_strategy = op_schema.args_schema
+    assert isinstance(self_strategy, OpStrategy)
+    assert isinstance(other_strategy, OpStrategy)
+
+    select_strategy = (
+        self_strategy
+        if self_strategy.max_num_shards() >= other_strategy.max_num_shards()
+        else other_strategy
+    )
+    equal_strategy = OpStrategy([])
+
+    for arg_strategy in select_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_partial(arg_spec):
+            # if the arg_spec have partial, reshard to replicate
+            output_spec = DTensorSpec(
+                mesh=arg_spec.mesh,
+                placements=tuple(
+                    Replicate() if isinstance(p, _Partial) else p
+                    for p in arg_spec.placements
+                ),
+            )
+            equal_strategy.strategies.append(PlacementStrategy(output_spec=output_spec))
+        else:
+            equal_strategy.strategies.append(PlacementStrategy(arg_spec))
+    return equal_strategy
 
 
 @register_op_strategy(

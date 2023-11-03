@@ -253,6 +253,17 @@ class DistTensorOpsTest(DTensorTestBase):
         eq_result = dist_tensor_1.equal(dist_tensor_2)
         # equal op all reduces each shard's local result
         self.assertFalse(eq_result)
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_2))
+
+        # test if sharding are different
+        replica_spec = [Replicate()]
+        global_input = torch.ones(4 * self.world_size, 4)
+        dist_tensor_3 = DTensor.from_local(
+            global_input, device_mesh, replica_spec, run_check=False
+        )
+
+        self.assertTrue(dist_tensor_1.equal(dist_tensor_3))
+        self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
