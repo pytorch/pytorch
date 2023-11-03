@@ -10,9 +10,9 @@ from torch.distributed._tensor._collective_utils import (
     mesh_scatter,
 )
 from torch.distributed._tensor.device_mesh import (
+    _mesh_resources,
     DeviceMesh,
     init_device_mesh,
-    mesh_resources,
 )
 from torch.distributed._tensor.placement_types import Shard
 
@@ -120,6 +120,15 @@ class DeviceMeshTest(DTensorTestBase):
             else:
                 mesh = DeviceMesh(self.device_type, mesh_subpg_2)
 
+        mesh_non_contiguous = (
+            torch.arange(0, self.world_size).view(2, 2).transpose(0, 1)
+        )
+        device_mesh = DeviceMesh(
+            self.device_type, mesh_non_contiguous, mesh_dim_names=("dp", "mp")
+        )
+        self.assertEqual(device_mesh.size(0), 2)
+        self.assertEqual(device_mesh.size(1), 2)
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
@@ -154,7 +163,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
         mesh2 = DeviceMesh(self.device_type, mesh_tensor_2d)
-        self.assertNotEqual(hash(mesh), hash(mesh2))
+        self.assertEqual(hash(mesh), hash(mesh2))
         mesh_tensor_3d = torch.arange(8).reshape(2, 2, 2)
         mesh3 = DeviceMesh(self.device_type, mesh_tensor_3d)
         self.assertNotEqual(hash(mesh), hash(mesh3))
@@ -268,8 +277,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
-        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
+        self.assertEqual(_mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
 
     @with_comms
     def test_get_parent_mesh_dim_exist(self):
@@ -279,15 +288,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
 
     @with_comms
     def test_get_parent_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
-        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh), None)
+        self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

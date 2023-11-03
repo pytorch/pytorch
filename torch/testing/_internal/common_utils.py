@@ -519,8 +519,71 @@ class parametrize(_TestParametrizer):
                 yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
-                raise ValueError('An empty arg_values was passed to @parametrize. '
+                raise ValueError(f'{test}: An empty arg_values was passed to @parametrize. '
                                  'Note that this may result from reuse of a generator.')
+
+
+class decorateIf(_TestParametrizer):
+    """
+    Decorator for applying parameter-specific conditional decoration.
+    Composes with other test parametrizers (e.g. @modules, @ops, @parametrize, etc.).
+
+    Examples::
+
+        @decorateIf(unittest.skip, lambda params: params["x"] == 2)
+        @parametrize("x", range(5))
+        def test_foo(self, x):
+            ...
+
+        @parametrize("x,y", [(1, 'foo'), (2, 'bar'), (3, 'baz')])
+        @decorateIf(
+            unittest.expectedFailure,
+            lambda params: params["x"] == 3 and params["y"] == "baz"
+        )
+        def test_bar(self, x, y):
+            ...
+
+        @decorateIf(
+            unittest.expectedFailure,
+            lambda params: params["op"].name == "add" and params["dtype"] == torch.float16
+        )
+        @ops(op_db)
+        def test_op_foo(self, device, dtype, op):
+            ...
+
+        @decorateIf(
+            unittest.skip,
+            lambda params: params["module_info"].module_cls is torch.nn.Linear and \
+                params["device"] == "cpu"
+        )
+        @modules(module_db)
+        def test_module_foo(self, device, dtype, module_info):
+            ...
+
+    Args:
+        decorator: Test decorator to apply if the predicate is satisfied.
+        predicate_fn (Callable): Function taking in a dict of params and returning a boolean
+            indicating whether the decorator should be applied or not.
+    """
+    def __init__(self, decorator, predicate_fn):
+        self.decorator = decorator
+        self.predicate_fn = predicate_fn
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+
+        # Leave test as-is and return the appropriate decorator_fn.
+        def decorator_fn(params, decorator=self.decorator, predicate_fn=self.predicate_fn):
+            if predicate_fn(params):
+                return [decorator]
+            else:
+                return []
+
+        @wraps(test)
+        def test_wrapper(*args, **kwargs):
+            return test(*args, **kwargs)
+
+        test_name = ''
+        yield (test_wrapper, test_name, {}, decorator_fn)
 
 
 class ProfilingMode(Enum):
@@ -719,19 +782,54 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     return wait_for_process(p, timeout=timeout)
 
 
-def retry_shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None, retries=1):
-    assert retries >= 0, f"Expecting non negative number for number of retries, got {retries}"
+def retry_shell(
+    command,
+    cwd=None,
+    env=None,
+    stdout=None,
+    stderr=None,
+    timeout=None,
+    retries=1,
+    was_rerun=False,
+) -> Tuple[int, bool]:
+    # Returns exicode + whether it was rerun
+    assert (
+        retries >= 0
+    ), f"Expecting non negative number for number of retries, got {retries}"
     try:
-        exit_code = shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout)
+        exit_code = shell(
+            command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
+        )
         if exit_code == 0 or retries == 0:
-            return exit_code
-        print(f"Got exit code {exit_code}, retrying (retries left={retries})", file=stdout, flush=True)
+            return exit_code, was_rerun
+        print(
+            f"Got exit code {exit_code}, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
     except subprocess.TimeoutExpired:
         if retries == 0:
-            print(f"Command took >{timeout // 60}min, returning 124", file=stdout, flush=True)
-            return 124
-        print(f"Command took >{timeout // 60}min, retrying (retries left={retries})", file=stdout, flush=True)
-    return retry_shell(command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout, retries=retries - 1)
+            print(
+                f"Command took >{timeout // 60}min, returning 124",
+                file=stdout,
+                flush=True,
+            )
+            return 124, was_rerun
+        print(
+            f"Command took >{timeout // 60}min, retrying (retries left={retries})",
+            file=stdout,
+            flush=True,
+        )
+    return retry_shell(
+        command,
+        cwd=cwd,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        timeout=timeout,
+        retries=retries - 1,
+        was_rerun=True,
+    )
 
 
 def discover_test_cases_recursively(suite_or_case):
@@ -889,7 +987,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
-            exitcode = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+            exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
@@ -1087,6 +1185,9 @@ TestEnvironment.def_flag("TEST_WITH_TSAN", env_var="PYTORCH_TEST_WITH_TSAN")
 TestEnvironment.def_flag("TEST_WITH_UBSAN", env_var="PYTORCH_TEST_WITH_UBSAN")
 TestEnvironment.def_flag("TEST_WITH_ROCM", env_var="PYTORCH_TEST_WITH_ROCM")
 
+# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
+# See #64427
+TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TestEnvironment.def_flag("TEST_WITH_SLOW", env_var="PYTORCH_TEST_WITH_SLOW")
 
@@ -1151,6 +1252,14 @@ if TEST_WITH_TORCHDYNAMO:
         torch._inductor.config.fallback_random = True
 
 
+def xpassIfTorchDynamo(func):
+    return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
+
+
+def xfailIfTorchDynamo(func):
+    return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
@@ -1172,7 +1281,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
 
     return decorator
 
-def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
+def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
+                        condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1192,6 +1302,8 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
 
     return decorator
 
+def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor on the ROCm stack"):
+    return skipIfTorchInductor(msg=msg, condition=TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)
 
 # Run PyTorch tests with translation validation on.
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
@@ -2254,6 +2366,11 @@ class TestCase(expecttest.TestCase):
     # `torch.float` when `setUp` and `tearDown` are called.
     _default_dtype_check_enabled: bool = False
 
+    # Always use difflib to print diffs on multi line equality.
+    # Undocumented feature in unittest
+    _diffThreshold = sys.maxsize
+    maxDiff = None
+
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
         if torch.cuda.is_initialized():
@@ -2263,6 +2380,7 @@ class TestCase(expecttest.TestCase):
                 torch.cuda.synchronize()
             except RuntimeError as rte:
                 print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
+                print(str(rte), file=sys.stderr)
                 return True
             return False
         else:
@@ -2471,7 +2589,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+            super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
@@ -4485,11 +4603,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
+    for out in pytree.tree_leaves(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_flatten(inps)[0]:
+    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_leaves(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

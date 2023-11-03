@@ -27,7 +27,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_presence",
-            np.array([[True, False, False, True], [False, True, True, False]], dtype=np.bool)
+            np.array([[True, False, False, True], [False, True, True, False]], dtype=bool)
         )
 
         workspace.RunOperatorOnce(op)
@@ -66,7 +66,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -75,7 +75,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
 
         workspace.RunOperatorOnce(op)
@@ -110,15 +110,15 @@ class TestFeatureMapsOps(TestCase):
         # Inputs 1, 2 & 3.
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
         workspace.FeedBlob(
             "in3_presence",
-            np.array([False, True], dtype=np.bool)
+            np.array([False, True], dtype=bool)
         )
         # Input 4.
         workspace.FeedBlob(
@@ -158,15 +158,15 @@ class TestFeatureMapsOps(TestCase):
         # Inputs 1, 2 & 3.
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
         workspace.FeedBlob(
             "in3_presence",
-            np.array([False, True], dtype=np.bool)
+            np.array([False, True], dtype=bool)
         )
         # Input 4.
         workspace.FeedBlob(
@@ -214,7 +214,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -227,7 +227,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
 
         workspace.RunOperatorOnce(op)
@@ -280,7 +280,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -289,7 +289,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
         workspace.FeedBlob(
             "out_values_values_grad",
@@ -336,7 +336,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in1_presence",
-            np.array([True, False], dtype=np.bool)
+            np.array([True, False], dtype=bool)
         )
         # Input 2.
         workspace.FeedBlob(
@@ -353,7 +353,7 @@ class TestFeatureMapsOps(TestCase):
         )
         workspace.FeedBlob(
             "in2_presence",
-            np.array([True, True], dtype=np.bool)
+            np.array([True, True], dtype=bool)
         )
 
         workspace.RunOperatorOnce(op)

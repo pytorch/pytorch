@@ -52,13 +52,13 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  */
 class TORCH_API RegisterOperators final {
 public:
-  RegisterOperators();
-  ~RegisterOperators();
+  RegisterOperators() = default;
+  ~RegisterOperators() = default;
 
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+  RegisterOperators(RegisterOperators&&) noexcept = default;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept = default;
 
   class TORCH_API Options final {
   public:
@@ -82,7 +82,7 @@ public:
     // internal only for registering caffe2 ops
     Options&& schema(FunctionSchema&& schema) {
         TORCH_CHECK(!schemaOrName_.has_value(), "You can only specify the schema once per operator registration.");
-        schemaOrName_ = c10::make_right<OperatorName, FunctionSchema>(std::move(schema));
+        schemaOrName_ = FunctionSchema(std::move(schema));
         return std::move(*this);
     }
 
@@ -431,7 +431,7 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
-    c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
+    c10::optional<std::variant<OperatorName, FunctionSchema>> schemaOrName_;
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;

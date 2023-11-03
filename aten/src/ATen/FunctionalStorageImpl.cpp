@@ -6,12 +6,11 @@
 #include <c10/util/Exception.h>
 #include <vector>
 
-namespace at {
-namespace functionalization {
+namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
-  return ViewMeta(forward_fn, reverse_fn, out_idx);
+  return ViewMeta(forward_fn, reverse_fn, is_multi_output, out_idx);
 }
 
 // Note [Functionalization: Alias Removal Part 2]
@@ -122,5 +121,4 @@ bool FunctionalStorageImpl::apply_updates() {
   return any_updates;
 }
 
-} // namespace functionalization
-} // namespace at
+} // namespace at::functionalization

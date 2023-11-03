@@ -212,6 +212,9 @@ try:
             self.validator.add_assertion(number >= 0)
             return number ** 0.5
 
+        def abs(self, number: z3.ArithRef) -> z3.ArithRef:
+            return z3.Abs(number)
+
     # Lifts a callable to be used in Z3.
     #
     # This function replaces the given 'op' by a function that:
@@ -221,7 +224,7 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.symbolic_shapes import sym_sqrt
+        from torch.fx.experimental.sym_node import sym_sqrt
 
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
@@ -263,6 +266,7 @@ try:
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
+            operator.abs: lift(ops.abs),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -272,6 +276,7 @@ try:
             torch.sym_float: lift(ops.to_real),
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
+            torch.sym_ite: lift(lambda b, t, f: t if b else f),
             sym_sqrt: lift(ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
@@ -643,6 +648,7 @@ def bisect(shape_env):
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
             tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
             new_with_shape_env(shape_env, fake.storage_offset()),
+            fake.is_nested,
         )
 
     # Checks whether the given shape_env fails when produce_guards is called.

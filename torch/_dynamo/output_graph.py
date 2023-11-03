@@ -39,8 +39,8 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
-from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
+from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
+from torch.utils.weak import WeakIdKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -56,6 +56,7 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
+    SkipFrame,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -87,8 +88,6 @@ from .utils import (
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
-    nnmodule_doc_url_msg,
-    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -100,6 +99,8 @@ from .variables.tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
+
+from .variables.torch_function import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -254,10 +255,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
-
-        # Used to maintain an alias between real values variable tracker for tensors we have seen.
-        # This map ensures that the only tensors in graph inputs, and the only tensors in guards are unique.
-        self.real_value_tensor_positive_aliases = WeakTensorKeyDictionary()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -423,11 +420,20 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def new_subtracer(self):
+    def subtracer(self, source_target, prior_tracer):
         new_scope_ctx = enter_new_scope()
         try:
+            if prior_tracer:
+                # Lineage MUST stay preserved
+                assert prior_tracer.parent is self.current_tracer
             new_scope_ctx.__enter__()
-            tracer = SubgraphTracer(self, parent=self.current_tracer)
+            tracer = (
+                prior_tracer
+                if prior_tracer
+                else SubgraphTracer(
+                    self, parent=self.current_tracer, source_target=source_target
+                )
+            )
             self.tracers.append(tracer)
             yield tracer
         finally:
@@ -558,9 +564,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert arg.fake_tensor is not None
 
         def bind_symint(s, prop):
-            if not (
-                isinstance(s, torch.SymInt) and isinstance(s.node.expr, sympy.Symbol)
-            ):
+            if not (is_symbolic(s) and isinstance(s.node.expr, sympy.Symbol)):
                 return
             # TODO: don't readd symint if we already have it in graph
             # (this is harmless because we do remove the unused ones later)
@@ -686,14 +690,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(
-                target, check_backward_hooks=True, check_state_dict_hooks=True
-            ):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
-                    f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
-                )
 
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
@@ -854,7 +850,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                not isinstance(
+                    v,
+                    (
+                        UnspecializedPythonVariable,
+                        NumpyNdarrayVariable,
+                        TensorWithTFOverrideVariable,
+                    ),
+                )
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
@@ -1058,6 +1061,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 "Adding a graph break."
             )
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
+        except SkipFrame as e:
+            # The backend compiler has requested that we skip the frame, instead of
+            # aborting execution.
+            raise e
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
@@ -1181,7 +1188,9 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph, parent=None, export_root=False):
+    def __init__(
+        self, output_graph, parent=None, export_root=False, source_target=None
+    ):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
@@ -1204,7 +1213,7 @@ class SubgraphTracer(fx.Tracer):
         # to new Proxy objects that wrap inputs to this subgraph.
         #
         # This dict serves two purposes:
-        # - Proxies are associatd with VariableTrackers. If we see
+        # - Proxies are associated with VariableTrackers. If we see
         # the same VariableTracker twice (and it is a free variable),
         # then we want to use the same Proxy in the current subgraph to
         # record the tracing.
@@ -1220,6 +1229,16 @@ class SubgraphTracer(fx.Tracer):
         self._orig_gm_meta = None
         self._orig_gm_lineno_map = None
         self._orig_gm_firstlineno = None
+        # Each SubgraphTracer is associated with a source target, which indicates
+        # which operator this subgraph is attached to. We compute a source_fn_stack
+        # based on the source target. For the root tracer, it's set to [].
+        # This is useful for debugging and transforming the exported graph.
+        if self.parent is None:
+            self.source_fn_stack = []
+        else:
+            self.source_fn_stack = self.parent.source_fn_stack + [
+                (self.graph._target_to_str(source_target), source_target)
+            ]
 
     def create_proxy(
         self,
@@ -1315,6 +1334,24 @@ class SubgraphTracer(fx.Tracer):
                 self._orig_gm_meta = None
                 self._orig_gm_lineno_map = None
                 self._orig_gm_firstlineno = None
+        nn_module_stack = tx.nn_module_stack
+        if nn_module_stack:
+            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if kind in {"call_function", "call_method"}:
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (rv.node.name, target)
+            ]
+        elif kind == "call_module":
+            if self.parent is not None:
+                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+            # For modules we store the class
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
+            ]
 
         # preserve original meta if it is available
         if (
@@ -1332,26 +1369,30 @@ class SubgraphTracer(fx.Tracer):
                 meta = self._orig_gm_meta[node_idx]
                 if "stack_trace" in meta:
                     rv.node.meta["stack_trace"] = meta["stack_trace"]
-                if "nn_module_stack" in meta and "source_fn" in meta:
+                if "nn_module_stack" in meta and "source_fn_stack" in meta:
                     rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
-                    rv.node.meta["source_fn"] = meta["source_fn"]
+                    rv.node.meta["source_fn_stack"] = meta["source_fn_stack"]
 
         if "nn_module_stack" not in rv.node.meta:
             nn_module_stack = tx.nn_module_stack
             if nn_module_stack:
                 rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if "source_fn" not in rv.node.meta:
+        if "source_fn_stack" not in rv.node.meta:
             if kind in {"call_function", "call_method"}:
-                rv.node.meta["source_fn"] = (rv.node.name, target)
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (rv.node.name, target)
+                ]
             elif kind == "call_module":
                 if self.parent is not None:
                     unimplemented("Invoking an nn.Module inside HigherOrderOperator")
                 # For modules we store the class
-                rv.node.meta["source_fn"] = (
-                    rv.node.name,
-                    rv.node.meta["nn_module_stack"][target][1],
-                )
+                rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                    (
+                        rv.node.name,
+                        rv.node.meta["nn_module_stack"][target][1],
+                    )
+                ]
 
         if "stack_trace" not in rv.node.meta:
             frame_summaries: List[traceback.FrameSummary] = []
@@ -1371,7 +1412,7 @@ class SubgraphTracer(fx.Tracer):
         self, op, target, args=None, kwargs=None, name=None, type_expr=None
     ):
         if self.parent is not None:
-            flat_args, _ = pytree.tree_flatten((args, kwargs))
+            flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
@@ -1512,7 +1553,7 @@ class SubgraphTracer(fx.Tracer):
 # (possibly nested) SubgraphTracers, one per body function.
 #
 # Mechanically, we do the introspection by:
-# - Creating a new SubgraphTracer via OutputGraph.new_subtracer
+# - Creating a new SubgraphTracer via OutputGraph.subtracer
 # - Executing the body function.
 # This constructs the graph of the body function in the new SubgraphTracer
 # while modifying the state of the OutputGraph. For example:
