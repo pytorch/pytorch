@@ -1282,9 +1282,8 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
 
 
 def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
+    r"""Randomly zero out entire channels (a channel is a 1D feature map.
     
-    Randomly zero out entire channels (a channel is a 1D feature map.
     E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
@@ -1321,9 +1320,8 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
+    r"""Randomly zero out entire channels (a channel is a 2D feature map.
     
-    Randomly zero out entire channels (a channel is a 2D feature map.
     E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
@@ -1463,7 +1461,7 @@ In-place version of :func:`~threshold`.
 
 
 def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Apply the rectified linear unit function element-wise. 
+    r"""Apply the rectified linear unit function element-wise.
     
     See :class:`~torch.nn.ReLU` for more details.
     """
@@ -1487,7 +1485,7 @@ In-place version of :func:`~relu`.
 
 
 def glu(input: Tensor, dim: int = -1) -> Tensor:
-    r"""The gated linear unit.
+    r"""Apply the gated linear unit function.
     
 
     Computes:
@@ -1536,7 +1534,7 @@ In-place version of :func:`~hardtanh`.
 
 
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Modification of the ReLU with activation limited to maximum size of 6. 
+    r"""Modification of the ReLU with activation limited to maximum size of 6.
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
@@ -1973,7 +1971,7 @@ def tanh(input):
 
 
 def sigmoid(input):
-    r""" Compute sigmoid element wise.
+    r"""Compute sigmoid element-wise.
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
 
@@ -2132,7 +2130,7 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    r"""Simple lookup table that looks up embeddings in a fixed dictionary and size.
+    r"""Lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
     The input to the module is a list of indices, and the embedding matrix,
@@ -2606,7 +2604,7 @@ def ctc_loss(
     reduction: str = "mean",
     zero_infinity: bool = False,
 ) -> Tensor:
-    r"""The Connectionist Temporal Classification loss.
+    r"""Apply the Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
 
@@ -2674,7 +2672,7 @@ def nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""The negative log likelihood loss.
+    r"""Apply the negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
 
