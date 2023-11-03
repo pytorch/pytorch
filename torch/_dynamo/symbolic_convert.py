@@ -353,7 +353,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
@@ -363,8 +362,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         push and self.push(value)
                         self.jump(inst)
                 else:
-                    # rollback to the state before the __bool__ or __len__ inline
-                    self.restore_graphstate(state)
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
