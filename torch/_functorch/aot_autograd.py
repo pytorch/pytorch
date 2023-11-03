@@ -1072,8 +1072,10 @@ def run_functionalized_fw_and_collect_metadata(
 
         if prior_autocast_states != _get_autocast_states():
             raise RuntimeError(
-                "AOTAutograd does not support tracing graphs that mutate "
-                "the autocast state"
+                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                "which will unwind all of their mutations to autocast state before the graph exits. "
+                "If you encounter this error while using torch.compile, please file a bug."
             )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
