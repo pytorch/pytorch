@@ -275,7 +275,9 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch:
+    if not pre_dispatch and func not in [
+        torch.ops.aten.size.default, torch.ops.aten.stride.default, torch.ops.aten.storage_offset.default
+    ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -574,7 +576,6 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
         self._allow_fake_constant = _allow_fake_constant
-        self.is_inside_mode = False
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []

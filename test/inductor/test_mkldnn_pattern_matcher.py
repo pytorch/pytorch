@@ -464,10 +464,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
             )
-            # 2. QConv2D Unary fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 7)
 
         self._test_common(
             mod,
@@ -509,10 +505,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
             )
             # 2. QConv2D Unary fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1,
-            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            #    [qconv2d_pointwise_default, relu]
             self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 8)
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 2)
 
         self._test_common(
             mod,
@@ -568,13 +563,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
                 )
                 # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
-                #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
-                #     clamp_min_3, clamp_max_3, convert_element_type_6]
+                #    [qconv2d_pointwise_default_1, add_4]
                 self.assertEqual(
                     counters["inductor"]["qconv2d_binary_matcher_count"], 1
                 )
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 11
+                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 2
                 )
 
             self._test_common(
@@ -634,13 +628,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
                 )
                 # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
-                #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu,
-                #     mul_6, round_4, add_4, clamp_min_3, clamp_max_3, convert_element_type_6]
+                #    [qconv2d_pointwise_default_1, add_3, relu]
                 self.assertEqual(
                     counters["inductor"]["qconv2d_binary_matcher_count"], 1
                 )
                 self.assertEqual(
-                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 12
+                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 3
                 )
 
             self._test_common(
@@ -906,15 +899,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 18
             )
-            # 3. QConv2D Unary fusion in post-grad fusion pass * 2
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
-            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 14)
-            # 4. Qconv2d Binary fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
-            #     clamp_min_3, clamp_max_3, convert_element_type_6]
+            # 3. Qconv2d Binary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default_1, add_3]
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 11)
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 2)
 
         self._test_common(
             mod,
@@ -953,11 +941,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 6
                 )
-                # 2. QLinear Unary fusion in post-grad fusion pass * 1
-                #    [qlinear_pointwise_default, div_1, round_2, add_1,
-                #     clamp_min_1, clamp_max_1, convert_element_type_2]
-                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
-                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 7)
 
             self._test_common(
                 mod,
@@ -998,10 +981,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 6
                 )
                 # 2. QLinear Unary fusion in post-grad fusion pass * 1
-                #    [qlinear_pointwise_default, relu, div_1, round_2, add_1,
-                #     clamp_min_1, clamp_max_1, convert_element_type_2]
+                #    [qlinear_pointwise_default, relu]
                 self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
-                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 8)
+                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 2)
 
             self._test_common(
                 mod,
@@ -1058,10 +1040,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self.assertEqual(
                 counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 18
             )
-            # 3. QLinear Unary fusion in post-grad fusion pass * 3
+            # 3. QLinear Unary fusion in post-grad fusion pass * 1
             #    [qlinear_pointwise_default, mul_6, round_4, add_3, clamp_min_3, clamp_max_3, convert_element_type_6]
-            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 3)
-            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 21)
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 7)
 
         self._test_common(
             mod,

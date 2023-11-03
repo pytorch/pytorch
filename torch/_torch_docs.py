@@ -12335,11 +12335,12 @@ Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
 
 .. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, the output tensor is initialized to prevent any possible
+    nondeterministic behavior from using the data as an input to an operation.
+    Floating point and complex tensors are filled with NaN, and integer tensors
+    are filled with the maximum value.
 
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
@@ -12374,11 +12375,12 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
 .. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, the output tensor is initialized to prevent any possible
+    nondeterministic behavior from using the data as an input to an operation.
+    Floating point and complex tensors are filled with NaN, and integer tensors
+    are filled with the maximum value.
 
 Args:
     {input}
@@ -12413,11 +12415,12 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
     in memory) its behavior is undefined.
 
 .. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, the output tensor is initialized to prevent any possible
+    nondeterministic behavior from using the data as an input to an operation.
+    Floating point and complex tensors are filled with NaN, and integer tensors
+    are filled with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -12465,11 +12468,12 @@ tensor with no overlaps.  If possible, prefer using this function over
 :func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
 
 .. note::
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
-    output tensor is initialized to prevent any possible nondeterministic
-    behavior from using the data as an input to an operation. Floating point
-    and complex tensors are filled with NaN, and integer tensors are filled
-    with the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, the output tensor is initialized to prevent any possible
+    nondeterministic behavior from using the data as an input to an operation.
+    Floating point and complex tensors are filled with NaN, and integer tensors
+    are filled with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
