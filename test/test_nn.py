@@ -12760,12 +12760,12 @@ class TestNNDeviceType(NNTestCase):
         seq_len = 2048
         vocab_size = 50000
 
-        shift_labels = torch.zeros(batch_size, seq_len-1, dtype=torch.long, device=device)
-        logits = torch.ones(batch_size, seq_len-1, vocab_size, dtype=torch.float16, device=device)
+        shift_labels = torch.zeros(batch_size, seq_len - 1, dtype=torch.long, device=device)
+        logits = torch.ones(batch_size, seq_len - 1, vocab_size, dtype=torch.float16, device=device)
         loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
         nll = loss_fct(logits.permute(0, 2, 1), shift_labels).float()
         rtol, atol = torch.testing._comparison.get_tolerances(torch.float16, rtol=None, atol=None)
-        self.assertEqual(nll, torch.ones_like(nll)*torch.log(torch.tensor(vocab_size)), rtol=rtol, atol=atol)
+        self.assertEqual(nll, torch.ones_like(nll) * torch.log(torch.tensor(vocab_size)), rtol=rtol, atol=atol)
 
     @onlyCUDA
     @largeTensorTest("20GB", "cuda")
