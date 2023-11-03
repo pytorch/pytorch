@@ -1487,7 +1487,6 @@ In-place version of :func:`~relu`.
 def glu(input: Tensor, dim: int = -1) -> Tensor:
     r"""Apply the gated linear unit function.
     
-
     Computes:
     .. math ::
         \text{GLU}(a, b) = a \otimes \sigma(b)
@@ -2247,9 +2246,9 @@ def embedding_bag(
     include_last_offset: bool = False,
     padding_idx: Optional[int] = None,
 ) -> Tensor:
-    r"""Compute sums, means or maxes of `bags` of embeddings, without instantiating the
-    intermediate embeddings.
-
+    r"""Directly compute sums, means or maxes of `bags` of embeddings.
+    
+    Calculation done without instantiating the intermediate embeddings.
     See :class:`torch.nn.EmbeddingBag` for more details.
 
     Note:
@@ -3204,7 +3203,9 @@ def smooth_l1_loss(
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> Tensor:
-    r"""Function that uses a squared term if the absolute
+    r"""Calculate Smooth L1 loss.
+    
+    Function uses a squared term if the absolute
     element-wise error falls below beta and an L1 term otherwise.
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
@@ -3244,9 +3245,14 @@ def huber_loss(
     reduction: str = 'mean',
     delta: float = 1.0,
 ) -> Tensor:
-    r"""Function that uses a squared term if the absolute
+    r"""Calculate Huber loss.
+    
+    Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
-
+    
+    When delta equals 1, this loss is equivalent to SmoothL1Loss. 
+    In general, Huber loss differs from SmoothL1Loss by a factor of delta (AKA beta in Smooth L1).
+    
     See :class:`~torch.nn.HuberLoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3275,9 +3281,7 @@ def l1_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""l1_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
-
-    Function that takes the mean element-wise absolute value difference.
+    r"""Calculate the mean element-wise absolute value difference.
 
     See :class:`~torch.nn.L1Loss` for details.
     """
@@ -3306,9 +3310,7 @@ def mse_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
-
-    Measures the element-wise mean squared error.
+    r"""Measure the element-wise mean squared error.
 
     See :class:`~torch.nn.MSELoss` for details.
     """
@@ -3339,10 +3341,7 @@ def margin_ranking_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
-
-    See :class:`~torch.nn.MarginRankingLoss` for details.
-    """
+    r"""See :class:`~torch.nn.MarginRankingLoss` for details."""
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             margin_ranking_loss,
@@ -3375,7 +3374,11 @@ def hinge_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""Measure the loss given an input tensor x and a labels tensor y (containing 1 or -1).
+
+    Usually used for measuring whether two inputs are similar or dissimilar, 
+    e.g. using the L1 pairwise distance as x, 
+    and is typically used for learning nonlinear embeddings or semi-supervised learning.
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
@@ -3404,10 +3407,7 @@ def multilabel_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multilabel_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
-
-    See :class:`~torch.nn.MultiLabelMarginLoss` for details.
-    """
+    r"""See :class:`~torch.nn.MultiLabelMarginLoss` for details."""
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             multilabel_margin_loss,
@@ -3433,11 +3433,8 @@ def soft_margin_loss(
     reduction: str = "mean",
 ) -> Tensor:
     r"""
-    Creates a criterion that optimizes a two-class classification logistic loss between input tensor 
-x and target tensor 
-y (containing 1 or -1).
-    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
-
+    Optimize a two-class classification logistic loss between input tensor x and target tensor y (containing 1 or -1).
+    
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3459,7 +3456,9 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""Optimize a multi-label one-versus-all loss based on max-entropy.
+
+    Creates a criterion between input x and target y of size (N,C) for optimisation.
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -3507,7 +3506,12 @@ def cosine_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean').
+    r"""Calculate Cosine Embedding loss.
+    
+    Creates a criterion that measures the loss given input tensors x1,x2
+    and a Tensor label y with values 1 or -1. 
+    Used for measuring whether two inputs are similar or dissimilar, using the cosine similarity, 
+    and is typically used for learning nonlinear embeddings or semi-supervised learning.
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
@@ -3540,10 +3544,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
-
-    See :class:`~torch.nn.MultiMarginLoss` for details.
-    """
+    r"""See :class:`~torch.nn.MultiMarginLoss` for details."""
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multi_margin_loss,
@@ -3821,7 +3822,7 @@ def interpolate(  # noqa: F811
     pass
 
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
-    r"""Down/up samples the input. 
+    r"""Down/up samples the input.
     
     Tensor interpolated to either the given :attr:`size` or the given
     :attr:`scale_factor`
@@ -4176,7 +4177,7 @@ def grid_sample(
     padding_mode: str = "zeros",
     align_corners: Optional[bool] = None,
 ) -> Tensor:
-    r"""grid_sample(input, grid, mode, padding_mode, align_corners).
+    r"""Compute grid sample.
     
     Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
@@ -4611,8 +4612,9 @@ def triplet_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""
-    See :class:`~torch.nn.TripletMarginLoss` for details
+    r"""Measure triplet loss between given input tensors and a margin greater than 0.
+    
+    See :class:`~torch.nn.TripletMarginLoss` for details.
     """
     if has_torch_function_variadic(anchor, positive, negative):
         return handle_torch_function(
@@ -4646,7 +4648,8 @@ def triplet_margin_with_distance_loss(
     swap: bool = False,
     reduction: str = "mean"
 ) -> Tensor:
-    r"""
+    r"""Compute the triplet margin loss for input tensors using a custom distance function.
+    
     See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
     """
     if torch.jit.is_scripting():
@@ -4776,9 +4779,8 @@ def fold(
     padding: BroadcastingList2[int] = 0,
     stride: BroadcastingList2[int] = 1
 ) -> Tensor:
-    r"""
-    Combine an array of sliding local blocks into a large containing tensor.
-
+    r"""Combine an array of sliding local blocks into a large containing tensor.
+    
     .. warning::
         Currently, only unbatched (3D) or batched (4D) image-like output tensors are supported.
 
@@ -5135,6 +5137,10 @@ def multi_head_attention_forward(
     is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
+    Foward method for MultiHeadAttention.
+    
+    See :class:`torch.nn.MultiheadAttention` for details.
+    
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
