@@ -169,9 +169,9 @@ add_library(fat SHARED IMPORTED)
 set_target_properties(fat PROPERTIES IMPORTED_OBJECTS "native/transformers/hip/oort/kernels/*.so")
 
 # flash_attention sources
-#file(GLOB flash_attention_cpp_hip "native/transformers/hip/flash_attn_rocm/*.cpp")
-file(GLOB flash_attention_cpp_hip "native/transformers/hip/flash_attn_rocm/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn_rocm/src/*.hip")
+#file(GLOB flash_attention_cpp_hip "native/transformers/hip/oort/*.cpp")
+file(GLOB flash_attention_cpp_hip "native/transformers/hip/oort/*.hip")
+file(GLOB flash_attention_src_hip_hip "native/transformers/hip/oort/src/*.hip")
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")

@@ -18,7 +18,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include <ATen/ATen.h>
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/utils.h> // for unpack
+#include <ATen/native/transformers/hip/oort/src/utils.h> // for unpack
 #include <ATen/hip/HIPGraphsUtils.cuh>                              // for philox
 
 // OORT headers
@@ -27,10 +27,10 @@
 #include <ATen/native/transformers/hip/oort/kernels/bwd_kernel_dq.h>
 #include <ATen/native/transformers/hip/oort/kernels/bwd_preprocess.h>
 
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a.h>
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a.h>
+#include <ATen/native/transformers/hip/oort/src/flash_bwd_runner_gfx90a.h>
+#include <ATen/native/transformers/hip/oort/src/flash_fwd_runner_gfx90a.h>
 
-#include <ATen/native/transformers/hip/flash_attn_rocm/src/static_switch.h>
+#include <ATen/native/transformers/hip/oort/src/static_switch.h>
 
 #define CHECK_SHAPE(x, ...) \
   TORCH_CHECK(x.sizes() == at::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
