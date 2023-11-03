@@ -97,6 +97,7 @@ class TestLazyScheduler(TestCase):
     """
     TODO: it seems we need to add the output node in the graph that has only in-place ops.
     Q: what should we return? what about the case where there are multiple mutations in the graph?
+       what do we currently do in AOTAutograd/Inductor functionalization pass?
     """
     class TestModule(torch.nn.Module):
       def __init__(self):
