@@ -1,5 +1,4 @@
 import functools
-import importlib
 
 from .allowed_functions import is_in_graph_function
 
@@ -49,6 +48,10 @@ torch_name_rule_map = {
     "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
+    "torch.default_generator.get_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator.get_state": TorchInGraphFunctionVariable,
+    "torch.default_generator.set_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator.set_state": TorchInGraphFunctionVariable,
 }
 
 
@@ -63,10 +66,7 @@ def get_torch_obj_rule_map():
 
 
 def load_object(name):
-    mod_name, obj_name = name.rsplit(".", 1)
-    mod = importlib.import_module(mod_name)
-    obj = getattr(mod, obj_name)
-    return obj
+    return eval(name)
 
 
 def lookup(obj):
