@@ -258,7 +258,6 @@ def _get_numerical_jacobian(
 ) -> List[Tuple[torch.Tensor, ...]]:
     """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`, returning M * N Jacobians.
     
-    Description -
     Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
     not specified, targets are the input. Returns M * N Jacobians where N is the
     number of tensors in target that require grad and M is the number of non-integral
