@@ -4,7 +4,7 @@ import math
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.distributed._functional_collectives as funcol
+from torch.distributed import all_gather
 
 from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
@@ -230,11 +230,10 @@ class DeviceMesh:
 
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type).contiguous()
-        mesh_tensor = funcol.all_gather_tensor(
-            self_mesh, gather_dim=0, group=_get_default_group()
-        )
-        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
-        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
+        tensor_list = [torch.zeros_like(self_mesh) for _ in range(get_world_size())]
+        all_gather(tensor_list, self_mesh)
+
+        for other_rank, other_mesh in enumerate(tensor_list):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh initialization does not allow different mesh argument:"
