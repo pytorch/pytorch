@@ -254,6 +254,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'torch/csrc/**/*.cpp',
 ]
@@ -265,6 +266,7 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
