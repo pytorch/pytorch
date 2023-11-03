@@ -164,14 +164,6 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
         input2.sizes(),
         ".");
   }
-  TORCH_CHECK(
-      is_expandable_to(input1.sym_sizes(), input2.sym_sizes()) || is_expandable_to(input2.sym_sizes(), input1.sym_sizes()),
-      "Expected input1 and input2 to be broadcastable to a common shape, but got ",
-      input1.sym_sizes(),
-      " and ",
-      input2.sym_sizes(),
-      ".");
-
 
   auto prod_sum = (input1 * input2).sum(targ_dim);
   auto mag_square1 = (input1 * input1).sum(targ_dim) + EPSILON;

@@ -5408,7 +5408,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input1 = torch.empty((1, 5), dtype=torch.double, device=device)
             input2 = torch.empty((1, 6), dtype=torch.double, device=device)
             target = torch.ones((1,), dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, ".*common shape.*"):
+            with self.assertRaisesRegex(RuntimeError, ".*must match the size.*"):
                 torch.nn.functional.cosine_embedding_loss(input1, input2, target)
 
     def test_kl_div_with_diff_type(self):
