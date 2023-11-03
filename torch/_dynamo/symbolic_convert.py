@@ -453,15 +453,11 @@ def break_graph_if_unsupported(*, push):
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
-                if len(self.states_before_block) > 0:
+                if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    state = self.states_before_block.pop()
-                    self.restore_graphstate(state)
-                    ctx = state.stack[-1]
-                    assert isinstance(ctx, GenericContextWrappingVariable)
-                    unimplemented(f"Graph break under {ctx}")
+                    unimplemented("Graph break under GenericContextWrappingVariable")
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
                     raise
@@ -1834,15 +1830,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.setup_or_before_with(inst)
 
     def setup_or_before_with(self, inst):
-        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
+            self.generic_context_manager_depth += 1
 
         self.output.guards.update(ctx.guards)
 
@@ -1979,7 +1972,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.states_before_block: List[InstructionTranslatorGraphState] = []
+        self.generic_context_manager_depth = 0
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -2163,7 +2156,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
-        return all(b.can_restore() for b in self.block_stack) and not self.one_graph
+        return (
+            all(b.can_restore() for b in self.block_stack)
+            and not self.one_graph
+            and self.generic_context_manager_depth == 0
+        )
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
