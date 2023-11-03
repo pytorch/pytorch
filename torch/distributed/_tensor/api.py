@@ -111,18 +111,17 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        if shape and stride:
-            tensor_shape = shape
-            tensor_stride = stride
-        else:
+        if (shape is not None) != (stride is not None):
+            raise RuntimeError("Please pass both shape and stride at the same time.")
+
+        if not shape or not stride:
             # if it's not by default run_check, we assume user is certain that each
             # rank has the same tensor shape, and we just use that to calculate the
             # global shape
-            tensor_shape, tensor_stride = compute_global_tensor_info(
-                input, device_mesh, placements
-            )
-            tensor_shape = torch.Size(tensor_shape)
-            tensor_stride = tuple(tensor_stride)
+            shape, stride = compute_global_tensor_info(input, device_mesh, placements)
+            tensor_shape, tensor_stride = torch.Size(shape), tuple(stride)
+        else:
+            tensor_shape, tensor_stride = shape, stride
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
@@ -169,7 +168,7 @@ class _FromTorchTensor(torch.autograd.Function):
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
-        return grad_output.to_local(), None, None, None
+        return grad_output.to_local(), None, None, None, None, None
 
 
 class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
@@ -310,6 +309,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 to check meta information and data. if have :class:`Replicate` in
                 `placements`, the data on first rank of the device mesh dimension
                 will be broadcasted to other ranks.
+            shape (torch.Size, optional): A List of int which specifies the size of
+                DTensor which build on top of `local_tensor`. Note this needs to be
+                provided if the shape of `local_tensor` are different across the ranks.
+                If not provided, `shape` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks.
+            stride (tuple, optional): A List of int which specifies the stride of DTensor.
+                If not provided, `stride` will be computed assuming the given distributed
+                tensor is evenly sharded across ranks.
 
         Returns:
             A :class:`DTensor` object
@@ -332,9 +339,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # set default placements to replicated if not specified
         if placements is None:
             placements = [Replicate() for _ in range(device_mesh.ndim)]
-
-        if (shape is not None) != (stride is not None):
-            raise RuntimeError("Please pass both shape and stride at the same time.")
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd

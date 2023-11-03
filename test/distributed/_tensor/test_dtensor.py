@@ -11,7 +11,7 @@ from torch.distributed._tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
-    init_device_mesh
+    init_device_mesh,
 )
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
@@ -198,6 +198,67 @@ class DTensorTest(DTensorTestBase):
         self.assertIsNotNone(local_tensor_with_grad.grad)
         expected_grad = torch.ones(3, 3) * 9
         self.assertEqual(local_tensor_with_grad.grad, expected_grad)
+
+    @with_comms
+    def test_from_local_uneven_sharding(self):
+        mesh_shape = (self.world_size,)
+        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+
+        uneven_dim0_size = self.world_size + 1
+        global_tensor = torch.randn(uneven_dim0_size, 2)
+        shard_placement = Shard(0)
+        tensor_list, _ = shard_placement._split_tensor(
+            global_tensor,
+            device_mesh.size(dim=0),
+            with_padding=False,
+            contiguous=True,
+        )
+
+        dtensor = DTensor.from_local(
+            tensor_list[self.rank],
+            device_mesh,
+            (Shard(0),),
+            shape=global_tensor.size(),
+            stride=global_tensor.stride(),
+        )
+
+        self.assertEqual(dtensor.size(), global_tensor.size())
+        self.assertEqual(dtensor.stride(), global_tensor.stride())
+
+    @with_comms
+    def test_from_local_uneven_sharding_raise_error(self):
+        mesh_shape = (self.world_size,)
+        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+
+        uneven_dim0_size = self.world_size + 1
+        global_tensor = torch.randn(uneven_dim0_size, 2)
+        shard_placement = Shard(0)
+        tensor_list, _ = shard_placement._split_tensor(
+            global_tensor,
+            device_mesh.size(dim=0),
+            with_padding=False,
+            contiguous=True,
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Please pass both shape and stride at the same time."
+        ):
+            dtensor = DTensor.from_local(
+                tensor_list[self.rank],
+                device_mesh,
+                (Shard(0),),
+                shape=global_tensor.size(),
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Please pass both shape and stride at the same time."
+        ):
+            dtensor = DTensor.from_local(
+                tensor_list[self.rank],
+                device_mesh,
+                (Shard(0),),
+                stride=global_tensor.stride(),
+            )
 
     @with_comms
     def test_from_local_negative_dim(self):
