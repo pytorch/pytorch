@@ -466,9 +466,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def nn_modules(self) -> Dict[str, torch.nn.Module]:
         return self.tracing_context.module_context.nn_modules
 
-    def save_global_state(self, global_state=None):
-        if global_state is None:
-            global_state = self.tracing_context.global_context.global_state
+    def save_global_state(self, out=None):
+        """
+        Saves to out if it is provided. Else saves to the tracing context's global_state.
+        """
+        global_state = (
+            out if out is not None else self.tracing_context.global_context.global_state
+        )
 
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
@@ -971,7 +975,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """
         prior_global_state = self.tracing_context.global_context.copy_graphstate()
         current_global_state: Dict[str, Tuple[Any, bool]] = {}
-        self.save_global_state(current_global_state)
+        self.save_global_state(out=current_global_state)
         try:
             # Set to state prior to tracing the graph
             self.tracing_context.global_context.restore_graphstate(prior_global_state)
