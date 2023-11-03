@@ -1915,21 +1915,77 @@ def forward(self, x_1, output_1):
             output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
 
+            tmp = torch.add(x, 1)
             grid = (x.numel(),)
             add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
 
-            return output
+            return output, tmp
 
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
         torch_add = t1 + t2
-        test, (code,) = run_and_get_code(
+        (test, _), codes = run_and_get_code(
             torch.compile(call_triton_add, dynamic=dynamic), t1, t2
         )
         self.assertEqual(torch_add, test)
-        self.assertTrue("aten.copy" not in code)
-        self.assertTrue("aten.clone" not in code)
+        self.assertTrue("aten.copy" not in codes[0])
+        self.assertTrue("aten.clone" not in codes[0])
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
+    def test_triton_kernel_caching(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def add_in_loop(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            for i in range(4):
+                x = add_in_loop(x, y)
+            return x
+
+        t1 = torch.ones(5, device="cuda")
+        t2 = torch.ones(5, device="cuda")
+
+        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        self.assertEqual(test, torch.tensor([5.0, 5.0, 5.0, 5.0, 5.0], device="cuda"))
+        # Enable after fixing
+        # self.assertTrue("add_kernel_autotuned_1.run" not in code)
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
+    def test_triton_kernel_dependancies(self):
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            output2 = torch.zeros_like(output)
+            add_kernel_autotuned[grid](output, y, output2, n_elements)
+            output3 = torch.add(output2, 1)
+            return output3
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+        torch_result = call_triton(t1, t2)
+        compiled_result = torch.compile(call_triton)(t1, t2)
+        self.assertEqual(torch_result, compiled_result)
 
     @requires_cuda()
     @requires_triton()
