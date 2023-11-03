@@ -500,22 +500,64 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         false_nn_modules = tx.copy_graphstate().output.nn_modules
 
         def dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars):
-            shared_freevars = true_lifted_freevars.keys() & false_lifted_freevars.keys()
-            unique_true_freevars = true_lifted_freevars.keys() - shared_freevars
-            unique_false_freevars = false_lifted_freevars.keys() - shared_freevars
+            # The nn module attributes are guaranteed to be registered into the top-level graph module during
+            # higher order op speculation. Therefore, get_attr nodes in two branches with the same
+            # target refer to the same attribute and we can safely deduplicate them with their target.
+            #
+            # Note: ideally, dynamo should just create a single proxy for the same attribute of a nn module. But
+            # true_branch and false_branch belong to two separate tracing contexts, they may register the same
+            # attribute to top level seperately. This creates two get_attr proxies for the same attribute
+            # that have different meta data such as stack_trace (one stack trace for the true_branch,
+            # and the other for false_branch). It seems better to discard the proxy explicitly in cond
+            # than make dynamo create a single proxy for the same get_attr target.
+            def shared_getattrs(true_lifted_proxies, false_lifted_proxies):
+                true_targets = {
+                    proxy.node.target: proxy
+                    for proxy in true_lifted_proxies
+                    if proxy.node.op == "get_attr"
+                }
+                true_fn_shared_getattrs = {}
+                false_fn_shared_getattrs = {}
+
+                for false_proxy in false_lifted_proxies:
+                    if (
+                        false_proxy.node.op == "get_attr"
+                        and false_proxy.node.target in true_targets
+                    ):
+                        true_proxy = true_targets[false_proxy.node.target]
+                        true_fn_shared_getattrs[true_proxy] = true_proxy
+                        false_fn_shared_getattrs[false_proxy] = true_proxy
+                return true_fn_shared_getattrs, false_fn_shared_getattrs
+
+            true_fn_shared_getattrs, false_fn_shared_getattrs = shared_getattrs(
+                true_lifted_freevars.keys(), false_lifted_freevars.keys()
+            )
+
+            true_shared_freevars = (
+                true_lifted_freevars.keys() & false_lifted_freevars.keys()
+            ).union(true_fn_shared_getattrs.keys())
+            false_shared_freevars = (
+                true_lifted_freevars.keys() & false_lifted_freevars.keys()
+            ).union(false_fn_shared_getattrs.keys())
+            unique_true_freevars = true_lifted_freevars.keys() - true_shared_freevars
+            unique_false_freevars = false_lifted_freevars.keys() - false_shared_freevars
 
             def _sort_by_name(vars):
                 return sorted(vars, key=lambda var: var.node.name)
 
             return (
-                list(_sort_by_name(list(shared_freevars))),
+                list(_sort_by_name(list(true_shared_freevars))),
+                list(_sort_by_name(list(false_shared_freevars))),
                 list(_sort_by_name(list(unique_true_freevars))),
                 list(_sort_by_name(list(unique_false_freevars))),
             )
 
-        shared, unique_true, unique_false = dedup_and_sort_lifted_freevars(
-            true_lifted_freevars, false_lifted_freevars
-        )
+        (
+            true_shared,
+            false_shared,
+            unique_true,
+            unique_false,
+        ) = dedup_and_sort_lifted_freevars(true_lifted_freevars, false_lifted_freevars)
 
         # Let's say we capture cond(pred, true_fn, false_fn, (x,))
         # With mannually_set_graph_input set to False,
@@ -536,6 +578,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             def _insert_or_replace_phs(new_args, name_suffix):
                 for arg in new_args:
                     new_ph = graph.placeholder(arg.node.name + name_suffix)
+                    # Override with new_ph if there exists a old placeholder.
                     if arg in lifted_freevars:
                         old_ph = lifted_freevars[arg].node
                         old_ph.replace_all_uses_with(new_ph)
@@ -552,10 +595,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 _insert_or_replace_phs(unique_false, "_false_branch")
 
         fixup_branch_inps(
-            true_graph, true_lifted_freevars, shared, unique_true, unique_false
+            true_graph, true_lifted_freevars, true_shared, unique_true, unique_false
         )
         fixup_branch_inps(
-            false_graph, false_lifted_freevars, shared, unique_true, unique_false
+            false_graph, false_lifted_freevars, false_shared, unique_true, unique_false
         )
 
         true_name = add_subgraph(
@@ -578,7 +621,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             args[0].as_proxy(),
             true_node,
             false_node,
-            shared + unique_true + unique_false,
+            # We pick true_shared but it shouldn't matter
+            true_shared + unique_true + unique_false,
         )
         # TODO: assert that the true/false return values are
         # consistent

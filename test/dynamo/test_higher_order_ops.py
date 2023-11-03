@@ -1252,10 +1252,8 @@ class GraphModule(torch.nn.Module):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 4 inputs (x, z, buffer_true_branch, buffer_false_branch)
-                # TODO: we should be able to de-duplicate the buffer accessed from two branches so that
-                # operands become (x, z, buffer)
-                self.assertEqual(len(operands), 4)
+                # Each branch takes 4 inputs (buffer, x, z)
+                self.assertEqual(len(operands), 3)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
                     num_placeholders = len(
@@ -1267,7 +1265,7 @@ class GraphModule(torch.nn.Module):
                             if node.op == "placeholder"
                         ]
                     )
-                    self.assertEqual(num_placeholders, 4)
+                    self.assertEqual(num_placeholders, 3)
 
     def _check_cond_graph_and_extract(self, fn, args):
         backend = EagerAndRecordGraphs()
