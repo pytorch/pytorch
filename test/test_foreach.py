@@ -819,7 +819,7 @@ class TestForeach(TestCase):
             self.skipTest("neither reverse mode nor forward mode supported")
         if (not inplace) and not op.supports_out:
             self.skipTest("out-of-place not implemented")
-        if inplace and not op.has_no_in_place:
+        if inplace and op.has_no_in_place:
             self.skipTest("in-place not implemented")
 
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
