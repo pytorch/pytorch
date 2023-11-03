@@ -241,6 +241,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def next_variables(self, tx):
         assert self.mutable_local
+        assert self.is_iterator()
 
         next_item = self.call_method(tx, "__next__", [], {})
         return next_item.add_options(self), self

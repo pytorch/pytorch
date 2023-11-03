@@ -1817,12 +1817,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def inner_fn(args):
             return [x[1].shape for x in args]
 
-        @torch._dynamo.optimize("eager")
         def fn(tensors):
-            return inner_fn(zip(itertools.count(), tensors["args"]))
+            [x.add_(1) for x in tensors["args"]]
+            shapes = inner_fn(zip(itertools.count(), tensors["args"]))
+            return [x.add_(1) for x in tensors["args"]], shapes
 
-        fn({"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]})
-        fn({"args": [torch.ones(5, 5)]})
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+
+        for tensors in [
+            {"args": [torch.ones(5, 5), torch.ones(5, 6), torch.ones(5, 7)]},
+            {"args": [torch.ones(5, 5)]},
+        ]:
+            self.assertEqual(fn(tensors), opt_fn(tensors))
 
     def test_dict_iter(self):
         class MyMod(torch.nn.Module):
