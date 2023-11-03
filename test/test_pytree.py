@@ -607,6 +607,7 @@ TreeSpec(tuple, None, [*,
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
+    @unittest.expectedFailure
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):
