@@ -130,13 +130,13 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
+@dataclasses.dataclass
 class SpeculationEntry:
-    def __init__(self, instruction_pointer: int):
-        self.instruction_pointer = instruction_pointer  # debug asserts only
-        self.failed = False
-        self.reason: Optional[GraphCompileReason] = None
+    instruction_pointer: int
+    failed: bool = False
+    reason: Optional[GraphCompileReason] = None
 
-    def restart_analysis(self):
+    def fail_and_restart_analysis(self):
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
@@ -144,10 +144,10 @@ class SpeculationEntry:
         raise exc.SpeculationRestartAnalysis()
 
 
+@dataclasses.dataclass
 class SpeculationLog:
-    def __init__(self):
-        self.entries: List[SpeculationEntry] = []
-        self.index = 0
+    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
+    index: int = 0
 
     def restart(self):
         self.index = 0
@@ -757,7 +757,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 log.debug("empty checkpoint")
                 raise
             log.debug("step triggered compile", exc_info=True)
-        self.current_speculation.restart_analysis()
+        self.current_speculation.fail_and_restart_analysis()
 
     def step_graph_break(self, continue_inst):
         # generate code from checkpoint
@@ -1281,7 +1281,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(result)
 
     def STORE_ATTR(self, inst):
-        prior = self.copy_graphstate()
+        speculation = self.speculate()
+        if speculation.failed:
+            return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
         if isinstance(obj, NNModuleVariable):
@@ -1306,9 +1308,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
-            self.restore_graphstate(prior)
+        speculation.fail_and_restart_analysis()
 
-        # break the graph
+    def store_attr_graph_break(self, inst):
         self.output.compile_subgraph(
             self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
         )
