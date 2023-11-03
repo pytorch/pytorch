@@ -5,6 +5,7 @@ import sys
 
 import torch
 import torch.distributed as dist
+from os import path
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
@@ -25,9 +26,26 @@ if NO_MULTIPROCESSING_SPAWN:
     print("Spawn not available, skipping tests.", file=sys.stderr)
     sys.exit(0)
 
+_allowed_backends = ("gloo", "nccl", "ucc")
+if (
+    "BACKEND" not in os.environ
+    or "WORLD_SIZE" not in os.environ
+    or "TEMP_DIR" not in os.environ
+    or not path.exists(path.join(os.environ["TEMP_DIR"], "barrier"))
+):
+    # TODO can we actually have `run_tests.py` emit the complete instructions when it prints a repro command?
+    print(
+        "Missing expected env vars for `test_distributed_spawn.py`.  Please ensure to specify the following:\n"
+        f"'BACKEND' = one of {_allowed_backends}\n"
+        f"'WORLD_SIZE' = int >= 2\n"
+        "'TEMP_DIR' specifying a directory containing a barrier file named 'barrier'.\n\n"
+        f"e.g.\ntouch /tmp/barrier && TEMP_DIR=/tmp BACKEND='nccl' WORLD_SIZE=2 python {__file__}",
+    )
+    sys.exit(0)
+
 BACKEND = os.environ["BACKEND"]
 
-if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
+if BACKEND in _allowed_backends:
     class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
 
         def setUp(self):
