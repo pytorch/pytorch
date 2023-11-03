@@ -8570,10 +8570,7 @@ class ForeachSampleInput(SampleInput):
 
     def __init__(self, *args, disable_fastpath=False, ref_args=None, **kwargs):
         super().__init__(*args, **kwargs)
-        if ref_args:
-            self.ref_args = ref_args
-        else:
-            self.ref_args = self.args
+        self.ref_args = ref_args or self.args
         self.disable_fastpath = disable_fastpath
 
 
@@ -9564,7 +9561,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ),
 ]
 
-foreach_lerp_op_db: List[ForeachFuncInfo] = [
+foreach_other_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
         "lerp",
         foreach_lerp_sample_func(3, True, False),
