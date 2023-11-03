@@ -616,6 +616,14 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
+        elif (
+            self.value is torch.nested.nested_tensor
+            and kwargs.get("layout", torch.strided) == torch.strided
+        ) or self.value in (
+            torch._nested_tensor_from_mask,
+            torch._nested_from_padded,
+        ):
+            raise unimplemented("torch.compile does not support strided NestedTensor")
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
