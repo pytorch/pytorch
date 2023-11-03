@@ -1261,7 +1261,7 @@ def get_guard_fail_reason(
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason = False
+            fail_reason: Union[bool, str] = False
             try:
                 fail_reason = eval(part, global_scope, scope)
             except Exception:
