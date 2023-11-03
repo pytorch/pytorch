@@ -354,7 +354,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def jvp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create a function to compute the dot product between the Jacobian of a function at a specified point and a vector "v".
+    r"""Create a function to compute the dot product between the Jacobian of given function at given specified point and a vector ``v``.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
