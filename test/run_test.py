@@ -47,7 +47,7 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
-    get_experimental_rankings,
+    get_experimental_ratings,
     get_test_prioritizations,
 )
 
@@ -1814,8 +1814,8 @@ def main():
                 emit_metric(
                     "td_number_ranking_experiment",
                     {
-                        **get_experimental_rankings(selected_tests),
-                        "failure": test,
+                        **get_experimental_ratings(selected_tests),
+                        "failure": str(test),
                         "tests": selected_tests,
                     },
                 )
