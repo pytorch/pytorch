@@ -189,6 +189,7 @@ jobs:
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*_toprint.log || true
+          sleep 2000
 
       - name: Stop monitoring script
         if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
