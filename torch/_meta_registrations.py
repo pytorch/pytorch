@@ -9,7 +9,6 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
-    decomposition_table,
     global_decomposition_table,
     meta_table,
 )
@@ -46,24 +45,6 @@ def register_meta(op):
 
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
-
-        tree_map(register, op)
-        return fn
-
-    return wrapper
-
-
-def register_meta_foreach(op):
-    def wrapper(fn):
-        fn = _convert_out_params(fn)
-
-        def register(op):
-            scalar_op_name, _ = str(op).replace("aten._foreach_", "").split(".")
-            scalar_op = getattr(aten, scalar_op_name).default
-            scalar_fn = decomposition_table.get(scalar_op, None)
-            if not scalar_fn:
-                scalar_fn = meta_table[scalar_op]
-            _add_op_to_registry(meta_table, op, partial(fn, _scalar_fn=scalar_fn))
 
         tree_map(register, op)
         return fn
@@ -2954,96 +2935,146 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-@register_meta([aten.round.default, aten.round.decimals])
-def meta_round(self, **kwargs):
-    return _elementwise_meta(
-        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
-    )
+def _check_meta_foreach(*args, _nlists=1, **kwargs):
+    for i in range(_nlists):
+        arg = args[i]
+        torch._check(
+            isinstance(arg, List),
+            lambda: (
+                f"The argument {i+1} of must be List[Tensor], " f"but got {type(arg)}."
+            ),
+        )
+        if i == 0:
+            nelem = len(arg)
+        else:
+            torch._check(
+                nelem > 0 and nelem == len(arg),
+                lambda: (
+                    "self and argument {i+1} must be non-empty and match in length, "
+                    f"but got {nelem} and {len(arg)}."
+                ),
+            )
 
 
-@register_meta_foreach(
+def _meta_foreach_out_of_place(*args, _scalar_op=None, _nlists=1, **kwargs):
+    _check_meta_foreach(*args, _nlists=_nlists, **kwargs)
+    nelem = len(args[0])
+
+    result = []
+    for elem in range(nelem):
+        each_args = [args[i][elem] for i in range(_nlists)]
+        result.append(_scalar_op(*each_args, *args[_nlists:], **kwargs))
+
+    return result
+
+
+def _meta_foreach_inplace(*args, _scalar_op=None, _nlists=1, **kwargs):
+    _check_meta_foreach(*args, _nlists=_nlists, **kwargs)
+    _meta_foreach_out_of_place(*args, _scalar_op=_scalar_op, _nlists=_nlists, **kwargs)
+    return
+
+
+def register_meta_foreach(ops):
+    for op_name, nlists in ops:
+        for overload in ["default", "Scalar", "Tensor", "List", "ScalarList"]:
+            op = getattr(getattr(aten, op_name), overload, None)
+            if not op:
+                continue
+            extra_nlists = 1 if overload in ["List", "ScalarList"] else 0
+
+            scalar_overload = "Scalar" if overload.startswith("Scalar") else "Tensor"
+
+            scalar_op_packet = getattr(aten, op_name.replace("_foreach_", ""))
+            scalar_op = getattr(
+                scalar_op_packet,
+                scalar_overload,
+                getattr(scalar_op_packet, "default", None),
+            )
+            _add_op_to_registry(
+                meta_table,
+                op,
+                partial(
+                    _meta_foreach_out_of_place,
+                    _scalar_op=scalar_op,
+                    _nlists=nlists + extra_nlists,
+                ),
+            )
+
+            op_name_ = f"{op_name}_"
+            op_ = getattr(getattr(aten, op_name_), overload)
+            scalar_op__packet = getattr(aten, op_name_.replace("_foreach_", ""), None)
+            if not scalar_op__packet:
+                continue
+            scalar_op_ = getattr(
+                scalar_op__packet,
+                scalar_overload,
+                getattr(scalar_op__packet, "default", None),
+            )
+            _add_op_to_registry(
+                meta_table,
+                op_,
+                partial(
+                    _meta_foreach_inplace,
+                    _scalar_op=scalar_op_,
+                    _nlists=nlists + extra_nlists,
+                ),
+            )
+
+
+register_meta_foreach(
     [
-        aten._foreach_abs_.default,
-        aten._foreach_acos_.default,
-        aten._foreach_asin_.default,
-        aten._foreach_atan_.default,
-        aten._foreach_ceil_.default,
-        aten._foreach_cos_.default,
-        aten._foreach_cosh_.default,
-        aten._foreach_erf_.default,
-        aten._foreach_erfc_.default,
-        aten._foreach_exp_.default,
-        aten._foreach_expm1_.default,
-        aten._foreach_frac_.default,
-        aten._foreach_floor_.default,
-        aten._foreach_lgamma_.default,
-        aten._foreach_log_.default,
-        aten._foreach_log10_.default,
-        aten._foreach_log1p_.default,
-        aten._foreach_log2_.default,
-        aten._foreach_neg_.default,
-        aten._foreach_reciprocal_.default,
-        aten._foreach_round_.default,
-        aten._foreach_sigmoid_.default,
-        aten._foreach_sign_.default,
-        aten._foreach_sin_.default,
-        aten._foreach_sinh_.default,
-        aten._foreach_sqrt_.default,
-        aten._foreach_tan_.default,
-        aten._foreach_tanh_.default,
-        aten._foreach_trunc_.default,
-        aten._foreach_zero_.default,
-    ]
+        ("_foreach_abs", 1),
+        ("_foreach_acos", 1),
+        ("_foreach_asin", 1),
+        ("_foreach_atan", 1),
+        ("_foreach_ceil", 1),
+        ("_foreach_cos", 1),
+        ("_foreach_cosh", 1),
+        ("_foreach_erf", 1),
+        ("_foreach_erfc", 1),
+        ("_foreach_exp", 1),
+        ("_foreach_expm1", 1),
+        ("_foreach_frac", 1),
+        ("_foreach_floor", 1),
+        ("_foreach_lgamma", 1),
+        ("_foreach_log", 1),
+        ("_foreach_log10", 1),
+        ("_foreach_log1p", 1),
+        ("_foreach_log2", 1),
+        ("_foreach_neg", 1),
+        ("_foreach_reciprocal", 1),
+        ("_foreach_round", 1),
+        ("_foreach_sigmoid", 1),
+        ("_foreach_sign", 1),
+        ("_foreach_sin", 1),
+        ("_foreach_sinh", 1),
+        ("_foreach_sqrt", 1),
+        ("_foreach_tan", 1),
+        ("_foreach_tanh", 1),
+        ("_foreach_trunc", 1),
+        ("_foreach_zero", 1),
+        ("_foreach_add", 1),
+        ("_foreach_sub", 1),
+        ("_foreach_mul", 1),
+        ("_foreach_div", 1),
+        ("_foreach_maximum", 1),
+        ("_foreach_minimum", 1),
+        ("_foreach_clamp_min", 1),
+        ("_foreach_clamp_max", 1),
+        ("_foreach_addcdiv", 2),
+        ("_foreach_addcmul", 2),
+        ("_foreach_lerp", 2),
+    ],
 )
-def meta__foreach_unaop_(self, _scalar_fn):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"Expect List[Tensor] but got {type(self)}",
-    )
-    for s in self:
-        _scalar_fn(s)
 
 
-@register_meta_foreach(
-    [
-        aten._foreach_abs.default,
-        aten._foreach_acos.default,
-        aten._foreach_asin.default,
-        aten._foreach_atan.default,
-        aten._foreach_ceil.default,
-        aten._foreach_cos.default,
-        aten._foreach_cosh.default,
-        aten._foreach_erf.default,
-        aten._foreach_erfc.default,
-        aten._foreach_exp.default,
-        aten._foreach_expm1.default,
-        aten._foreach_frac.default,
-        aten._foreach_floor.default,
-        aten._foreach_lgamma.default,
-        aten._foreach_log.default,
-        aten._foreach_log10.default,
-        aten._foreach_log1p.default,
-        aten._foreach_log2.default,
-        aten._foreach_neg.default,
-        aten._foreach_reciprocal.default,
-        aten._foreach_round.default,
-        aten._foreach_sigmoid.default,
-        aten._foreach_sign.default,
-        aten._foreach_sin.default,
-        aten._foreach_sinh.default,
-        aten._foreach_sqrt.default,
-        aten._foreach_tan.default,
-        aten._foreach_tanh.default,
-        aten._foreach_trunc.default,
-        aten._foreach_zero.default,
-    ]
-)
-def meta__foreach_unaop(self, _scalar_fn):
+@register_meta([aten._foreach_pow.ScalarAndTensor])
+def meta__foreach_pow_scalar_and_tensor(self, exponent):
     torch._check(
-        isinstance(self, List),
-        lambda: f"Expect List[Tensor] but got {type(self)}",
+        isinstance(exponent, List),
+        lambda: f"exponent must be a tensor list but got {type(exponent)}",
     )
-    return [_scalar_fn(s) for s in self]
+    return [torch.empty_like(e) for e in exponent]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
@@ -3063,186 +3094,22 @@ def _check_foreach_binop_tensor_lists(self, other):
     )
 
 
-@register_meta(
-    [
-        aten._foreach_add.List,
-        aten._foreach_sub.List,
-        aten._foreach_mul.List,
-        aten._foreach_div.List,
-        aten._foreach_maximum.List,
-        aten._foreach_minimum.List,
-        aten._foreach_clamp_min.List,
-        aten._foreach_clamp_max.List,
-    ]
-)
-def meta__foreach_binop_list(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta(
-    [
-        aten._foreach_add_.List,
-        aten._foreach_sub_.List,
-        aten._foreach_mul_.List,
-        aten._foreach_div_.List,
-        aten._foreach_maximum_.List,
-        aten._foreach_minimum_.List,
-        aten._foreach_clamp_min_.List,
-        aten._foreach_clamp_max_.List,
-    ]
-)
-def meta__foreach_binop__list(self, other, alpha=1):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta(
-    [
-        aten._foreach_add.Tensor,
-    ]
-)
-def meta__foreach_binop_tensor(self, other, alpha=1):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
-    )
-    torch._check(
-        isinstance(other, torch.Tensor),
-        lambda: f"The second argument must be Tensor, but got {type(other)}.",
-    )
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta(
-    [
-        aten._foreach_add_.Tensor,
-    ]
-)
-def meta__foreach_binop__tensor(self, other, alpha=1):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"The first argument must be List[Tensor], but got {type(self)}.",
-    )
-    torch._check(
-        isinstance(other, torch.Tensor),
-        lambda: f"The second argument must be Tensor, but got {type(other)}.",
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_add_.Scalar,
-        aten._foreach_mul_.Scalar,
-        aten._foreach_sub_.Scalar,
-        aten._foreach_div_.Scalar,
-        aten._foreach_maximum_.Scalar,
-    ]
-)
-def meta__foreach_binop__scalar(self, scalar=1):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_add.Scalar,
-        aten._foreach_div.Scalar,
-        aten._foreach_mul.Scalar,
-        aten._foreach_sub.Scalar,
-    ]
-)
-def meta__foreach_binop_scalar(self, scalar=1):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"The first argument of must be List[Tensor], but got {type(self)}.",
-    )
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta(
-    [
-        aten._foreach_addcdiv_.Scalar,
-        aten._foreach_addcmul_.Scalar,
-    ]
-)
-def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
-        lambda: (
-            "All arguments of _foreach_addc*_ must be List[Tensor], "
-            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_lerp_.Scalar,
-    ]
-)
-def meta__foreach_lerp__scalar(self, other, scalar=1):
-    _check_foreach_binop_tensor_lists(self, other)
-
-
-@register_meta(
-    [
-        aten._foreach_addcdiv.Scalar,
-        aten._foreach_addcmul.Scalar,
-    ]
-)
-def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
-        lambda: (
-            "All arguments must be List[Tensor], "
-            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_pow.ScalarAndTensor])
-def meta__foreach_pow_scalar_and_tensor(self, exponent):
-    torch._check(
-        isinstance(exponent, List),
-        lambda: f"exponent must be a tensor list but got {type(exponent)}",
-    )
-    return [torch.empty_like(e) for e in exponent]
-
-
-@register_meta([aten._foreach_addcdiv_.Tensor, aten._foreach_addcmul_.Tensor])
-def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2])
-        and isinstance(scalars, torch.Tensor),
-        lambda: (
-            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], tensor, "
-            f"but got: {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-
 @register_meta([aten._foreach_copy_])
 def meta__foreach_copy_inplace(self, src, non_blocking=False):
     _check_foreach_binop_tensor_lists(self, src)
+
+
+@register_meta([aten._local_scalar_dense])
+def meta__local_scalar_dense(self):
+    torch._check(
+        isinstance(self, Tensor),
+        lambda: f"The first argument must be Tensor, but got {type(self)}.",
+    )
+    torch._check(
+        self.dim() == 0 and self.numel() == 1,
+        lambda: f"The first argument must be 0-dim, but got {self.dim()}-dim.",
+    )
+    return torch.zeros(size=(1,), dtype=self.dtype).item()
 
 
 @register_meta([aten._fused_adam_.default])
@@ -3646,6 +3513,13 @@ def meta_binop_inplace_alpha(self, other, alpha=1):
     if isinstance(other, torch.Tensor):
         check_inplace_broadcast(self.shape, other.shape)
     return self
+
+
+@register_meta([aten.round.default, aten.round.decimals])
+def meta_round(self, **kwargs):
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
 
 
 def shift_dtype_check(fn_name, self, val):
