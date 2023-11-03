@@ -51,6 +51,7 @@ from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 from torch._prims_common import suggest_memory_format
+from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -326,16 +327,16 @@ def get_lock_dir() -> str:
     return lock_dir
 
 
+def sha256_hash(data: bytes) -> str:
+    # [:51] to strip off the "Q====" suffix common to every hash value.
+    return base64.b32encode(hashlib.sha256(data).digest())[:51].decode("utf-8").lower()
+
+
 def code_hash(code: Union[str, bytes], extra: str = ""):
     hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra != "":
         hashing_str = hashing_str + b"||" + extra.encode("utf-8")
-    return (
-        "c"
-        + base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
-        .decode("utf-8")
-        .lower()
-    )
+    return "c" + sha256_hash(hashing_str)
 
 
 def get_path(
@@ -357,8 +358,6 @@ def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code
         return code_hash(content, extra)
     if hash_type == "cubin":
         return code_hash(repr(content))
-    if hash_type == "cg":
-        return extra
     raise AssertionError(f"Unknown hash type {hash_type}")
 
 
@@ -425,21 +424,10 @@ class TensorMetadataAndValues:
     values: List[Any]
 
 
-class DynamicShapeError(BaseException):
-    """
-    TODO(masnesral): Support dynamic shapes and remove this.
-    """
-
-    pass
-
-
 def extract_tensor_metadata(t: torch.Tensor) -> TensorMetadata:
     """
     Extract the TensorMetadata of a tensor.
     """
-    if not all(isinstance(e, int) for e in t.shape):
-        raise DynamicShapeError()
-
     memory_format = suggest_memory_format(t)
     if not t.is_contiguous(memory_format=memory_format):
         memory_format = None
@@ -491,6 +479,16 @@ def _reduce_tensor(t):
         return (_ident, (metadata,))
 
 
+def _reduce_symint(s):
+    """
+    See FxGraphCachePickler. Custom reducer to pickle SymInts.
+    """
+    # For hashing purposes, we only care about the name of the symbol and
+    # not the backed value. We evaluate guards stored with a cached graph
+    # to ensure a cached entity with SymInt args is safe to reuse.
+    return (_ident, (str(s),))
+
+
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -502,6 +500,7 @@ class FxGraphCachePickler(pickle.Pickler):
     dispatch_table = copyreg.dispatch_table.copy()
     dispatch_table[torch._subclasses.fake_tensor.FakeTensor] = _reduce_fake_tensor
     dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[torch.SymInt] = _reduce_symint
 
     @staticmethod
     def dumps(obj) -> bytes:
@@ -512,6 +511,15 @@ class FxGraphCachePickler(pickle.Pickler):
             pickler = FxGraphCachePickler(stream)
             pickler.dump(obj)
             return stream.getvalue()
+
+    @staticmethod
+    def get_hash(obj: Any) -> str:
+        """
+        Serialize an object using the FxGraphCachePickler and return a hash
+        of the pickled object.
+        """
+        serialized_data = FxGraphCachePickler.dumps(obj)
+        return sha256_hash(serialized_data)
 
 
 @functools.lru_cache(None)
@@ -553,8 +561,14 @@ class FxGraphHashDetails:
     # Excluded kwargs param that are not stable between runs
     EXCLUDED_KWARGS = ["graph_id"]
 
-    def __init__(self, fx_args: List[Any], fx_kwargs: Dict[str, Any]) -> None:
-        self.fx_args = fx_args
+    def __init__(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        fx_kwargs: Dict[str, Any],
+    ):
+        self.gm = gm
+        self.example_inputs = example_inputs
 
         # Order kwargs so hashing is stable to changes in kwarg order.
         self.fx_kwargs = {}
@@ -575,79 +589,243 @@ class FxGraphHashDetails:
         self.inductor_config = config.save_config()  # type: ignore[attr-defined]
         self.inductor_code_hash = get_inductor_code_hash()
 
+    def debug_str(self) -> str:
+        """
+        Get a printable string describing in more detail all the attributes
+        comprising this object. Useful for debugging when one graph hashes
+        to a different value than another.
+        """
 
-def compiled_fx_graph_hash(fx_args: List[Any], fx_kwargs: Dict[str, Any]) -> str:
+        def get_str(obj) -> str:
+            if isinstance(obj, torch.Tensor):
+                return str(extract_tensor_metadata(obj))
+            elif isinstance(obj, bytes):
+                return "<bytes>"
+            else:
+                return str(obj)
+
+        lines = []
+        for attr, obj in vars(self).items():
+            if isinstance(obj, list):
+                for ii in range(len(obj)):
+                    h = FxGraphCachePickler.get_hash(obj[ii])
+                    lines.append(f"[{h}] {attr}[{ii}]: {get_str(obj[ii])}")
+            elif isinstance(obj, dict):
+                for k, v in obj.items():
+                    h = FxGraphCachePickler.get_hash(v)
+                    lines.append(f"[{h}] {attr}[{k}]: {get_str(v)}")
+            else:
+                h = FxGraphCachePickler.get_hash(obj)
+                lines.append(f"[{h}] {attr}: {get_str(obj)}")
+        return "\n".join(lines)
+
+
+def compiled_fx_graph_hash(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    fx_kwargs: Dict[str, Any],
+) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = FxGraphHashDetails(fx_args, fx_kwargs)
-    serialized_data = FxGraphCachePickler.dumps(details)
-    return (
-        "f"
-        + base64.b32encode(hashlib.sha256(serialized_data).digest())[:51]
-        .decode("utf-8")
-        .lower()
-    )
+    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
+    # The prefix distinguishes among the other kinds of objects we
+    # cache in this module.
+    key = "f" + FxGraphCachePickler.get_hash(details)
+    log.debug("FX graph cache hash details for key %s:\n%s", key, details.debug_str())
+    return key
 
 
 class FxGraphCache:
     """
     Supports caching and reusing compiled Fx graphs.
+
+    The overall strategy is as follows:
+    - This cache stores entries on disk. When saving an entry, we can't
+      serialize callables (that could be C++, Triton, etc.), so we serialize
+      their own disk cache location. We then recreate the compiled artifact
+      after fetching from disk.
+    - For indexing the cache, we gather the fields relevant to identifying an
+      FxGraph (the graph module, graph inputs, system settings etc.) into an
+      FxGraphCacheDetails object, pickle it, and compute a hash for the key.
+      See FxGraphCachePickler.
+    - Among the metadata we store, we also include a guards expression that's
+      appropriate for validating any symbols for Tensor arguments that have
+      symbolic bounds. On cache lookup then, we evaluate those guards in the
+      current context to validate that a cached entry can be served.
+    - A given graph could have multiple compiled versions, corresponding to
+      different sets of guards. Therefore, we store cache entries in the form:
+          <temp dir>/<fx graph hash>/<serialized metatdata>
+    - On lookup, we compute the key from the graph details, iterate over all
+      leaf files in the corresponding subdirectory, deserialize the entry, and
+      evaluate its guards expression. If the evaluation succeeds, we have a
+      cache hit. If it fails, we compile the graph and store a new entry.
+    - Finally, on a cache hit, we need to make sure any guards that would
+      have been created during compilation are added to the current context.
     """
 
     # TODO(masnesral): Investigate whether it's beneficial to store compiled graphs
     # in an in-memory cache after loading from disk.
-    @classmethod
-    def save_graph(cls, key: str, compiled_graph: CompiledFxGraph):
+    @staticmethod
+    def _get_tmp_dir() -> str:
+        """
+        Get the toplevel temporary directory for storing compiled graphs.
+        """
+        return os.path.join(cache_dir(), "fxgraph")
+
+    @staticmethod
+    def _get_tmp_dir_for_key(key: str) -> str:
+        """
+        Return the disk location for a given cache key.
+        """
+        return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
+
+    @staticmethod
+    def _filter_symints(inputs: List[Any]) -> List[torch.SymInt]:
+        """
+        Get the SymInt objects from the input list.
+        """
+        return [s for s in inputs if isinstance(s, torch.SymInt)]
+
+    @staticmethod
+    def _get_shape_env() -> ShapeEnv:
+        """
+        Helper to get the shape env from the tracing context.
+        """
+        tracing_context = torch._guards.TracingContext.get()
+        assert tracing_context is not None
+        return tracing_context.fake_mode.shape_env
+
+    @staticmethod
+    def _lookup_graph(
+        key: str,
+        example_inputs: List[torch.Tensor],
+    ) -> Optional[CompiledFxGraph]:
+        """
+        Lookup a compiled graph in the cache by key. On a hit, return the
+        deserialized CompiledFxGraph object. On a miss, return None.
+        """
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if not os.path.exists(subdir):
+            return None
+
+        # Iterate over any entries in the subdir for this key and evaluate
+        # their guards to determine whether there's a hit.
+        for path in sorted(os.listdir(subdir)):
+            with open(os.path.join(subdir, path), "rb") as f:
+                graph: CompiledFxGraph = pickle.load(f)
+
+            guards_expr = graph.guards_expr
+            if not guards_expr:
+                # No guards to evaluate
+                return graph
+
+            # Evaluate the guard expression in the current context.
+            shape_env = FxGraphCache._get_shape_env()
+            symints = FxGraphCache._filter_symints(example_inputs)
+
+            # If there's not a cache hit, we don't want the evaluation to
+            # affect the current env, e.g., cause the creation of new guards,
+            # so we evaluate with the hints instead of the symbols.
+            assert all(has_hint(s) for s in symints)
+            hints = [hint_int(s) for s in symints]
+            hit = bool(shape_env.evaluate_guards_expression(guards_expr, hints))
+            log.debug(
+                "fx graph cache key %s evaluating guards for %s with values %s => %s",
+                key,
+                guards_expr,
+                hints,
+                hit,
+            )
+            if hit:
+                # Now re-evaluate with the symints to add any guards to the current env.
+                check = bool(shape_env.evaluate_guards_expression(guards_expr, symints))
+                assert check is True
+                log.debug(
+                    "fx graph cache key %s post-load guards: %s",
+                    key,
+                    shape_env.guards,
+                )
+                return graph
+
+        return None
+
+    @staticmethod
+    def _save_graph(
+        key: str, compiled_graph: CompiledFxGraph, example_inputs: List[torch.Tensor]
+    ):
+        """
+        Store a serialized CompiledFxGraph on disk.
+        """
         disk_compiled_graph = copy(compiled_graph)
-        # Important as compiled models are not pickleable
-        # TODO: Check status of PR #101651 as that might change the above statement
+        # Important as compiled models are not pickleable:
         disk_compiled_graph.compiled_artifact = None
-        write(pickle.dumps(disk_compiled_graph), "cg", extra=key, hash_type="cg")
 
-    @classmethod
-    def load_graph(cls, cg_path: str) -> CompiledFxGraph:
-        with open(cg_path, "rb") as f:
-            return pickle.load(f)
+        # Before serializing, compute the guard expression that will be used to
+        # ensure that a CompiledFxGraph is valid when loaded from the cache. It's
+        # sufficient to consider only the SymInt args to the fx graph since the
+        # Tensor shapes are already captured in the hash for the cache key. Any
+        # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
+        shape_env = FxGraphCache._get_shape_env()
+        symints = FxGraphCache._filter_symints(example_inputs)
+        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
-    @classmethod
+        content = pickle.dumps(disk_compiled_graph)
+
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+
+        # Use a hash of the serialized CompiledFxGraph to get a unique file
+        # name. The specific name doesn't matter since a lookup involves
+        # iterating over all entries in the parent subdir.
+        path = os.path.join(subdir, sha256_hash(content))
+        write_atomic(path, content)
+
+    @staticmethod
     def load(
-        cls,
         compile_fx_fn: Callable[..., Any],
-        fx_args: List[Any],
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
     ):
+        """
+        Load a compiled graph from the cache. If a cached entry does not exist,
+        compile the graph and save it to the cache.
+        """
         from filelock import FileLock
 
-        try:
-            key = compiled_fx_graph_hash(fx_args, fx_kwargs)
-        except DynamicShapeError:
-            # TODO(masnresral): support dynamic shapes
-            log.debug("fx graph cache skip due to dynamic shapes")
-            counters["inductor"]["fxgraph_cache_skip"] += 1
-            return compile_fx_fn(*fx_args, **fx_kwargs)
+        key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            _, _, cg_path = get_path(key, "cg")
-            if not os.path.exists(cg_path):
+            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
-                compiled_graph: CompiledFxGraph = compile_fx_fn(*fx_args, **fx_kwargs)
-                cls.save_graph(key, compiled_graph)
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
             else:
-                # Load required info from disk; recreation of compiled model will be on first run
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
-                compiled_graph = cls.load_graph(cg_path)
 
             return compiled_graph
+
+    @staticmethod
+    def clear():
+        """
+        Clear out the on-disk cache.
+        """
+        shutil.rmtree(FxGraphCache._get_tmp_dir())
 
 
 @dataclasses.dataclass
 class CompiledFxGraph:
-    """Class holding a compiled FX graph"""
+    """
+    Class holding a compiled FX graph. This is the object serialized on disk
+    to support FxGraph caching.
+    """
 
     compiled_artifact: Optional[Callable[..., Any]] = None
     current_callable: Optional[Callable[..., Any]] = None
@@ -660,8 +838,32 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
     output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+    # This is a string representation of an expression we serialize
+    # with the object so the guards can be evaluated in a different
+    # context in order to verify the validity of serving a cached
+    # fx graph. The expression must be generated by:
+    # ShapeEnv.produce_guards_expression()
+    guards_expr: Optional[str] = None
 
     _boxed_call: Optional[bool] = None
+
+    def __init__(
+        self,
+        compiled_artifact: Optional[Callable[..., Any]],
+        graph: GraphLowering,
+        output_strides: List[Optional[Tuple[int, ...]]],
+    ):
+        self.compiled_artifact = compiled_artifact
+        self.cache_key = graph.cache_key
+        self.artifact_path = graph.cache_path
+        self.cache_linemap = graph.cache_linemap
+        self.device_types = graph.device_types
+        self.device_idxs = graph.device_idxs
+        self.mutated_inputs = graph.mutated_inputs
+        self.mutated_input_idxs = set(graph.mutated_input_idxs)
+        self.constants = graph.constants
+        self.output_strides = output_strides
+        self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)

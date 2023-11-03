@@ -83,7 +83,7 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
 }
 
 TORCH_LIBRARY_FRAGMENT(custom, m) {
-    m.impl_abstract_pystub("nonzero", "my_custom_ops");
+    m.impl_abstract_pystub("my_custom_ops");
     m.def("nonzero(Tensor x) -> Tensor");
 }
 

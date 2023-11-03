@@ -1180,6 +1180,58 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.register_finalizer_fns.append(register_finalizer)
 
 
+err_epilogue = (
+    "With the current config, we will graph break "
+    "(and fall back to eager-mode PyTorch) on all ops "
+    "that have do not have the 'pt2_compliant_tag'. "
+    "Please see the following doc for how to mark this op as PT2 compliant "
+    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+)
+
+
+def check_pt2_compliant_op(tx, kind, target, args, kwargs):
+    if kind != "call_function":
+        return
+    if not config.only_allow_pt2_compliant_ops:
+        return
+    if isinstance(target, torch._ops.OpOverload):
+        if torch.Tag.pt2_compliant_tag in target.tags:
+            return
+        unimplemented(
+            f"Encountered the torch.ops.OpOverload {target} "
+            f"that is not PT2 compliant. " + err_epilogue
+        )
+    if isinstance(target, torch._ops.OpOverloadPacket):
+        overloads = tuple(target.overloads())
+        # Optimization: Overload resolution is expensive.
+        # If there's only one overload, we know what it will resolve to.
+        if len(overloads) == 1:
+            op = getattr(target, overloads[0])
+            if torch.Tag.pt2_compliant_tag in op.tags:
+                return
+            unimplemented(
+                f"Encountered the non-overloaded "
+                f"torch.ops.OpOverloadPacket {target} "
+                f"that is not PT2 compliant. " + err_epilogue
+            )
+        args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
+            tx, (args, kwargs)
+        )
+        try:
+            overload = torch._C._jit_resolve_packet(
+                target._qualified_op_name, *args, **kwargs
+            )
+        except RuntimeError as e:
+            unimplemented(str(e))
+
+        if torch.Tag.pt2_compliant_tag not in getattr(target, overload).tags:
+            unimplemented(
+                f"Encountered the torch.ops.OpOverloadPacket {target} "
+                f"which resolves to the overload ({overload}) that is "
+                f"not PT2 compliant. " + err_epilogue
+            )
+
+
 class SubgraphTracer(fx.Tracer):
     """
     Holds an FX graph that is being traced. OutputGraph owns a SubgraphTracer
@@ -1411,6 +1463,7 @@ class SubgraphTracer(fx.Tracer):
     def create_node(
         self, op, target, args=None, kwargs=None, name=None, type_expr=None
     ):
+        check_pt2_compliant_op(self.output_graph.current_tx, op, target, args, kwargs)
         if self.parent is not None:
             flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
