@@ -11,6 +11,7 @@ import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
+from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher
@@ -202,6 +203,21 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_simple_split(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
+        example_inputs = (torch.randn(2, 8, device=self.device),)
+        counters.clear()
+        self.check_model(Model(), example_inputs)
+        self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
+        self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
+
     def test_small_constant(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -215,7 +231,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
-    def test_output_path(self):
+    def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -230,6 +246,26 @@ class AOTInductorTestsTemplate:
         )
         with config.patch("aot_inductor.output_path", "tmp_output_"):
             self.check_model(Model(), example_inputs)
+
+    def test_output_path_2(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        model = Model().to(device=self.device)
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        expected_path = os.path.join(tempfile.mkdtemp(), "model.so")
+        actual_path = AOTInductorModelRunner.compile(
+            model, example_inputs, options={"aot_inductor.output_path": expected_path}
+        )
+        self.assertTrue(actual_path == expected_path)
 
     @requires_cuda()
     def test_multi_device(self):
