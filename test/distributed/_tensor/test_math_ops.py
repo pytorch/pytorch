@@ -38,13 +38,11 @@ class DistMathOpsTest(DTensorTestBase):
                     dim_reduced_tensor = op(*args)
                     dt_reduced = op_dt(*args)
                 dt_dim_reduced_tensor = dt_reduced.full_tensor()
-                self.assertEqual(dt_dim_reduced_tensor.to_local(), dim_reduced_tensor)
+                self.assertEqual(dt_dim_reduced_tensor, dim_reduced_tensor)
 
         full_reduced_tensor = op()
-        dt_full_reduced = op_dt().redistribute(
-            device_mesh, [Replicate()] * device_mesh.ndim
-        )
-        self.assertEqual(dt_full_reduced.to_local(), full_reduced_tensor)
+        dt_full_reduced = op_dt().full_tensor()
+        self.assertEqual(dt_full_reduced, full_reduced_tensor)
 
     @with_comms
     def test_linear_op_reductions(self):
