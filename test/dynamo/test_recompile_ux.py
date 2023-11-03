@@ -72,7 +72,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         # self.assertEqual(counters["frames"]["ok"], 1 + self.cache_limit)
 
         # compile_counter only sees frames that were fed to the backend compiler,
-        # which is a subset of counters["frames"]["ok"] -- probably becuase
+        # which is a subset of counters["frames"]["ok"] -- probably because
         # counters["frames"]["ok"] includes frames not containing torch ops?
         self.assertEqual(compile_counter.frame_count, self.cache_limit)
 
@@ -104,7 +104,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
     def test_nvfuser_guards(self):
         # we may want to model dynamo's guards sufficiently after nvfuser's ProfilingExecutor guards
         # such that we ensure dynamo is in charge of all the recompilations at the top level,
-        # and we could thus simplfy the underlying torchscript executor
+        # and we could thus simplify the underlying torchscript executor
         def func(a, b, c):
             return a + b * c
 

@@ -33,8 +33,8 @@ class AnnotationsTest(TestCase):
     def test_annotations(self):
         """
         Test type annotations in the forward function.
-        The annoation should appear in the n.graph
-        where n is the corresoinding node in the resulting graph.
+        The annotation should appear in the n.graph
+        where n is the corresponding node in the resulting graph.
         """
         class M(torch.nn.Module):
             def forward(self,
@@ -827,7 +827,7 @@ class TypeCheckerTest(TestCase):
         for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
             assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
 
-        # here we give the same input as to runtume
+        # here we give the same input as to runtime
         gm_static_with_types = symbolic_trace(resnet50())
 
         # we initialize our placeholder
