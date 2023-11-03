@@ -597,7 +597,7 @@ class ViewAndMutationMeta:
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
-    # of eager-mode equivalence. It is the responsibility of upstream graph acquisition
+    # equivalence to eager mode. It is the responsibility of upstream graph acquisition
     # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
     grad_enabled_mutation: Optional[bool] = None
 
