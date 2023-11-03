@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.nested._internal.nested_tensor import jagged_from_list, buffer_from_jagged
+import contextlib
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -141,6 +142,16 @@ def random_nt_from_similar(other, dims=None):
 
 
 class TestNestedTensor(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -646,6 +657,14 @@ class TestNestedTensor(TestCase):
 
 
 class TestNestedTensorDeviceType(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
 
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
@@ -1387,6 +1406,7 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double)
     @parametrize("layout", [torch.strided, torch.jagged])
     def test_dropout(self, device, dtype, layout):
@@ -2240,6 +2260,15 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
 class TestNestedTensorAutograd(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -2859,6 +2888,15 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
     def _get_example_tensor_lists(self, include_list_of_lists=True, include_requires_grad=True):
 
         def _make_tensor(*shape, include_requires_grad=include_requires_grad, requires_grad=True):
@@ -2973,6 +3011,7 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3048,6 +3087,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3070,6 +3110,7 @@ class TestNestedTensorSubclass(TestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
