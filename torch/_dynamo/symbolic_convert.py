@@ -15,7 +15,6 @@ import traceback
 import types
 import typing
 import weakref
-from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
@@ -715,7 +714,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
-            if self.empty_checkpoint():
+            if self.checkpoint is None:
                 log.debug("empty checkpoint")
                 raise
 
@@ -1866,18 +1865,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
-
-    def empty_checkpoint(self):
-        if self.checkpoint is None:
-            return True
-        output_graphstate = self.checkpoint[1][0]
-        graphstate = self.checkpoint[1][1:]
-        state = (*output_graphstate, *graphstate)
-        for obj in state:
-            if isinstance(obj, Sized):
-                if len(obj) != 0:
-                    return False
-        return True
 
     def format_frame_summary(self, additional_stack_frames=None):
         if additional_stack_frames is None:
