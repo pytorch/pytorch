@@ -152,6 +152,8 @@ jobs:
 
           arch
 
+          env
+
           if [[ -n "$CONDA_ENV" ]]; then
             # Use binaries under conda environment
             export PATH="$CONDA_ENV/bin":$PATH
