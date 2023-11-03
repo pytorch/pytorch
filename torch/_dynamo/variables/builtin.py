@@ -1101,21 +1101,33 @@ class BuiltinVariable(VariableTracker):
                 # have the original tensor stored in the graphargs.
                 for grapharg in tx.output.graphargs:
                     if grapharg.source == source.base:
-                        example_value = grapharg.example.grad
-                        return VariableBuilder(tx, source)(example_value).add_options(
-                            options
-                        )
-                unimplemented(f"tensor grad with source {source}")
-            else:
-                from .builder import wrap_fx_proxy
+                        old_grad = grapharg.example.grad
+                        new_grad = obj.as_proxy().node.meta["example_value"].grad
 
-                grad_proxy = obj.as_proxy().grad
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=grad_proxy,
-                    example_value=obj.as_proxy().node.meta["example_value"].grad,
-                    **options,
-                )
+                        def _grad_changed(old, new):
+                            if old_grad is None:
+                                return new is not None
+                            if old_grad.shape != new_grad.shape:
+                                return True
+                            if old_grad.stride() != new_grad.stride():
+                                return True
+                            return False
+
+                        if _grad_changed(old_grad, new_grad):
+                            grad_shape_specialized = [int(x) for x in new_grad.shape]
+                            # We lazily update the grad on the example to its real state as tracked by fake tensor.
+                            # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
+                            # the underlying value to always be correct.
+                            grapharg.example.grad = torch.zeros(
+                                grad_shape_specialized, device=new_grad.device
+                            )
+                        out = VariableBuilder(tx, source)(
+                            grapharg.example.grad
+                        ).add_options(options)
+                        return out
+                unimplemented("tensor grad")
+            else:
+                unimplemented("tensor grad")
         elif isinstance(
             obj,
             (
