@@ -5162,13 +5162,14 @@ def fn():
         opt_fn(x2, y2)
 
         self.assertTrue(guard_failure is not None)
+        first_guard_failure = guard_failure[0].partition("\n")[0]
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(
-                guard_failure[0],
+                first_guard_failure,
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 5""",
             )
         else:
-            self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
+            self.assertExpectedInline(first_guard_failure, """L['x'].size()[0] < 3""")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
