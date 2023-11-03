@@ -249,7 +249,7 @@ bool check_flash_causal_non_square_seqlens(sdp_params const& params, bool debug)
 
 bool use_flash_attention(sdp_params const& params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with flash attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
 
@@ -287,7 +287,7 @@ bool use_flash_attention(sdp_params const& params, bool debug) {
 
 bool use_mem_efficient_attention(sdp_params const& params, bool debug) {
 #ifndef USE_MEM_EFF_ATTENTION
-  TORCH_WARN(!debug, "Torch was not compiled with memory efficient attention.");
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
 #endif
   // Constraints specific to mem efficient attention

@@ -627,9 +627,9 @@ InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
 def reinplace_scatters(graph):
     """
-    Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1), and the node being mutated
-    shares storage with no other nodes.
+    Reinplaces scatter operations.
+    If there are no uses of a view of the mutated arg after the current node,
+    it is possible to inplace the op.
 
     Also handles input mutations when there is a corresponding copy node.
     """
@@ -656,8 +656,6 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    # Invariant: If there are any uses of a view of the mutated arg
-    # after the current node, it is not possible to inplace.
     def any_use_of_views_after_node(node, shared_view_nodes, copy_node):
         node_loc = node_order[node]
         for view in shared_view_nodes:
@@ -675,7 +673,7 @@ def reinplace_scatters(graph):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if mutated_arg.op == "placeholder":
+        if any(view.op == "placeholder" for view in shared_view_nodes):
             if not (
                 copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
             ):

@@ -3854,13 +3854,9 @@ class UserDefinedTritonKernel(ExternKernel):
         packed = UserDefinedTritonKernel(
             kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
         )
-        outputs = {}
-        for key, arg in kernel_args.items():
+        for arg in kernel_args.values():
             if isinstance(arg, TensorBox):
-                outputs[key] = NopOutput(arg.layout, arg)
-            else:
-                outputs[key] = arg
-        return outputs
+                MutationOutput(arg.layout, arg, packed)
 
     def has_aliasing(self):
         return True
@@ -3869,12 +3865,12 @@ class UserDefinedTritonKernel(ExternKernel):
         return [i.get_name() for i in self.inputs]
 
 
-class NopOutput(ExternKernel):
+class MutationOutput(ExternKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
-    def __init__(self, layout, input):
-        super().__init__(None, layout, [input], ())
+    def __init__(self, layout, input, parent):
+        super().__init__(None, layout, [input, parent], ())
         self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
