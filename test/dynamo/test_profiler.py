@@ -10,6 +10,8 @@ import torch._dynamo.utils
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dynamo_timed
 
+from torch.testing._internal.common_utils import TemporaryFileName
+
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
     def test_dynamo_timed_profiling_isolated(self):
@@ -91,6 +93,21 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
         with torch.profiler.profile(record_shapes=True):
             opt_fn(*inputs)
+
+    def test_execution_trace_dynamic_shapes(self):
+        def fn(x, y, z):
+            return x @ y + z
+
+        et = torch.profiler.ExecutionTraceObserver()
+        opt_fn = torch.compile(fn, dynamic=True, backend="aot_eager")
+        inputs = [torch.rand((4, 4)) for _ in range(3)]
+
+        with TemporaryFileName() as fname:
+            et.register_callback(fname)
+            et.start()
+            out = opt_fn(*inputs)
+            et.stop()
+            et.unregister_callback()
 
     def test_profiler_cache_lookup(self):
         def fn(x):

@@ -22,10 +22,12 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     Iterable,
     List,
     NamedTuple,
     Optional,
+    Protocol,
     Set,
     TypeVar,
     Union,
@@ -100,7 +102,11 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     filtered_events = EventList(
-        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+        ]
     )
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
@@ -373,7 +379,20 @@ def tuple_sorted(x):
     return sorted(x, key=sort_func)
 
 
-def cache_on_self(fn):
+RV = TypeVar("RV", covariant=True)
+
+
+# FIXME this should take in a ParamSpec too
+class CachedFunction(Generic[RV], Protocol):
+    @staticmethod
+    def clear_cache(self) -> None:
+        ...
+
+    def __call__(self, *args, **kwargs) -> RV:
+        ...
+
+
+def cache_on_self(fn: Callable[..., RV]) -> CachedFunction[RV]:
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
@@ -382,7 +401,12 @@ def cache_on_self(fn):
             setattr(self, key, fn(self))
         return getattr(self, key)
 
-    return wrapper
+    def clear_cache(self):
+        if hasattr(self, key):
+            delattr(self, key)
+
+    wrapper.clear_cache = clear_cache  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
 
 
 def aggregate_origins(node_schedule):
@@ -534,7 +558,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
             return sympy_symbol(key)
         return key
 
-    return expr.xreplace(
+    return sympy.sympify(expr).xreplace(
         {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
     )
 
@@ -1258,6 +1282,10 @@ def aot_inductor_launcher(so_path: str, device: str):
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
             }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
         """
     elif device == "cpu":
         return f"""
@@ -1267,6 +1295,10 @@ def aot_inductor_launcher(so_path: str, device: str):
 
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
+            }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
             }}
         """
     else:
