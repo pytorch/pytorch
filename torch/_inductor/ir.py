@@ -4314,6 +4314,8 @@ class FallbackKernel(ExternKernelAlloc):
         if not isinstance(self.op_overload, torch._ops.OpOverload):
             return []
         if torch._inductor.utils.is_view(self.op_overload):
+            # TODO - use op._schema.arguments alias_info to figure out
+            # precise list
             return [inp.get_name() for inp in self.inputs]
         return []
 
@@ -4593,6 +4595,7 @@ class MultiOutput(ExternKernel):
             inp.get_name()
             for inp in self.inputs
             if isinstance(inp, (FallbackKernel, ComplexView))
+            and len(inp.get_alias_names()) > 0
         ]
 
 
