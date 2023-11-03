@@ -8150,8 +8150,8 @@ ShapeEnv not equal: field values don't match:
         other.create_unbacked_symint()
 
         # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
-        #   - +1 defferred_runtime_asserts entry
-        #   - Change: num_defferred_runtime_asserts
+        #   - +1 deferred_runtime_asserts entry
+        #   - Change: num_deferred_runtime_asserts
         expect_true(r % 3 == 0)
 
         self.assertExpectedRaisesInline(
