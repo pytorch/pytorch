@@ -8777,32 +8777,6 @@ class foreach_inputs_sample_func:
                 )
 
 
-class foreach_error_inputs_func(foreach_inputs_sample_func):
-    def __call__(self, opinfo, device, dtype, **kwargs):
-        _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
-        _foreach_inputs_kwargs["requires_grad"] = False
-        _foreach_inputs_kwargs["zero_size"] = False
-        for rightmost_arg_type, num_tensors in itertools.product(self._rightmost_arg_types, foreach_num_tensors):
-            if rightmost_arg_type not in (ForeachRightmostArgType.TensorList, ForeachRightmostArgType.ScalarList):
-                continue
-
-            input = sample_inputs_foreach(
-                None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-            args = [
-                sample_inputs_foreach(
-                    None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-                for _ in range(self.arity - 2)
-            ]
-            rightmost_arg_list = self._sample_rightmost_arg(
-                opinfo, rightmost_arg_type, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-            for rightmost_arg in rightmost_arg_list:
-                sample_kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype)
-                # Test a ScalarList/TensorList that has size less than expected. Used to segfault.
-                yield ForeachSampleInput(input, *args, rightmost_arg[:-1], **sample_kwargs)
-                # Test a ScalarList/TensorList that has size higher than expected.
-                yield ForeachSampleInput(input, *args, rightmost_arg + rightmost_arg[0:1], **sample_kwargs)
-
-
 class foreach_norm_sample_func(foreach_inputs_sample_func):
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
         assert "num_input_tensors" not in kwargs
@@ -9114,7 +9088,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "add",
         foreach_inputs_sample_func(2, True, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
@@ -9133,7 +9106,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "sub",
         foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         supports_alpha_param=True,
@@ -9150,10 +9122,9 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "mul",
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True, True),
         skips=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
@@ -9168,10 +9139,9 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "div",
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         skips=(
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
@@ -9196,7 +9166,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "clamp_min",
         foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         skips=(
@@ -9213,7 +9182,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "clamp_max",
         foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         skips=(
@@ -9231,7 +9199,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "minimum",
         foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
@@ -9251,7 +9218,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "maximum",
         foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=False,
@@ -9269,12 +9235,11 @@ foreach_binary_op_db: List[OpInfo] = [
     ),
     ForeachFuncInfo(
         "pow",
-        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
-        error_inputs_func=foreach_error_inputs_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_alpha_param=False,
         supports_scalar_self_arg=True,
+        sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
         skips=(
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),

@@ -2100,15 +2100,16 @@ def emit_body(
     unpack_args_stats, unpacked_bindings = unpack_args(f)
 
     body.extend(unpack_args_stats)
-    body.append(declare_returned_variables(f))
-
-    body.append(emit_call(f, unpacked_bindings, try_jit_decomposition))
     if requires_derivative:
         body.extend(emit_any_requires_grad())
         body.extend(emit_any_has_forward_grad())
         body.extend(emit_check_inplace())
         body.extend(emit_original_self_definition())
         body.extend(setup_derivative(differentiable_inputs))
+    body.append(declare_returned_variables(f))
+
+    body.append(emit_call(f, unpacked_bindings, try_jit_decomposition))
+    if requires_derivative:
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.append(emit_history())
