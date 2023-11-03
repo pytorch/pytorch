@@ -54,19 +54,19 @@ def arch_type(arch_version: str) -> str:
 
 
 WHEEL_CONTAINER_IMAGES = {
-    "11.8": "pytorch/manylinux-builder:cuda11.8-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "12.1": "pytorch/manylinux-builder:cuda12.1-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "5.5": "pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692",
-    "5.6": "pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692",
-    "cpu": "pytorch/manylinux-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    "11.8": "pytorch/manylinux-builder:cuda11.8-2.1",
+    "12.1": "pytorch/manylinux-builder:cuda12.1-2.1",
+    "5.5": "pytorch/manylinux-builder:rocm5.5-2.1",
+    "5.6": "pytorch/manylinux-builder:rocm5.6-2.1",
+    "cpu": "pytorch/manylinux-builder:cpu-2.1",
+    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.1",
+    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64-2.1",
 }
 
 CONDA_CONTAINER_IMAGES = {
-    "11.8": "pytorch/conda-builder:cuda11.8-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "12.1": "pytorch/conda-builder:cuda12.1-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
-    "cpu": "pytorch/conda-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    "11.8": "pytorch/conda-builder:cuda11.8-2.1",
+    "12.1": "pytorch/conda-builder:cuda12.1-2.1",
+    "cpu": "pytorch/conda-builder:cpu-2.1",
 }
 
 PRE_CXX11_ABI = "pre-cxx11"
@@ -78,43 +78,43 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     (
         "11.8",
         PRE_CXX11_ABI,
-    ): "pytorch/manylinux-builder:cuda11.8-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    ): "pytorch/manylinux-builder:cuda11.8-2.1",
     (
         "12.1",
         PRE_CXX11_ABI,
-    ): "pytorch/manylinux-builder:cuda12.1-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    ): "pytorch/manylinux-builder:cuda12.1-2.1",
     (
         "11.8",
         CXX11_ABI,
-    ): "pytorch/libtorch-cxx11-builder:cuda11.8-941be28cb5c686dc41b7ea8681701e64192c3002",
+    ): "pytorch/libtorch-cxx11-builder:cuda11.8-2.1",
     (
         "12.1",
         CXX11_ABI,
-    ): "pytorch/libtorch-cxx11-builder:cuda12.1-941be28cb5c686dc41b7ea8681701e64192c3002",
+    ): "pytorch/libtorch-cxx11-builder:cuda12.1-2.1",
     (
         "5.5",
         PRE_CXX11_ABI,
-    ): "pytorch/manylinux-builder:rocm5.5-01ce69ff0d18320ab36787e288436586ed278692",
+    ): "pytorch/manylinux-builder:rocm5.5-2.1",
     (
         "5.6",
         PRE_CXX11_ABI,
-    ): "pytorch/manylinux-builder:rocm5.6-01ce69ff0d18320ab36787e288436586ed278692",
+    ): "pytorch/manylinux-builder:rocm5.6-2.1",
     (
         "5.5",
         CXX11_ABI,
-    ): "pytorch/libtorch-cxx11-builder:rocm5.5-941be28cb5c686dc41b7ea8681701e64192c3002",
+    ): "pytorch/libtorch-cxx11-builder:rocm5.5-2.1",
     (
         "5.6",
         CXX11_ABI,
-    ): "pytorch/libtorch-cxx11-builder:rocm5.6-17ea05e4536e78c9c0be8641952b1c5850a298cb",
+    ): "pytorch/libtorch-cxx11-builder:rocm5.6-2.1",
     (
         "cpu",
         PRE_CXX11_ABI,
-    ): "pytorch/manylinux-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    ): "pytorch/manylinux-builder:cpu-2.1",
     (
         "cpu",
         CXX11_ABI,
-    ): "pytorch/libtorch-cxx11-builder:cpu-59a2f92aa12c3c0cb11622b05fe77de8312f6d00",
+    ): "pytorch/libtorch-cxx11-builder:cpu-2.1",
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]
