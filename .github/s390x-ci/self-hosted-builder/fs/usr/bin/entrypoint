@@ -1,0 +1,30 @@
+#!/bin/bash
+
+#
+# Container entrypoint that waits for all spawned processes.
+#
+
+set -e -u
+
+# Create a FIFO and start reading from its read end.
+tempdir=$(mktemp -d "/tmp/done.XXXXXXXXXX")
+trap 'rm -r "$tempdir"' EXIT
+done="$tempdir/pipe"
+mkfifo "$done"
+cat "$done" & waiter=$!
+
+# Start the workload. Its descendants will inherit the FIFO's write end.
+status=0
+if [ "$#" -eq 0 ]; then
+    bash 9>"$done" || status=$?
+else
+    "$@" 9>"$done" || status=$?
+fi
+
+# When the workload and all of its descendants exit, the FIFO's write end will
+# be closed and `cat "$done"` will exit. Wait until it happens. This is needed
+# in order to handle SelfUpdater, which the workload may start in background
+# before exiting.
+wait "$waiter"
+
+exit "$status"
