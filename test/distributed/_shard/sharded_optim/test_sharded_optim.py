@@ -104,7 +104,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         local_model = MyShardedModel().cuda()
         sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
 
-        # copy the parameteres from local model
+        # copy the parameters from local model
         sharded_model.sharded_param.local_shards()[0].tensor = \
             local_model.sharded_param.detach().clone().requires_grad_()
 
