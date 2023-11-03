@@ -392,6 +392,8 @@ def is_allowed(obj) -> bool:
 def is_in_graph_function(obj) -> bool:
     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
         obj = obj.__wrapped__
+    if is_user_defined_allowed(obj):
+        return True
     if isinstance(
         obj,
         (

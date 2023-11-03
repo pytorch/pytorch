@@ -138,29 +138,42 @@ def torch_reconstruct(codegen, value):
     return codegen.setup_globally_cached(unique_var_name, value, False)
 
 
-class TorchCtxManagerClassVariable(VariableTracker):
+class BaseTorchVariable(VariableTracker):
     """Points to a context manager class in torch.* that dynamo has implementations"""
 
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return TorchCtxManagerClassVariable(
+        return cls(
             value,
             source=source,
         )
 
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     def reconstruct(self, codegen):
-        return torch_reconstruct(codegen, self.value)
+        name = torch_get_name(value, f"allowed_fn_{id(value)}")
+        unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+        return codegen.setup_globally_cached(unique_var_name, value, False)
+
+    def as_proxy(self):
+        return self.value
 
     def python_type(self):
         return type(self.value)
 
     def as_python_constant(self):
         return self.value
+
+    def can_constant_fold_through(self):
+        if self.value in constant_fold_functions:
+            return True
+        return getattr(self.value, "__module__", None) == "math"
+
+
+class TorchCtxManagerClassVariable(BaseTorchVariable):
+    """Points to a context manager class in torch.* that dynamo has implementations"""
+
+    def __repr__(self):
+        return f"TorchCtxManagerClassVariable({self.value})"
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -220,34 +233,11 @@ class TorchCtxManagerClassVariable(VariableTracker):
             return TorchFunctionDisableVariable.create(tx)
 
 
-class TorchInGraphFunctionVariable(VariableTracker):
+class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a function that should be put as a FX graph node"""
 
-    @classmethod
-    def create_with_source(cls, value, source):
-        return TorchInGraphFunctionVariable(
-            value,
-            source=source,
-            guards={source.make_guard(GuardBuilder.FUNCTION_MATCH)},
-        )
-
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
-    def reconstruct(self, codegen):
-        return torch_reconstruct(codegen, self.value)
-
-    def python_type(self):
-        return type(self.value)
-
-    def as_python_constant(self):
-        return self.value
-
-    def can_constant_fold_through(self):
-        if self.value in constant_fold_functions:
-            return True
-        return getattr(self.value, "__module__", None) == "math"
+    def __repr__(self):
+        return f"TorchInGraphFunctionVariable({self.value})"
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -676,18 +666,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchVariable(VariableTracker):
+class TorchVariable(BaseTorchVariable):
     """Points to a module or method in torch.*"""
 
     def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
         if (
             isinstance(value, collections.abc.Hashable)
             and value in tensor_dunder_fns_remap
         ):
             value = tensor_dunder_fns_remap[value]
 
-        self.value = value
+        super().__init__(value, **kwargs)
 
         # the remainder of this is just optional debug checks
         try:
@@ -721,12 +710,6 @@ class TorchVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result).add_options(self)
 
-    def reconstruct(self, codegen):
-        return torch_reconstruct(codegen, self.value)
-
-    def as_proxy(self):
-        return self.value
-
     def python_type(self):
         if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
             return type(self.value)
@@ -734,18 +717,10 @@ class TorchVariable(VariableTracker):
             return type
         return super().python_type()
 
-    def as_python_constant(self):
-        return self.value
-
-    def can_constant_fold_through(self):
-        if self.value in constant_fold_functions:
-            return True
-        return getattr(self.value, "__module__", None) == "math"
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import StreamContextVariable
+        from . import ConstantVariable, StreamContextVariable
 
         from .builder import wrap_fx_proxy
 
@@ -753,7 +728,16 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if istype(self.value, type) and issubclass(self.value, torch.nn.Module):
+        if self.can_constant_fold_through() and (constant_args or unspec_python_args):
+            # constant fold
+            return ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+                **options,
+            )
+        elif istype(self.value, type) and issubclass(self.value, torch.nn.Module):
             if self.value is torch.nn.CrossEntropyLoss:
                 return self._call_cross_entropy_loss(tx, args, kwargs, options)
             else:
