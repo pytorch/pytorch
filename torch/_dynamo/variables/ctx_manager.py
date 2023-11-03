@@ -114,9 +114,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
                 f"Unsupported context manager {self.cm_obj}'s __exit__ function"
             ) from e
 
-        # Remove the checkpoint if there is no graph break
-        # under this GenericContextWrappingVariable.
-        tx.states_before_block.pop()
+        tx.generic_context_manager_depth -= 1
         return x
 
 
