@@ -22,8 +22,8 @@ from torch.distributed.checkpoint.state_dict import (
     STATE,
     StateDictOptions,
 )
+from torch.distributed.checkpoint.state_dict_utils import _gather_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
