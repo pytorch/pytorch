@@ -21,7 +21,10 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
-from torch.distributed.checkpoint.state_dict_utils import _gather_state_dict
+from torch.distributed.checkpoint.state_dict_utils import (
+    _all_gather_sharded_tensor,
+    _gather_state_dict,
+)
 from torch.distributed.fsdp import (
     CPUOffload,
     FullStateDictConfig,
@@ -31,7 +34,6 @@ from torch.distributed.fsdp import (
     ShardedStateDictConfig,
     StateDictType,
 )
-from torch.distributed.fsdp._shard_utils import _all_gather_sharded_tensor
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer

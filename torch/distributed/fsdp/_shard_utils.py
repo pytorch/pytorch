@@ -1,11 +1,10 @@
 import copy
 import itertools
 import math
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
     Shard,
