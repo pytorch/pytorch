@@ -3897,16 +3897,19 @@ class InplaceBernoulliFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     def __init__(self, x, *constant_args):
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([x]),
             constant_args,
         )
+        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
 
 
@@ -3925,15 +3928,18 @@ class AccumulateGrad(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     def __init__(self, variable, new_grad):
         super().__init__(
             None,
-            MutationLayout(variable),
+            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([variable, new_grad]),
         )
+        V.graph.mark_buffer_mutated(variable.get_name())
         self.name = V.graph.register_buffer(self)
 
 
@@ -3981,6 +3987,12 @@ class ScatterFallback(ExternKernel):
             kernel = "at::scatter_reduce_out"
         return kernel
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     def __init__(
         self,
         fn,
@@ -4012,9 +4024,11 @@ class ScatterFallback(ExternKernel):
         else:
             tensors = [self.realize_input(t) for t in [x, index]]
             constant_args = (dim, src)
+
+        V.graph.mark_buffer_mutated(x.get_name())
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
@@ -4045,13 +4059,20 @@ class IndexPutFallback(ExternKernel):
     def should_allocate(self):
         return False
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     def __init__(self, x, indices, values, accumulate):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
+        V.graph.mark_buffer_mutated(x.get_name())
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             (accumulate,),
         )
@@ -5003,8 +5024,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[1].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     @classmethod
     def create(
@@ -5041,7 +5064,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             unary_algorithm,
         ]
         return ConvolutionBinaryInplace(
-            kernel_layout=MutationLayout(inputs[1]),
+            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
@@ -6622,6 +6645,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     @classmethod
     def create(
         cls,
@@ -6632,10 +6658,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        layout = MutationLayout(inplace_inputs[0])
-
+        V.graph.mark_buffer_mutated(inplace_inputs[0])
         _ = AllReduceCoalesced(
-            layout=layout,
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
@@ -6660,15 +6685,18 @@ class AllReduce(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     @classmethod
     def create(
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MutationLayout(inplace_inputs[0])
+        V.graph.mark_buffer_mutated(inplace_inputs[0])
 
         _ = AllReduce(
-            layout=layout,
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
