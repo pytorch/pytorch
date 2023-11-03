@@ -717,12 +717,27 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 **options,
             )
+            # Note - you could ostensibly move this entire flow to operate on every single
+            # fake run node (see get_fake_value in utils) - however, it would require a lot of
+            # plumbing to get sources in place there (as it extracts args from the op).
+            # This location is a safe blend of convenience, soundness, and ease of use. This should cover
+            # all ops.
             flat_args_post_op, _ = pytree.tree_flatten((args, kwargs))
             for arg in flat_args_post_op:
                 if arg in tensor_var_to_grad:
                     new_grad = arg.as_proxy().node.meta["example_value"].grad
                     old_grad = tensor_var_to_grad[arg]
-                    if old_grad != new_grad:
+
+                    def _grad_changed(old, new):
+                        if old is None:
+                            return new is not None
+                        if old.shape != new.shape:
+                            return True
+                        if old.stride() != new.stride():
+                            return True
+                        return False
+
+                    if _grad_changed(old_grad, new_grad):
                         # Grad changed from running this op
                         for grapharg in tx.output.graphargs:
                             if grapharg.source == arg.source:
