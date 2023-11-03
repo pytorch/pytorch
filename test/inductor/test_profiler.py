@@ -9,7 +9,7 @@ import torch._inductor.utils
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName, skipIfRocm
 
 from torch.utils._triton import has_triton
 
@@ -89,6 +89,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self._test_profiling_kernel_names(fn, args, "sin")
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    @skipIfRocm
     def test_inductor_profiling_kernel_names_template(self):
         with config.patch(
             {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
