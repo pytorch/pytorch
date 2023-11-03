@@ -1252,7 +1252,7 @@ class GraphModule(torch.nn.Module):
                 and node.target == torch.ops.higher_order.cond
             ):
                 _, _, _, operands = node.args
-                # Each branch takes 4 inputs (buffer, x, z)
+                # Each branch takes 3 inputs (buffer, x, z)
                 self.assertEqual(len(operands), 3)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
