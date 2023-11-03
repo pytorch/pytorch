@@ -716,6 +716,8 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
@@ -1025,15 +1027,14 @@ CPU_TEST_FAILURES = {
     ),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": TestFailure(
-        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",), is_skip=True,
+        ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
+        is_skip=True,
     ),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_sdpa": fail_with_and_without_stack_allocation(),
     "test_sdpa_2": fail_with_and_without_stack_allocation(),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_zero_grid": fail_with_and_without_stack_allocation(),  # unsupported input dtype
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(),  # unsupported input dtype
 }
 
 copy_tests(

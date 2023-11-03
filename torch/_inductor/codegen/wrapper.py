@@ -255,11 +255,12 @@ class AllocateLine(MemoryPlanningLine):
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
 
-        static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
-        if static_shape is not None:
-            state.total_allocated_buffer_size += int(
-                functools.reduce(operator.mul, static_shape, 1)
-            )
+        if self.node.get_device().type == "cpu":
+            static_shape = self.wrapper.static_shape_for_buffer_or_none(self.node)
+            if static_shape is not None:
+                state.total_allocated_buffer_size += int(
+                    functools.reduce(operator.mul, static_shape, 1)
+                )
 
         return self
 
@@ -1334,8 +1335,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if isinstance(input, sympy.Expr):
             from ..graph import may_get_constant_buffer_dtype
 
-            graph_input = V.graph.graph_inputs[input_key]
-            dtype = may_get_constant_buffer_dtype(graph_input)
+            dtype = may_get_constant_buffer_dtype(input)
             assert (
                 dtype is not None
             ), f"Failed to get the dtype of sympy.Expr: {graph_input}"
@@ -1382,7 +1382,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.prefix.splice(
                     """
                     template <>
-                    AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<AOTInductorModelInputs, AOTInductorModelOutputs>(
+                    AOTInductorModelOutputs AOTInductorModel::run_impl_minimal_arrayref_interface<
+                      AOTInductorModelInputs, AOTInductorModelOutputs>(
                         const AOTInductorModelInputs& inputs,
                         DeviceStreamType stream,
                         AOTIProxyExecutorHandle proxy_executor
@@ -1650,8 +1651,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         f"{cached_output_name}.copy_data_from({output});"
                     )
                     output_entry = f"std::get<{idx}>(output_arrayref_tensors)"
+                    element_type = f"std::decay_t<decltype({output_entry}.data()[0])>"
                     self.wrapper_call.writeline(
-                        f"{output_entry} = {cached_output_name}.arrayref_tensor<std::decay_t<decltype({output_entry}.data()[0])>>();"
+                        f"{output_entry} = {cached_output_name}.arrayref_tensor<{element_type}>();"
                     )
                 else:
                     self.wrapper_call.writeline(
@@ -1691,7 +1693,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                                 f"{cached_output_name} = {output}.release();"
                             )
                             self.wrapper_call.writeline(
-                                f"convert_handle_to_arrayref_tensor({cached_output_name}, std::get<{idx}>(output_arrayref_tensors));"
+                                f"convert_handle_to_arrayref_tensor({cached_output_name}, "
+                                f"std::get<{idx}>(output_arrayref_tensors));"
                             )
                         else:
                             self.wrapper_call.writeline(

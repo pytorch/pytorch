@@ -54,7 +54,7 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
-    torch.float16: "_Float16",
+    torch.float16: "half",
     torch.int64: "long",
     torch.int32: "int",
     torch.int16: "short",
