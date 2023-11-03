@@ -151,6 +151,7 @@ class TestNestedTensor(TestCase):
             unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
         )
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
