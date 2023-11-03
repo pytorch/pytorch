@@ -8,7 +8,17 @@ import time
 import warnings
 from itertools import count
 
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -356,8 +366,7 @@ def compile_fx_inner(
 
     # Inputs to fx_codegen_and_compile
     # Anything that affects codegen should go here, so if the signature
-    # of fx_codegen_and_compile changes, the list and dict should be updated accordingly
-    graph_args = [gm, example_inputs]
+    # of fx_codegen_and_compile changes, the dict should be updated accordingly
     graph_kwargs = {
         "cudagraphs": cudagraphs,
         "num_fixed": num_fixed,
@@ -375,14 +384,20 @@ def compile_fx_inner(
 
     if config.fx_graph_cache and not aot_mode:
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, graph_args, graph_kwargs
+            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
         )
     else:
         compiled_graph = fx_codegen_and_compile(
-            *graph_args, **graph_kwargs  # type: ignore[arg-type]
+            gm, example_inputs, **graph_kwargs  # type: ignore[arg-type]
         )
 
     log.debug("FX codegen and compilation took %.3fs", time.time() - start)
+
+    # Return the output strides to the caller via TracingContext
+    context = torch._guards.TracingContext.get()
+    if context is not None and context.output_strides is not None:
+        assert len(context.output_strides) == 0
+        context.output_strides.extend(compiled_graph.output_strides)
 
     if aot_mode:
         return compiled_graph
@@ -579,23 +594,23 @@ def fx_codegen_and_compile(
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
+            is_inference=is_inference,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
-            context = torch._guards.TracingContext.get()
-            if context is not None and context.output_strides is not None:
-                # Return the output strides to the caller via TracingContext
-                assert len(context.output_strides) == 0
-                assert graph.graph_outputs is not None
+            output_strides: List[Optional[Tuple[int, ...]]] = []
+            if graph.graph_outputs is not None:
+                # We'll put the output strides in the compiled graph so we
+                # can later return them to the caller via TracingContext
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
-                        context.output_strides.append(
+                        output_strides.append(
                             tuple(  # type: ignore[arg-type]
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
                     else:
-                        context.output_strides.append(None)
+                        output_strides.append(None)
 
             compiled_fn = graph.compile_to_fn()
 
@@ -605,17 +620,8 @@ def fx_codegen_and_compile(
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
 
-            compiled_graph = CompiledFxGraph(
-                compiled_artifact=compiled_fn,
-                cache_key=graph.cache_key,
-                artifact_path=graph.cache_path,
-                cache_linemap=graph.cache_linemap,
-                device_types=graph.device_types,
-                device_idxs=graph.device_idxs,
-                mutated_inputs=graph.mutated_inputs,
-                mutated_input_idxs=set(graph.mutated_input_idxs),
-                constants=graph.constants,
-            )
+            compiled_graph = CompiledFxGraph(compiled_fn, graph, output_strides)
+
     return compiled_graph
 
 
@@ -1104,7 +1110,7 @@ def compile_fx(
         if config.keep_output_stride:
             *_, model_outputs_node = model.graph.nodes
             assert model_outputs_node.op == "output"
-            model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
@@ -1327,7 +1333,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     @functools.wraps(compiled_fn)
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.tree_flatten(args)[0])
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

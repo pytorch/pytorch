@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
             torch.jagged,
             values.device,
             False,
-            kwargs.get("requires_grad", False),
+            False,
             "sizes",
             False,
             True,  # dispatch_layout
