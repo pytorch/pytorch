@@ -42,7 +42,9 @@ aten = torch.ops.aten
         aten.copy_.default,
         aten.detach.default,
         aten.equal.default,
+        aten.fill_.Scalar,
         aten.is_same_size.default,
+        aten.zero_.default,
     ]
 )
 def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
@@ -60,12 +62,24 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 @register_op_strategy(
     [
         aten.empty_like.default,
-        aten.fill_.Scalar,
-        aten.full_like.default,
         aten.ones_like.default,
-        aten.zero_.default,
+        aten.rand_like.default,
+        aten.randn_like.default,
         aten.zeros_like.default,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(1, ["dtype"]),
+)
+@register_op_strategy(
+    [aten.full_like.default],
+    schema_info=RuntimeSchemaInfo(2, ["dtype"]),
+)
+@register_op_strategy(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randint_like.low_dtype_out,
+    ],
+    schema_info=RuntimeSchemaInfo(3, ["dtype"]),
 )
 def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # create_like_strategy deals with ops that creating tensors with same

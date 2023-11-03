@@ -90,42 +90,39 @@ struct InputMetadata {
     return at::zeros_symint(shape_as_dim_vector(), options_);
   }
 
-  bool is_nestedness_same(const at::Tensor& grad) const {
+  void check_nestedness_same(const at::Tensor& grad) const {
     bool grad_is_subclass = grad.unsafeGetTensorImpl()->is_python_dispatch();
     bool grad_is_nested = grad.is_nested();
     bool grad_is_cpp_nested = grad_is_nested && !grad_is_subclass;
-    return grad_is_cpp_nested == is_cpp_nested_tensor() &&
-        grad_is_nested == is_nested_;
+    TORCH_CHECK(
+        grad_is_cpp_nested == is_cpp_nested_tensor() &&
+            grad_is_nested == is_nested_,
+        "grad and the input wrt the gradient that is being computed for need to be "
+        "either both nested or both non-nested tensors. Also note that nested "
+        "tensors with different layouts do not compose currently.");
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
-    if (!is_nestedness_same(grad)) {
-      return false;
-    }
+    check_nestedness_same(grad);
     if (is_cpp_nested_tensor()) {
       return grad._nested_tensor_size().is_same_size(shape_as_tensor());
     }
     return grad.sym_sizes().equals(shape_as_dim_vector());
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
-    // Currently C++ NestedTensors are not expandable (but Python NestedTensors
-    // may be). If this support is added then updates to reduce_grad will be
-    // needed
-    if (!is_nestedness_same(grad) &&
-        !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
-      return false;
-    }
-    return is_nested_
+    // Currently NestedTensors are not expandable. If this support is added then
+    // updates to reduce_grad will be needed
+    check_nestedness_same(grad);
+    return grad.is_nested()
         ? false
         : at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
   }
 
   at::Tensor reduce_grad(at::Tensor& grad) const {
     // Currently reduce_grad is only called if is_expandable_to_shape returns
-    // true. For C++ nested tensors this always returns False, so this check
-    // shouldn't fail.
-    TORCH_INTERNAL_ASSERT(!(
-        grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()));
+    // true For nested tensors this always returns False, so this check
+    // shouldn't fail
+    TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_)
     return at::sum_to(std::move(grad), shape_as_dim_vector());
   }
 

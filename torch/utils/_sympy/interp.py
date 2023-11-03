@@ -14,7 +14,16 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Pow, TrueDiv, Where
+from .functions import (
+    CleanDiv,
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+    ModularIndexing,
+    Pow,
+    TrueDiv,
+    Where,
+)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -57,6 +66,7 @@ def handlers():
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
+        IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
     }
     return HANDLERS
 

@@ -1,6 +1,7 @@
 import functools
 
 import torch
+
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
 from torch.fx.operator_schemas import normalize_function
@@ -10,39 +11,15 @@ __all__: List[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
-# Simplifying assumption: we assume that the batch dim is always the left-most
-# dim, and the ragged dim is always the second dim.
-def _wrap_jagged_dim(ndim, dim, op_name, allow_ragged=False):
+def _wrap_jagged_dim(ndim, dim, op_name):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    # Technically we can also map 0 -> 0, but we can add it later if we need it
-    if wrapped < 2 and not (allow_ragged and wrapped == 1):
+    if wrapped < 2:
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
     return wrapped - 1
-
-
-def _wrap_jagged_dims(ndim, dims, op_name):
-    # ex: (2, 3, 4) -> (1, 2, 3)
-    # ex: (0, 1, 4) -> (0, 3)
-    zero_in_dims = 0 in dims
-    one_in_dims = 1 in dims
-    if zero_in_dims ^ one_in_dims:
-        apply, not_apply = ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
-        raise RuntimeError(
-            f"{op_name}(): applying over the {apply} dimension, but not the {not_apply}"
-            " dimension is not supported for NestedTensor"
-        )
-    return (
-        tuple(
-            _wrap_jagged_dim(ndim, d, op_name, allow_ragged=True)
-            for d in dims
-            if d != 0
-        ),
-        zero_in_dims,
-    )
 
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
@@ -100,37 +77,6 @@ def check_ragged_dim_same(
 def raggedness_matches(nt, size):
     end = nt._ragged_idx + 1
     return list(nt._size[:end]) == list(size[:end])
-
-
-def squeeze_leading_ones_get_extra(t, nt):
-    # Note: [ Squeezing leading ones ]
-    #
-    # Squeeze leading ones from t, and return the number of extra ones
-    # that need to be unsqueezed after relying on dense broadcasting
-    # Today, we would error if extra != 0 because NT does not yet support
-    # unsqueezing on the 0th dimension.
-    #
-    # We want:
-    #   (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
-    #   (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)  (not yet supported)
-    #
-    # 1) Squeeze extra ones and grab values from NT
-    #   (1, 1, ?, ?) -> (?, ?)   and   (sum(*), ?, ?) -> (B, j0, ?, ?)
-    # 2) Do dense broadcasting:
-    #   (sum(*), ?, ?) + (?, ?) -> (sum(*), ?, ?)
-    # 3) Construct nested tensor
-    #   (sum(*), ?, ?) -> (B, j0, ?, ?)
-    #
-    # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
-    # at step (4).
-    t_shape = t.shape
-    extra = 0
-    for s in t_shape:
-        if s == 1:
-            if t.dim() > nt.dim():
-                extra += 1
-            t = t.squeeze(0)
-    return t, extra
 
 
 def register_func(tables, aten_ops, schema_str):
@@ -217,17 +163,15 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # === Handle broadcasting across the batch / ragged dims ===
 
     # Easy case: take advantage of pre-existing broadcasting logic
-    # ex: (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
-    # ex: (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
-    # ex: (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
-    nt, t = (a, b) if a_is_nt else (b, a)
-    # See Note: [ Squeezing leading ones ]
-    t_squeezed, extra = squeeze_leading_ones_get_extra(t, nt)
-    if extra != 0:
-        raise NotImplementedError("NYI: broadcasting NT with T with larger dim")
-    if nt.dim() >= t_squeezed.dim() + 2:
-        lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
-        return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
+    # when NT dim > non-NT dim
+    # ex: (B, j0, D_0, D_1) + (D_0, D_1) -> (B, j0, D_0, D_1)
+    # ex: (B, j0, D_0, D_1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
+    # ex: (B, j0, 1, 1) + (D_0, D_1) -> (B, j0, D_0, D_1)
+    # ex: (B, j0, 1, 1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
+    if (a_is_nt and a.dim() > b.dim()) or (not a_is_nt and b.dim() > a.dim()):
+        arg1 = a._values if a_is_nt else a
+        arg2 = b._values if not a_is_nt else b
+        return NestedTensor(func(arg1, arg2, *args[2:], **kwargs), **extracted_kwargs)
 
     # Harder case: do manual broadcasting over unbound components
     # when NT dim == non-NT dim
@@ -424,6 +368,38 @@ register_jagged_func(
 )(jagged_unary_pointwise)
 
 
+@register_jagged_func(
+    torch.ops.aten.native_dropout.default, "self: jt, float: any, train: any?"
+)
+def native_dropout_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    out1, out2 = func(inp._values, **new_kwargs)
+    return (
+        NestedTensor(out1, **extract_kwargs(inp)),
+        NestedTensor(out2, **extract_kwargs(inp)),
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.native_dropout_backward.default,
+    "grad_output: jt, mask: jt, scale: any",
+)
+def native_dropout_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    grad_output = new_kwargs.pop("grad_output")
+    mask = new_kwargs.pop("mask")
+    return NestedTensor(
+        func(grad_output._values, mask._values, **new_kwargs),
+        **extract_kwargs(grad_output),
+    )
+
+
 @register_jagged_func(torch.ops.aten.prod.dim_int, "self: jt, dim: any, keepdim: any?")
 def prod_dim_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -439,6 +415,31 @@ def prod_dim_int(func, *args, **kwargs):
     new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
+
+
+@register_jagged_func(
+    torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any"
+)
+def split_with_sizes_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    values = inp._values
+
+    # hack to split on the last dim
+    dim = new_kwargs["dim"]
+    if dim != -1:
+        raise RuntimeError(
+            "split_with_sizes(): only supported for NestedTensor on dim = -1 for now"
+        )
+
+    split_sizes = new_kwargs["split_sizes"]
+    return [
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in torch.split(values, split_sizes, -1)
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
@@ -597,31 +598,6 @@ def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
 
-@register_jagged_func(
-    torch.ops.aten.sum.dim_IntList, "self: jt, dim: any?, keepdim: any?, dtype: any?"
-)
-def sum_dim_IntList(func, *args, **kwargs):
-    # sum_dim_IntList can produce a NT or a T depending on whether the ragged dims
-    # are reduced away.
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    inp = new_kwargs.pop("input")
-    assert inp._ragged_idx == 1
-    new_kwargs["dim"], ragged_reduced_away = _wrap_jagged_dims(
-        inp.dim(), new_kwargs["dim"], "sum"
-    )
-
-    if not ragged_reduced_away:
-        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
-    else:
-        # Don't wrap because we reduced away the raggedness
-        out = func(inp._values, **new_kwargs)
-        if new_kwargs["keepdim"]:
-            out = out.unsqueeze(0)
-        return out
-
-
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
 def transpose_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -759,4 +735,22 @@ def stack_default(func, *args, **kwargs):
 
     return NestedTensor(
         func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.embedding.default,
+    "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?",
+)
+def embedding_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    # guaranteed this is non-empty if we got here
+    indices = new_kwargs.pop("indices")
+    weight = new_kwargs.pop("weight")
+
+    return NestedTensor(
+        func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
