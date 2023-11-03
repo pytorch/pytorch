@@ -11,6 +11,7 @@ import torch
 
 _INTEGRAL_TYPES = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
 _FLOATING_TYPES = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
+_FLOATING_8BIT_TYPES = [torch.float8_e4m3fn, torch.float8_e5m2]
 _COMPLEX_TYPES = [torch.complex32, torch.complex64, torch.complex128]
 _BOOLEAN_OR_INTEGRAL_TYPES = [torch.bool, *_INTEGRAL_TYPES]
 _FLOATING_OR_COMPLEX_TYPES = [*_FLOATING_TYPES, *_COMPLEX_TYPES]
@@ -217,6 +218,18 @@ def make_tensor(
         _uniform_random_(
             torch.view_as_real(result) if dtype in _COMPLEX_TYPES else result, low, high
         )
+    elif dtype in _FLOATING_8BIT_TYPES:
+        low, high = modify_low_high(
+            low,
+            high,
+            lowest_inclusive=torch.finfo(dtype).min,
+            highest_exclusive=torch.finfo(dtype).max,
+            default_low=-9,
+            default_high=9,
+        )
+        result = torch.empty(shape, device=device, dtype=torch.float32)
+        _uniform_random_(result, low, high)
+        result = result.to(dtype)
     else:
         raise TypeError(
             f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
