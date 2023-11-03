@@ -170,7 +170,7 @@ def _register_pytree_node(
         )
 
     if serialized_type_name is None:
-        serialized_type_name = NO_SERIALIZED_TYPE_NAME_FOUND
+        serialized_type_name = f"{typ.__module__}.{typ.__name__}"
 
     serialize_node_def = _SerializeNodeDef(
         typ, serialized_type_name, to_dumpable_context, from_dumpable_context
