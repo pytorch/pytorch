@@ -15,6 +15,7 @@
 "ciflow/inductor":
 - torch/_decomp/**
 - torch/_dynamo/**
+- torch/_export/**
 - torch/_inductor/**
 - benchmarks/dynamo/**
 - torch/_subclasses/fake_tensor.py

@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, params_t)
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, ParamsT)
 from typing import List, Optional, Tuple, Union
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
@@ -12,7 +12,7 @@ __all__ = ["AdamW", "adamw"]
 class AdamW(Optimizer):
     def __init__(
         self,
-        params: params_t,
+        params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
         betas: Tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
@@ -519,18 +519,23 @@ def _multi_tensor_adamw(
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
-        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
-        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
-        device_exp_avg_sqs = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs
-        ]
-        device_max_exp_avg_sqs = [
-            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_max_exp_avg_sqs
-        ]
-        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        for i in range(len(device_params)):
+            if torch.is_complex(device_params[i]):
+                device_params[i] = torch.view_as_real(device_params[i])
+                device_grads[i] = torch.view_as_real(device_grads[i])
+                device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
+                device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
+                if amsgrad:
+                    device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
 
-        # update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         # Perform stepweight decay
         if weight_decay != 0:

@@ -85,18 +85,28 @@ class _MeshEnv:
                 return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
         return None
 
+    @staticmethod
+    def num_devices_per_host(device_type: str) -> int:
+        return _get_device_handle(device_type).device_count()
 
-mesh_resources: _MeshEnv = _MeshEnv()
+    @staticmethod
+    def num_hosts(device_type: str) -> int:
+        # ProcessGroup can't tell us this info so we have to infer it, assume
+        # homogeneous hardware for now
+        return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
+
+
+_mesh_resources: _MeshEnv = _MeshEnv()
 
 
 def _get_device_handle(device_type: str = "cuda"):
     """
     Get the module corresponding to the device_type which is cuda or cuda-like device.
     For example, when the device_type is cuda, the module `torch.cuda` is returned.
-    Return None when device_type is cpu or there is no corresponding module,
-    otherwise return the corresponding module.
+    Return None when there is no corresponding module for device_type, otherwise
+    return the corresponding module.
     """
-    return getattr(torch, device_type, None) if device_type != "cpu" else None
+    return getattr(torch, device_type, None)
 
 
 class DeviceMesh:
@@ -160,12 +170,20 @@ class DeviceMesh:
             else torch.tensor(mesh, dtype=torch.int)
         )
         self.mesh_dim_names = mesh_dim_names
-        # always try to create default (world) pg, even if it is not initialized
-        # already. The world pg is used for device mesh identity (rank) on each
-        # process (we need to know if the current global rank is in the mesh or not)
-        self._get_or_create_default_group()
-        if _init_process_groups:
-            self._init_process_groups(_validate_mesh)
+
+        # private field to pre-generate DeviceMesh's hash
+        self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+        self._hash = hash((self._flatten_mesh_list, self.mesh.shape))
+
+        # Skip process group initialization if xla device.
+        # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
+        if device_type != "xla":
+            # always try to create default (world) pg, even if it is not initialized
+            # already. The world pg is used for device mesh identity (rank) on each
+            # process (we need to know if the current global rank is in the mesh or not).
+            self._get_or_create_default_group()
+            if _init_process_groups:
+                self._init_process_groups(_validate_mesh)
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -184,7 +202,10 @@ class DeviceMesh:
             # automatically set the current cuda/cuda-like device base on num of gpu devices available in each host
             # NOTE: This device selection would only work for homogeneous hardware.
             num_devices_per_host = device_handle.device_count()
-            if world_size % num_devices_per_host != 0:
+            if (
+                world_size > num_devices_per_host
+                and world_size % num_devices_per_host != 0
+            ):
                 raise RuntimeError(
                     f"DeviceMesh only support homogeneous hardware, but found "
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
@@ -208,7 +229,7 @@ class DeviceMesh:
             )
 
         # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type)
+        self_mesh = self.mesh.to(self.device_type).contiguous()
         mesh_tensor = funcol.all_gather_tensor(
             self_mesh, gather_dim=0, group=_get_default_group()
         )
@@ -266,26 +287,29 @@ class DeviceMesh:
 
     def __enter__(self) -> "DeviceMesh":
         # set this mesh as the current mesh in mesh env
-        mesh_resources.mesh_stack.append(self)
+        _mesh_resources.mesh_stack.append(self)
         return self
 
     # pyre-fixme[2]: Parameter must be annotated.
     def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
         # pop this mesh from mesh env
-        mesh_resources.mesh_stack.pop()
+        _mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return self._hash
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
-        if id(self) == id(other):
+        if id(self.mesh) == id(other.mesh):
             return True
-        return self.mesh.equal(other.mesh)
+        return (
+            self.mesh.shape == other.mesh.shape
+            and self._flatten_mesh_list == other._flatten_mesh_list
+        )
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """
@@ -331,7 +355,7 @@ class DeviceMesh:
                 f"Available mesh dimensions are: {self.mesh_dim_names}",
             )
         mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
-        submesh = mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
+        submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
         return submesh
 
@@ -356,6 +380,10 @@ class DeviceMesh:
     @property
     def ndim(self) -> int:
         return self.mesh.ndim
+
+    @property
+    def shape(self) -> Tuple[int, ...]:
+        return tuple(self.mesh.shape)
 
     def get_rank(self) -> int:
         return get_rank()
@@ -394,7 +422,7 @@ def init_device_mesh(
         A :class:`DeviceMesh` object
 
     .. note: If no process group is found, init_device_mesh will initialize distributed process group/groups
-    behind the scene, which are requried for distributed communications.
+    behind the scene, which are required for distributed communications.
 
     Example:
         >>> # xdoctest: +SKIP

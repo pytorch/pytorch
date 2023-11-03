@@ -1,9 +1,13 @@
 import datetime
 import difflib
 import functools
+import inspect
 import json
 import os
+import re
 import tempfile
+import threading
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -12,6 +16,7 @@ import torch._dynamo
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._subclasses.schema_check_mode import SchemaCheckMode
+from torch._utils_internal import get_file_path_2
 from torch.overrides import TorchFunctionMode
 from torch.testing._internal.optests import (
     aot_autograd_check,
@@ -20,14 +25,38 @@ from torch.testing._internal.optests import (
 )
 
 
-def safe_schema_check(op, args, kwargs):
+def dontGenerateOpCheckTests(reason: str):
+    def inner(fun):
+        fun._torch_dont_generate_opcheck_tests = True
+        return fun
+
+    return inner
+
+
+def is_abstract(tensor: torch.Tensor) -> bool:
+    if tensor.is_meta:
+        return True
+    if torch._subclasses.fake_tensor.is_fake(tensor):
+        return True
+    return False
+
+
+def safe_schema_check(
+    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Any:
     args, kwargs = deepcopy_tensors((args, kwargs))
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
 
 
-def safe_autograd_registration_check(op, args, kwargs):
+def safe_autograd_registration_check(
+    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> None:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return
     # Don't perform autograd_registration_check if none of the inputs require grad.
     if not pytree.tree_any_only(
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
@@ -37,12 +66,24 @@ def safe_autograd_registration_check(op, args, kwargs):
     return autograd_registration_check(op, args, kwargs)
 
 
-def safe_fake_check(op, args, kwargs):
+def safe_fake_check(
+    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> None:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
     args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs)
 
 
-def safe_aot_autograd_check(op, args, kwargs, dynamic):
+def safe_aot_autograd_check(
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    dynamic: bool,
+) -> Any:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
+
     def func(*args, **kwargs):
         args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
         return op(*args, **kwargs)
@@ -52,7 +93,7 @@ def safe_aot_autograd_check(op, args, kwargs, dynamic):
     return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
 
 
-def deepcopy_tensors(inputs):
+def deepcopy_tensors(inputs: Any) -> Any:
     return pytree.tree_map_only(torch.Tensor, clone_input, inputs)
 
 
@@ -79,14 +120,22 @@ ALL_TEST_UTILS = {
 
 GDOC = "https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
 
+DEFAULT_TEST_UTILS = [
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_static",
+    "test_aot_dispatch_dynamic",
+]
+
 
 def generate_opcheck_tests(
-    testcase,
-    namespaces,
-    failures_dict_path,
-    additional_decorators,
-    test_utils,
-):
+    testcase: Any,
+    namespaces: List[str],
+    failures_dict_path: Optional[str] = None,
+    additional_decorators: Dict[str, Callable] = None,
+    test_utils: List[str] = DEFAULT_TEST_UTILS,
+) -> None:
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
 
@@ -119,11 +168,21 @@ def generate_opcheck_tests(
         failures_dict_path: See ``validate_failures_dict_structure`` for more details
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
+    if additional_decorators is None:
+        additional_decorators = {}
     test_methods = [
         m
         for m in dir(testcase)
         if m.startswith("test_") and callable(getattr(testcase, m))
     ]
+    if failures_dict_path is None:
+        # The default failures_dict_path is failures_dict.json in
+        # the same directory as the test file.
+        prev_frame = inspect.currentframe().f_back
+        filename = inspect.getframeinfo(prev_frame)[0]
+        failures_dict_path = get_file_path_2(
+            os.path.dirname(filename), "failures_dict.json"
+        )
     failures_dict = FailuresDict.load(
         failures_dict_path, create_file=should_update_failures_dict()
     )
@@ -132,6 +191,8 @@ def generate_opcheck_tests(
 
     def construct_method(attr, prefix, tester):
         method = getattr(testcase, attr)
+        if getattr(method, "_torch_dont_generate_opcheck_tests", False):
+            return
         new_method_name = prefix + "__" + attr
 
         @functools.wraps(method)
@@ -141,7 +202,7 @@ def generate_opcheck_tests(
                 prefix,
                 tester,
                 failures_dict,
-                new_method_name,
+                f"{testcase.__name__}.{new_method_name}",
                 failures_dict_path,
             ):
                 result = method(*args, **kwargs)
@@ -193,10 +254,10 @@ def generate_opcheck_tests(
             construct_method(attr, prefix, tester)
 
 
-TEST_OPTIONS = ("xfail", "skip", "success")
+TEST_OPTIONS = ("xfail", "skip", "xsuccess")
 
 
-def validate_failures_dict_formatting(failures_dict_path):
+def validate_failures_dict_formatting(failures_dict_path: str) -> None:
     with open(failures_dict_path) as fp:
         actual = fp.read()
     failures_dict = FailuresDict.load(failures_dict_path)
@@ -209,7 +270,7 @@ def validate_failures_dict_formatting(failures_dict_path):
         return
     expected = expected.splitlines(1)
     actual = actual.splitlines(1)
-    diff = difflib.unified_diff(expected, actual)
+    diff = difflib.unified_diff(actual, expected)
     diff = "".join(diff)
     raise RuntimeError(
         f"\n{diff}\n\nExpected the failures dict to be formatted "
@@ -219,7 +280,9 @@ def validate_failures_dict_formatting(failures_dict_path):
     )
 
 
-def validate_failures_dict_structure(failure_dict, test_utils, testcase):
+def validate_failures_dict_structure(
+    failure_dict: "FailuresDict", test_utils: List[str], testcase: Any
+) -> None:
     """Validates the failures dict.
 
     The failure dict looks something like the following.
@@ -262,27 +325,40 @@ def validate_failures_dict_structure(failure_dict, test_utils, testcase):
                 raise RuntimeError(
                     f"In failures_dict, got status={test_option} but it needs to be in {TEST_OPTIONS}"
                 )
-            if not any(test_name.startswith(test) for test in test_utils):
+            test_class, actual_test_name = test_name.split(".")
+            if not any(actual_test_name.startswith(test) for test in test_utils):
                 raise RuntimeError(
                     f"In failures_dict, test name '{test_name}' should begin with one of {test_utils}"
                 )
             for test in test_utils:
-                if not test_name.startswith(test):
+                if not actual_test_name.startswith(test):
                     continue
-                base_test_name = test_name[len(test) + 2 :]
+                base_test_name = actual_test_name[len(test) + 2 :]
+                # remove potential pytest parametrization suffix
+                base_test_name = re.sub(r"\[.*\]", "", base_test_name)
+                if testcase.__name__ != test_class:
+                    continue
                 if hasattr(testcase, base_test_name):
                     continue
                 raise RuntimeError(
                     f"In failures dict, got test name '{test_name}'. We parsed this as "
                     f"running test '{test}' on '{base_test_name}', but "
-                    f"{base_test_name} does not exist on the TestCase. "
+                    f"{base_test_name} does not exist on the TestCase '{testcase.__name__}]. "
                     f"Maybe you need to change the test name?"
                 )
 
 
-def should_update_failures_dict():
+def should_update_failures_dict() -> bool:
     key = "PYTORCH_OPCHECK_ACCEPT"
     return key in os.environ and os.environ[key] == "1"
+
+
+_is_inside_opcheck_mode = threading.local()
+_is_inside_opcheck_mode.value = False
+
+
+def is_inside_opcheck_mode():
+    return _is_inside_opcheck_mode.value
 
 
 class OpCheckMode(TorchFunctionMode):
@@ -293,12 +369,12 @@ class OpCheckMode(TorchFunctionMode):
 
     def __init__(
         self,
-        namespaces,
-        test_util_name,
-        test_util,
-        failures_dict,
-        test_name,
-        failures_dict_path,
+        namespaces: List[str],
+        test_util_name: str,
+        test_util: Callable,
+        failures_dict: "FailuresDict",
+        test_name: str,
+        failures_dict_path: str,
     ):
         # We will intercept calls to ops with these namespaces
         self.namespaces = namespaces
@@ -315,17 +391,17 @@ class OpCheckMode(TorchFunctionMode):
         self.failures_dict_path = failures_dict_path
 
         # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
-        # Maps qualname -> List[exception]
+        # Maps qualname -> List[(Exception, func, maybe args, maybe kwargs)]
         self.seen_ops_to_errors = {}
 
-    def maybe_raise_errors_on_exit(self):
+    def maybe_raise_errors_on_exit(self) -> None:
         # Check expected failures first
         for qualname in self.seen_ops_to_errors.keys():
             option = self.failures_dict.get_status(qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if should_update_failures_dict():
                     self.failures_dict.set_status(
-                        qualname, self.test_name, "success", comment=""
+                        qualname, self.test_name, "xsuccess", comment=""
                     )
                 else:
                     if option == "xfail":
@@ -344,7 +420,7 @@ class OpCheckMode(TorchFunctionMode):
         failed_ops = []
         for qualname in self.seen_ops_to_errors.keys():
             option = self.failures_dict.get_status(qualname, self.test_name)
-            if option != "success":
+            if option != "xsuccess":
                 continue
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 continue
@@ -360,25 +436,30 @@ class OpCheckMode(TorchFunctionMode):
         # Raise from the first error but also report about all of them to make
         # recording xfails easier.
         ex, op, args, kwargs = self.seen_ops_to_errors[failed_ops[0]][0]
-        if should_print_repro():
-            repro_command = generate_repro(self.test_util_name, op, args, kwargs)
-            repro_command = (
-                f"\n\nFor a minimal repro, run the following: \n\n{repro_command}"
-            )
-        else:
-            repro_command = ""
+        repro_command = generate_repro(
+            self.test_util_name, op, args, kwargs, save_data=should_print_better_repro()
+        )
         raise OpCheckError(
             f"Test generated by `generate_opcheck_tests`, {self.test_name}, "
             f"failed on operators {failed_ops}. This usually means that the "
             f"operators are not implemented correctly and may lead to silently "
-            f"incorrect behavior. Set PYTORCH_OPCHECK_PRINT_REPRO=1 for a standalone repro, "
+            f"incorrect behavior. Set PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1 for a standalone repro, "
             f"or please see "
             f"{GDOC} "
             f"for more recommendations. "
-            f"{repro_command}"
+            f"To reproduce this problem locally, try to run the following:\n{repro_command}"
         ) from ex
 
+    def __enter__(self, *args, **kwargs):
+        self.prev_is_opcheck_mode = _is_inside_opcheck_mode.value
+        self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
+        _is_inside_opcheck_mode.value = True
+        os.environ["TORCHDYNAMO_DISABLE"] = "1"
+        return super().__enter__(*args, **kwargs)
+
     def __exit__(self, *args, **kwargs):
+        _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
+        os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
@@ -424,23 +505,23 @@ class OpCheckMode(TorchFunctionMode):
         result = func(*args, **kwargs)
 
         option = self.failures_dict.get_status(qualname, self.test_name)
-        if option == "success" or option == "xfail":
+        if option == "xsuccess" or option == "xfail":
             # Surpress all errors during execution. Raise them during __exit__.
             try:
                 if qualname not in self.seen_ops_to_errors:
                     self.seen_ops_to_errors[qualname] = []
                 self.run_test_util(func, args_c, kwargs_c)
             except Exception as ex:
-                if should_print_repro():
+                if should_print_better_repro():
                     self.seen_ops_to_errors[qualname].append((ex, func, args, kwargs))
                 else:
-                    self.seen_ops_to_errors[qualname].append((ex, None, None, None))
+                    self.seen_ops_to_errors[qualname].append((ex, func, None, None))
         elif option == "skip":
             pass
         return result
 
 
-def should_print_repro():
+def should_print_better_repro() -> None:
     """If set, the tests generated by `generate_opcheck_tests` will print a
     repro command on failure.
 
@@ -451,14 +532,21 @@ def should_print_repro():
     Although this is a temp folder, it will usually not automatically get cleaned
     up, so you'll need to manually delete it.
     """
-    key = "PYTORCH_OPCHECK_PRINT_REPRO"
+    key = "PYTORCH_OPCHECK_PRINT_BETTER_REPRO"
     if key not in os.environ:
         return False
     value = os.environ[key]
     return value == "1" or value == 1
 
 
-def opcheck(op, args, kwargs=None, *, test_utils="ALL", raise_exception=True):
+def opcheck(
+    op: torch._ops.OperatorBase,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    test_utils: Union[str, List[str]] = "ALL",
+    raise_exception: bool = True,
+) -> Dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
     registered correctly.
 
@@ -533,31 +621,59 @@ class OpCheckError(Exception):
     pass
 
 
-def generate_repro(test, op, args, kwargs):
-    now = datetime.datetime.now()
-    unix_timestamp = datetime.datetime.timestamp(now) * 1000
-    path = os.path.join(tempfile.gettempdir(), "pytorch_opcheck_safe_to_delete")
-    if not os.path.exists(path):
-        os.makedirs(path)
-    filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
+def generate_repro(
+    test: str,
+    op: torch._ops.OpOverload,
+    args: Tuple[Any, ...],
+    kwargs: Dict[str, Any],
+    *,
+    save_data: bool,
+    dry_run: bool = False,
+) -> str:
+    if save_data:
+        now = datetime.datetime.now()
+        path = os.path.join(tempfile.gettempdir(), "pytorch_opcheck_safe_to_delete")
+        unix_timestamp = datetime.datetime.timestamp(now) * 100000
+        filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
+        if not dry_run:
+            if not os.path.exists(path):
+                os.makedirs(path)
+            torch.save((args, kwargs), filepath)
+        args_kwargs = f'args, kwargs = torch.load("{filepath}")'
+    else:
+        args_kwargs = (
+            "# If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1\n"
+            "# we will fill them in same (args, kwargs) as in your test\n"
+            "args = ()  # args to the operator\n"
+            "kwargs = {}  # kwargs to the operator"
+        )
 
     ns, name = op._schema.name.split("::")
     overload = op._overloadname
 
     repro_command = (
+        f"# =========================================================\n"
+        f"# BEGIN REPRO SCRIPT\n"
+        f"# =========================================================\n"
         f"import torch\n"
         f"from torch.testing._internal.optests import opcheck\n"
+        f"\n"
         f"# Make sure you have loaded the library that contains the op\n"
         f"# via an import or torch.ops.load_library(...)\n"
         f"op = torch.ops.{ns}.{name}.{overload}\n"
-        f'args, kwargs = torch.load("{filepath}")\n'
+        f"\n"
+        f"{args_kwargs}\n"
         f'opcheck(op, args, kwargs, test_utils="{test}")\n'
+        f"# =========================================================\n"
+        f"# END REPRO SCRIPT\n"
+        f"# =========================================================\n"
     )
-    torch.save((args, kwargs), filepath)
     return repro_command
 
 
-def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):
+def resolve_unique_overload_or_throw(
+    op: torch._ops.OpOverloadPacket,
+) -> torch._ops.OpOverload:
     all_schemas = torch._C._jit_get_schemas_for_operator(op._qualified_op_name)
     if len(all_schemas) != 1:
         raise RuntimeError(
@@ -575,32 +691,47 @@ def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):
 DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
 
 
+FailuresDictData = Dict[str, Dict[str, Dict[str, str]]]
+
+
+VERSION = 1
+DESCRIPTION = (
+    f"This is a dict containing failures for tests autogenerated by "
+    f"generate_opcheck_tests. "
+    f"For more details, please see {GDOC}"
+)
+
+
 class FailuresDict:
-    def __init__(self, path, data):
+    def __init__(self, path: str, data: FailuresDictData):
         self.path = path
         self.data = data
 
     @staticmethod
-    def load(path, *, create_file=False):
+    def load(path, *, create_file=False) -> "FailuresDict":
         if create_file and not os.path.exists(path):
             result = FailuresDict(path, {})
             FailuresDict.save()
             return result
         with open(path) as fp:
-            dct = json.load(fp)
-        assert "data" in dct
-        assert "_version" in dct and dct["_version"] == 1
+            contents = fp.read()
+            if contents.strip() == "":
+                dct = {
+                    "_description": DESCRIPTION,
+                    "data": {},
+                    "_version": VERSION,
+                }
+            else:
+                dct = json.loads(contents)
+                assert "data" in dct
+                assert "_version" in dct and dct["_version"] == VERSION
         return FailuresDict(path, dct["data"])
 
-    def _save(self, to_str=False):
+    def _save(self, to_str=False) -> Optional[str]:
         to_dump = {
-            "_description": (
-                f"This is a dict containing failures for tests autogenerated by "
-                f"generate_opcheck_tests. "
-                f"For more details, please see {GDOC}"
-            ),
+            "_description": DESCRIPTION,
             "data": self.data,
-            "_version": 1,
+            "_version": VERSION,
         }
         # json.dumps doesn't end with a newline. Let's add one because files
         # should end in newlines.
@@ -611,26 +742,33 @@ class FailuresDict:
             fp.write(serialized)
         return None
 
-    def save(self):
+    def save(self) -> None:
         return self._save()
 
-    def get_status(self, qualname, test_name):
+    def get_status(self, qualname: str, test_name: str) -> str:
         if qualname not in self.data:
-            return "success"
+            return "xsuccess"
         dct = self.data[qualname]
         if test_name not in dct:
-            return "success"
+            return "xsuccess"
         return dct[test_name]["status"]
 
-    def set_status(self, qualname, test_name, status, *, comment=None):
+    def set_status(
+        self,
+        qualname: str,
+        test_name: str,
+        status: str,
+        *,
+        comment: Optional[str] = None,
+    ):
         if qualname not in self.data:
             self.data[qualname] = {}
         dct = self.data[qualname]
         if test_name not in dct:
             dct[test_name] = {"status": None, "comment": ""}
 
-        if status == "success":
-            # The default status is "success".
+        if status == "xsuccess":
+            # The default status is "xsuccess".
             del dct[test_name]
         else:
             dct[test_name]["status"] = status

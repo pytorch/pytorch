@@ -4,7 +4,7 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch.library import Library, impl, fallthrough_kernel
-from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch import SymInt
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
@@ -15,9 +15,9 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
-import torch.utils._pytree as pytree
 from torch._C import DispatchKeySet, DispatchKey
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
@@ -459,8 +459,8 @@ class TestPythonRegistration(TestCase):
         if mutable_result is None:
             flat_mutable_result = []
         else:
-            flat_mutable_result, _ = pytree.tree_flatten(mutable_result)
-        flat_functional_result, _ = pytree.tree_flatten(functional_result)
+            flat_mutable_result = pytree.tree_leaves(mutable_result)
+        flat_functional_result = pytree.tree_leaves(functional_result)
         assert len(flat_functional_result) > len(flat_mutable_result)
         self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
 
@@ -695,7 +695,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
-            class A(torch._C._TensorBase):
+            class A(torch._C.TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
                     return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -715,7 +715,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
     def test_invalid_ret(self) -> None:
         # test invalid return gets reasonable error message
-        class A(torch._C._TensorBase):
+        class A(torch._C.TensorBase):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -2196,16 +2196,16 @@ class TestWrapperSubclassAliasing(TestCase):
 
         result_test = op(*args_subclass, **kwargs_subclass)
 
-        args_ref_flat, _ = pytree.tree_flatten((args, kwargs))
+        args_ref_flat = pytree.arg_tree_leaves(*args, **kwargs)
         args_ref_flat_tensors = [x for x in args_ref_flat if isinstance(x, torch.Tensor)]
 
-        args_test_flat, _ = pytree.tree_flatten((args_subclass, kwargs_subclass))
+        args_test_flat = pytree.tree_leaves((args_subclass, kwargs_subclass))
         args_test_flat_tensors = [x for x in args_test_flat if isinstance(x, torch.Tensor)]
 
-        result_ref_flat, _ = pytree.tree_flatten(result_ref)
+        result_ref_flat = pytree.tree_leaves(result_ref)
         result_ref_flat_tensors = [x for x in result_ref_flat if isinstance(x, torch.Tensor)]
 
-        result_test_flat, _ = pytree.tree_flatten(result_test)
+        result_test_flat = pytree.tree_leaves(result_test)
         result_test_flat_tensors = [x for x in result_test_flat if isinstance(x, torch.Tensor)]
 
         for o_ref, o_test in zip(result_ref_flat_tensors, result_test_flat_tensors):
@@ -2258,6 +2258,12 @@ class TestWrapperSubclassAliasing(TestCase):
         # (I'm using inference_mode to make sure conv2d doesn't decompose and goes to torch_dispatch)
         with torch.inference_mode():
             self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_out_op(self, device):
+        # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
+        args = (torch.ones(4), torch.ones(4))
+        kwargs = {'out': torch.empty(4)}
+        self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 

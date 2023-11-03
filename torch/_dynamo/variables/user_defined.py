@@ -68,6 +68,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 obj.__func__, self, source=source, **options
             )
+        elif source and inspect.ismemberdescriptor(obj):
+            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
+                options
+            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -75,7 +79,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj).add_options(options)
             elif ConstantVariable.is_literal(obj):
-                return ConstantVariable(obj, **options)
+                return ConstantVariable.create(obj, **options)
 
         return super().var_getattr(tx, name)
 
@@ -171,7 +175,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 is torch.nn.Module.__init__
             ):
                 tx.output.side_effects.store_attr(
-                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                    var,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
                 return var
             else:
@@ -197,6 +203,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
+
+    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
 
     def __init__(self, value, value_type=None, **kwargs):
         super().__init__(**kwargs)
@@ -251,7 +259,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable(None, **options)
+                return ConstantVariable.create(None, **options)
 
             if method is collections.OrderedDict.keys and self.source:
                 # subclass of OrderedDict
@@ -259,7 +267,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
-                    [ConstantVariable(k, **options) for k in keys], **options
+                    [ConstantVariable.create(k, **options) for k in keys], **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
@@ -270,7 +278,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
-                return ConstantVariable(
+                return ConstantVariable.create(
                     args[0].as_python_constant() in self.value, **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
@@ -320,6 +328,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .. import trace_rules
         from .builder import VariableBuilder
 
         if (
@@ -341,12 +350,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and is_allowed(obj.__class__)
+                and trace_rules.lookup(obj.__class__)
+                == variables.TorchCtxManagerClassVariable
                 and not (args or kwargs)
             ):
-                return variables.TorchVariable(obj.__class__).call_function(
-                    tx, args, kwargs
-                )
+                return variables.TorchCtxManagerClassVariable(
+                    obj.__class__
+                ).call_function(tx, args, kwargs)
+
+            if (
+                func is torch.autograd.grad_mode.inference_mode.clone
+                and obj.__class__ is torch.autograd.grad_mode.inference_mode
+            ):
+                # simulate the inference_mode.clone implementation
+                var = variables.ConstantVariable(obj.mode)
+                return variables.TorchCtxManagerClassVariable(
+                    obj.__class__
+                ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
             and is_allowed(self.value.func)
@@ -372,10 +392,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 )
 
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
+            partial_args = [
+                variables.ConstantVariable.create(v) for v in self.value.args
+            ]
             partial_args.extend(args)
             partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
+                k: variables.ConstantVariable.create(v)
+                for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
@@ -421,14 +444,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
+        class NO_SUCH_SUBOBJ:
+            pass
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
-            subobj = None
+            subobj = NO_SUCH_SUBOBJ
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
-                ).call_function(tx, [ConstantVariable(name)], {})
+                ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
@@ -498,7 +524,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable(subobj, **options)
+                return ConstantVariable.create(subobj, **options)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -545,7 +571,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.is_attribute_mutation(self):
             try:
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                return variables.ConstantVariable(
+                return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 ).add_options(self, result)
             except KeyError:
@@ -560,9 +586,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         try:
             self._getattr_static(name)
-            return variables.ConstantVariable(True, **options)
+            return variables.ConstantVariable.create(True, **options)
         except AttributeError:
-            return variables.ConstantVariable(False, **options)
+            return variables.ConstantVariable.create(False, **options)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
@@ -623,7 +649,7 @@ class RemovableHandleVariable(VariableTracker):
     def call_method(self, tx, method_name, args, kwargs):
         if method_name == "remove":
             tx.output.side_effects.remove_hook(self.idx)
-            return variables.ConstantVariable(None)
+            return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
     # This reconstruct is actually pretty unique - it does not construct the object from scratch.

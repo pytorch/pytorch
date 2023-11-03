@@ -1,5 +1,4 @@
 import contextlib
-import copy
 import logging
 import math
 import warnings
@@ -17,9 +16,9 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed._tensor import DTensor
+from torch.distributed._tensor.device_mesh import _mesh_resources
 
-from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _get_module_fsdp_state_if_fully_sharded_module,
@@ -45,8 +44,10 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
+    _ext_all_gather_dtensor,
     _ext_chunk_dtensor,
     _ext_chunk_tensor,
+    _ext_post_unflatten_transform,
     _ext_pre_load_state_dict_transform,
 )
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
@@ -289,6 +290,14 @@ def _full_pre_state_dict_hook(
     is supported in ``nn.Module``, this hook will be registered as a hook in
     ``nn.Module``.
     """
+    if getattr(fsdp_state, "_device_mesh", False):
+        parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        if parent_mesh:
+            raise RuntimeError(
+                f"Found FSDP's device_mesh {fsdp_state._device_mesh} has a parent device_mesh {parent_mesh}.",
+                "We do not support FULL_STATE_DICT for 2D FSDP + TP. Please use FSDP SHARDED_STATE_DICT instead.",
+            )
+
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
         module,
@@ -597,8 +606,10 @@ def _sharded_pre_load_state_dict_hook(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
+    fqn_to_param_ext = dict(
+        zip(handle.flat_param._fqns, handle.flat_param._param_extensions)
+    )
 
-    device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
         if not _is_composable(fsdp_state):
             fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
@@ -631,52 +642,37 @@ def _sharded_pre_load_state_dict_hook(
             )
             if len(shards) == 1:
                 local_tensor = shards[0].tensor.flatten()
-                pg_device = _get_pg_default_device(fsdp_state.process_group)
-                if local_tensor.device.type != pg_device.type:
-                    with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
-                        local_tensor = local_tensor.to(pg_device)
+                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                    local_tensor = local_tensor.to(fsdp_state.compute_device)
                 num_padding = chunk_size - local_tensor.numel()
                 if num_padding > 0:
                     local_tensor = F.pad(local_tensor, [0, num_padding])
             else:
-                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+                local_tensor = torch.zeros(
+                    chunk_size, dtype=param.dtype, device=fsdp_state.compute_device
+                )
             tensor = torch.empty(
                 chunk_size * fsdp_state.world_size,
                 dtype=local_tensor.dtype,
-                device=device,
+                device=fsdp_state.compute_device,
             )
-            if local_tensor.is_cpu:
-                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
-                # Convert to CPU so all_gather can work.
-                tensor_dev = tensor.device
-                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
-                    tensor = tensor.cpu()
-                tensor_list = list(
-                    torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+            with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                dist.all_gather_into_tensor(
+                    tensor, local_tensor, group=fsdp_state.process_group
                 )
-                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                    dist.all_gather(
-                        tensor_list, local_tensor, group=fsdp_state.process_group
-                    )
-                with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
-                    tensor.to(tensor_dev)
-            else:
-                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
-                    dist.all_gather_into_tensor(
-                        tensor, local_tensor, group=fsdp_state.process_group
-                    )
             tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
             state_dict[fqn_from_global_root] = tensor
         else:
             if param.device != fsdp_state._device_mesh.device_type:
                 param = param.to(fsdp_state._device_mesh.device_type)
-            placements = list(copy.deepcopy(param.placements))
-            placements[-1] = Replicate()
-            param = param.redistribute(
-                device_mesh=param.device_mesh,
-                placements=placements,
-            )
-            state_dict[fqn_from_global_root] = param.to_local()
+
+            parent_mesh = _mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            local_tensor = _ext_all_gather_dtensor(param, parent_mesh)
+
+            if fqn_to_param_ext.get(fqn) is not None:
+                ext = fqn_to_param_ext[fqn]
+                local_tensor = _ext_post_unflatten_transform(local_tensor, ext)
+            state_dict[fqn_from_global_root] = local_tensor
 
     with SimpleProfiler.profile("_enter_unshard_params_ctx"):
         _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
@@ -771,6 +767,7 @@ def _pre_state_dict_hook(
             "be returned."
         )
     else:
+        _set_use_dtensor(module, fsdp_state)
         context = contextlib.nullcontext()
 
     with context:
@@ -785,6 +782,17 @@ def _pre_state_dict_hook(
             *args,
             **kwargs,
         )
+
+
+@no_type_check
+def _set_use_dtensor(fsdp_state: _FSDPState, module: nn.Module) -> None:
+    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # _use_dtensor flag to be true for ShardedStateDictConfig().
+    if (
+        getattr(module, "device_mesh", None)
+        and fsdp_state._state_dict_type == StateDictType.SHARDED_STATE_DICT
+    ):
+        fsdp_state._state_dict_config._use_dtensor = True
 
 
 @no_type_check
@@ -808,6 +816,7 @@ def _pre_load_state_dict_hook(
             "be returned."
         )
     else:
+        _set_use_dtensor(module, fsdp_state)
         context = contextlib.nullcontext()
 
     _lazy_init(fsdp_state, module)

@@ -391,6 +391,7 @@ def get_pip_packages(run_lambda):
                     "flake8",
                     "triton",
                     "optree",
+                    "onnx",
                 }
             )
         )

@@ -5,7 +5,7 @@ Getting Started
 
 Before you read this section, make sure to read the :ref:`torch.compiler_overview`.
 
-Let’s start by looking at a simple ``torch.compile`` example that demonstrates
+Let's start by looking at a simple ``torch.compile`` example that demonstrates
 how to use ``torch.compile`` for inference. This example demonstrates the
 ``torch.cos()`` and ``torch.sin()`` features which are examples of pointwise
 operators as they operate element by element on a vector. This example might
@@ -14,26 +14,27 @@ understanding of how you can use ``torch.compile`` in your own programs.
 
 .. note::
    To run this script, you need to have at least one GPU on your machine.
-   If you do not have a GPU, you can remove the ``cuda()`` code in the
-   snippet below and it will run on CPU.
+   If you do not have a GPU, you can remove the ``.to(device="cuda:0")`` code
+   in the snippet below and it will run on CPU.
 
 .. code:: python
 
    import torch
-   def fn(x, y):
-       a = torch.cos(x).cuda()
-       b = torch.sin(y).cuda()
-       return a + b
+   def fn(x):
+      a = torch.cos(x)
+      b = torch.sin(a)
+      return b
    new_fn = torch.compile(fn, backend="inductor")
    input_tensor = torch.randn(10000).to(device="cuda:0")
-   a = new_fn(input_tensor, input_tensor)
+   a = new_fn(input_tensor)
 
 A more famous pointwise operator you might want to use would
 be something like ``torch.relu()``. Pointwise ops in eager mode are
 suboptimal because each one would need to read a tensor from the
 memory, make some changes, and then write back those changes. The single
 most important optimization that inductor performs is fusion. In the
-example above we can turn 2 reads and 2 writes into 1 read and 1 write which
+example above we can turn 2 reads (``x``, ``a``) and
+2 writes (``a``, ``b``) into 1 read (``x``) and 1 write (``b``), which
 is crucial especially for newer GPUs where the bottleneck is memory
 bandwidth (how quickly you can send data to a GPU) rather than compute
 (how quickly your GPU can crunch floating point operations).
@@ -55,19 +56,18 @@ the following:
 
 .. code-block:: python
 
-   @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
+   @pointwise(size_hints=[16384], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 2), equal_to_1=())]})
    @triton.jit
-   def kernel(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
-       xnumel = 10000
-       xoffset = tl.program_id(0) * XBLOCK
-       xindex = xoffset + tl.arange(0, XBLOCK)[:]
-       xmask = xindex < xnumel
-       x0 = xindex
-       tmp0 = tl.load(in_ptr0 + (x0), xmask)
-       tmp1 = tl.cos(tmp0)
-       tmp2 = tl.sin(tmp0)
-       tmp3 = tmp1 + tmp2
-       tl.store(out_ptr0 + (x0), tmp3, xmask)
+   def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+      xnumel = 10000
+      xoffset = tl.program_id(0) * XBLOCK
+      xindex = xoffset + tl.arange(0, XBLOCK)[:]
+      xmask = xindex < xnumel
+      x0 = xindex
+      tmp0 = tl.load(in_ptr0 + (x0), xmask)
+      tmp1 = tl.cos(tmp0)
+      tmp2 = tl.sin(tmp1)
+      tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)
 
 .. note:: The above code snippet is an example. Depending on your hardware,
    you might see different code generated.
@@ -76,12 +76,12 @@ And you can verify that fusing the ``cos`` and ``sin`` did actually occur
 because the ``cos`` and ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
-Read more on Triton’s performance
+Read more on Triton's performance
 `here <https://openai.com/blog/triton/>`__. Because the code is written
 in Python, it's fairly easy to understand even if you have not written all that
 many CUDA kernels.
 
-Next, let’s try a real model like resnet50 from the PyTorch
+Next, let's try a real model like resnet50 from the PyTorch
 hub.
 
 .. code-block:: python
@@ -126,7 +126,7 @@ kernels for BERT. They are more complex than the trigonometry
 example we tried above but you can similarly skim through it and see if you
 understand how PyTorch works.
 
-Similarly, let’s try out a TIMM example:
+Similarly, let's try out a TIMM example:
 
 .. code-block:: python
 

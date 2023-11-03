@@ -293,7 +293,7 @@ class SummaryWriter:
         return self.log_dir
 
     def add_hparams(
-        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None
+        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None, global_step=None
     ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
@@ -311,6 +311,7 @@ class SummaryWriter:
               contains names of the hyperparameters and all discrete values they can hold
             run_name (str): Name of the run, to be included as part of the logdir.
               If unspecified, will use current timestamp.
+            global_step (int): Global step value to record
 
         Examples::
 
@@ -335,11 +336,11 @@ class SummaryWriter:
             run_name = str(time.time())
         logdir = os.path.join(self._get_file_writer().get_logdir(), run_name)
         with SummaryWriter(log_dir=logdir) as w_hp:
-            w_hp.file_writer.add_summary(exp)
-            w_hp.file_writer.add_summary(ssi)
-            w_hp.file_writer.add_summary(sei)
+            w_hp.file_writer.add_summary(exp, global_step)
+            w_hp.file_writer.add_summary(ssi, global_step)
+            w_hp.file_writer.add_summary(sei, global_step)
             for k, v in metric_dict.items():
-                w_hp.add_scalar(k, v)
+                w_hp.add_scalar(k, v, global_step)
 
     def add_scalar(
         self,

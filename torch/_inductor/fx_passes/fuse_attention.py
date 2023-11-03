@@ -7,9 +7,9 @@ import torch
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
-    inference_graph,
+    fwd_only,
+    joint_fwd_bwd,
     register_replacement,
-    training_graph,
 )
 
 log = logging.getLogger(__name__)
@@ -304,6 +304,23 @@ def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
     )
 
 
+def _sfdp_pattern_13(query, key, value, dropout_p):
+    attn_weight = torch.bmm(query, key.transpose(1, 2)).softmax(dim=-1)
+    attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+    return torch.bmm(attn_weight, value)
+
+
+def _sfdp_replacement_13(query, key, value, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.unsqueeze(0),
+        key.unsqueeze(0),
+        value.unsqueeze(0),
+        dropout_p=dropout_p,
+        scale=1.0,
+    ).squeeze(0)
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -362,12 +379,12 @@ def partialize_and_update_signature(func, **kwargs):
         return partial_func(*args, **kwargs)
 
     wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+    wrapper.__name__ = func.__name__
 
     return wrapper
 
 
-@functools.lru_cache(None)
-def _sfdp_init():
+def _get_sfdp_patterns():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -378,127 +395,170 @@ def _sfdp_init():
 
     # sizes/values don't actually matter for initial trace
     # once we get a possible match we re-trace with the actual values and verify the match still holds
-    g = functools.partial(torch.empty, (2, 4, 8, 16), device=device, requires_grad=True)
-    gp = functools.partial(
-        torch.empty, (2, 8, 4, 16), device=device, requires_grad=True, dtype=torch.half
+    g_inp = functools.partial(
+        torch.empty, (2, 4, 8, 16), device=device, requires_grad=True
     )
-    b = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
-    c = functools.partial(torch.tensor, 2.0, device=device)
+    b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
+    c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
 
-    for pattern, replacement, args, workaround, extra_check in [
-        (
-            _sfdp_pattern_1,
-            _sfdp_replacement_1,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
-        (
-            _sfdp_pattern_2,
-            _sfdp_replacement_2,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.mul.Tensor),
-        ),
-        (
-            _sfdp_pattern_3,
-            _sfdp_replacement_3,
-            [g(), g(), g(), c()],
-            d,
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
-        (
-            _sfdp_pattern_4,
-            _sfdp_replacement_4,
-            [g(), g(), g(), c()],
-            d,
-            _sfdp_scale_factor_check(aten.mul.Tensor),
-        ),
-        (
-            _sfdp_pattern_5,
-            _sfdp_replacement_5,
-            [g(), g(), g(), b()],
-            {},
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_6,
-            _sfdp_replacement_6,
-            [g(), g(), g(), b()],
-            d,
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_7,
-            _sfdp_replacement_7,
-            [gp(), gp(), gp()],
-            d,
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_8,
-            _sfdp_replacement_8,
-            [gp(), gp(), gp()],
-            {},
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_9,
-            _sfdp_replacement_9,
-            [gp(), gp(), gp()],
-            d,
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_10,
-            _sfdp_replacement_10,
-            [gp(), gp(), gp()],
-            {},
-            _sfdp_params_check,
-        ),
-        (
-            _sfdp_pattern_11,
-            _sfdp_replacement_11,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
-        (
-            _sfdp_pattern_12,
-            _sfdp_replacement_12,
-            [g(), g(), g(), c()],
-            d,
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
-    ]:
-        training_args = [*args, *workaround.values()]  # type: ignore[attr-defined]
-        register_replacement(
-            pattern,
-            replacement,
-            training_args,
-            training_graph,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
-        )
+    # we could also generate all these patterns in 3d.. TODO
+    g_3d_inp = functools.partial(
+        torch.empty, (1024, 128, 128), device=device, requires_grad=True
+    )
 
-        if workaround:
+    # softmax will generate a dtype conversion on inputs if they are in half,
+    # but will not in float, so we generate a pattern for both
+    for dtype in [torch.float, torch.half]:
+        g = functools.partial(g_inp, dtype=dtype)
+        b = functools.partial(b_inp, dtype=dtype)
+        c = functools.partial(c_inp, dtype=dtype)
+        g_3d = functools.partial(g_3d_inp, dtype=dtype)
+
+        for pattern, replacement, args, workaround, extra_check in [
+            (
+                _sfdp_pattern_1,
+                _sfdp_replacement_1,
+                [g(), g(), g(), c()],
+                {},
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_2,
+                _sfdp_replacement_2,
+                [g(), g(), g(), c()],
+                {},
+                _sfdp_scale_factor_check(aten.mul.Tensor),
+            ),
+            (
+                _sfdp_pattern_3,
+                _sfdp_replacement_3,
+                [g(), g(), g(), c()],
+                d,
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_4,
+                _sfdp_replacement_4,
+                [g(), g(), g(), c()],
+                d,
+                _sfdp_scale_factor_check(aten.mul.Tensor),
+            ),
+            (
+                _sfdp_pattern_5,
+                _sfdp_replacement_5,
+                [g(), g(), g(), b()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_6,
+                _sfdp_replacement_6,
+                [g(), g(), g(), b()],
+                d,
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_7,
+                _sfdp_replacement_7,
+                [g(), g(), g()],
+                d,
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_8,
+                _sfdp_replacement_8,
+                [g(), g(), g()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_9,
+                _sfdp_replacement_9,
+                [g(), g(), g()],
+                d,
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_10,
+                _sfdp_replacement_10,
+                [g(), g(), g()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_11,
+                _sfdp_replacement_11,
+                [g(), g(), g(), c()],
+                {},
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_12,
+                _sfdp_replacement_12,
+                [g(), g(), g(), c()],
+                d,
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_13,
+                _sfdp_replacement_13,
+                [g_3d(), g_3d(), g_3d()],
+                d,
+                _sfdp_params_check,
+            ),
+        ]:
+            # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
+            # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
-            assert len(workaround) == 1 and "dropout_p" in workaround
-            # functools.partial insufficient because we look at signature downstream
-            pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
-            replacement = partialize_and_update_signature(replacement, dropout_p=0.0)
-            workaround = {}
+            name = pattern.__name__
 
+            training_name = (
+                f"{name}_training" if dtype == torch.float else f"{name}_training_half"
+            )
+            yield training_name, {
+                "search_fn": pattern,
+                "replace_fn": replacement,
+                "example_inputs": args,
+                "trace_fn": joint_fwd_bwd,
+                "pass_dicts": patterns,
+                "extra_check": extra_check,
+                "scalar_workaround": workaround,
+            }
+
+            if workaround:
+                assert len(workaround) == 1 and "dropout_p" in workaround
+                # functools.partial insufficient because we look at signature downstream
+                pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                replacement = partialize_and_update_signature(
+                    replacement, dropout_p=0.0
+                )
+                workaround = {}
+
+            inference_name = (
+                f"{name}_inference"
+                if dtype == torch.float
+                else f"{name}_inference_half"
+            )
+            yield inference_name, {
+                "search_fn": pattern,
+                "replace_fn": replacement,
+                "example_inputs": args,
+                "trace_fn": fwd_only,
+                "pass_dicts": patterns,
+                "extra_check": extra_check,
+                "scalar_workaround": workaround,
+            }
+
+
+@functools.lru_cache(None)
+def _sfdp_init():
+    from .serialized_patterns.central_index import get_serialized_pattern
+
+    for key, register_replacement_kwargs in _get_sfdp_patterns():
+        search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
-            pattern,
-            replacement,
-            args,
-            inference_graph,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
+            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
         )

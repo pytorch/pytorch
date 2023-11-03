@@ -42,7 +42,9 @@ aten = torch.ops.aten
         aten.copy_.default,
         aten.detach.default,
         aten.equal.default,
+        aten.fill_.Scalar,
         aten.is_same_size.default,
+        aten.zero_.default,
     ]
 )
 def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
@@ -60,10 +62,8 @@ def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 @register_op_strategy(
     [
         aten.empty_like.default,
-        aten.fill_.Scalar,
         aten.full_like.default,
         aten.ones_like.default,
-        aten.zero_.default,
         aten.zeros_like.default,
     ]
 )
@@ -290,7 +290,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     return result
 
 
-@register_prop_rule(aten.index.Tensor)
+@register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))
 def prop_index(op_schema: OpSchema) -> OutputSharding:
     """
     Expect replicated on the first input; _mostly_ pointwise on the second input.
@@ -413,7 +413,9 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule(aten.cat.default, schema_info=RuntimeSchemaInfo(1))
+@register_prop_rule(
+    aten.cat.default, schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
+)
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     # torch.cat requires all tensors must either have the same shape (except
     # in the concatenating dimension) or be "empty". "Empty" here strictly means

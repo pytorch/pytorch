@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
+import itertools
+import unittest
 
 import torch
 
@@ -13,6 +14,13 @@ from torch._dynamo.testing import normalize_gm
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.nested._internal.nested_tensor import jagged_from_list, ViewBufferFromNested
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
 
 class MockSubclass(torch.Tensor):
@@ -21,6 +29,30 @@ class MockSubclass(torch.Tensor):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+
+class DummyNDim(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.ndim.__get__:
+            return 10
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class SigmoidToExpSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        if func == torch.Tensor.sigmoid:
+            return super().__torch_function__(torch.Tensor.exp, types, args, kwargs)
+
+        return super().__torch_function__(func, types, args, kwargs)
 
 
 class EagerRecordGraphAndInputs:
@@ -34,22 +66,18 @@ class EagerRecordGraphAndInputs:
         return gm
 
 
-@contextlib.contextmanager
-def preserve_subclass_config():
-    old_subclass_set = set(torch._dynamo.config.traceable_tensor_subclasses)
-    try:
-        torch._dynamo.config.traceable_tensor_subclasses.add(MockSubclass)
-        yield
-    finally:
-        torch._dynamo.config.traceable_tensor_subclasses.clear()
-        torch._dynamo.config.traceable_tensor_subclasses.update(old_subclass_set)
+GLOBAL_TEST_SUBCLASSES = {MockSubclass, DummyNDim, SigmoidToExpSubclass}
 
 
 class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._exit_stack.enter_context(preserve_subclass_config())
+        cls._exit_stack.enter_context(
+            torch._dynamo.config.patch(
+                "traceable_tensor_subclasses", GLOBAL_TEST_SUBCLASSES
+            )
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -110,16 +138,152 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        torch._dynamo.config.traceable_tensor_subclasses.add(LocalSubclass)
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                return LocalSubclass(torch.add(x, 1.0))
+
+            input = torch.ones(2, 2)
+
+            res = fn(input)
+            self.assertIsInstance(res, LocalSubclass)
+
+    def test_torch_function_call_on_method(self):
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = x.as_subclass(SigmoidToExpSubclass)
+        wrapped2 = y.as_subclass(SigmoidToExpSubclass)
+
+        def fn(w):
+            return w.sigmoid()
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped2)
+        res_exp2 = z.exp()
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, res_exp2)
+
+    def test_user_overidden_method_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            return LocalSubclass(torch.add(x, 1.0))
+            x.sigmoid()
 
-        input = torch.ones(2, 2)
+        msg = (
+            "Accessing overidden method/attribute sigmoid on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
 
-        res = fn(input)
-        self.assertIsInstance(res, LocalSubclass)
+    def test_user_overidden_attr_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            ndim = 10
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.ndim
+
+        msg = (
+            "Accessing overidden method/attribute ndim on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_user_overidden_property_unsupported(self):
+        class LocalSubclass(torch.Tensor):
+            def __init__(self):
+                self._ndim = 10
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            @property
+            def ndim(self):
+                return self._ndim
+
+            @ndim.setter
+            def ndim(self, value):
+                self._ndim = value
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.ndim
+
+        msg = (
+            "Accessing overidden method/attribute ndim on a tensor"
+            " subclass with a __torch_function__ override is not supported"
+        )
+        with torch._dynamo.config.patch(
+            "traceable_tensor_subclasses", {LocalSubclass}
+        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+    def test_overridden_method_guarding(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.sigmoid()
+
+        with torch._dynamo.config.patch(
+            error_on_recompile=True, traceable_tensor_subclasses={LocalSubclass}
+        ):
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+            x.sigmoid = False
+            fn(x)
+
+    def test_torch_function_call_on_attr(self):
+        x = torch.ones(2, 2)
+        wrapped = x.as_subclass(DummyNDim)
+
+        def fn(w):
+            return w.ndim + torch.ones(2)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+
+        self.assertEqual(res_exp, res_act)
+        self.assertEqual(res_exp, torch.ones(2) + 10)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])
@@ -312,19 +476,20 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
-            return add_
+            return (add_,)
 """
-        check_count_and_graph(1, 1, 1, expected_graph)
+        check_count_and_graph(1, 2, 1, expected_graph)
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(2, 2, 2, expected_graph)
+        check_count_and_graph(2, 4, 2, expected_graph)
 
         try:
             x = torch._to_functional_tensor(t_clone2)
@@ -335,7 +500,40 @@ class GraphModule(torch.nn.Module):
             torch._disable_functionalization()
 
         # frame count and op count are incremented due to re-compilation
-        check_count_and_graph(3, 3, 3, expected_graph)
+        check_count_and_graph(3, 6, 3, expected_graph)
+
+    def test_has_torch_function(self):
+        class MyTensor:
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                if func is torch.max:
+                    return torch.tensor(123)
+                return func(*args, **kwargs)
+
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        def fn(x):
+            return torch.overrides.has_torch_function_unary(
+                x
+            ), torch.overrides.has_torch_function_variadic(x)
+
+        for test_class in [MyTensor, LocalSubclass]:
+            x = test_class()
+            ref0 = fn(x)
+            ref1 = fn(4)
+            opt_fn = torch._dynamo.optimize("eager")(fn)
+            res0 = opt_fn(x)
+            res1 = opt_fn(4)
+            self.assertEqual(ref0, res0)
+            self.assertEqual(ref1, res1)
 
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
@@ -539,6 +737,196 @@ class GraphModule(torch.nn.Module):
                 ],
             ],
         )
+
+
+class TestNestedTensor(torch._dynamo.test_case.TestCase):
+    def _get_jagged_tensor(self, nested_size, offsets, requires_grad=True):
+        # Makes a jagged tensor with N constituent tensors with size
+        # as specified ((S0, S1, S2), D)
+        D = nested_size[1]
+        out = []
+        for s in nested_size[0]:
+            out.append(
+                torch.randn(s, D, requires_grad=requires_grad, dtype=torch.float64)
+            )
+        return jagged_from_list(out, offsets)
+
+    def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
+        compile_count = [0]
+
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
+        out = compiled_f(*inputs1)
+        self.assertEqual(compile_count[0], 1)
+        out = compiled_f(*inputs2)
+        self.assertEqual(compile_count[0], 2 if recompiles else 1)
+
+    def test_unary_does_not_recompile(self):
+        nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((3, 4, 5, 6), 4), None)
+        self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
+
+    def test_binary_does_not_recompile(self):
+        def binary(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
+        # Basic binary
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, offsets = self._get_jagged_tensor(((3, 4, 5), 4), None)
+        nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
+        self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
+
+    def test_binary_recompiles(self):
+        def binary(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
+        # Binary recompiles because singleton ints no longer match
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+
+    def test_binary_recompiles_due_to_duck_sizing(self):
+        # Even though the input is unused, we still guard due to duck sizing
+        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+
+    # TODO: cannot parametrize this test class with device for some reason
+    def _test_autograd(self, backend):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt, offsets = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], offsets)
+
+        def fn1(nt1, nt2):
+            return (nt1 + nt2).sin().cos()
+
+        compiled_f = torch.compile(
+            fn1, fullgraph=True, backend="aot_eager", dynamic=True
+        )
+        out = compiled_f(nt, nt2)
+        out_buffer = ViewBufferFromNested.apply(out)
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
+        out_ref = compiled_f(nt, nt2)
+        out_buffer_ref = ViewBufferFromNested.apply(out_ref)
+        ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
+
+        self.assertTrue(torch.allclose(ga, ga_ref))
+        self.assertTrue(torch.allclose(gb, gb_ref))
+        self.assertTrue(torch.allclose(gc, gc_ref))
+
+    def test_basic_autograd(self):
+        self._test_autograd("aot_eager")
+
+    @requires_cuda()
+    def test_basic_autograd_inductor(self):
+        self._test_autograd("inductor")
+
+    def test_unbind(self):
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
+
+        def fn(x):
+            return x.unbind()
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend="eager", dynamic=True)
+        out = compiled_f(nt)
+
+        out_ref = fn(nt)
+
+        # correctness
+        self.assertEqual(len(out), len(out_ref))
+        for x, x_ref in zip(out, out_ref):
+            self.assertTrue(torch.allclose(x, x_ref))
+
+        # We specialize on the length of offsets, e.g. (1) we recompile if the
+        # length of the offsets is different. (2) we don't recompile if the
+        # length of the offsets is the same, even if the size of the constituent
+        # tensors are different.
+        self._check_recompiles(fn, (nt,), (nt2,), False)
+        self._check_recompiles(fn, (nt,), (nt3,), True)
+
+    def _get_views(self):
+        # There are three cases to consider here based on the logic in
+        # meta_utils.py
+        #
+        # (1) basic case:
+        # view is not a leaf and has the same requires grad as its basic case
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)
+        self.assertEqual(x.is_leaf, False)
+        yield x.unsqueeze(-1)
+
+        # (2) leaf view case:
+        # the view has to be a leaf (w/ requires_grad True or requires_grad False)
+        # base w/ requires_grad True or requires_grad False
+        for requires_grad_1, requires_grad_2 in itertools.product(
+            [True, False], repeat=2
+        ):
+            x, _ = self._get_jagged_tensor(
+                ((2, 3, 4), 3), None, requires_grad=requires_grad_1
+            )
+            with torch.no_grad():
+                x_view = x.unsqueeze(-1)
+                # The issue is this doesn't quite work
+                x_view.requires_grad_(requires_grad_2)
+            yield x_view
+
+        # (3) obscure case:
+        # view is not a leaf (implies requires_grad True)
+        # base w/ requires_grad False)
+        x, _ = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=False)
+        # intermediate leaf view
+        with torch.no_grad():
+            x_view = x.unsqueeze(-1)
+        x_view.requires_grad_(True)
+        x_view_view = x_view.unsqueeze(-1)
+        yield x_view_view
+
+    def test_inputs_to_compiled_fn_are_views(self):
+        for nt_view in self._get_views():
+
+            def fn(x):
+                return x.sin()
+
+            out_ref = fn(nt_view)
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend="aot_eager", dynamic=True
+            )
+            out = compile_fn(nt_view)
+
+            # Check metadata and values are correct
+            self.assertTrue(out.size() == out_ref.size())
+            self.assertTrue(out.stride() == out_ref.stride())
+            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+
+            # Check that no guards are incurred
+            def backend(gm, args):
+                context = torch._guards.TracingContext.get()
+                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
+                self.assertEqual(len(val_to_guards), 0)
+                return gm
+
+            torch._dynamo.reset()
+            compile_fn = torch.compile(
+                fn, fullgraph=True, backend=backend, dynamic=True
+            )
+            out = compile_fn(nt_view)
 
 
 if __name__ == "__main__":

@@ -134,7 +134,7 @@ def _retrieve_or_adapt_input_to_graph_set(
                 sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
             elif isinstance(tensor, int):
                 # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
-                # dim, and onnx-script will promote it to tensot(int64)
+                # dim, and onnx-script will promote it to tensor(int64)
                 sequence_mixed_elements.append([tensor])
         # Concat all the elements in the sequence.
         # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
@@ -514,7 +514,7 @@ class FxOnnxInterpreter:
         )
         # In the following loop, a TorchScript graph is created to
         # represent the input FX graph with ONNX symbols (e.g., onnx::add).
-        # To connect the values to nodes in the TorchScript graph, we maintian
+        # To connect the values to nodes in the TorchScript graph, we maintain
         # fx_name_to_onnxscript_value. Basically, we want to translate
         #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
         # to

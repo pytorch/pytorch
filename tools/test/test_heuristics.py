@@ -3,7 +3,7 @@ import json
 import pathlib
 import sys
 import unittest
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -12,12 +12,15 @@ try:
     sys.path.append(str(REPO_ROOT))
 
     from tools.testing.target_determination.determinator import (
+        AggregatedHeuristics,
         get_test_prioritizations,
         TestPrioritizations,
     )
+    from tools.testing.target_determination.heuristics import HEURISTICS
     from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
         _get_previously_failing_tests,
     )
+    from tools.testing.test_run import TestRun, TestRuns
 
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
@@ -31,7 +34,37 @@ def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     return file_object
 
 
-class TestParsePrevTests(unittest.TestCase):
+class HeuristicsTestMixin(unittest.TestCase):
+    def assert_heuristics_match(
+        self,
+        test_prioritizations: TestPrioritizations,
+        expected_high_tests: Optional[TestRuns] = None,
+        expected_probable_tests: Optional[TestRuns] = None,
+        expected_unranked_tests: Optional[TestRuns] = None,
+    ) -> None:
+        if expected_unranked_tests:
+            self.assertTupleEqual(
+                test_prioritizations.get_unranked_relevance_tests(),
+                expected_unranked_tests,
+                "Unranked tests differ",
+            )
+
+        if expected_probable_tests:
+            self.assertTupleEqual(
+                test_prioritizations.get_probable_relevance_tests(),
+                expected_probable_tests,
+                "Probable relevance tests differ",
+            )
+
+        if expected_high_tests:
+            self.assertTupleEqual(
+                test_prioritizations.get_high_relevance_tests(),
+                expected_high_tests,
+                "High relevance tests differ",
+            )
+
+
+class TestParsePrevTests(HeuristicsTestMixin):
     @mock.patch("pathlib.Path.exists", return_value=False)
     def test_cache_does_not_exist(self, mock_exists: Any) -> None:
         expected_failing_test_files: Set[str] = set()
@@ -77,7 +110,7 @@ class TestParsePrevTests(unittest.TestCase):
         return_value={"test2", "test4"},
     )
     @mock.patch(
-        "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests",
+        "tools.testing.target_determination.heuristics.correlated_with_historical_failures.get_correlated_tests",
         return_value=["test1"],
     )
     def test_get_reordered_tests(self, *args: Any) -> None:
@@ -94,18 +127,257 @@ class TestParsePrevTests(unittest.TestCase):
             tests
         ).get_aggregated_priorities()
 
-        self.assertTupleEqual(
-            expected_prioritizations.get_high_relevance_tests(),
-            test_prioritizations.get_high_relevance_tests(),
+        self.assert_heuristics_match(
+            test_prioritizations,
+            expected_high_tests=expected_prioritizations.get_high_relevance_tests(),
+            expected_probable_tests=expected_prioritizations.get_probable_relevance_tests(),
+            expected_unranked_tests=expected_prioritizations.get_unranked_relevance_tests(),
         )
-        self.assertTupleEqual(
-            expected_prioritizations.get_probable_relevance_tests(),
-            test_prioritizations.get_probable_relevance_tests(),
+
+
+class TestInterface(HeuristicsTestMixin):
+    def test_class_prioritization(self) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+
+        prioritizations = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2::TestFooClass", "test3"],
         )
-        self.assertTupleEqual(
-            expected_prioritizations.get_unranked_relevance_tests(),
-            test_prioritizations.get_unranked_relevance_tests(),
+
+        expected_probable_tests = tuple(
+            TestRun(test) for test in ["test2::TestFooClass", "test3"]
         )
+        expected_unranked_tests = (
+            TestRun("test1"),
+            TestRun("test2", excluded=["TestFooClass"]),
+            TestRun("test4"),
+            TestRun("test5"),
+        )
+
+        self.assert_heuristics_match(
+            prioritizations,
+            expected_probable_tests=expected_probable_tests,
+            expected_unranked_tests=expected_unranked_tests,
+        )
+
+
+class TestAggregatedHeuristics(HeuristicsTestMixin):
+    def test_merging_multiple_test_class_heuristics(self) -> None:
+        tests = ["test1", "test2", "test3", "test4"]
+
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2::TestFooClass", "test3"],
+        )
+
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test2::TestFooClass", "test3::TestBarClass"],
+        )
+
+        expected_high_relevance = tuple(
+            TestRun(test) for test in ["test2::TestFooClass", "test3::TestBarClass"]
+        )
+        expected_probable_relevance = (TestRun("test3", excluded=["TestBarClass"]),)
+        expected_unranked_relevance = (
+            TestRun("test1"),
+            TestRun("test2", excluded=["TestFooClass"]),
+            TestRun("test4"),
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        aggregated_pris = aggregator.get_aggregated_priorities()
+
+        self.assert_heuristics_match(
+            aggregated_pris,
+            expected_high_tests=expected_high_relevance,
+            expected_probable_tests=expected_probable_relevance,
+            expected_unranked_tests=expected_unranked_relevance,
+        )
+
+    def test_merging_file_heuristic_after_class_heuristic(self) -> None:
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test2::TestFooClass"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2", "test3"],
+        )
+
+        expected_aggregated_high_relevance = tuple(
+            TestRun(test) for test in ["test2::TestFooClass"]
+        )
+        expected_aggregated_probable_relevance = (
+            TestRun("test2", excluded=["TestFooClass"]),
+            TestRun("test3"),
+        )
+        expected_aggregated_unranked_relevance = (
+            TestRun("test1"),
+            TestRun("test4"),
+            TestRun("test5"),
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        aggregated_pris = aggregator.get_aggregated_priorities()
+
+        self.assert_heuristics_match(
+            aggregated_pris,
+            expected_high_tests=expected_aggregated_high_relevance,
+            expected_probable_tests=expected_aggregated_probable_relevance,
+            expected_unranked_tests=expected_aggregated_unranked_relevance,
+        )
+
+    def test_get_test_stats_with_whole_tests(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        expected_test3_stats = {
+            "test_name": "test3",
+            "test_filters": "",
+            "without_heuristics": {
+                "relevance_group": "UNRANKED",
+                "order_within_relevance_group": 2,
+                "num_tests_in_relevance_group": 5,
+                "order_overall": 2,
+                "heuristic_name": "baseline",
+            },
+            "heuristics": [
+                {
+                    "relevance_group": "HIGH",
+                    "order_within_relevance_group": 0,
+                    "num_tests_in_relevance_group": 2,
+                    "order_overall": 0,
+                    "heuristic_name": HEURISTICS[0].name,
+                    "trial_mode": False,
+                },
+                {
+                    "relevance_group": "UNRANKED",
+                    "order_within_relevance_group": 2,
+                    "num_tests_in_relevance_group": 4,
+                    "order_overall": 3,
+                    "heuristic_name": HEURISTICS[1].name,
+                    "trial_mode": False,
+                },
+            ],
+            "num_heuristics_prioritized_by": 1,
+            "aggregated": {
+                "relevance_group": "HIGH",
+                "order_within_relevance_group": 0,
+                "num_tests_in_relevance_group": 2,
+                "order_overall": 0,
+            },
+            "aggregated_trial": {
+                "relevance_group": "HIGH",
+                "order_within_relevance_group": 0,
+                "num_tests_in_relevance_group": 2,
+                "order_overall": 0,
+            },
+            "highest_ranking_heuristic": HEURISTICS[0].name,
+        }
+
+        test3_stats = aggregator.get_test_stats(TestRun("test3"))
+
+        self.assertDictEqual(test3_stats, expected_test3_stats)
+
+    def test_get_test_stats_only_contains_allowed_types(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5::classA"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        stats3 = aggregator.get_test_stats(TestRun("test3"))
+        stats5 = aggregator.get_test_stats(TestRun("test5::classA"))
+
+        def assert_valid_dict(dict_contents: Dict[str, Any]) -> None:
+            for key, value in dict_contents.items():
+                self.assertTrue(isinstance(key, str))
+                self.assertTrue(
+                    isinstance(value, (str, float, int, list, dict)),
+                    f"{value} is not a str, float, or dict",
+                )
+                if isinstance(value, dict):
+                    assert_valid_dict(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        assert_valid_dict(item)
+
+        assert_valid_dict(stats3)
+        assert_valid_dict(stats5)
+
+    def test_get_test_stats_gets_rank_for_test_classes(self) -> None:
+        self.maxDiff = None
+        tests = ["test1", "test2", "test3", "test4", "test5"]
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            high_relevance=["test3", "test4"],
+        )
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test5::classA"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        statsInclusive = aggregator.get_test_stats(
+            TestRun("test5", included=["classA"])
+        )
+        statsExclusive = aggregator.get_test_stats(
+            TestRun("test5", excluded=["classA"])
+        )
+
+        print("h")
+        # Validate the heuristic level stats are correct
+        self.assertEqual(
+            statsInclusive["heuristics"][1]["order_within_relevance_group"], 0
+        )
+        self.assertEqual(
+            statsInclusive["heuristics"][1]["num_tests_in_relevance_group"], 1
+        )
+        self.assertEqual(statsInclusive["heuristics"][1]["order_overall"], 0)
+        self.assertEqual(statsInclusive["heuristics"][1]["relevance_group"], "PROBABLE")
+        self.assertEqual(statsInclusive["aggregated"]["order_overall"], 2)
+
+        self.assertEqual(
+            statsExclusive["heuristics"][1]["order_within_relevance_group"], 4
+        )
+        self.assertEqual(
+            statsExclusive["heuristics"][1]["num_tests_in_relevance_group"], 5
+        )
+        self.assertEqual(statsExclusive["heuristics"][1]["order_overall"], 5)
+        self.assertEqual(statsExclusive["heuristics"][1]["relevance_group"], "UNRANKED")
+        self.assertEqual(statsExclusive["aggregated"]["order_overall"], 5)
 
 
 if __name__ == "__main__":
