@@ -311,9 +311,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 xiq.get_default_x86_inductor_quantization_config()
             )
             node_occurrence = {
-                # one for input and weight of the conv, one for output for the conv
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                 # note: quantize op for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -322,8 +322,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.quantized_decomposed.quantize_per_tensor.default,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 torch.ops.aten.conv2d.default,
-                torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             ]
             self._test_quantizer(
                 m,
@@ -349,9 +347,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     xiq.get_default_x86_inductor_quantization_config()
                 )
                 node_occurrence = {
-                    # one for input and weight of the conv, one for output for the relu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    # one for input and weight of the conv
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                     # note: quantize op for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -361,8 +359,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default,
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
                 self._test_quantizer(
                     m,
@@ -389,10 +385,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input and weight of the conv
-                        # one for output for the add
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -401,11 +396,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence = {
                         # one for input of the conv
                         # one for input of another conv
-                        # one for output for the add
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                         # quantize_per_channel for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
@@ -415,8 +409,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
                 self._test_quantizer(
                     m,
@@ -445,10 +437,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 if conv2d_type != Conv2DType.both:
                     node_occurrence = {
                         # one for input for conv
-                        # one for output for the relu
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
                         # note: quantize op for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -457,11 +448,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence = {
                         # one for input of the conv
                         # one for input of another conv
-                        # one for output for the relu
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
-                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                         # note: quantize op for weights are const propagated
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
@@ -471,8 +461,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.aten.add.Tensor,
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
                 self._test_quantizer(
                     m,
@@ -492,8 +480,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             example_inputs = (torch.randn(2, 3, 16, 16),)
             quantizer = X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
             node_occurrence = {
-                torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 6,
                 # quantize_per_channel for weights are const propagated
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 4,
@@ -508,8 +496,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 torch.ops.aten.conv2d.default,
                 torch.ops.aten.add.Tensor,
                 torch.ops.aten.relu.default,
-                torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             ]
             self._test_quantizer(
                 m,
@@ -594,8 +580,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         example_inputs = (x,)
         node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 7,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 6,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 6,
             # quantize_per_channel for weights are const propagated
             torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
@@ -839,8 +825,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight, one for output
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -849,8 +835,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
                 self._test_quantizer(
                     m,
@@ -882,8 +866,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight of the conv, one for output for the relu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -893,8 +877,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
                     post_op_map[postop][0 if inplace else 1],
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
                 self._test_quantizer(
                     m,
