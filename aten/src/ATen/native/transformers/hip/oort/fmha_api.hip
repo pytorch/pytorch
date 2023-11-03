@@ -21,6 +21,12 @@
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/utils.h> // for unpack
 #include <ATen/hip/HIPGraphsUtils.cuh>                              // for philox
 
+// OORT headers
+#include <ATen/native/transformers/hip/oort/kernels/attn_fwd.h>
+#include <ATen/native/transformers/hip/oort/kernels/bwd_kernel_dk_dv.h>
+#include <ATen/native/transformers/hip/oort/kernels/bwd_kernel_dq.h>
+#include <ATen/native/transformers/hip/oort/kernels/bwd_preprocess.h>
+
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a.h>
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a.h>
 
@@ -77,7 +83,9 @@ void set_params_fprop(
     void* softmax_lse_d,
     float p_dropout,
     float softmax_scale,
-    bool is_causal) {
+    bool is_causal,
+    bool is_deterministic = true,
+    bool is_using_qloop = true) {
   auto acc_type  = at::kFloat;
   auto data_type = q.dtype();
 
@@ -181,6 +189,8 @@ void set_params_fprop(
   // Set this to probability of keeping an element to simplify things.
   params.p_dropout = p_dropout;
   params.is_causal = is_causal;
+  params.is_deterministic = is_deterministic;
+  params.is_using_qloop = is_using_qloop;
 }
 
 void set_params_dgrad(
@@ -206,7 +216,10 @@ void set_params_dgrad(
     void* softmax_lse_d,
     float p_dropout,
     float softmax_scale,
-    bool is_causal) {
+    bool is_causal,
+    bool is_deterministic,
+    bool is_performance_mode,
+    bool is_using_qloop) {
   hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
   auto acc_type      = at::kFloat;
   auto data_type     = q.dtype();
@@ -330,6 +343,9 @@ void set_params_dgrad(
   // Set this to probability of keeping an element to simplify things.
   params.p_dropout = p_dropout;
   params.is_causal = is_causal;
+  params.is_deterministic = is_deterministic;
+  params.is_performance_mode = is_performance_mode;
+  params.is_using_qloop = is_using_qloop;
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
@@ -345,12 +361,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    const bool return_softmax, // o in rocm ,this will return the random number matrix when doing dropout
-    const int num_splits,       // num_splits is not used in rocm
-    bool is_causal,
-    const bool is_deterministic = true,
-    const bool is_using_qloop   = true
-) {
+    const bool return_softmax, // in rocm ,this will return the random number matrix when doing dropout
+    const int num_splits       // num_splits is not used in rocm
+  ) {
+  const bool is_deterministic = true;
+
+
   auto dprops                 = at::cuda::getCurrentDeviceProperties();
   auto stream                 = at::cuda::getCurrentHIPStream().stream();
   bool is_dropout             = p_dropout > 0.0;
@@ -358,7 +374,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
 
   auto q_dtype = q.dtype();
 
-  TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16);
+  // FAT limits
+  TORCH_CHECK(q_dtype == at::kHalf);
+  TORCH_CHECK(!is_dropout);
+  
+  //TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16);
   TORCH_CHECK(k.dtype() == q_dtype);
   TORCH_CHECK(v.dtype() == q_dtype);
   TORCH_CHECK(out.dtype() == q_dtype);
@@ -439,7 +459,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
       softmax_lse.data_ptr(),
       p_dropout,
       softmax_scale,
-      is_causal);
+      is_causal,
+      is_deterministic);
 
   // number of times random will be generated per thread, to offset philox counter in thc random
   // state
@@ -472,7 +493,25 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_fwd(
     }
   }
 
-  run_flash_fwd(launch_params);
+  //run_flash_fwd(launch_params);
+
+  //Temporary workspace                                                    at::dtype should be a float....
+  at::Tensor M = at::empty({(q.sizes()[0] * q.sizes()[1]), q.sizes()[2]}, at::dtype(at::kFloat).device(at::kCUDA));
+  dim3 grid;
+  grid.x = (q.sizes()[2] + 64 - 1) / 64;
+  grid.y = q.sizes()[0] * q.sizes()[1];
+  grid.z = 1;
+  dim3 block { 64 * 8/*num_warps*/, 1, 1 };
+  
+  oort::attn_fwd<1,128,64,64,true> fwd_opt;
+  fwd_opt(grid, block, q.data_ptr(), k.data_ptr(), v.data_ptr(), softmax_scale, (float*)M.data_ptr(), out.data_ptr(),
+	  q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+	  k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+	  v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+	  out.stride(0), out.stride(1), out.stride(2), out.stride(3),
+	  q.sizes()[0],  q.sizes()[1],  q.sizes()[2], stream  );
+  
+  
 
 #if 0
     std::vector<at::Tensor> result = {softmax_lse};
@@ -504,9 +543,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
     const bool zero_tensors,
     const bool is_causal,
     const int num_splits,
-    at::Tensor philox_seed,  // Not used or supported on ROCm
-    at::Tensor philox_offset, // Not used or supported on ROCm
-) {
+    at::Tensor philox_seed,          // Not used or supported on ROCm
+    at::Tensor philox_offset     ) { // Not used or supported on ROCm
   const bool is_deterministic    = true;
   const bool is_using_qloop      = true;
   const bool is_performance_mode = true;
@@ -620,7 +658,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mha_bwd(
       softmax_lse.data_ptr(),
       p_dropout,
       softmax_scale,
-      is_causal);
+      is_causal,
+      is_deterministic,
+      is_performance_mode,
+      is_using_qloop);
 
   if (is_dropout) {
     // See Note [Acquire lock when using random generators]
