@@ -298,7 +298,19 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert sig.return_annotation in (sig.empty, out_type)
+        if (
+            isinstance(sig.return_annotation, str)
+            and "torch._tensor.Tensor" in sig.return_annotation
+        ):
+            # FIXME(T168485992): This is a forward reference, i.e a type
+            # annotation wrapped in a string literal. In theory, we would need
+            # to parse it, but we don't have the global context (i.e imports)
+            # to do that correctly. Since we know it is most likely introduced
+            # by `pyre infer` before running Pysa, so we can safely ignore it
+            # for now.
+            pass
+        else:
+            assert sig.return_annotation in (sig.empty, out_type)
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]
