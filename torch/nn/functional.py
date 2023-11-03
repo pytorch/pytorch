@@ -1,4 +1,4 @@
-"""Functional interface"""
+"""Functional interface."""
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
@@ -436,7 +436,7 @@ def fractional_max_pool2d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+    fractional_max_pool2d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None).
 
     Applies 2D fractional max pooling over an input signal composed of several input planes.
 
@@ -535,7 +535,7 @@ def fractional_max_pool3d_with_indices(
     _random_samples: Optional[Tensor] = None
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None)
+    fractional_max_pool3d(input, kernel_size, output_size=None, output_ratio=None, return_indices=False, _random_samples=None).
 
     Applies 3D fractional max pooling over an input signal composed of several input planes.
 
@@ -644,7 +644,7 @@ def max_pool1d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+    max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
 
     Applies a 1D max pooling over an input signal composed of several input
     planes.
@@ -730,7 +730,7 @@ def max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+    max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
 
     Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -816,7 +816,7 @@ def max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False)
+    max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False, return_indices=False).
 
     Applies a 3D max pooling over an input signal composed of several input
     planes.
@@ -929,7 +929,7 @@ def max_unpool1d(
     padding: BroadcastingList1[int] = 0,
     output_size: Optional[BroadcastingList1[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool1d`.
+    r"""Compute a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
@@ -965,7 +965,7 @@ def max_unpool2d(
     padding: BroadcastingList2[int] = 0,
     output_size: Optional[BroadcastingList2[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool2d`.
+    r"""Compute a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
@@ -997,7 +997,7 @@ def max_unpool3d(
     padding: BroadcastingList3[int] = 0,
     output_size: Optional[BroadcastingList3[int]] = None
 ) -> Tensor:
-    r"""Computes a partial inverse of :class:`MaxPool3d`.
+    r"""Compute a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
@@ -1028,8 +1028,10 @@ def lp_pool2d(
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Applies a 2D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is
+    r"""Apply a 2D power-average pooling over an input signal composed of
+    several input planes.
+    
+    If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool2d` for details.
@@ -1053,8 +1055,10 @@ def lp_pool1d(
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
-    r"""Applies a 1D power-average pooling over an input signal composed of
-    several input planes. If the sum of all inputs to the power of `p` is
+    r"""Apply a 1D power-average pooling over an input signal composed of
+    several input planes.
+    
+    If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
     See :class:`~torch.nn.LPPool1d` for details.
@@ -1075,7 +1079,7 @@ def adaptive_max_pool1d_with_indices(
     input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    adaptive_max_pool1d(input, output_size, return_indices=False)
+    adaptive_max_pool1d(input, output_size, return_indices=False).
 
     Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1117,7 +1121,7 @@ def adaptive_max_pool2d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    adaptive_max_pool2d(input, output_size, return_indices=False)
+    adaptive_max_pool2d(input, output_size, return_indices=False).
 
     Applies a 2D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1161,7 +1165,7 @@ def adaptive_max_pool3d_with_indices(
     return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""
-    adaptive_max_pool3d(input, output_size, return_indices=False)
+    adaptive_max_pool3d(input, output_size, return_indices=False).
 
     Applies a 3D adaptive max pooling over an input signal composed of
     several input planes.
@@ -1203,7 +1207,7 @@ adaptive_max_pool3d = boolean_dispatch(
 adaptive_avg_pool1d = _add_docstr(
     torch.adaptive_avg_pool1d,
     r"""
-adaptive_avg_pool1d(input, output_size) -> Tensor
+adaptive_avg_pool1d(input, output_size) -> Tensor.
 
 Applies a 1D adaptive average pooling over an input signal composed of
 several input planes.
@@ -1218,7 +1222,8 @@ Args:
 
 def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> Tensor:
     r"""
-    Applies a 2D adaptive average pooling over an input signal composed of
+    
+    Apply a 2D adaptive average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
@@ -1235,7 +1240,8 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
 def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
     r"""
-    Applies a 3D adaptive average pooling over an input signal composed of
+    
+    Apply a 3D adaptive average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
@@ -1253,6 +1259,7 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
 # Activation functions
 def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
+    
     During training, randomly zeroes some of the elements of the input
     tensor with probability :attr:`p` using samples from a Bernoulli
     distribution.
@@ -1272,7 +1279,7 @@ def dropout(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool 
 
 
 def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
-    r"""Applies alpha dropout to the input.
+    r"""Apply alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
@@ -1285,8 +1292,9 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
 
 def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
-    Randomly zero out entire channels (a channel is a 1D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    
+    Randomly zero out entire channels (a channel is a 1D feature map.
+    E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
@@ -1323,8 +1331,9 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
-    Randomly zero out entire channels (a channel is a 2D feature map,
-    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    
+    Randomly zero out entire channels (a channel is a 2D feature map.
+    E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
@@ -1367,7 +1376,8 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""
-    Randomly zero out entire channels (a channel is a 3D feature map,
+    
+    Randomly zero out entire channels (a channel is a 3D feature map.
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
@@ -1406,8 +1416,9 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
     r"""
-    Randomly masks out entire channels (a channel is a feature map,
-    e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    
+    Randomly masks out entire channels (a channel is a feature map.
+    E.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
     is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
     setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function.
@@ -1463,10 +1474,12 @@ In-place version of :func:`~threshold`.
 
 
 def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""relu(input, inplace=False) -> Tensor
+    r"""
+    
+    relu(input, inplace=False) -> Tensor
 
-    Applies the rectified linear unit function element-wise. See
-    :class:`~torch.nn.ReLU` for more details.
+    Applies the rectified linear unit function element-wise. 
+    See :class:`~torch.nn.ReLU` for more details.
     """
     if has_torch_function_unary(input):
         return handle_torch_function(relu, (input,), input, inplace=inplace)
@@ -1489,7 +1502,8 @@ In-place version of :func:`~relu`.
 
 def glu(input: Tensor, dim: int = -1) -> Tensor:
     r"""
-    glu(input, dim=-1) -> Tensor
+    
+    glu(input, dim=-1) -> Tensor.
 
     The gated linear unit. Computes:
 
