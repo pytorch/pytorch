@@ -979,9 +979,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_add_cpu(self):
+    def test_qlinear_mul_cpu(self):
         r"""
-        This testcase will quantize a Linear->Add pattern.
+        This testcase will quantize a Linear->Mul pattern.
         """
 
         class M(torch.nn.Module):
@@ -990,7 +990,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.linear = torch.nn.Linear(4, 5, use_bias)
 
             def forward(self, x1, x2):
-                return torch.add(self.linear(x1), x2)
+                return torch.mul(self.linear(x1), x2)
 
         bias_list = [True, False]
         for bias in bias_list:
@@ -1001,8 +1001,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod,
                 (x1, x2),
-                4,
-                17,
+                2,
+                8,
                 check_quantization=True,
             )
 
