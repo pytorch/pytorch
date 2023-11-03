@@ -709,6 +709,8 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
@@ -1006,12 +1008,6 @@ copy_tests(
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
-        "test_zero_grid": TestFailure(
-            ("abi_compatible_cpu",)
-        ),  # unsupported input dtype
-        "test_zero_grid_with_unbacked_symbols": TestFailure(
-            ("abi_compatible_cpu",)
-        ),  # unsupported input dtype
     },
 )
 
