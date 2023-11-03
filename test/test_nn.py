@@ -5400,7 +5400,15 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             input1 = torch.empty((0, 0), dtype=torch.double, device=device)
             input2 = torch.empty((0,), dtype=torch.double, device=device)
             target = torch.empty((0,), dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, ".*same shape.*"):
+            with self.assertRaisesRegex(RuntimeError, ".*expects 2D.*"):
+                torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+
+    def test_cosine_embedding_loss_error_on_nonexpandable_shapes(self):
+        for device in device_():
+            input1 = torch.empty((1, 5), dtype=torch.double, device=device)
+            input2 = torch.empty((1, 6), dtype=torch.double, device=device)
+            target = torch.ones((1,), dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, ".*common shape.*"):
                 torch.nn.functional.cosine_embedding_loss(input1, input2, target)
 
     def test_kl_div_with_diff_type(self):

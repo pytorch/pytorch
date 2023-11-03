@@ -10,6 +10,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/Exception.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/ExpandUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -146,17 +147,9 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   TORCH_CHECK(
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
-  TORCH_CHECK(
-      input1.sym_sizes() == input2.sym_sizes(),
-      "Expected input1 to be of same shape as input2, but got ",
-      input1.sym_sizes(),
-      " and ",
-      input2.sym_sizes(),
-      ".");
-
   if (targ_dim == 1) {
     TORCH_CHECK(
-        input1.dim() == 2,
+        input1.dim() == 2 && input2.dim() == 2,
         "1D target tensor expects 2D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -164,13 +157,21 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
         ".");
   } else {
     TORCH_CHECK(
-        input1.dim() == 1,
+        input1.dim() == 1 && input2.dim() == 1,
         "0D target tensor expects 1D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
         input2.sizes(),
         ".");
   }
+  TORCH_CHECK(
+      is_expandable_to(input1.sym_sizes(), input2.sym_sizes()) || is_expandable_to(input2.sym_sizes(), input1.sym_sizes()),
+      "Expected input1 and input2 to be broadcastable to a common shape, but got ",
+      input1.sym_sizes(),
+      " and ",
+      input2.sym_sizes(),
+      ".");
+
 
   auto prod_sum = (input1 * input2).sum(targ_dim);
   auto mag_square1 = (input1 * input1).sum(targ_dim) + EPSILON;
