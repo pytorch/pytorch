@@ -23,18 +23,20 @@ from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 
 try:
-    from torch.utils._cxx_pytree import tree_flatten, tree_unflatten
+    from torch.utils import _cxx_pytree as pytree
 except ImportError:
-    from torch.utils._pytree import (  # type: ignore[assignment]
-        tree_flatten,
-        tree_unflatten,
-    )
+    from torch.utils import _pytree as pytree  # type: ignore[no-redef]
 
 aten = torch.ops.aten
 
 _random_ops = {
     aten.native_dropout.default,
     aten.normal_.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.randint_like.default,
+    aten.randint_like.low_dtype,
+    aten.randint_like.low_dtype_out,
     aten.uniform_.default,
 }
 
@@ -89,7 +91,7 @@ def redistribute_local_args(
     # Need to fix all the ops before doing this.
     if op_info.args_tree_spec is not None:
         flatten_args_schema_to_reshard = tuple(
-            tree_flatten(suggested_input_schema.args_schema)[0]
+            pytree.tree_leaves(suggested_input_schema.args_schema)
         )
     else:
         flatten_args_schema_to_reshard = suggested_input_schema.args_schema
@@ -132,7 +134,7 @@ def _operator_dispatch(
 
     if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
         # flatten args/kwargs when necessary
-        tree_args, args_spec = tree_flatten(args)
+        tree_args, args_spec = pytree.tree_flatten(args)
         args_list: Sequence[object] = tree_args
     else:
         args_list, args_spec = args, None
@@ -201,7 +203,9 @@ def _operator_dispatch(
         mesh,
         OpSchema(
             op_call,
-            tree_unflatten(args_schema, args_spec) if args_spec else tuple(args_schema),
+            pytree.tree_unflatten(args_schema, args_spec)
+            if args_spec
+            else tuple(args_schema),
             kwargs_schema,
             schema_info=runtime_schema_info,
         ),
@@ -269,7 +273,7 @@ def _operator_dispatch(
             redistribute_local_args(op_info, suggested_input_schema)
 
         local_tensor_args = (
-            tree_unflatten(cast(List[object], op_info.local_args), args_spec)
+            pytree.tree_unflatten(cast(List[object], op_info.local_args), args_spec)
             if args_spec
             else op_info.local_args
         )
@@ -303,9 +307,10 @@ def _operator_dispatch(
 
     if _is_inplace_op(op_call):
         # inplace op should return self instead of re-wrapping
-        self = cast(dtensor.DTensor, args[0])
-        self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self, op_info.schema, output_sharding
+        if output_sharding.output_spec is not None:
+            return args[0], op_info.schema, output_sharding
+        else:
+            return None, op_info.schema, output_sharding
     elif _is_out_variant_op(op_call):
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
