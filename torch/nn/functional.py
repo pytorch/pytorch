@@ -1366,9 +1366,8 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""
+    r"""Randomly zero out entire channels (a channel is a 3D feature map.
     
-    Randomly zero out entire channels (a channel is a 3D feature map.
     E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
@@ -1406,9 +1405,8 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
-    r"""
+    r"""Randomly masks out entire channels (a channel is a feature map.
     
-    Randomly masks out entire channels (a channel is a feature map.
     E.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
     is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
     setting activations to zero, as in regular Dropout, the activations are set
@@ -1436,7 +1434,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
 
 
 def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = False) -> Tensor:
-    r"""Thresholds each element of the input Tensor.
+    r"""Threshold each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
@@ -1465,11 +1463,8 @@ In-place version of :func:`~threshold`.
 
 
 def relu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""
+    r"""Apply the rectified linear unit function element-wise. 
     
-    relu(input, inplace=False) -> Tensor
-
-    Applies the rectified linear unit function element-wise. 
     See :class:`~torch.nn.ReLU` for more details.
     """
     if has_torch_function_unary(input):
@@ -1492,12 +1487,10 @@ In-place version of :func:`~relu`.
 
 
 def glu(input: Tensor, dim: int = -1) -> Tensor:
-    r"""
+    r"""The gated linear unit.
     
-    glu(input, dim=-1) -> Tensor.
 
-    The gated linear unit. Computes:
-
+    Computes:
     .. math ::
         \text{GLU}(a, b) = a \otimes \sigma(b)
 
@@ -1518,10 +1511,9 @@ def glu(input: Tensor, dim: int = -1) -> Tensor:
 
 
 def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
-    r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
-
-    Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
+    r"""Apply the HardTanh function element-wise.
+    
+    See :class:`~torch.nn.Hardtanh` for more
     details.
     """
     if has_torch_function_unary(input):
@@ -1544,7 +1536,7 @@ In-place version of :func:`~hardtanh`.
 
 
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""relu6(input, inplace=False) -> Tensor
+    r"""Modification of the ReLU with activation limited to maximum size of 6. 
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
@@ -1560,7 +1552,7 @@ def relu6(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Applies the Exponential Linear Unit (ELU) function element-wise.
+    r"""Apply the Exponential Linear Unit (ELU) function element-wise.
 
     See :class:`~torch.nn.ELU` for more details.
     """
@@ -1584,7 +1576,7 @@ In-place version of :func:`~elu`.
 
 
 def selu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""selu(input, inplace=False) -> Tensor
+    r"""Apply the Scaled Exponential Linear Unit (ELU) function element-wise.
 
     Applies element-wise,
     :math:`\text{SELU}(x) = scale * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
@@ -1613,11 +1605,14 @@ In-place version of :func:`~selu`.
 
 
 def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""celu(input, alpha=1., inplace=False) -> Tensor
+    r"""Apply CELU, a continously differentiable ELU.
 
     Applies element-wise,
     :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
 
+    Refer paper for further information:
+    `Continuously Differentiable Exponential Linear Units`_.
+    
     See :class:`~torch.nn.CELU` for more details.
     """
     if has_torch_function_unary(input):
@@ -1640,10 +1635,8 @@ In-place version of :func:`~celu`.
 
 
 def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False) -> Tensor:
-    r"""
-    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
-
-    Applies element-wise,
+    r"""Apply LeakyReLU element-wise.
+    
     :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     See :class:`~torch.nn.LeakyReLU` for more details.
@@ -1690,9 +1683,7 @@ See :class:`~torch.nn.PReLU` for more details.
 def rrelu(
     input: Tensor, lower: float = 1.0 / 8, upper: float = 1.0 / 3, training: bool = False, inplace: bool = False
 ) -> Tensor:
-    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
-
-    Randomized leaky ReLU.
+    r"""Randomized leaky ReLU.
 
     See :class:`~torch.nn.RReLU` for more details.
     """
@@ -1757,9 +1748,9 @@ See :class:`~torch.nn.Hardshrink` for more details.
 
 
 def tanhshrink(input):
-    r"""tanhshrink(input) -> Tensor
+    r"""Apply the following function element-wise.
 
-    Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
+    Function :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
 
     See :class:`~torch.nn.Tanhshrink` for more details.
     """
@@ -1769,9 +1760,9 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    r"""softsign(input) -> Tensor
+    r"""Apply the following function element-wise.
 
-    Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
+    Function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
 
     See :class:`~torch.nn.Softsign` for more details.
     """
@@ -1808,7 +1799,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
 
 
 def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmin function.
+    r"""Apply a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
 
@@ -1834,7 +1825,7 @@ def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
 
 
 def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax function.
+    r"""Apply a softmax function.
 
     Softmax is defined as:
 
@@ -1871,7 +1862,7 @@ def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
 
 def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1) -> Tensor:
     r"""
-    Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
+    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1932,7 +1923,7 @@ def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: floa
 
 
 def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
-    r"""Applies a softmax followed by a logarithm.
+    r"""Apply a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
     operations separately is slower and numerically unstable. This function
@@ -1971,9 +1962,9 @@ See :class:`~torch.nn.Softshrink` for more details.
 
 
 def tanh(input):
-    r"""tanh(input) -> Tensor
-
-    Applies element-wise,
+    r"""Apply hyperbolic tangent (tanh) function element-wise.
+    
+    tanh defined as - 
     :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
 
     See :class:`~torch.nn.Tanh` for more details.
@@ -1982,7 +1973,7 @@ def tanh(input):
 
 
 def sigmoid(input):
-    r"""sigmoid(input) -> Tensor
+    r""" Compute sigmoid element wise.
 
     Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
 
@@ -1992,7 +1983,7 @@ def sigmoid(input):
 
 
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the element-wise function
+    r"""Apply the Hardsigmoid function element-wise.
 
     .. math::
         \text{Hardsigmoid}(x) = \begin{cases}
@@ -2059,7 +2050,8 @@ Shape:
 
 
 def silu(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the Sigmoid Linear Unit (SiLU) function, element-wise.
+    r"""Apply the Sigmoid Linear Unit (SiLU) function, element-wise.
+    
     The SiLU function is also known as the swish function.
 
     .. math::
@@ -2083,7 +2075,8 @@ def silu(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def mish(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the Mish function, element-wise.
+    r"""Apply the Mish function, element-wise.
+    
     Mish: A Self Regularized Non-Monotonic Neural Activation Function.
 
     .. math::
@@ -2102,8 +2095,9 @@ def mish(input: Tensor, inplace: bool = False) -> Tensor:
 
 
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Applies the hardswish function, element-wise, as described in the paper:
-
+    r"""Apply hardswish function, element-wise.
+    
+    Follows implementation as described in the paper:
     `Searching for MobileNetV3`_.
 
     .. math::
@@ -2138,7 +2132,7 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
+    r"""Simple lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
     The input to the module is a list of indices, and the embedding matrix,
@@ -2207,7 +2201,6 @@ def embedding(
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
             embedding,
@@ -2256,7 +2249,7 @@ def embedding_bag(
     include_last_offset: bool = False,
     padding_idx: Optional[int] = None,
 ) -> Tensor:
-    r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
+    r"""Compute sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
@@ -2464,7 +2457,7 @@ def batch_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Batch Normalization for each channel across a batch of data.
+    r"""Apply Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
@@ -2509,8 +2502,7 @@ def instance_norm(
     momentum: float = 0.1,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Instance Normalization for each channel in each data sample in a
-    batch.
+    r"""Apply Instance Normalization independently for each channel in every data sample within a batch.
 
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
@@ -2542,7 +2534,7 @@ def layer_norm(
     bias: Optional[Tensor] = None,
     eps: float = 1e-5,
 ) -> Tensor:
-    r"""Applies Layer Normalization for last certain number of dimensions.
+    r"""Apply Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
@@ -2556,7 +2548,7 @@ def layer_norm(
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
 ) -> Tensor:
-    r"""Applies Group Normalization for last certain number of dimensions.
+    r"""Apply Group Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
@@ -2569,9 +2561,10 @@ def group_norm(
 
 
 def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
-    r"""Applies local response normalization over an input signal composed of
-    several input planes, where channels occupy the second dimension.
-    Applies normalization across channels.
+    r"""Apply local response normalization over an input signal.
+    
+    Input ignal is composed of several input planes, where channels occupy the second dimension.
+    Normalization is applied across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
@@ -2897,7 +2890,9 @@ def kl_div(
     reduction: str = "mean",
     log_target: bool = False,
 ) -> Tensor:
-    r"""The `Kullback-Leibler divergence Loss
+    r"""Calculate KL Divergence loss.
+    
+    Refer - The `Kullback-Leibler divergence Loss
     <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
 
     See :class:`~torch.nn.KLDivLoss` for details.
@@ -2980,7 +2975,7 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input logits and target.
+    r"""Compute the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
@@ -3071,8 +3066,7 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Function that measures the Binary Cross Entropy between the target and input
-    probabilities.
+    r"""Calculate Binary Cross Entropy between the target and input probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
@@ -3141,8 +3135,7 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Function that measures Binary Cross Entropy between target and input
-    logits.
+    r"""Caculate Binary Cross Entropy between target and input logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -3441,7 +3434,11 @@ def soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
+    r"""
+    Creates a criterion that optimizes a two-class classification logistic loss between input tensor 
+x and target tensor 
+y (containing 1 or -1).
+    soft_margin_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
