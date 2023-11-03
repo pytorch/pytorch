@@ -30,7 +30,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db, foreach_unary_op_db, foreach_binary_op_db,
-    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_pointwise_op_db, foreach_reduce_op_db, foreach_other_op_db)
 from torchgen.yaml_utils import YamlLoader
 from torchgen.model import OperatorName
 
@@ -64,7 +64,7 @@ foreach_op_db = (
     foreach_binary_op_db +
     foreach_pointwise_op_db +
     foreach_reduce_op_db +
-    foreach_lerp_op_db
+    foreach_other_op_db
 )
 
 
@@ -805,7 +805,6 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
-    aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},

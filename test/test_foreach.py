@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db, foreach_lerp_op_db)
+    foreach_reduce_op_db, foreach_other_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, floating_types_and, floating_types, integral_types_and,
 )
@@ -119,7 +119,7 @@ class TestForeach(TestCase):
     #   - https://github.com/pytorch/pytorch/pull/100811
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=(torch.float32,)
     )
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
@@ -132,7 +132,7 @@ class TestForeach(TestCase):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, is_fastpath=True, zero_size=True)
 
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
     @parametrize(
         "noncontiguous,inplace",
@@ -657,7 +657,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         dtypes=(torch.float,),
     )
     def test_inplace_foreach_leaf_check_and_grad_fn(self, device, dtype, op):
@@ -681,7 +681,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         dtypes=(torch.float,),
     )
     def test_outplace_with_invalid_grads(self, device, dtype, op):
@@ -700,7 +700,7 @@ class TestForeach(TestCase):
     @ops(
         filter(
             lambda op: op.backward_requires_result,
-            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_lerp_op_db,
+            foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_other_op_db,
         ),
         dtypes=(torch.float32,),
     )
@@ -809,7 +809,7 @@ class TestForeach(TestCase):
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
     @ops(
-        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
+        foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
         dtypes=OpDTypes.supported,
         allowed_dtypes=(torch.float64, torch.complex128),
     )
