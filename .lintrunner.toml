@@ -187,6 +187,7 @@ include_patterns = [
     'torch/_dynamo/funcname_cache.py',
     'torch/_dynamo/convert_frame.py',
     'torch/_dynamo/replay_record.py',
+    'torch/_dynamo/resume_execution.py',
     'torch/_dynamo/symbolic_convert.py',
     'torch/_dynamo/testing.py',
     'torch/_dynamo/types.py',
