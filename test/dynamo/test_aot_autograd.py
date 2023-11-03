@@ -277,9 +277,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
     # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
     # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
-    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # that we do not hit this assertion, as dynamo recompiles correctly and protects this condition.
     #
-    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tensors
     # is because dynamo sends fake tensors down to aot_autograd.
     @patch("torch._functorch.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
