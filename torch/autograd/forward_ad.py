@@ -169,7 +169,7 @@ def unpack_dual(tensor, *, level=None):
 
 
 class dual_level(_DecoratorContextManager):
-    r"""Create a context manager for forward AD, where all forward AD computation must occur within the "dual_level" context.
+    r"""Create a context manager for forward AD, where all forward AD computation must occur within the ``dual_level`` context.
 
     .. Note::
 
