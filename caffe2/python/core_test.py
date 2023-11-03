@@ -255,25 +255,25 @@ class TestExternalInputs(test_util.TestCase):
     def testAddExternalInputShouldRaiseIfDuplicate(self):
         net = core.Net("test")
         net.AddExternalInput(
-            schema.Struct(("x", schema.Scalar(np.float))),
+            schema.Struct(("x", schema.Scalar(np.float64))),
         )
         with self.assertRaises(AssertionError):
             net.AddExternalInput(
-                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float64))),
             )
 
     def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
         net = core.Net("test")
         with self.assertRaises(AssertionError):
             net.AddExternalInput(
-                schema.Struct(("x", schema.Scalar(np.float))),
-                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float64))),
+                schema.Struct(("x", schema.Scalar(np.float64))),
             )
 
     def testSetInputRecordWithBlobs(self):
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(
-            ("x", schema.Scalar(np.float)),
+            ("x", schema.Scalar(np.float64)),
         ))
         input_record = net.set_input_record(record)
         self.assertTrue(net.BlobIsDefined(input_record.x()))
@@ -281,7 +281,7 @@ class TestExternalInputs(test_util.TestCase):
 
     def testSetInputRecordWithoutBlobs(self):
         net = core.Net("test")
-        record = schema.Struct(("x", schema.Scalar(np.float)))
+        record = schema.Struct(("x", schema.Scalar(np.float64)))
         input_record = net.set_input_record(record)
         self.assertTrue(net.BlobIsDefined(input_record.x()))
         self.assertIn(input_record.x(), net.external_inputs)

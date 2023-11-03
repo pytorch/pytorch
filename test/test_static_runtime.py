@@ -297,6 +297,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph on
     multiple nested fork/wait operations
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4(self):
         input = torch.ones(3, 3)
         num_forks = 10
@@ -311,6 +312,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph with multiple
     nested fork/wait operations on runAsync API returning future
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4_async(self):
         input = torch.ones(3, 3)
         num_forks = 10
