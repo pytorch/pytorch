@@ -55,7 +55,7 @@ class TestFSDPFineTune(FSDPTest):
             if i % 2 == 0:
                 for param in seq[i * 2].parameters(recurse=True):
                     param.requires_grad = requires_grad
-                    
+
     @classmethod
     @skip_if_lt_x_gpu(2)
     def _run(cls, rank, test_name, file_name, pipe):
