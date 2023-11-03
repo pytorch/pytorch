@@ -3211,7 +3211,8 @@ module_db: List[ModuleInfo] = [
                        unittest.expectedFailure,
                        'TestModule',
                        'test_cpu_gpu_parity',
-                       dtypes=[torch.float32],
+                       dtypes=[torch.float32, torch.float64],
+                       device_type='cuda',
                        active_if=(TEST_WITH_TORCHINDUCTOR) and (lambda p: not p['training']),
                    ),)
                ),
