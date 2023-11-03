@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import torch
+from torch._dynamo.test_case import TestCase as DynamoTestCase
 from torch._dynamo.testing import CompileCounter
 
 
@@ -99,3 +100,54 @@ class PublicTorchCompilerTests(unittest.TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
+
+
+class ResumeAfterRegionTests(DynamoTestCase):
+    def test_resume_at_after_try_except(self):
+        def fn(x):
+            x = x + 1
+            # Should fallback on eager here
+            try:
+                x += 3
+                raise AssertionError()
+            except AssertionError:
+                pass
+            # Should resume at here
+            x = x + 2
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        cnt = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=cnt)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_resume_at_after_try_except_nested(self):
+        def fn(x):
+            x = x + 1
+            # Should fallback on eager here
+            try:
+                x += 3
+                try:
+                    raise AssertionError()
+                except AssertionError:
+                    x += 4
+            except AssertionError:
+                x += 5
+            # Should resume at here
+            x = x + 2
+            return x
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        cnt = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(backend=cnt)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(cnt.frame_count, 2)

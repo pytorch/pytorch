@@ -734,26 +734,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert self.checkpoint is not None
         continue_inst, state = self.checkpoint
 
-        cannot_restore_depth = 0
-        for idx_from_top, block in enumerate(reversed(self.block_stack)):
-            if not block.can_restore():
-                cannot_restore_depth = idx_from_top + 1
-
-        # The analysis of `JUMP_FORWARD` is currently wrong. It equates each `JUMP_FORWARD`
-        # with one member of the block stack. However, there can be further blocks setup ahead,
-        # or `JUMP_FORWARD` from other. The correct way to analyze is to jump into the `FINALLY`
-        # region of the target, and then chase the `JUMP_FORWARD` from there.
-        if cannot_restore_depth > 0:
-            jump_forwards = []
+        cannot_restore_entry = next(
+            entry for entry in reversed(self.block_stack) if not entry.can_restore()
+        )
+        if cannot_restore_entry:
+            cannot_restore_target = cannot_restore_entry.target
             insts = self.instructions[self.instruction_pointer :]
+            last_jump_forward = None
+            in_active_region = False
             for inst in insts:
-                if inst.opname == "JUMP_FORWARD":
-                    jump_forwards.append(inst)
-                    if len(jump_forwards) >= cannot_restore_depth:
-                        break
-            assert len(jump_forwards) == cannot_restore_depth
-
-            last_jump_forward = jump_forwards[-1]
+                if inst == cannot_restore_target:
+                    in_active_region = True
+                if in_active_region and inst.opname == "JUMP_FORWARD":
+                    last_jump_forward = inst
 
         self.restore_graphstate(state)
         self.output.compile_subgraph(
@@ -762,15 +755,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
-        # If the reason why we fail is due to non-restorable block stack entries:
-        if cannot_restore_depth > 0 and not self.one_graph:
-            # The call to resume at should be the destination of the Kth unconditional jump
-            # Where K is the depth of the blockstack at which blocks below can restore
-            # The rest of the code till that point inlined into the `output_instructions`
+        # If the reason why we fail is due to non-restorable block stack entries.
+        # Hence, resume at the jump target of its unwind/cleanup block
+        if cannot_restore_entry and not self.one_graph:
+            assert last_jump_forward is not None
             jump_fwd_index = None
             target_index = None
             for idx, instruction in enumerate(self.instructions):
-                print(idx, instruction)
                 if instruction == last_jump_forward:
                     jump_fwd_index = idx
                 if instruction == last_jump_forward.target:
@@ -780,15 +771,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             assert jump_fwd_index is not None
 
             resume_at = self.create_call_resume_at(last_jump_forward.target)
+            for inst in self.instructions:
+                if inst.target == last_jump_forward.target:
+                    inst.target = resume_at[0]
 
-            self.instructions[jump_fwd_index].target = resume_at[0]
             self.output.add_output_instructions(
                 [create_jump_absolute(continue_inst)] + self.instructions[:target_index]
             )
             self.output.add_output_instructions(resume_at)
-
-            for idx, instruction in enumerate(self.output.output_instructions):
-                print(idx, instruction)
         else:
             self.output.add_output_instructions(
                 [create_jump_absolute(continue_inst)] + self.instructions
