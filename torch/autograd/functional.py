@@ -965,7 +965,7 @@ def hessian(
 
 
 def vhp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create function to calculate dot product between vector "v" and Hessian of a scalar function at a specified point.
+    r"""Create a function to calculate dot product between vector "v" and Hessian of a scalar function at a specified point.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
