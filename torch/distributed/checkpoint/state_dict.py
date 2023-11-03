@@ -77,9 +77,13 @@ class StateDictOptions:
     """
     This dataclass specifies how get_state_dict/set_state_dict will work.
 
-    - ``fsdp_state_dict_type``: if the model contains FSDP sharded submodules,
-      what FSDP state_dict type should be used.
-      The default value is SHARDED_STATE_DICT.
+    - ``full_state_dict``: if this is set to True, all the tensors in the
+      returned state_dict will be gathered. No ShardedTensor and DTensor
+      will be in the returned state_dict.
+
+    - ``cpu_offload``: offload all the tensors to cpu. To prevent CPU OOM, if
+      ``full_state_dict`` is also true, then only the rank0 will get the
+      state_dict and all other ranks will get empty state_dict.
 
     - ``ignore_frozen_params``: if the value is True, the returned state_dict
       won't contain any frozen parameters -- the ``requires_grad`` is False.
@@ -100,7 +104,8 @@ class StateDictOptions:
       The default value is False.
     """
 
-    fsdp_state_dict_type: StateDictType = StateDictType.SHARDED_STATE_DICT
+    full_state_dict: bool = False
+    cpu_offload: bool = False
     ignore_frozen_params: bool = False
     keep_submodule_prefixes: bool = True
     strict: bool = True
@@ -210,25 +215,25 @@ def _verify_options(
     fsdp_context: Callable
     if fsdp_modules:
         # FSDP API only work if at least one FSDP instance exists.
-        if options.fsdp_state_dict_type == StateDictType.FULL_STATE_DICT:
+        if options.full_state_dict:
             state_dict_config = FullStateDictConfig(
-                offload_to_cpu=True, rank0_only=True
+                offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
             )
             optim_state_dict_config = FullOptimStateDictConfig(
-                offload_to_cpu=True, rank0_only=True
+                offload_to_cpu=options.cpu_offload, rank0_only=options.cpu_offload
             )
-        elif options.fsdp_state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            state_dict_config = ShardedStateDictConfig()
-            optim_state_dict_config = ShardedOptimStateDictConfig()
+            state_dict_type = StateDictType.FULL_STATE_DICT
         else:
-            raise RuntimeError(
-                "state_dict currently support only FSDP "
-                "FULL_STATE_DICT and SHARDED_STATE_DICT"
+            state_dict_config = ShardedStateDictConfig()
+            optim_state_dict_config = ShardedOptimStateDictConfig(
+                offload_to_cpu=options.cpu_offload,
             )
+            state_dict_tyupe = StateDictType.SHARDED_STATE_DICT
+
         fsdp_context = functools.partial(
             FSDP.state_dict_type,
             module=model,
-            state_dict_type=options.fsdp_state_dict_type,
+            state_dict_type=state_dict_type,
             state_dict_config=state_dict_config,
             optim_state_dict_config=optim_state_dict_config,
         )
