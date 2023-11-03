@@ -44,7 +44,7 @@ jobs:
     # Also ensure that we always run with the right architecture
     defaults:
       run:
-        shell: arch -arch ${{ inputs.arch }} bash -e -l {0}
+        shell: /bin/bash --noprofile --norc -e -o pipefail {0}
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
