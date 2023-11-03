@@ -1716,6 +1716,25 @@ utils_device.CURRENT_DEVICE == None""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_array_of_arrays(self):
+        def fn(x, y):
+            return np.array([x, y])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x, y = np.float64(1), np.float64(2)
+        res = opt_fn(x, y)
+        self.assertEqual(res, np.array([1, 2], dtype=float))
+        self.assertEqual(type(res), np.ndarray)
+        self.assertEqual(cnts.frame_count, 1)
+
+        x, y = np.arange(2), np.arange(2) + 2
+        res = opt_fn(x, y)
+        self.assertEqual(res, np.array([[0, 1], [2, 3]]))
+        self.assertEqual(type(res), np.ndarray)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_numpy_readonly(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -8131,8 +8150,8 @@ ShapeEnv not equal: field values don't match:
         other.create_unbacked_symint()
 
         # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
-        #   - +1 defferred_runtime_asserts entry
-        #   - Change: num_defferred_runtime_asserts
+        #   - +1 deferred_runtime_asserts entry
+        #   - Change: num_deferred_runtime_asserts
         expect_true(r % 3 == 0)
 
         self.assertExpectedRaisesInline(
@@ -8143,6 +8162,9 @@ ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  > Right: {}
+==> divisible: values don't match.
+  >  Left: {Mod(i0, 3)}
   > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, i0, mod}
