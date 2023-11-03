@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import (
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase
+from contextlib import contextmanager
 from unittest.mock import patch
 import torch
 import re
@@ -51,30 +52,37 @@ def _check_has_dynamic_shape(
     )
     self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
 
+@contextmanager
+def _temporary_log_handler(logger, handler, level):
+    logger.addHandler(handler)
+    prev_level = logger.level
+    logger.setLevel(level)
+    try:
+        yield
+    finally:
+        logger.setLevel(prev_level)
+        logger.removeHandler(handler)
+
 def run_and_get_code(fn, *args, **kwargs):
     """
     Run fn and return the result along with the generated code.
     """
     from torch._inductor import config
+
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
-    # even if this run_and_get_cpp_code function is called multiple times.
+    # even if this run_and_get_code function is called multiple times.
     with patch.object(config, "debug", True):
         torch._dynamo.reset()
         import io
         import logging
+        from torch._inductor.graph import output_code_log
 
         log_capture_string = io.StringIO()
         ch = logging.StreamHandler(log_capture_string)
-        from torch._inductor.graph import output_code_log
-
-        output_code_log.addHandler(ch)
-        prev_level = output_code_log.level
-        output_code_log.setLevel(logging.DEBUG)
-        result = fn(*args, **kwargs)
-        s = log_capture_string.getvalue()
-        output_code_log.setLevel(prev_level)
-        output_code_log.removeHandler(ch)
+        with _temporary_log_handler(output_code_log, ch, logging.DEBUG):
+            result = fn(*args, **kwargs)
+            s = log_capture_string.getvalue()
     return result, s
 
 def run_and_get_multiple_code(fn, *args, **kwargs):
