@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 
-from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _view_as_real,
                         _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 
@@ -82,18 +82,18 @@ class Adagrad(Optimizer):
                 state["sum"].share_memory_()
 
     def _init_group(self, group, params_with_grad, grads, state_sums, state_steps):
-        has_sparse_grad = False
+        has_sparse_grad, has_complex = False, False
         for p in group["params"]:
             if p.grad is not None:
-                if p.grad.is_sparse:
-                    has_sparse_grad = True
+                has_sparse_grad |= p.grad.is_sparse
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 grads.append(p.grad)
                 state = self.state[p]
                 state_sums.append(state["sum"])
                 state_steps.append(state["step"])
 
-        return has_sparse_grad
+        return has_sparse_grad, has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -115,7 +115,7 @@ class Adagrad(Optimizer):
             state_sums = []
             state_steps = []
 
-            has_sparse_grad = self._init_group(group, params_with_grad, grads, state_sums, state_steps)
+            has_sparse_grad, has_complex = self._init_group(group, params_with_grad, grads, state_sums, state_steps)
 
             adagrad(
                 params_with_grad,
@@ -130,6 +130,7 @@ class Adagrad(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -189,6 +190,7 @@ def adagrad(
     has_sparse_grad: bool = None,
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     lr: float,
     weight_decay: float,
@@ -229,6 +231,7 @@ def adagrad(
         has_sparse_grad=has_sparse_grad,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -252,6 +255,7 @@ def _single_tensor_adagrad(
     has_sparse_grad: bool,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for (param, grad, state_sum, step_t) in zip(params, grads, state_sums, state_steps):
@@ -310,6 +314,7 @@ def _multi_tensor_adagrad(
     has_sparse_grad: bool,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -335,6 +340,7 @@ def _multi_tensor_adagrad(
                 has_sparse_grad=True,
                 maximize=False,
                 differentiable=differentiable,
+                has_complex=has_complex,
             )
             continue
 
@@ -342,11 +348,8 @@ def _multi_tensor_adagrad(
             device_grads = torch._foreach_neg(device_grads)
 
         # Handle complex parameters
-        for i in range(len(device_params)):
-            if torch.is_complex(device_params[i]):
-                device_params[i] = torch.view_as_real(device_params[i])
-                device_grads[i] = torch.view_as_real(device_grads[i])
-                device_state_sums[i] = torch.view_as_real(device_state_sums[i])
+        if has_complex:
+            _view_as_real(device_params, device_grads, device_state_sums)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
