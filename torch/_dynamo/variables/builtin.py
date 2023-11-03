@@ -843,7 +843,7 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
                 guards=guards,
             ).add_options(self, obj)
-        elif isinstance(obj, UserDefinedObjectVariable):
+        elif isinstance(obj, variables.UserDefinedObjectVariable):
             # Handle as `UserDefinedObjectVariable` if it implements `__iter__`
             return obj.call_method(tx, "__iter__", [], {})
 
