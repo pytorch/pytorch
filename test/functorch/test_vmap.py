@@ -3596,6 +3596,12 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
 
+        # RuntimeError: linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel()
+        # INTERNAL ASSERT FAILED at "/var/lib/jenkins/workspace/aten/src/ATen/native/cuda/Indexing.cu":496,
+        # please report a bug to PyTorch. number of flattened indices did not match number of elements
+        # in the value tensor: 20 vs 40
+        xfail("index_put", "broadcast", device_type="cuda", dtypes=(torch.float32,)),
+
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
         decorate('nn.functional.instance_norm', decorator=skipIfRocm),
