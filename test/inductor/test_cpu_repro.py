@@ -423,7 +423,7 @@ class CPUReproTests(TestCase):
                         inps.append((h, c))
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
 
                     # Check that _flat_weights are not functional_tensor, otherwise
                     # deepcopy will fail during recompilation.
@@ -517,7 +517,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             inps = [embeds, (hidden_0, hidden_1)]
             fn_opt = torch._dynamo.optimize("inductor")(mod)
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
             self.assertFalse("torch.ops.mkldnn._lstm" in code)
             self.assertEqual(fn_opt(*inps), mod(*inps))
@@ -1382,7 +1382,7 @@ class CPUReproTests(TestCase):
 
         fn_opt = torch.compile()(fn)
         with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             FileCheck().check("atomic_add").run(code)
 
             self.assertEqual(
@@ -1565,7 +1565,7 @@ class CPUReproTests(TestCase):
 
             f_opt = torch.compile()(f)
 
-            code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
+            _, code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
             FileCheck().check_not("void kernel").run(code)
 
             self.assertEqual(
@@ -1578,7 +1578,7 @@ class CPUReproTests(TestCase):
                 return x[torch.tensor(1) :] * 2
 
             f_opt = torch.compile()(f)
-            code = run_and_get_cpp_code(f_opt, inps[0])
+            _, code = run_and_get_cpp_code(f_opt, inps[0])
             FileCheck().check_not("void kernel").run(code)
             self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
@@ -2267,7 +2267,7 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(opt_fn, x)
+        _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
         # def and use
         FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
@@ -2418,7 +2418,7 @@ class CPUReproTests(TestCase):
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
+            _, code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -2430,7 +2430,7 @@ class CPUReproTests(TestCase):
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
+        _, code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
