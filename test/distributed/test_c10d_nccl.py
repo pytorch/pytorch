@@ -1241,6 +1241,13 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         _check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
         dist.destroy_process_group()
 
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, pg_options=opts, timeout=timedelta(seconds=1240))
+        _check_nccl_timeout(timedelta(seconds=1240))
+        dist.destroy_process_group()
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
