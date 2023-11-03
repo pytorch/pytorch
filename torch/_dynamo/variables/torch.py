@@ -622,6 +622,24 @@ class TorchVariable(VariableTracker):
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
             unimplemented("TypeError(\"'module' object is not callable\")")
+        elif self.value == torch.ops.inductor.accumulate_grad_.default:
+            from .builder import SourcelessBuilder
+
+            def dummy_accumulate_grad_(t1, t2):
+                if t1.grad is None:
+                    t1.grad = t2
+                else:
+                    t1.grad += t2
+
+            dummy_accumulate_grad_variable = SourcelessBuilder()(
+                tx, dummy_accumulate_grad_
+            )
+            res = tx.inline_user_function_return(
+                dummy_accumulate_grad_variable,
+                args,
+                {},
+            )
+            return ConstantVariable.create(None, **options)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

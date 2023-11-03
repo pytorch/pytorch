@@ -318,6 +318,7 @@ def check_file(filename, allow_torch=False):
     if (
         bool(SKIP_DIRS_RE.match(filename))
         and not filename.endswith("variables/tensor.py")
+        and not filename.endswith("variables/torch.py")
         and not filename.endswith("fx/graph_module.py")
     ):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
