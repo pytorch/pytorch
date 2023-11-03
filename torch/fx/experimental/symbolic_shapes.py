@@ -153,6 +153,10 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
+        if not is_symbolic(val):
+            # This allow applies to the jagged layout NestedTensor case as
+            # singleton ints are not symbolic
+            return set()
         return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
@@ -768,10 +772,6 @@ SYMPY_INTERP = {
     'ceiling': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
 }
-
-def _translation_validation_enabled() -> bool:
-    from torch.fx.experimental.validator import translation_validation_enabled
-    return translation_validation_enabled()
 
 
 def _lru_cache(fn, maxsize=None):
@@ -1424,6 +1424,9 @@ class ShapeEnv:
         # Disable event recording when replaying.
         kwargs["should_record_events"] = False
 
+        from torch.fx.experimental.validator import translation_validation_enabled
+        self._translation_validation_enabled = translation_validation_enabled()
+
         # If not specified, enable event recording if both:
         #   - Translation validation is on
         #   - Translation validation bisection is not disabled
@@ -1431,7 +1434,7 @@ class ShapeEnv:
             should_record_events
             if should_record_events is not None
             else (
-                _translation_validation_enabled()
+                self._translation_validation_enabled
                 and not torch._dynamo.config.translation_validation_no_bisect
             )
         )
@@ -1567,7 +1570,10 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
-        if _translation_validation_enabled():
+        from torch.fx.experimental.validator import translation_validation_enabled
+        self._translation_validation_enabled = translation_validation_enabled()
+
+        if self._translation_validation_enabled:
             from torch.fx.experimental.validator import TranslationValidator
 
             self.validator = TranslationValidator()
@@ -1685,7 +1691,7 @@ class ShapeEnv:
         self.frozen = True
 
     def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
-        if not _translation_validation_enabled():
+        if not self._translation_validation_enabled:
             return None
         srcname = source.name()
         if source not in self.source_to_symbol:
@@ -1693,19 +1699,19 @@ class ShapeEnv:
         return self.source_to_symbol[srcname]
 
     def _add_z3var(self, symbol: sympy.Symbol, type: Type) -> None:
-        if _translation_validation_enabled():
+        if self._translation_validation_enabled:
             self.validator.add_var(symbol, type)
 
     def _add_target_expr(self, expr) -> None:
-        if _translation_validation_enabled():
+        if self._translation_validation_enabled:
             self.validator.add_target_expr(expr)
 
     def _add_assertion(self, expr) -> None:
-        if _translation_validation_enabled():
+        if self._translation_validation_enabled:
             self.validator.add_assertion(expr)
 
     def _check_translation_validate(self) -> None:
-        if _translation_validation_enabled():
+        if self._translation_validation_enabled:
             self.validator.validate()
 
     @record_shapeenv_event()
@@ -1719,7 +1725,7 @@ class ShapeEnv:
         # Flags whether the returned node was cached or not.
         fresh = False
 
-        if _translation_validation_enabled() and node_key not in self.fx_node_cache:
+        if self._translation_validation_enabled and node_key not in self.fx_node_cache:
             from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
@@ -1745,7 +1751,7 @@ class ShapeEnv:
             symbol: sympy.Symbol,
             type: Type,
     ) -> Optional[torch.fx.Node]:
-        if not _translation_validation_enabled():
+        if not self._translation_validation_enabled:
             return None
 
         node_key = (self.graph.placeholder, (symbol,))
@@ -1767,7 +1773,7 @@ class ShapeEnv:
         return self.fx_node_cache[node_key]
 
     def remove_fx_node(self, node: Optional[torch.fx.Node]) -> None:
-        if _translation_validation_enabled() and node is not None:
+        if self._translation_validation_enabled and node is not None:
             self.name_to_node.pop(node.name)
             self.graph.erase_node(node)
 
@@ -2009,7 +2015,7 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
-        if _translation_validation_enabled() and source is not None:
+        if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
             assert symbol is not None
@@ -2525,7 +2531,7 @@ class ShapeEnv:
 
         if not _simplified:
             for source, expr in input_guards:
-                if _translation_validation_enabled():
+                if self._translation_validation_enabled:
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
                     if srcname in self.source_to_symbol:
@@ -2705,7 +2711,7 @@ class ShapeEnv:
             },
         )
 
-        if _translation_validation_enabled():
+        if self._translation_validation_enabled:
             from torch.fx.experimental.validator import PopulateValidator
 
             # Add all deferred runtime assertions; these are not technically
@@ -2735,13 +2741,31 @@ class ShapeEnv:
         self._check_translation_validate()
         return exprs
 
-    def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
+    def produce_guards_expression(self, placeholders, ignore_static=True):
+        """
+        Expected to be used with evaluate_guards_expression(). Produces the guards
+        for the given placeholders and returns a string expression to be evaluated
+        by evaluate_guards_expression given concrete values for the placeholders.
+        """
         from torch._dynamo.source import LocalSource
-        arg_names = [f"t{i}" for i in range(len(args))]
+        arg_names = [f"t{i}" for i in range(len(placeholders))]
         guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names], ignore_static=ignore_static)
         if guards:
-            code = " and ".join(guards)
-            return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
+            return " and ".join(guards)
+        return None
+
+    def evaluate_guards_expression(self, code, args):
+        """
+        Expected to be used with produce_guards_expression(). Evaluates an expression
+        generated by produce_guards_expression for the given concrete args.
+        """
+        arg_names = [f"t{i}" for i in range(len(args))]
+        return eval(code, SYMPY_INTERP, {"L": dict(zip(arg_names, args))})
+
+    def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
+        code = self.produce_guards_expression(placeholders, ignore_static=ignore_static)
+        if code:
+            return self.evaluate_guards_expression(code, args)
         return True
 
     def bind_symbols(self, placeholders, args):
@@ -2816,9 +2840,18 @@ class ShapeEnv:
         Tries to evaluate expr without introducing guards
 
         If unbacked_only == True, then we only do substitutions on
-        unbacked SymInts (leaving regular hinted integers alone).
+        unbacked SymInts (leaving regular hinted integers alone).  This could
+        result in an expression that still contains backed SymInts, which you
+        could then potentially guard on.
+
+        Use compute_hint == True if you are trying to compute a non-binding
+        hint for the particular hint values of backed SymInts, e.g., if
+        s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
         expr = self.simplify(expr)
+
+        if compute_hint:
+            expr = expr.xreplace(self.var_to_val)
 
         symbols = list(expr.free_symbols)
 
@@ -2954,7 +2987,7 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: "sympy.Expr"):
+    def size_hint(self, expr: "sympy.Expr", *, allow_none=False):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
@@ -2965,6 +2998,8 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
+            if allow_none:
+                return None
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3004,6 +3039,7 @@ class ShapeEnv:
             if a not in self.replacements or expr != self.replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
+        log.info("set_replacement %s = %s", a, expr)
         self.replacements[a] = expr
 
         # When specializing 'a == expr', the equality should be also conveyed to
@@ -3050,7 +3086,8 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        # NB: prioritize unbacked symints for solving by ordering them last
+        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):
@@ -3061,7 +3098,19 @@ class ShapeEnv:
                 r = try_solve(expr, free[0], floordiv_inequality=False)
                 if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     new_var = self._find(r[1])
-                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                    ok = False
+                    if self.is_unbacked_symint(free[0]):
+                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                        # s0 - i0 - i1.  Arguably this should be OK but the
+                        # runtime assert machinery is very delicate right now
+                        # so this causes things to fail e.g.,
+                        # test_split_unbacked_sizes
+                        ok = len(free_unbacked_symbols(new_var)) <= 1
+                    else:
+                        # Never substitute backed with unbacked
+                        ok = len(free_unbacked_symbols(new_var)) == 0
+                    if ok:
+                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3186,7 +3235,7 @@ class ShapeEnv:
         node = None
         fresh = False
         if (
-                _translation_validation_enabled()
+                self._translation_validation_enabled
                 and fx_node is not None
                 and not self._suppress_guards_tls()
         ):
@@ -3326,7 +3375,7 @@ class ShapeEnv:
 
         # OK, we're definitely doing a runtime assert now
         if (
-            _translation_validation_enabled()
+            self._translation_validation_enabled
             and fx_node is not None
             and not self._suppress_guards_tls()
         ):
@@ -3337,9 +3386,9 @@ class ShapeEnv:
 
         self._check_frozen(expr, sympy.true)
 
-        # TODO: eliminate symbols on equality tests
-        # (_maybe_guard_eq assumes everything is hinted so it doesn't work
-        # here)
+        # eliminate symbols on equality tests
+        if isinstance(expr, sympy.Eq):
+            self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
             stack = CapturedTraceback.extract(skip=1)
