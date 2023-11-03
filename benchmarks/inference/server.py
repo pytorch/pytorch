@@ -175,6 +175,7 @@ class BackendWorker(mp.Process):
         return m
 
     def run(self):
+        torch.cuda.init()
         while True:
             try:
                 data, request_time = self.request_queue.get(timeout=10)
