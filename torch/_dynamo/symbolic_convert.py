@@ -733,15 +733,66 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         assert not self.output.output_instructions
         assert self.checkpoint is not None
         continue_inst, state = self.checkpoint
+
+        cannot_restore_depth = 0
+        for idx_from_top, block in enumerate(reversed(self.block_stack)):
+            if not block.can_restore():
+                cannot_restore_depth = idx_from_top + 1
+
+        # The analysis of `JUMP_FORWARD` is currently wrong. It equates each `JUMP_FORWARD`
+        # with one member of the block stack. However, there can be further blocks setup ahead,
+        # or `JUMP_FORWARD` from other. The correct way to analyze is to jump into the `FINALLY`
+        # region of the target, and then chase the `JUMP_FORWARD` from there.
+        if cannot_restore_depth > 0:
+            jump_forwards = []
+            insts = self.instructions[self.instruction_pointer :]
+            for inst in insts:
+                if inst.opname == "JUMP_FORWARD":
+                    jump_forwards.append(inst)
+                    if len(jump_forwards) >= cannot_restore_depth:
+                        break
+            assert len(jump_forwards) == cannot_restore_depth
+
+            last_jump_forward = jump_forwards[-1]
+
         self.restore_graphstate(state)
         self.output.compile_subgraph(
             self,
+            # TODO: not sure if this needs to be changed if we are going to resume_at
             partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
-        self.output.add_output_instructions(
-            [create_jump_absolute(continue_inst)] + self.instructions
-        )
+        # If the reason why we fail is due to non-restorable block stack entries:
+        if cannot_restore_depth > 0 and not self.one_graph:
+            # The call to resume at should be the destination of the Kth unconditional jump
+            # Where K is the depth of the blockstack at which blocks below can restore
+            # The rest of the code till that point inlined into the `output_instructions`
+            jump_fwd_index = None
+            target_index = None
+            for idx, instruction in enumerate(self.instructions):
+                print(idx, instruction)
+                if instruction == last_jump_forward:
+                    jump_fwd_index = idx
+                if instruction == last_jump_forward.target:
+                    target_index = idx
+                    break
+            assert target_index is not None
+            assert jump_fwd_index is not None
+
+            resume_at = self.create_call_resume_at(last_jump_forward.target)
+
+            self.instructions[jump_fwd_index].target = resume_at[0]
+            self.output.add_output_instructions(
+                [create_jump_absolute(continue_inst)] + self.instructions[:target_index]
+            )
+            self.output.add_output_instructions(resume_at)
+
+            for idx, instruction in enumerate(self.output.output_instructions):
+                print(idx, instruction)
+        else:
+            self.output.add_output_instructions(
+                [create_jump_absolute(continue_inst)] + self.instructions
+            )
 
     def run_ctx_mgr(self):
         # NB: Don't push the top level frame summary; set_current_loc will
@@ -1297,7 +1348,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             .guards
         )
 
-    def create_call_resume_at(self, offset):
+    def create_call_resume_at(self, inst):
         raise AssertionError(
             f"create_call_resume_at not overridden by subclass {type(self)}"
         )
@@ -2535,7 +2586,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing
 
-    def create_call_resume_at(self, offset):
+    def create_call_resume_at(self, inst):
         unimplemented("cant resume while inlining")
 
     def RETURN_VALUE(self, inst):
