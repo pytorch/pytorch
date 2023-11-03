@@ -12,7 +12,7 @@ SUPPORTED_NODES: Dict[Type[Any], FlattenFuncSpec] = {}
 SUPPORTED_NODES_EXACT_MATCH: Dict[Type[Any], Optional[FlattenFuncExactMatchSpec]] = {}
 
 def register_pytree_flatten_spec(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn_spec: FlattenFuncSpec,
     flatten_fn_exact_match_spec: Optional[FlattenFuncExactMatchSpec] = None
 ) -> None:
@@ -66,4 +66,4 @@ def _namedtuple_flatten_spec_exact_match(d: NamedTuple, spec: TreeSpec) -> bool:
 register_pytree_flatten_spec(dict, _dict_flatten_spec, _dict_flatten_spec_exact_match)
 register_pytree_flatten_spec(list, _list_flatten_spec, _list_flatten_spec_exact_match)
 register_pytree_flatten_spec(tuple, _tuple_flatten_spec, _tuple_flatten_spec_exact_match)
-register_pytree_flatten_spec(namedtuple, _namedtuple_flatten_spec, _tuple_flatten_spec_exact_match)
+register_pytree_flatten_spec(namedtuple, _namedtuple_flatten_spec, _tuple_flatten_spec_exact_match)  # type: ignore[arg-type]

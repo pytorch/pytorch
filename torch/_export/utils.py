@@ -21,7 +21,7 @@ SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
 def register_dataclass_as_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
