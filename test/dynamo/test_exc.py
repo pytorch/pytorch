@@ -280,7 +280,7 @@ Failed Source Expressions:
             """\
 translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
 
-Failure ocurred while running node:
+Failure occurred while running node:
     %split : [num_users=1] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
 
 Model:
