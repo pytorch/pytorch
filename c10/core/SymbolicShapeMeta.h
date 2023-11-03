@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/core/SymInt.h>
 #include <c10/core/SymBool.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/DimVector.h>
 
 #include <bitset>
@@ -8,13 +8,13 @@
 namespace c10 {
 
 class C10_API SymbolicShapeMeta {
-public:
+ public:
   // Basic metadata from which other quantities are derived
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
   SymInt storage_offset_ = 0;
 
-  bool strides_valid_ = true;  // e.g. for sparse where there are no strides
+  bool strides_valid_ = true; // e.g. for sparse where there are no strides
 
   void refresh_numel() {
     available_.reset(numel_avail);
@@ -81,13 +81,14 @@ public:
     if (available_.test(is_channels_last_contiguous_avail)) {
       return is_channels_last_contiguous_;
     }
-    is_channels_last_contiguous_ = [&]{
+    is_channels_last_contiguous_ = [&] {
       switch (dim()) {
         case 5:
         case 4: {
           return compute_channels_last_contiguous_2d();
         }
-        default: return SymBool{false};
+        default:
+          return SymBool{false};
       }
     }();
     available_.set(is_channels_last_contiguous_avail);
@@ -98,10 +99,12 @@ public:
     if (available_.test(is_channels_last_3d_contiguous_avail)) {
       return is_channels_last_3d_contiguous_;
     }
-    is_channels_last_3d_contiguous_ = [&]{
+    is_channels_last_3d_contiguous_ = [&] {
       switch (dim()) {
-        case 5: return compute_channels_last_contiguous_3d_dim5();
-        default: return SymBool{false};
+        case 5:
+          return compute_channels_last_contiguous_3d_dim5();
+        default:
+          return SymBool{false};
       }
     }();
     available_.set(is_channels_last_3d_contiguous_avail);
@@ -114,9 +117,12 @@ public:
     }
     is_channels_last_ = [&] {
       switch (dim()) {
-        case 5: return compute_channels_last_2d_dim5();
-        case 4: return compute_strides_like_channels_last_2d();
-        default: return SymBool{false};
+        case 5:
+          return compute_channels_last_2d_dim5();
+        case 4:
+          return compute_strides_like_channels_last_2d();
+        default:
+          return SymBool{false};
       }
     }();
     available_.set(is_channels_last_avail);
@@ -127,10 +133,12 @@ public:
     if (available_.test(is_channels_last_3d_avail)) {
       return is_channels_last_3d_;
     }
-    is_channels_last_3d_ = [&]{
+    is_channels_last_3d_ = [&] {
       switch (dim()) {
-        case 5: return compute_channels_last_3d_dim5();
-        default: return SymBool{false};
+        case 5:
+          return compute_channels_last_3d_dim5();
+        default:
+          return SymBool{false};
       }
     }();
     available_.set(is_channels_last_3d_avail);
@@ -143,9 +151,12 @@ public:
     }
     is_non_overlapping_and_dense_ = [&] {
       switch (dim()) {
-        case 5: return compute_is_non_overlapping_and_dense_dim5();
-        case 4: return compute_is_non_overlapping_and_dense_dim4();
-        default: return compute_is_non_overlapping_and_dense_anydim();
+        case 5:
+          return compute_is_non_overlapping_and_dense_dim5();
+        case 4:
+          return compute_is_non_overlapping_and_dense_dim4();
+        default:
+          return compute_is_non_overlapping_and_dense_anydim();
       }
     }();
     available_.set(is_non_overlapping_and_dense_avail);
@@ -178,14 +189,21 @@ public:
     is_non_overlapping_and_dense_ = true;
   }
 
-private:
-
+ private:
   SymBool compute_contiguous() const;
   SymBool compute_channels_last_contiguous_2d() const;
   SymBool compute_channels_last_contiguous_3d() const;
   SymBool compute_strides_like_channels_last_2d() const;
   SymBool compute_strides_like_channels_last_3d() const;
   SymBool compute_non_overlapping_and_dense() const;
+
+  // These are little wrappers over the real compute_ functions that
+  // can make use of other contiguity fields to short circuit.
+  // They need to be implemented separately for SymBool, as SymBool does
+  // not short circuit.
+  // TODO: should the SymBool cases avoid the short circuit?  Need to reason
+  // if its correct, and reason if the simpler expressions are better for
+  // analysis (maybe not!)
 
   SymBool compute_channels_last_contiguous_3d_dim5() const;
   SymBool compute_channels_last_2d_dim5() const;
@@ -216,4 +234,4 @@ private:
   mutable SymBool is_non_overlapping_and_dense_{true};
 };
 
-}
+} // namespace c10

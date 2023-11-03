@@ -86,8 +86,8 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
       std::tie(base, size_nodes, stride_nodes) = *n;            \
       return SymBool(base->nodeimpl(size_nodes, stride_nodes)); \
     } else {                                                    \
-      c10::SymIntArrayRef sizes(sizes_);                         \
-      c10::SymIntArrayRef strides(strides_);                     \
+      c10::SymIntArrayRef sizes(sizes_);                        \
+      c10::SymIntArrayRef strides(strides_);                    \
       return fallback(sizes, strides);                          \
     }                                                           \
   }
@@ -120,8 +120,7 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
   if (definitely_true(is_channels_last_contiguous())) {
     return true;
   }
-  return is_contiguous() |
-      is_channels_last_contiguous() |
+  return is_contiguous() | is_channels_last_contiguous() |
       compute_non_overlapping_and_dense();
 }
 
@@ -129,8 +128,7 @@ SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
   if (definitely_true(is_channels_last_contiguous())) {
     return false;
   }
-  return ~is_channels_last_contiguous() &
-      compute_channels_last_contiguous_3d();
+  return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d();
 }
 
 SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
@@ -145,8 +143,7 @@ SymBool SymbolicShapeMeta::compute_channels_last_3d_dim5() const {
   if (definitely_true(is_channels_last())) {
     return false;
   }
-  return ~is_channels_last() &
-      compute_strides_like_channels_last_3d();
+  return ~is_channels_last() & compute_strides_like_channels_last_3d();
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
@@ -159,10 +156,8 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
   if (definitely_true(is_channels_last_3d_contiguous())) {
     return true;
   }
-  return is_contiguous() |
-      is_channels_last_contiguous() |
-      is_channels_last_3d_contiguous() |
-      compute_non_overlapping_and_dense();
+  return is_contiguous() | is_channels_last_contiguous() |
+      is_channels_last_3d_contiguous() | compute_non_overlapping_and_dense();
 }
 
 SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
@@ -172,5 +167,4 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
   return is_contiguous() | compute_non_overlapping_and_dense();
 }
 
-
-} // namespace c10::detail
+} // namespace c10

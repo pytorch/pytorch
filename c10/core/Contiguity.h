@@ -1,7 +1,7 @@
 #pragma once
-#include <c10/util/irange.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -123,4 +123,4 @@ bool _compute_non_overlapping_and_dense(
   return true;
 }
 
-}
+} // namespace c10

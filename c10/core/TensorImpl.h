@@ -2598,11 +2598,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // These are little wrappers over the real compute_ functions that
   // can make use of other contiguity fields to short circuit.
-  // They need to be implemented separately for SymBool, as SymBool does
-  // not short circuit.
-  // TODO: should the SymBool cases avoid the short circuit?  Need to reason
-  // if its correct, and reason if the simpler expressions are better for
-  // analysis (maybe not!)
 
   bool compute_is_non_overlapping_and_dense_dim4(identity<bool> type_id) {
     return is_contiguous_ || is_channels_last_contiguous_ ||
