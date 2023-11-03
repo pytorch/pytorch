@@ -3829,16 +3829,14 @@ class UserDefinedTritonKernel(ExternKernel):
         return {}
 
     def get_mutation_names(self):
-        return [t.get_name() for t in self.inputs]
+        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
         constant_args = []
-        device = None
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
-                device = v.get_device()
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
@@ -3846,7 +3844,9 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 constant_args.append(v)
                 kwargs[k] = v
-        assert device is not None
+
+        assert len(inputs) != 0
+        device = inputs[0].get_device()
 
         super().__init__(
             None,
@@ -3858,6 +3858,45 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+    @classmethod
+    def create(cls, *, kernel_idx, grid, kernel_args):
+        packed = UserDefinedTritonKernel(
+            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
+        )
+        for arg in kernel_args.values():
+            if isinstance(arg, TensorBox):
+                MutationOutput(arg.layout, arg, packed)
+
+    def has_aliasing(self):
+        return True
+
+    def get_alias_names(self):
+        return [i.get_name() for i in self.inputs]
+
+
+class MutationOutput(ExternKernel):
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def __init__(self, layout, input, parent):
+        super().__init__(None, layout, [input, parent], ())
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def is_no_op(self):
+        return True
+
+    def has_side_effects(self):
+        return True
+
+    def has_aliasing(self):
+        return True
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name()]
 
 
 class InplaceBernoulliFallback(ExternKernel):
