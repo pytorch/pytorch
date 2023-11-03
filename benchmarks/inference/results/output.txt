@@ -1,0 +1,102 @@
+=============================================================================
+Starting benchmark...
+Running benchmark with batch_size=1, compile=True...
+torch.load() time: 6.10427 s
+m.compile() time (not actual first compilation): 2.87285 s
+Warmup latency: 17.49735 s
+Average latency (exclude warmup): 0.19162 +/- 0.03528 s
+Max latency: 0.25079 s
+Min latency: 0.12150 s
+Throughput (exclude warmup): 5.21875 samples per second
+Average GPU utilization: 1.60377
+=============================================================================
+Running benchmark with batch_size=1, compile=False...
+torch.load() time: 4.58509 s
+m.compile() time (not actual first compilation): 3.04469 s
+Warmup latency: 15.93151 s
+Average latency (exclude warmup): 0.21114 +/- 0.08324 s
+Max latency: 0.33655 s
+Min latency: 0.05609 s
+Throughput (exclude warmup): 4.73618 samples per second
+Average GPU utilization: 1.36975
+=============================================================================
+Running benchmark with batch_size=32, compile=True...
+torch.load() time: 4.52213 s
+m.compile() time (not actual first compilation): 3.04607 s
+Warmup latency: 18.04272 s
+Average latency (exclude warmup): 0.08939 +/- 0.05349 s
+Max latency: 0.32729 s
+Min latency: 0.05432 s
+Throughput (exclude warmup): 357.98582 samples per second
+Average GPU utilization: 9.54777
+=============================================================================
+Running benchmark with batch_size=32, compile=False...
+torch.load() time: 6.10497 s
+m.compile() time (not actual first compilation): 2.81504 s
+Warmup latency: 17.63034 s
+Average latency (exclude warmup): 0.09804 +/- 0.06186 s
+Max latency: 0.34396 s
+Min latency: 0.05326 s
+Throughput (exclude warmup): 326.39100 samples per second
+Average GPU utilization: 9.03448
+=============================================================================
+Running benchmark with batch_size=64, compile=True...
+torch.load() time: 4.03582 s
+m.compile() time (not actual first compilation): 2.81601 s
+Warmup latency: 15.34173 s
+Average latency (exclude warmup): 0.16323 +/- 0.06980 s
+Max latency: 0.38692 s
+Min latency: 0.10606 s
+Throughput (exclude warmup): 392.07749 samples per second
+Average GPU utilization: 9.69634
+=============================================================================
+Running benchmark with batch_size=64, compile=False...
+torch.load() time: 4.20635 s
+m.compile() time (not actual first compilation): 2.94122 s
+Warmup latency: 16.02117 s
+Average latency (exclude warmup): 0.15843 +/- 0.06778 s
+Max latency: 0.43202 s
+Min latency: 0.10348 s
+Throughput (exclude warmup): 403.97103 samples per second
+Average GPU utilization: 11.68396
+=============================================================================
+Running benchmark with batch_size=128, compile=True...
+torch.load() time: 5.03246 s
+m.compile() time (not actual first compilation): 2.84313 s
+Warmup latency: 17.31349 s
+Average latency (exclude warmup): 0.22467 +/- 0.03856 s
+Max latency: 0.43571 s
+Min latency: 0.19707 s
+Throughput (exclude warmup): 569.73164 samples per second
+Average GPU utilization: 19.07874
+=============================================================================
+Running benchmark with batch_size=128, compile=False...
+torch.load() time: 4.08615 s
+m.compile() time (not actual first compilation): 3.32804 s
+Warmup latency: 18.63257 s
+Average latency (exclude warmup): 0.21772 +/- 0.02416 s
+Max latency: 0.33381 s
+Min latency: 0.19965 s
+Throughput (exclude warmup): 587.92371 samples per second
+Average GPU utilization: 17.92218
+=============================================================================
+Running benchmark with batch_size=256, compile=True...
+torch.load() time: 5.20652 s
+m.compile() time (not actual first compilation): 2.77379 s
+Warmup latency: 17.41663 s
+Average latency (exclude warmup): 0.44098 +/- 0.05971 s
+Max latency: 0.69925 s
+Min latency: 0.36411 s
+Throughput (exclude warmup): 580.52872 samples per second
+Average GPU utilization: 29.34734
+=============================================================================
+Running benchmark with batch_size=256, compile=False...
+torch.load() time: 4.35882 s
+m.compile() time (not actual first compilation): 2.92387 s
+Warmup latency: 16.12477 s
+Average latency (exclude warmup): 0.45545 +/- 0.07371 s
+Max latency: 0.70644 s
+Min latency: 0.39760 s
+Throughput (exclude warmup): 562.08413 samples per second
+Average GPU utilization: 25.56983
+=============================================================================
