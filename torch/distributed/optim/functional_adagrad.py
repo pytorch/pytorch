@@ -76,11 +76,11 @@ class _FunctionalAdagrad:
                 + f"Gradients length: {len(gradients)}"
             )
 
-        has_sparse_grad = False
+        has_sparse_grad, has_complex = False, False
         for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
-                if gradient.is_sparse:
-                    has_sparse_grad = True
+                has_sparse_grad |= gradient.is_sparse
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 state = self.state[param]
@@ -100,4 +100,5 @@ class _FunctionalAdagrad:
                 has_sparse_grad=has_sparse_grad,
                 foreach=self.foreach,
                 maximize=self.maximize,
+                has_complex=has_complex,
             )
