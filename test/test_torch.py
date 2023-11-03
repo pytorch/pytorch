@@ -9708,9 +9708,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             self.assertIs(holder[0], t1)
             self.assertEqual(t1.foo, "bar")
-            self.assertIs(t1_ref(), t1)
-            self.assertIsNot(t1_ref(), t2)
-            del t1, holder
+            self.assertIs(t1_ref(), t2)
+            self.assertIsNot(t1_ref(), t1)
+            del t2, holder
             # Dynamo keeps it alive
             if not TEST_WITH_TORCHDYNAMO:
                 self.assertIs(t1_ref(), None)

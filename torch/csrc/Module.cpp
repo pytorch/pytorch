@@ -415,14 +415,23 @@ PyObject* THPModule_swap(PyObject* _unused, PyObject* args) {
   a_gc->_gc_prev = b_gc->_gc_prev;
   b_gc->_gc_prev = tmp_gc_head;
 
-  //// Part 6: Put back weakrefs
+  //// Part 6: Fix weakrefs
+  // The lists were moved but the object pointed by each ref were not
   // Note that the tp_weaklistoffset is always correct, even in the managed case
 #define GET_WR_OBJECT(obj) \
-  (PyObject**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset)
+  (PyWeakReference**)((char*)obj + Py_TYPE(obj)->tp_weaklistoffset)
 
-  PyObject* wr_tmp = *GET_WR_OBJECT(a_);
-  *GET_WR_OBJECT(a_) = *GET_WR_OBJECT(b_);
-  *GET_WR_OBJECT(b_) = wr_tmp;
+  PyWeakReference* head = *GET_WR_OBJECT(a_);
+  while (head != NULL) {
+    head->wr_object = a_;
+    head = head->wr_next;
+  }
+  head = *GET_WR_OBJECT(b_);
+  while (head != NULL) {
+    head->wr_object = b_;
+    head = head->wr_next;
+  }
+
 #undef GET_WR_OBJECT
 
   Py_RETURN_NONE;
