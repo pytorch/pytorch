@@ -10,7 +10,11 @@ from torch.distributed.checkpoint.optimizer import load_sharded_optimizer_state_
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -53,8 +57,10 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
-    def test_load_sharded_optimizer_state_dict(self) -> None:
+    @parametrize("pass_planner", [True, False])
+    def test_load_sharded_optimizer_state_dict(self, pass_planner) -> None:
         CHECKPOINT_DIR = self.temp_dir
+        planner = DCP.DefaultLoadPlanner() if pass_planner else None
 
         model = self._create_model()
         model = FSDP(model)
@@ -105,6 +111,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             model_state_dict=state_dict["model"],
             optimizer_key="optim",
             storage_reader=DCP.FileSystemReader(CHECKPOINT_DIR),
+            planner=planner,
         )
         flattened_osd = FSDP.optim_state_dict_to_load(
             model_2, optim_2, optim_state["optim"]
@@ -126,5 +133,6 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                     self.assertEqual(state, state2)
 
 
+instantiate_parametrized_tests(FsdpOptimStateCheckpoint)
 if __name__ == "__main__":
     run_tests()
