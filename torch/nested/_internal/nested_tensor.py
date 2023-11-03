@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
+from torch._prims_common import is_expandable_to
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
@@ -241,7 +242,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
 
 # Not actually a view!
-class ViewNoncontiguousNestedFromBuffer(torch.autograd.Function):
+class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
     @staticmethod
     def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
         return NestedTensor(values.detach(), offsets=offsets, lengths=lengths)
@@ -306,19 +307,24 @@ def jagged_from_list(
 
 def jagged_from_tensor_and_lengths(
     tensor: torch.Tensor, starts: torch.Tensor, lengths: torch.Tensor
-) -> Tuple[NestedTensor, torch.Tensor]:
+) -> Tuple[NestedTensor, torch.Tensor, torch.Tensor]:
     """Constructs a NestedTensor backed by jagged layout from a tensor, starts of sequences, and sequence lengths"""
     batch_size = tensor.shape[0]
-    try:
+    if is_expandable_to(starts.shape, (batch_size, 1)) and is_expandable_to(
+        lengths.shape, (batch_size, 1)
+    ):
         start_list = starts.expand(batch_size, 1)
         length_list = lengths.expand(batch_size, 1)
-    except RuntimeError as e:
+    else:
         raise RuntimeError(
             "When constructing a jagged nested tensor using narrow(), "
             "your start and length must be a Tensor that broadcasts to input.shape[0] x 1"
-        ) from e
+        )
 
     # Calculate jagged offsets
+    assert (
+        len(tensor.shape) >= 2
+    ), "tensor must at least be 2D for the nested narrow op to work"
     max_seq_len = tensor.shape[1]
     offset_lengths = max_seq_len * torch.arange(
         0, batch_size, dtype=torch.int64, device=tensor.device
@@ -332,7 +338,7 @@ def jagged_from_tensor_and_lengths(
     else:
         values = tensor.reshape(-1)
 
-    return ViewNoncontiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
+    return ViewNonContiguousNestedFromBuffer.apply(values, offsets, length_list), offsets, length_list  # type: ignore[call-overload]
 
 
 def buffer_from_jagged(jagged):
