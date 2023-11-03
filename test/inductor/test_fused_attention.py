@@ -67,7 +67,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             counters.clear()
             torch.manual_seed(1234)
-            result2, (source_code,) = run_and_get_code(
+            result2, source_code = run_and_get_code(
                 torch.compile(dot_prod_attention, fullgraph=True),
                 *(args2 + dropout_arg),
             )
@@ -144,7 +144,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn(tensor_shape, device=self.device),
             torch.randn(tensor_shape, device=self.device),
         ]
-        _, (source_code,) = run_and_get_code(dot_prod_attention, *args)
+        _, source_code = run_and_get_code(dot_prod_attention, *args)
         self.assertNotIn("aten._scaled_dot_product_efficient_attention", source_code)
 
     @skipIfRocm

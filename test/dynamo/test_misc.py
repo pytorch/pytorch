@@ -8196,7 +8196,7 @@ ShapeEnv not equal: field values don't match:
         self.assertEqual(expect, actual)
 
         self.assertTrue(
-            all("aten.pow" not in code),
+            "aten.pow" not in code,
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 

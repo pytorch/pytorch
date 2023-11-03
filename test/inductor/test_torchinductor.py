@@ -8101,7 +8101,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             x = torch.randn(2, 1024, device="cuda")
             ref = f(x)
-            actual, (code,) = run_and_get_code(torch.compile(f), x)
+            actual, code = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
             self.assertTrue(
                 re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
