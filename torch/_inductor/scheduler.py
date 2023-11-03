@@ -779,7 +779,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
         self.scheduler = scheduler
-        self.node: ir.Buffer
+        self.node: Optional[ir.Buffer] = None
         self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
@@ -1017,7 +1017,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         else:
             self.scheduler = scheduler
             self.snodes = nodes
-            self.node: ir.Buffer
+            self.node: Optional[ir.Buffer] = None
             self.users: List[NodeUser] = []
 
             self.set_read_writes(
