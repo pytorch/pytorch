@@ -222,7 +222,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     def create(tx, **kwargs):
         var = TorchFunctionDisableVariable(
             target_values=[False],
-            initial_values=[torch._C._is_torch_function_enabled()],
+            initial_values=[tx.output.torch_function_enabled],
             **kwargs,
         )
         # mlazos: I think this is here to make sure we don't reinvoke on clone()
