@@ -130,6 +130,13 @@ def _operator_dispatch(
         assert isinstance(args[0], torch.Tensor)
         assert isinstance(args[1], torch.Tensor)
         return args[0].shape == args[1].shape, None, None  # type: ignore[return-value]
+    elif op_call == aten.detach.default:
+        # directly wrap a new DTensor with the input DTensor's local_shard and spec, this
+        # this because detach only relates to autograd and we don't need to run local
+        # compute or sharding propagation here (and since we safely maintain local tensor
+        # and wrapper autograd via `view_as`, it's safe to directly re-wrap)
+        assert isinstance(args[0], dtensor.DTensor)
+        return wrap(args[0]._local_tensor, args[0]._spec), None, None  # type: ignore[return-value]
 
     runtime_schema_info = sharding_propagator.op_to_schema_info.get(op_call, None)
 
