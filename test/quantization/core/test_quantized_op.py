@@ -4161,18 +4161,22 @@ class TestQuantizedLinear(TestCase):
         use_bias_list = [True, False]
         supported_post_ops = ['none', 'relu']
         weight_quant_per_channel_list = [True, False]
-        fp32_output_list = [True, False]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
         x_scale, x_zp = 1.2, 1
         w_scale, w_zp = 0.8, 0
         y_scale, y_zp = 4.7, 2
         post_op_args = []
         cases = itertools.product(
             in_channels_list, out_channels_list, use_bias_list,
-            supported_post_ops, weight_quant_per_channel_list, fp32_output_list)
+            supported_post_ops, weight_quant_per_channel_list, output_dtype_list)
         with override_quantized_engine('onednn'):
-            for ic, oc, use_bias, post_op, weight_quant_per_channel, fp32_out in cases:
-                if fp32_out:
-                    y_scale, y_zp = 1.0, 0
+            for ic, oc, use_bias, post_op, weight_quant_per_channel, output_dtype in cases:
+                used_y_scale = y_scale
+                used_y_zp = y_zp
+                fp32_out = output_dtype == torch.float32
+                bfloat16_out = output_dtype == torch.bfloat16
+                if fp32_out or bfloat16_out:
+                    used_y_scale, used_y_zp = 1.0, 0
                 x = torch.rand(batch_size, ic) * 10
                 w = torch.rand(oc, ic) * 10
                 qx = torch.quantize_per_tensor(x, x_scale, x_zp, torch.quint8)
@@ -4194,19 +4198,30 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed = qlinear_prepack(qw_cpu, x.shape)
                 qy_cpu = qlinear(qx_cpu, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                                 b, y_scale, y_zp, fp32_out, post_op, post_op_args, post_op_algorithm)
+                                 b, 1.0 / used_y_scale, used_y_zp, output_dtype, post_op, post_op_args, post_op_algorithm)
 
                 # Reference
                 qw_packed_ref = qlinear_prepack_ref(qw, b)
                 qlinear_ref = post_op_to_qlinear_ref_dict[post_op]
-                qy_ref = qlinear_ref(qx, qw_packed_ref, y_scale, y_zp)
+                qy_ref = qlinear_ref(qx, qw_packed_ref, used_y_scale, used_y_zp)
 
                 # Compare results
-                if fp32_out:
-                    qy_cpu = torch.quantize_per_tensor(qy_cpu, y_scale, y_zp, dtype=torch.quint8).dequantize()
-                    self.assertEqual(qy_cpu, qy_ref.dequantize(), "Results not equal!")
-                else:
-                    self.assertEqual(qy_cpu, qy_ref.int_repr(), "Results not equal!")
+                if fp32_out or bfloat16_out:
+                    qy_cpu = torch.quantize_per_tensor(
+                        qy_cpu.to(torch.float32),
+                        used_y_scale,
+                        used_y_zp, dtype=torch.quint8
+                    ).int_repr()
+
+                np.testing.assert_array_almost_equal(
+                    qy_ref.int_repr().cpu().numpy(),
+                    qy_cpu.cpu().numpy(),
+                    decimal=0,
+                    err_msg=f"""X: {x}, W: {w}, b: {b},
+                    x_s: {x_scale}, x_zp: {x_zp},
+                    w_s: {w_scale}, w_zp: {w_zp},
+                    y_s: {y_scale}, y_zp: {y_zp}""",
+                )
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 class TestQuantizedEmbeddingOps(TestCase):

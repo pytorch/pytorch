@@ -5797,7 +5797,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 c10::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 std::string post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
                 std::string post_op_algorithm)"""
@@ -5817,7 +5817,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5833,7 +5833,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             bias,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5860,7 +5860,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         bias: "TensorBox",
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5880,16 +5880,17 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwisePT2E(
             layout=kernel_layout,
