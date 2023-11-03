@@ -251,7 +251,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     @unittest.expectedFailure  # fails as long as numpy scalars are 0D arrays
     def test_specializing_numpy_float_in_control_flow(self):
-        # np.float is unspecialized by default,
+        # np.float64 is unspecialized by default,
         # but it should be specialized when used in control flow.
         def fn(x, y):
             if y > 1.0:
