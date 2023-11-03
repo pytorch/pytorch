@@ -2,6 +2,8 @@ import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from torch._guards import TracingContext
+
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
@@ -146,6 +148,26 @@ class VariableTracker(metaclass=HasPostInit):
         """Combine the guards from many VariableTracker into **kwargs for a new instance"""
         guards = set()
 
+        ret = {
+            "guards": guards,
+        }
+        tcx = TracingContext.get()
+        if tcx is not None and tcx.export:
+            """
+            Why we want to skip gurad propagation when exporting graph?
+            For export path, we haven't found a way to meaningfully use generated guards from
+            torch dynamo, since exported programs are also used in non Python environments.
+
+            At the time of writing this today, we observed some slowness in dynamo that there's
+            a substantial portion of time consumed in guard propagation logic, especially when
+            we're dealing with immutable VTs. This doesn't improve the time complexity of VT
+            propagation algorithm overall but greatly reduce the constant factor of it, thus still
+            gives us great speedup for exporting time. We've discussed the resolution for the root
+            cause but as a quick unblocker in the short term we might still want to skip guards to
+            enable several use cases.
+            """
+            return ret
+
         def visit(var):
             if type(var) in (list, tuple, dict_values, odict_values):
                 for i in var:
@@ -155,9 +177,7 @@ class VariableTracker(metaclass=HasPostInit):
                 guards.update(var.guards)
 
         visit(vars)
-        return {
-            "guards": guards,
-        }
+        return ret
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""

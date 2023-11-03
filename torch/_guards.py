@@ -567,19 +567,19 @@ class TracingContext:
     def get() -> Optional[TracingContext]:
         return getattr(_TLS, "tracing_context", None)
 
-    def __init__(self, fake_mode):
+    def __init__(self, fake_mode, export: bool = False):
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.fake_mode = fake_mode
-        self.frame_summary_stack = []
+        self.frame_summary_stack: List[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
         # to keep track of what line we are in the function.  We make a
         # function call, this gets cleared and the frame location is pushed
         # to frame_summary_stack (prepping this variable for the inner frame's
         # progress)
-        self.loc_in_frame = None
+        self.loc_in_frame: Optional[traceback.FrameSummary] = None
         # this is only set after aot_autograd
         self.fw_metadata = None
         self.params_flat = None
@@ -599,6 +599,8 @@ class TracingContext:
         # ints that are known to be size-like and may have 0/1 entries that we
         # must not specialize on.
         self.force_unspec_int_unbacked_size_like = False
+        # A flag indicating whether we are exporting a single graph.
+        self.export = export
 
     @staticmethod
     @contextmanager
@@ -666,7 +668,7 @@ class TracingContext:
 
     @staticmethod
     @contextlib.contextmanager
-    def current_frame(frame_summary):
+    def current_frame(frame_summary: Optional[traceback.FrameSummary]):
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
         tc = TracingContext.get()
