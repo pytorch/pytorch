@@ -1488,9 +1488,6 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                # Special case for autograd.Function tracing
-                if "saved_tensor_marked" in arg.meta:
-                    continue
                 assert (
                     arg.graph == self.graph
                 ), "create_node using arg not from this SubgraphTracer"
@@ -1603,9 +1600,6 @@ class SubgraphTracer(fx.Tracer):
         if not isinstance(arg, torch.fx.Proxy):
             return arg
         elif arg.tracer == self:
-            return arg
-        # Special case for autograd.Function tracing
-        elif "saved_tensor_marked" in arg.node.meta:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
 
