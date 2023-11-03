@@ -434,7 +434,7 @@ def init_device_mesh(
     if mesh_dim_names is not None:
         if len(set(mesh_dim_names)) != len(mesh_dim_names):
             raise RuntimeError(
-                "Each mesh_dim_name must be uqique.",
+                "Each mesh_dim_name must be unique.",
                 f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
             )
 

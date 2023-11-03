@@ -850,7 +850,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -903,7 +903,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -923,7 +923,7 @@ def forward(self, primals_1):
         out_ref = f2(inp_ref)
         out_test = f2_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -946,7 +946,7 @@ def forward(self, primals_1):
         out_ref = f3(inp_ref)
         out_test = f3_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 

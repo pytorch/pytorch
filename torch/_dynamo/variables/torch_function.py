@@ -166,7 +166,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         if _is_attr_overidden(tx, self, name):
             unimplemented(
-                f"Accessing overidden method/attribute {name} on a tensor"
+                f"Accessing overridden method/attribute {name} on a tensor"
                 " subclass with a __torch_function__ override is not supported"
             )
 
@@ -218,7 +218,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
             if _is_attr_overidden(tx, self, name):
                 unimplemented(
-                    f"Calling overidden method {name} on a tensor"
+                    f"Calling overridden method {name} on a tensor"
                     " subclass with a __torch_function__ override is not supported"
                 )
 

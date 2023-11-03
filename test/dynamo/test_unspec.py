@@ -110,7 +110,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
-    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be reffering
+    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be referring
     # to a name from a source that is not there. If we call .item() and take the wrapped_value out, where we do
     # wrapped_value = wrapped_value.item() where we send unspec down to wrap_fx_proxy, this test passes and then
     # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as

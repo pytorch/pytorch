@@ -344,7 +344,7 @@ aliasing_ops = {
     'narrow',
     'permute',
     'positive',
-    # 'ravel', is composite implict autograd and may call clone
+    # 'ravel', is composite implicit autograd and may call clone
     'real',
     'reshape',
     'resolve_conj',
@@ -1058,7 +1058,7 @@ class TestOperators(TestCase):
     }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
-    # because that coresponds to "batched forward-mode AD" testing in PyTorch core
+    # because that corresponds to "batched forward-mode AD" testing in PyTorch core
     def test_vmapjvpall(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
             # TODO: test in-place
@@ -1463,7 +1463,7 @@ class TestOperators(TestCase):
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @skipOps('TestOperators', 'test_vmapjvpvjp', vjp_fail.union({
-        # Following operatos take too long, hence skipped
+        # Following operators take too long, hence skipped
         skip('atleast_1d'),
         skip('atleast_2d'),
         skip('atleast_3d'),
@@ -1574,7 +1574,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapjvpvjp(self, device, dtype, op):
-        # Since we test `jvpvjp` seperately,
+        # Since we test `jvpvjp` separately,
         # in this we just check that vmap of `jvpvjp`
         # is correct.
         if not op.supports_autograd:
