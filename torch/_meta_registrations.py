@@ -2124,7 +2124,7 @@ if torch._C._has_mkldnn:
         groups,
         output_scale,
         output_zero_point,
-        fp32_output,
+        output_dtype,
         attr,
         scalars,
         algorithm,
@@ -2139,7 +2139,8 @@ if torch._C._has_mkldnn:
             groups,
             None,
         )
-        out = x.new_empty(shape_out, dtype=(torch.float32 if fp32_output else None))
+        assert output_dtype in [torch.float32, torch.bfloat16]
+        out = x.new_empty(shape_out, dtype=output_dtype)
         out = out.to(memory_format=torch.channels_last)
         return out
 
@@ -2154,14 +2155,15 @@ if torch._C._has_mkldnn:
         bias,
         output_scale,
         output_zero_point,
-        fp32_output,
+        output_dtype,
         post_op_name,
         post_op_args,
         post_op_algorithm,
     ):
         output_shape = list(x.shape)
         output_shape[-1] = w.shape[0]
-        out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
+        assert output_dtype in [torch.float32, torch.bfloat16]
+        out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
