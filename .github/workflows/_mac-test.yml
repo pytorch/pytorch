@@ -160,27 +160,27 @@ jobs:
           # Print out some information about the test environment
           which conda
           conda --version
-          ${CONDA_RUN} which python3
-          ${CONDA_RUN} python3 --version
-          ${CONDA_RUN} which python
-          ${CONDA_RUN} python --version
+          which python3
+          python3 --version
+          which python
+          python --version
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+          python3 -mpip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
           # Install pip dependencies if they are not found. This is to mitigate a peculiar
           # flaky missing dependencies on MacOS
-          ${CONDA_RUN} python3 -c "import torch"
+          python3 -c "import torch"
           RC=$?
           popd
 
           if [ "${RC}" -ne 0 ]; then
-            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+            python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
           set -e
 
-          ${CONDA_RUN} .ci/pytorch/macos-test.sh
+          source .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
