@@ -7895,7 +7895,7 @@ def ___make_guard_fn():
                 self.a += 1
                 if self.a > 5:
                     raise StopIteration()
-                return self.a
+                return x
 
         def fn(x):
             for items in MyClass():
@@ -7909,6 +7909,39 @@ def ___make_guard_fn():
         compiled = compiled_fn(x)
 
         self.assertEqual(eager, compiled)
+
+    def test_iter_user_defined_iter_resets(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += 1
+                if self.a > 5:
+                    raise StopIteration()
+                return x
+
+        def fn(x):
+            c = iter(MyClass())
+            next(c)
+            next(c)
+            i = 1
+            # This will reset __iter__ for c, so we iterate from 1 to 5
+            for items in c:
+                x += items
+                i += 1
+            return x, i
+
+        x = torch.zeros(3)
+        eager = fn(x)
+
+        compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+        compiled = compiled_fn(x)
+
+        self.assertEqual(eager, compiled)
+        self.assertEqual(compiled[1], 5)
 
     def test_non_user_defined_raise_stop_iteration(self):
         def fn(x):

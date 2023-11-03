@@ -16,21 +16,11 @@ class IteratorVariable(VariableTracker):
         unimplemented("abstract method, must implement")
 
 
-class GenericIteratorVariable(IteratorVariable):
-    def __init__(self, iterator, **kwargs):
-        super().__init__(**kwargs)
-        self.iterator = iterator
-
-    def next_variables(self, tx):
-        assert self.mutable_local
-
-        next_item = self.iterator.call_method(tx, "__next__", [], {})
-        next_iter = self.clone(iterator=self.iterator)
-        tx.replace_all(self, next_iter)
-        return next_item.add_options(self), next_iter
+class ItertoolsIteratorVariable(IteratorVariable):
+    pass
 
 
-class RepeatIteratorVariable(IteratorVariable):
+class RepeatIteratorVariable(ItertoolsIteratorVariable):
     def __init__(self, item: VariableTracker, **kwargs):
         super().__init__(**kwargs)
         self.item = item
@@ -41,7 +31,7 @@ class RepeatIteratorVariable(IteratorVariable):
         return self.item.add_options(self), self
 
 
-class CountIteratorVariable(IteratorVariable):
+class CountIteratorVariable(ItertoolsIteratorVariable):
     def __init__(self, item: int = 0, step: int = 1, **kwargs):
         super().__init__(**kwargs)
         if not isinstance(item, VariableTracker):
@@ -59,7 +49,7 @@ class CountIteratorVariable(IteratorVariable):
         return self.item.add_options(self), next_iter
 
 
-class CycleIteratorVariable(IteratorVariable):
+class CycleIteratorVariable(ItertoolsIteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,

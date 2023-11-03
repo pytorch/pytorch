@@ -801,9 +801,9 @@ class BuiltinVariable(VariableTracker):
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
 
-        if isinstance(obj, variables.IteratorVariable):
-            # For non-list iterators, we will guard on vars that
-            # determine the control flow
+        # For list iterator and itertools iterators, we know that they return `self` when
+        # calling `iter` on them.
+        if isinstance(obj, (variables.ItertoolsIteratorVariable, ListIteratorVariable)):
             return obj
 
         # TODO This should probably be treated as a dict, or dicts should also be treated here
@@ -841,13 +841,9 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
                 guards=guards,
             ).add_options(self, obj)
-        elif obj is not None and isinstance(obj, variables.UserDefinedObjectVariable):
-            options = VariableTracker.propagate(obj)
-            iterator = obj.call_method(tx, "__iter__", [], {}).add_options(options)
-
-            return variables.GenericIteratorVariable(
-                iterator=iterator, mutable_local=MutableLocal()
-            )
+        elif obj is not None:
+            # Handle as `UserDefinedIteratorVariable` if it implements `__iter__`
+            return obj.call_method(tx, "__iter__", [], {})
 
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
@@ -986,7 +982,7 @@ class BuiltinVariable(VariableTracker):
     def call_super(self, tx, a, b):
         return variables.SuperVariable(a, b)
 
-    def call_next(self, tx, arg, kwargs=None):
+    def call_next(self, tx, arg):
         if isinstance(
             arg, (variables.ListIteratorVariable, variables.IteratorVariable)
         ):
@@ -1037,7 +1033,7 @@ class BuiltinVariable(VariableTracker):
     def call_StopIteration(self, tx):
         from .user_defined import UserDefinedObjectVariable
 
-        return UserDefinedObjectVariable(StopIteration())
+        return UserDefinedObjectVariable.create(StopIteration())
 
     def call_reduce(self, tx, function, iterable, initializer=None):
         if iterable.has_unpack_var_sequence(tx):

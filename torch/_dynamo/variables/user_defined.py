@@ -33,6 +33,7 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import ConstDictVariable
+from .iter import IteratorVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -167,7 +168,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 self.value,
                 variables.UnspecializedNNModuleVariable
                 if issubclass(self.value, torch.nn.Module)
-                else UserDefinedObjectVariable,
+                else UserDefinedObjectVariable.create,
                 options,
             )
             if (
@@ -204,12 +205,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value",
+        "value_type",
+        "_from_create",
+        *UserDefinedVariable._nonvar_fields,
+    }
 
-    def __init__(self, value, value_type=None, **kwargs):
+    @staticmethod
+    def create(value, value_type=None, **kwargs):
+        if hasattr(value, "__next__"):
+            return UserDefinedIteratorVariable(
+                value, value_type=value_type, _from_create=True, **kwargs
+            )
+
+        return UserDefinedObjectVariable(
+            value, value_type=value_type, _from_create=True, **kwargs
+        )
+
+    def __init__(self, value, value_type=None, _from_create=False, **kwargs):
         super().__init__(**kwargs)
+        assert (
+            _from_create
+        ), "Please only initialize via UserObjectDefinedVariables.create"
         self.value = value
         self.value_type = value_type or type(value)
+        self._from_create = _from_create
         assert type(value) is self.value_type
 
     def __str__(self):
@@ -463,7 +484,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
         elif isinstance(subobj, torch.distributions.utils.lazy_property):
-            subobj_var = UserDefinedObjectVariable(subobj, source=source, **options)
+            subobj_var = UserDefinedObjectVariable.create(
+                subobj, source=source, **options
+            )
             return variables.UserMethodVariable(
                 subobj.__get__.__func__, subobj_var, source=source, **options
             ).call_function(tx, [self], {})
@@ -554,7 +577,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 torch.distributions.constraints.Constraint,
             ),
         ):
-            return UserDefinedObjectVariable(subobj, **options)
+            return UserDefinedObjectVariable.create(subobj, **options)
         elif isinstance(self.value, torch.nn.Module) and name in all_hook_names:
             assert isinstance(subobj, collections.OrderedDict)
             if not subobj:
@@ -605,6 +628,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
+
+
+class UserDefinedIteratorVariable(UserDefinedObjectVariable, IteratorVariable):
+    def next_variables(self, tx):
+        assert self.mutable_local
+
+        next_item = self.call_method(tx, "__next__", [], {})
+        return next_item.add_options(self), self
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

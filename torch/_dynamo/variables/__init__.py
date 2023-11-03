@@ -27,8 +27,8 @@ from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
-    GenericIteratorVariable,
     IteratorVariable,
+    ItertoolsIteratorVariable,
     RepeatIteratorVariable,
 )
 from .lists import (
@@ -65,7 +65,11 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchVariable
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    UserDefinedClassVariable,
+    UserDefinedIteratorVariable,
+    UserDefinedObjectVariable,
+)
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -92,7 +96,8 @@ __all__ = [
     "CycleIteratorVariable",
     "LambdaVariable",
     "ListIteratorVariable",
-    "GenericIteratorVariable",
+    "UserDefinedIteratorVariable",
+    "ItertoolsIteratorVariable",
     "ListVariable",
     "NNModuleVariable",
     "NamedTupleVariable",

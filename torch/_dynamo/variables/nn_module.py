@@ -226,7 +226,9 @@ class NNModuleVariable(VariableTracker):
             elif istype(subobj, classmethod):
                 return variables.UserMethodVariable(
                     subobj.__func__,
-                    variables.UserDefinedObjectVariable(type(base), guards=guards),
+                    variables.UserDefinedObjectVariable.create(
+                        type(base), guards=guards
+                    ),
                     **options,
                 )
             elif istype(subobj, staticmethod):

@@ -2584,10 +2584,9 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]
-        if not isinstance(tos, ListIteratorVariable):
-            self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})
-            self.push(res)
+        self.pop()
+        res = BuiltinVariable(iter).call_function(self, [tos], {})
+        self.push(res)
         return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):

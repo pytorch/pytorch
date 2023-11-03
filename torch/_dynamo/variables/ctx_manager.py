@@ -82,7 +82,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         try:
             return variables.UserMethodVariable(
                 self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                variables.UserDefinedObjectVariable.create(self.cm_obj, **options),
                 **options,
             ).call_function(tx, [], {})
         except Unsupported as e:
@@ -98,7 +98,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         try:
             x = variables.UserMethodVariable(
                 self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                variables.UserDefinedObjectVariable.create(self.cm_obj, **options),
                 **options,
             ).call_function(
                 tx,
