@@ -3584,11 +3584,14 @@ class ExternKernel(InputsKernel):
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                # FIXME We should let ExternKernel have access to the cpp schema where possible,
-                # so that we can pass the param type in here (instead of None).
+                # FIXME We should let ExternKernel have access to the cpp schema where possible.
+                if hasattr(self, "kwargs_default_value"):
+                    type_ = self.kwargs_default_value.get(arg_name).get("type")
+                else:
+                    type_ = None
                 kwargs.append(
                     V.graph.wrapper_code.val_to_cpp_arg_str(
-                        None, v, self.is_legacy_abi_kernel()
+                        type_, v, self.is_legacy_abi_kernel()
                     )
                 )
         else:
