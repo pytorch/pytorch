@@ -728,11 +728,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         # StopIteration, if uncaught by tracing mechanisms, should trigger compile
-        except (Unsupported, exc.InlinedUserStopIteration):
+        except (Unsupported, exc.InlinedUserStopIteration) as e:
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
-
+            if isinstance(e, exc.InlinedUserStopIteration):
+                log.debug("step: uncaught user StopIteration")
             log.debug("step triggered compile", exc_info=True)
 
         # generate code from checkpoint

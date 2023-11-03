@@ -7978,13 +7978,16 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
 
     def test_correct_behaviour_graph_break_while_nested_raising(self):
+        def g(x):
+            items = iter([1, 2])
+            x += next(items)
+            x += next(items)
+            x += next(items)
+
         def fn(x):
             x = x + 1
             try:
-                items = iter([1, 2])
-                x += next(items)
-                x += next(items)
-                x += next(items)
+                g(x)
             except StopIteration:
                 pass
             x = x + 1
