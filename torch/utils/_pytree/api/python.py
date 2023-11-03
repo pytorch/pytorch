@@ -156,7 +156,7 @@ def _register_pytree_node(
         )
 
     if serialized_type_name is None:
-        serialized_type_name = NO_SERIALIZED_TYPE_NAME_FOUND
+        serialized_type_name = f"{cls.__module__}.{cls.__qualname__}"
 
     serialize_node_def = _SerializeNodeDef(
         cls,
