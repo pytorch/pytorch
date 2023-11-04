@@ -79,7 +79,7 @@ class Adadelta(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -194,6 +194,7 @@ def adadelta(
 
     See :class:`~torch.optim.Adadelta` for details.
     """
+
     # We still respect when the user inputs False for foreach.
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
