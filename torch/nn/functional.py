@@ -1321,7 +1321,7 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
     r"""Randomly zero out entire channels a channel is a 2D feature map.
     
-    E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
