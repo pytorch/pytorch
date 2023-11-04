@@ -18,7 +18,7 @@ __all__ = [
 
 
 def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
-    r"""Return the random number generator state of the specified GPU as a ByteTensor.
+    r"""Returns the random number generator state of the specified GPU as a ByteTensor.
 
     Args:
         device (torch.device or int, optional): The device to return the RNG state of.
@@ -40,7 +40,8 @@ def get_rng_state(device: Union[int, str, torch.device] = "cuda") -> Tensor:
 
 
 def get_rng_state_all() -> List[Tensor]:
-    r"""Return a list of ByteTensor representing the random number states of all devices."""
+    r"""Returns a list of ByteTensor representing the random number states of all devices."""
+
     results = []
     for i in range(device_count()):
         results.append(get_rng_state(i))
@@ -50,7 +51,7 @@ def get_rng_state_all() -> List[Tensor]:
 def set_rng_state(
     new_state: Tensor, device: Union[int, str, torch.device] = "cuda"
 ) -> None:
-    r"""Set the random number generator state of the specified GPU.
+    r"""Sets the random number generator state of the specified GPU.
 
     Args:
         new_state (torch.ByteTensor): The desired state
@@ -75,18 +76,16 @@ def set_rng_state(
 
 
 def set_rng_state_all(new_states: Iterable[Tensor]) -> None:
-    r"""Set the random number generator state of all devices.
+    r"""Sets the random number generator state of all devices.
 
     Args:
-        new_states (Iterable of torch.ByteTensor): The desired state for each device.
-    """
+        new_states (Iterable of torch.ByteTensor): The desired state for each device"""
     for i, state in enumerate(new_states):
         set_rng_state(state, i)
 
 
 def manual_seed(seed: int) -> None:
-    r"""Set the seed for generating random numbers for the current GPU.
-    
+    r"""Sets the seed for generating random numbers for the current GPU.
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -108,8 +107,7 @@ def manual_seed(seed: int) -> None:
 
 
 def manual_seed_all(seed: int) -> None:
-    r"""Set the seed for generating random numbers on all GPUs.
-    
+    r"""Sets the seed for generating random numbers on all GPUs.
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -127,8 +125,7 @@ def manual_seed_all(seed: int) -> None:
 
 
 def seed() -> None:
-    r"""Set the seed for generating random numbers to a random number for the current GPU.
-    
+    r"""Sets the seed for generating random numbers to a random number for the current GPU.
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
 
@@ -146,8 +143,7 @@ def seed() -> None:
 
 
 def seed_all() -> None:
-    r"""Set the seed for generating random numbers to a random number on all GPUs.
-    
+    r"""Sets the seed for generating random numbers to a random number on all GPUs.
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
     """
@@ -168,7 +164,7 @@ def seed_all() -> None:
 
 
 def initial_seed() -> int:
-    r"""Return the current random seed of the current GPU.
+    r"""Returns the current random seed of the current GPU.
 
     .. warning::
         This function eagerly initializes CUDA.
