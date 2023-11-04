@@ -20,6 +20,7 @@ from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tup
 import torch
 import torch.fx
 import torch.fx.traceback as fx_traceback
+from torch.fx.experimental import _config as config
 
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
@@ -784,12 +785,10 @@ def _lru_cache(fn, maxsize=None):
     shape environment whenever the constraints are updated, otherwise the cache
     will not be cleared.
     """
-    from torch._dynamo import config
-
     fn_cache = lru_cache(maxsize)(fn)
     prior_version = 0
 
-    if config.translation_validation_no_bisect:
+    if config.validate_shape_env_verison_key:
         prior_key = None
 
         @functools.wraps(fn)
@@ -1459,7 +1458,7 @@ class ShapeEnv:
             if should_record_events is not None
             else (
                 self._translation_validation_enabled
-                and not torch._dynamo.config.translation_validation_no_bisect
+                and not config.translation_validation_no_bisect
             )
         )
 
@@ -1467,7 +1466,7 @@ class ShapeEnv:
         #   - It should record events
         #   - The recording check is enabled
         self.check_recorded_events = (
-            self.should_record_events and torch._dynamo.config.check_shape_env_recorded_events
+            self.should_record_events and config.check_shape_env_recorded_events
         )
 
         # This will make sure we only record the top-level function call.
@@ -3071,7 +3070,7 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = expr`.
         """
-        if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
+        if config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
             # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
@@ -3342,7 +3341,7 @@ class ShapeEnv:
             self._check_frozen(expr, concrete_val)
 
             if (
-                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
                     and isinstance(hint, bool)
                     and isinstance(expr, (sympy.Eq, sympy.Ne))
             ):

@@ -79,9 +79,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             "report_guard_failures",
             "report_all_guard_failures",
             "base_dir",  # used for minifying / logging
-            "translation_validation",
-            "translation_validation_timeout",
-            "translation_validation_no_bisect",
             "DEBUG_DIR_VAR_NAME",
             "debug_dir_root",
         }
