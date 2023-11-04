@@ -18,10 +18,7 @@ _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenfl
 
 @contextlib.contextmanager
 def dl_open_guard():
-    """
-    Context manager to set the RTLD_GLOBAL dynamic linker flag while we open a
-    shared library to load custom operators.
-    """
+    """Context manager to set the RTLD_GLOBAL dynamic linker flag while we open a shared library to load custom operators."""
     if not _SET_GLOBAL_FLAGS:
         yield
         return
@@ -34,10 +31,7 @@ def dl_open_guard():
 
 
 class OperatorBase:
-    """
-    Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator
-    (which represents Python-only operators that are unrepresentable in TorchScript).
-    """
+    """Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator (which represents Python-only operators that are unrepresentable in TorchScript)."""
 
     def __init__(self):
         # The dispatch cache precomputes a mapping of dispatch key that the
@@ -882,7 +876,7 @@ class _Ops(types.ModuleType):
 
     def import_module(self, module):
         """
-        Imports a Python module that has torch.library registrations.
+        Import a Python module that has torch.library registrations.
 
         Generally, to extend PyTorch with custom operators, a user will
         create a Python module whose import triggers registration of
@@ -901,7 +895,7 @@ class _Ops(types.ModuleType):
 
     def load_library(self, path):
         """
-        Loads a shared library from the given path into the current process.
+        Load a shared library from the given path into the current process.
 
         The library being loaded may run global initialization code to register
         custom operators with the PyTorch JIT runtime. This allows dynamically

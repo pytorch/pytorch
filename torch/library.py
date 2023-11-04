@@ -25,17 +25,12 @@ _impls: Set[str] = set()
 _reserved_namespaces = ['prim']
 
 def fallthrough_kernel():
-    """
-    A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
-    """
+    """Pass to ``Library.impl`` as a dummy function in order to register a fallthrough."""
     raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 class Library:
     """
-    A class to create libraries that can be used to register new operators or
-    override operators in existing libraries from Python.
-    A user can optionally pass in a dispatch keyname if they only want to register
-    kernels corresponding to only one specific dispatch key.
+    A class to create libraries that can be used to register new operators or override operators in existing libraries from Python. A user can optionally pass in a dispatch keyname if they only want to register kernels corresponding to only one specific dispatch key.
 
     To create a library to override operators in an existing library (with name ns), set the kind to "IMPL".
     To create a new library (with name ns) to register new operators, set the kind to "DEF".
@@ -48,6 +43,7 @@ class Library:
         kind: "DEF", "IMPL" (default: "IMPL"), "FRAGMENT"
         dispatch_key: PyTorch dispatch key (default: "")
     """
+
     def __init__(self, ns, kind, dispatch_key=""):
         if kind not in ('IMPL', 'DEF', 'FRAGMENT'):
             raise ValueError("Unsupported kind: ", kind)
@@ -73,7 +69,7 @@ class Library:
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis="", *, tags=()):
-        r'''Defines a new operator and its semantics in the ns namespace.
+        r"""Define a new operator and its semantics in the ns namespace.
 
         Args:
             schema: function schema to define a new operator.
@@ -91,7 +87,7 @@ class Library:
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
             >>> my_lib = Library("foo", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
-        '''
+        """
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
@@ -102,7 +98,7 @@ class Library:
         return self.m.define(schema, alias_analysis, tuple(tags))
 
     def impl(self, op_name, fn, dispatch_key=''):
-        r'''Registers the function implementation for an operator defined in the library.
+        r"""Register the function implementation for an operator defined in the library.
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
@@ -116,7 +112,7 @@ class Library:
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
-        '''
+        """
         if not callable(fn):
             raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
@@ -183,7 +179,7 @@ NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
 
 @functools.singledispatch
 def define(qualname, schema, *, lib=None, tags=()):
-    r"""Defines a new operator.
+    r"""Define a new operator.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define the op (by providing an operator name and schema)
@@ -249,9 +245,7 @@ def define(qualname, schema, *, lib=None, tags=()):
 
 @define.register
 def _(lib: Library, schema, alias_analysis=""):
-    """The old torch.library.define.
-    We're keeping this around for BC reasons
-    """
+    """Keep old torch.library.define for backward compatibility reasons."""
     def wrap(f):
         name = lib.define(schema, alias_analysis)
         lib.impl(name, f)
@@ -336,7 +330,7 @@ def _device_type_to_key(device_type: str) -> str:
 
 @impl.register
 def _(lib: Library, name, dispatch_key=""):
-    """Legacy torch.library.impl API. Kept around for BC"""
+    """Keep legacy torch.library.impl API for backward compatibility."""
     def wrap(f):
         lib.impl(name, f, dispatch_key)
         return f
@@ -345,7 +339,8 @@ def _(lib: Library, name, dispatch_key=""):
 
 
 def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
-    r"""Register an abstract implementation for this operator.
+    r"""
+    Register an abstract implementation for this operator.
 
     An "abstract implementation" specifies the behavior of this operator on
     Tensors that carry no data. Given some input Tensors with certain properties
@@ -409,7 +404,6 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     return torch.tensor(res, device=x.device)
 
     """
-
     source = torch._library.utils.get_source(_stacklevel + 1)
 
     def inner(func):
@@ -432,7 +426,7 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
 # This is done via us setting the global_ctx_getter function every time a fake
 # implementation is invoked.
 def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
-    """get_ctx() returns the current AbstractImplCtx object.
+    """Return the current AbstractImplCtx object.
 
     Calling ``get_ctx()`` is only valid inside of an abstract impl
     (see :func:`torch.library.impl_abstract` for more usage details.

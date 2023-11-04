@@ -195,7 +195,7 @@ class Guard:
     @staticmethod
     def weakref_to_str(obj_weakref):
         """
-        This is a workaround of a Python weakref bug.
+        Work around a Python weakref bug.
 
         `obj_weakref` is instance returned by `weakref.ref`,
         `str(obj_weakref)` is buggy if the original obj overrides __getattr__, e.g:
@@ -416,10 +416,7 @@ class GlobalContextCheckpointState:
 
 
 class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
-    """
-    This keeps track of the global torch state during tracing of a function.
-    For example, torch.is_grad_enabled.
-    """
+    """This keeps track of the global torch state during tracing of a function. For example, torch.is_grad_enabled."""
 
     _supported_global_states = {
         "grad_enabled",
@@ -724,8 +721,7 @@ def compile_context(context: CompileContext):
 @contextmanager
 def tracing(context: TracingContext):
     """
-    This function installs the passed in tracing context as a dynamic scoped
-    global variable.
+    Install the passed in tracing context as a dynamic scoped global variable.
 
     Calls to TracingContext.get() while not under a `with tracing()` context
     will return None.
@@ -778,10 +774,10 @@ class ChainedSource(Source):
 
 def detect_fake_mode(inputs: Any = None):
     """
-    Attempts to "detect" what the current fake mode is.  If there is one ambiently
-    available from TracingContext, we preferentially use that.  Otherwise, we
-    heuristically detect the fake mode via the following sources, in order of
-    priority:
+    Attempt to "detect" what the current fake mode is.
+
+    If there is one ambiently available from TracingContext, we preferentially use that.
+    Otherwise, we heuristically detect the fake mode via the following sources, in order of priority.:
 
         - Currently active fake mode on stack
         - Fake mode associated with passed in tensors (inputs does not

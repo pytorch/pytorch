@@ -1,8 +1,4 @@
-"""
-The weak_script annotation needs to be here instead of inside torch/jit/ so it
-can be used in other places in torch/ (namely torch.nn) without running into
-circular dependency problems
-"""
+"""The weak_script annotation needs to be here instead of inside torch/jit/ so it can be used in other places in torch/ (namely torch.nn) without running into circular dependency problems."""
 
 import ast
 import builtins
@@ -95,9 +91,7 @@ loader = SourceLoader()
 
 def createResolutionCallbackFromEnv(lookup_base):
     """
-    Creates a resolution callback that will look up qualified names in an
-    environment, starting with `lookup_base` for the base of any qualified
-    names, then proceeding down the lookup chain with the resolved object.
+    Create a resolution callback that will look up qualified names in an environment, starting with `lookup_base` for the base of any qualified names, then proceeding down the lookup chain with the resolved object.
 
     You should not use this directly, it should only be used from the other
     createResolutionCallbackFrom* functions.
@@ -162,12 +156,9 @@ def createResolutionCallbackFromEnv(lookup_base):
 
 def createResolutionCallbackFromFrame(frames_up: int = 0):
     """
-    Creates a function which, given a string variable name,
-    returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallbackFromFrame (by default).
-
-    This is used to enable access in-scope Python variables inside
-    TorchScript fragments.
+    Return the value of the variable in the scope of the caller of the function which called createResolutionCallbackFromFrame (by default) given a string variable name.
+    
+    This is used to enable access in-scope Python variables inside TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
     The default value is 0, which correspond to the frame of the caller
@@ -211,9 +202,7 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
 
 
 def get_closure(fn):
-    """
-    Get a dictionary of closed over variables from a function
-    """
+    """Get a dictionary of closed over variables from a function."""
     captures = {}
     captures.update(fn.__globals__)
 
@@ -269,10 +258,7 @@ def get_closure(fn):
 
 
 def createResolutionCallbackFromClosure(fn):
-    """
-    Create a resolutionCallback by introspecting the function instead of
-    looking up the stack for the enclosing scope
-    """
+    """Create a resolutionCallback by introspecting the function instead of looking up the stack for the enclosing scope."""
     closure = get_closure(fn)
 
     class closure_lookup:
@@ -313,8 +299,7 @@ def can_compile_class(cls) -> bool:
 
 def get_callable_argument_names(fn) -> List[str]:
     """
-    Gets names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
-    Returns an empty list when other types of arguments are present.
+    Get names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`. Return an empty list when other types of arguments are present.
 
     This is used by `torch.jit.trace` to assign meaningful argument names to
     traced functions and modules.
@@ -343,10 +328,7 @@ def get_callable_argument_names(fn) -> List[str]:
 
 
 def get_annotation_str(annotation):
-    """
-    Convert an AST node containing a type annotation to the string present in the source
-    that represents the same annotation.
-    """
+    """Convert an AST node containing a type annotation to the string present in the source that represents the same annotation."""
     if isinstance(annotation, ast.Name):
         return annotation.id
     elif isinstance(annotation, ast.Attribute):
@@ -366,9 +348,7 @@ def get_annotation_str(annotation):
 
 def get_type_hint_captures(fn):
     """
-    Get a dictionary containing type resolution mappings necessary to resolve types
-    for the literal annotations on 'fn'. These are not considered to be closed-over by fn
-    and must be obtained separately (e.g. using this function).
+    Get a dictionary containing type resolution mappings necessary to resolve types for the literal annotations on 'fn'. These are not considered to be closed-over by fn and must be obtained separately (e.g. using this function).
 
     Args:
         fn: A callable.
@@ -447,10 +427,7 @@ def get_type_hint_captures(fn):
 
 
 def createResolutionCallbackForClassMethods(cls):
-    """
-    This looks at all the methods defined in a class and pulls their closed-over
-    variables into a dictionary and uses that to resolve variables.
-    """
+    """Pull pulls closed-over variables from all methods defined in a class into a dictionary and uses that to resolve variables."""
     # cls is a type here, so `ismethod` is false since the methods on the type
     # aren't bound to anything, so Python treats them as regular functions
     fns = [
@@ -480,11 +457,7 @@ def createResolutionCallbackForClassMethods(cls):
 def boolean_dispatch(
     arg_name, arg_index, default, if_true, if_false, module_name, func_name
 ):
-    """
-    Dispatches to either of 2 script functions based on a boolean argument.
-    In TorchScript, the boolean argument must be constant so that the correct
-    function to use can be determined at compile time.
-    """
+    """Dispatch to either of 2 script functions based on a boolean argument. In TorchScript, the boolean argument must be constant so that the correct function to use can be determined at compile time."""
 
     def fn(*args, **kwargs):
         dispatch_flag = default
@@ -527,10 +500,7 @@ def boolean_dispatch(
 
 
 class FunctionModifiers:
-    """
-    Used to denote the behavior of a function in TorchScript. See export() and
-    ignore() for details.
-    """
+    """Used to denote the behavior of a function in TorchScript. See export() and ignore() for details."""
 
     UNUSED = "unused (ignored and replaced with raising of an exception)"
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
@@ -544,8 +514,7 @@ class FunctionModifiers:
 
 def export(fn):
     """
-    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
-    :class:`ScriptModule` and should be compiled.
+    Indicate (decorator) that a method on an ``nn.Module`` is used as an entry point into a :class:`ScriptModule` and should be compiled.
 
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
@@ -590,10 +559,7 @@ def export(fn):
 
 def unused(fn):
     """
-    This decorator indicates to the compiler that a function or method should
-    be ignored and replaced with the raising of an exception. This allows you
-    to leave code in your model that is not yet TorchScript compatible and still
-    export your model.
+    Indicate (decorator) to the compiler that a function or method should be ignored and replaced with the raising of an exception. This allows you to leave code in your model that is not yet TorchScript compatible and still export your model.
 
         Example (using ``@torch.jit.unused`` on a method)::
 
@@ -653,11 +619,7 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
 
 def ignore(drop=False, **kwargs):
     """
-    This decorator indicates to the compiler that a function or method should
-    be ignored and left as a Python function. This allows you to leave code in
-    your model that is not yet TorchScript compatible. If called from TorchScript,
-    ignored functions will dispatch the call to the Python interpreter. Models with ignored
-    functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
+    Indicate (decorator) to the compiler that a function or method should be ignored and left as a Python function. This allows you to leave code in your model that is not yet TorchScript compatible. If called from TorchScript, ignored functions will dispatch the call to the Python interpreter. Models with ignored functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -712,7 +674,6 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
-
     if callable(drop):
         # used without any args, so drop is actually a function
         #   @torch.jit.ignore
@@ -1119,9 +1080,8 @@ for i in range(2, 7):
 
 def is_scripting() -> bool:
     r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
+    Return True when in compilation and False otherwise. This is useful especially with the @unused decorator to leave code in your model that is not yet TorchScript compatible.
+
     .. testcode::
 
         import torch
@@ -1489,8 +1449,7 @@ class _TensorExtractor(pickle.Pickler):
 
 def _extract_tensors(obj):
     r"""
-    This function is exclusively called from C++.
-    See ``torch/csrc/jit/python/python_ivalue.h``.
+    See ``torch/csrc/jit/python/python_ivalue.h``. This function is exclusively called from C++.
 
     It extracts the tensors contained in the given object, through pickling.
     """

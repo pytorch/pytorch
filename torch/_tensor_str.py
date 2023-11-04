@@ -29,7 +29,7 @@ def set_printoptions(
     profile=None,
     sci_mode=None,
 ):
-    r"""Set options for printing. Items shamelessly taken from NumPy
+    r"""Set options for printing. Items shamelessly taken from NumPy.
 
     Args:
         precision: Number of digits of precision for floating point output
@@ -95,16 +95,13 @@ def set_printoptions(
 
 
 def get_printoptions() -> Dict[str, Any]:
-    r"""Gets the current options for printing, as a dictionary that
-    can be passed as ``**kwargs`` to set_printoptions().
-    """
+    r"""Get the current options for printing, as a dictionary that can be passed as ``**kwargs`` to set_printoptions()."""
     return dataclasses.asdict(PRINT_OPTS)
 
 
 @contextlib.contextmanager
 def printoptions(**kwargs):
-    r"""Context manager that temporarily changes the print options.  Accepted
-    arguments are same as :func:`set_printoptions`."""
+    r"""Context manager that temporarily changes the print options. Accepted arguments are same as :func:`set_printoptions`."""
     old_kwargs = get_printoptions()
     set_printoptions(**kwargs)
     try:
