@@ -6660,7 +6660,6 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        V.graph.mark_buffer_mutated(inplace_inputs[0])
         packed = AllReduceCoalesced(
             layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
@@ -6696,7 +6695,6 @@ class AllReduce(InPlaceCollectiveKernel):
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        V.graph.mark_buffer_mutated(inplace_inputs[0])
 
         packed = AllReduce(
             layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
