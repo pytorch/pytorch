@@ -957,6 +957,7 @@ SeqNr|OrigAten|SrcFn
             torch.set_grad_enabled(True)
             y = f_compiled(x)
             self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
             self.assertEqual(y_ref, y)
 
             self.assertIsNone(y_ref[0].grad_fn)
