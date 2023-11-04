@@ -1011,6 +1011,16 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
         idx += cnt
     return infos
 
+def _get_autocast_states():
+    return [
+        torch.is_autocast_enabled(),
+        torch.is_autocast_cpu_enabled(),
+        torch.get_autocast_gpu_dtype(),
+        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_cache_enabled(),
+    ]
+
+
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
 #
@@ -1060,12 +1070,21 @@ def run_functionalized_fw_and_collect_metadata(
         flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
+        prior_autocast_states = _get_autocast_states()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
         with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
+
+        if prior_autocast_states != _get_autocast_states():
+            raise RuntimeError(
+                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                "which will unwind all of their mutations to autocast state before the graph exits. "
+                "If you encounter this error while using torch.compile, please file a bug."
+            )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
