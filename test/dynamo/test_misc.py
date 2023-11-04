@@ -8128,7 +8128,6 @@ def ___make_guard_fn():
             listify = True
             try:
                 list_eager = list(eager[1])
-                print(functional, list_eager)
             except Exception:
                 listify = False
 
