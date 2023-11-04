@@ -1,6 +1,7 @@
 __all__ = ["get_meta"]
 
 import inspect
+import re
 import warnings
 from typing import Any, Dict
 
@@ -8,8 +9,8 @@ import torch
 from torch.testing import make_tensor
 
 
-def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5)):
-    """Return op specific parameters for the given op inputs key.
+def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=False):
+    """Return triton kernel meta parameters of the specified op and its inputs key.
 
     Parameters
     ----------
@@ -18,6 +19,11 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5)):
     device_name (optional, str): The name of a device for which op
       parameters are provided.
     version (optional, hashable): Specifies the version of parameters.
+    exact (optional, bool): When True, the returned data (if
+      available) corresponds exactly to the specified device_name and
+      version information. Otherwise, if the corresponding data is not
+      available but there exists a data set that is computed for a
+      similar GPU device, then this data set will be returned.
 
     Returns
     -------
@@ -26,7 +32,20 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5)):
     """
     if device_name is None:
         device_name = torch.cuda.get_device_name()
-    op_data = _operation_device_version_data.get((op, device_name, version), dict())
+    op_data = _operation_device_version_data.get((op, device_name, version))
+    if op_data is None:
+        # A lack of op data could be due to using a (slightly)
+        # different GPU model compared to a model for which optimal
+        # meta parameters have been computed. In the following we'll
+        # assume that there is a set of GPU models that all have
+        # a similar set of optimal meta parameters.
+        if re.match(r"NVIDIA A100[^\d]", device_name) is not None:
+            device_name = "NVIDIA A100-SXM4-80GB"
+        else:
+            return
+        op_data = _operation_device_version_data.get((op, device_name, version))
+    if op_data is None:
+        return
     values = op_data.get(key)
     if values is not None:
         if op == "scatter_mm":
@@ -195,10 +214,10 @@ def optimize_scatter_mm(
     key = (m, k, n, bm, bk)
     version = (0, dtype, sparsity)
 
-    initial_meta = get_meta("scatter_mm", key, version=version)
+    initial_meta = get_meta("scatter_mm", key, version=version, exact=True)
 
     if initial_meta is None:
-        initial_meta = get_meta("scatter_mm", key, version=(0, dtype, 0.5))
+        initial_meta = get_meta("scatter_mm", key, version=(0, dtype, 0.5), exact=True)
         if initial_meta is None:
             initial_meta = dict(
                 GROUP_SIZE=1, TILE_M=16, TILE_N=16, SPLIT_N=1, num_warps=1, num_stages=1
@@ -275,10 +294,12 @@ def optimize_bsr_dense_mm(
     key = (m, k, n, bm, bk)
     version = (0, dtype, sparsity)
 
-    initial_meta = get_meta("bsr_dense_mm", key, version=version)
+    initial_meta = get_meta("bsr_dense_mm", key, version=version, exact=True)
 
     if initial_meta is None:
-        initial_meta = get_meta("bsr_dense_mm", key, version=(0, dtype, 0.5))
+        initial_meta = get_meta(
+            "bsr_dense_mm", key, version=(0, dtype, 0.5), exact=True
+        )
         if initial_meta is None:
             initial_meta = dict(GROUP_SIZE_ROW=1, num_stages=1, num_warps=1)
     elif not force:
@@ -382,7 +403,7 @@ def main(op="scatter_mm", force=False):
                 dense = make_tensor(K, N, dtype=dtype, device="cuda")
                 meta_lst = []
                 for sparsity in sparsity_lst:
-                    meta = get_meta(op, key, version=(0, dtype, sparsity))
+                    meta = get_meta(op, key, version=(0, dtype, sparsity), exact=True)
                     if meta is None:
                         continue
 
@@ -441,7 +462,9 @@ def main(op="scatter_mm", force=False):
 
                 if index > 0:
                     device_name = torch.cuda.get_device_name()
-                    meta = get_meta(op, key, version=(0, dtype, meta_lst[0][1]))
+                    meta = get_meta(
+                        op, key, version=(0, dtype, meta_lst[0][1]), exact=True
+                    )
                     update(
                         op,
                         device_name,
