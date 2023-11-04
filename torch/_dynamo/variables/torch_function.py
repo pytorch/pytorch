@@ -167,7 +167,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
         if _is_attr_overidden(tx, self, name):
             unimplemented(
-                f"Accessing overidden method/attribute {name} on a tensor"
+                f"Accessing overridden method/attribute {name} on a tensor"
                 " subclass with a __torch_function__ override is not supported"
             )
 
@@ -216,7 +216,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
             if _is_attr_overidden(tx, self, name):
                 unimplemented(
-                    f"Calling overidden method {name} on a tensor"
+                    f"Calling overridden method {name} on a tensor"
                     " subclass with a __torch_function__ override is not supported"
                 )
 
@@ -232,4 +232,4 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)

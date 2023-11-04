@@ -3794,6 +3794,7 @@ class TestSparseCompressedTritonKernels(TestCase):
                         break
 
                     self.assertEqual(result, expected)
+        torch.sparse._triton_ops._bsr_scatter_mm_indices_data.cache_clear()
 
     def test_TensorAsKey(self, device):
         from torch.sparse._triton_ops import TensorAsKey
