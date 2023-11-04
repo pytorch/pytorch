@@ -151,8 +151,8 @@ class SpeculationLog:
     """
     SpeculationLog replaces the prior copy_graphstate/restore_graphstate
     checkpointing.  Rather than saving/restoring state, we restart the
-    dynamo conversion process over from the beginning -- but when we hit
-    the start of the speculation that failed, we take instead generate
+    dynamo conversion process over from the beginning -- but when we
+    hit the start of the speculation that failed, we instead generate
     a graph break.
     """
 
