@@ -33,7 +33,7 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
     if device_name is None:
         device_name = torch.cuda.get_device_name()
     op_data = _operation_device_version_data.get((op, device_name, version))
-    if op_data is None:
+    if op_data is None and not exact:
         # A lack of op data could be due to using a (slightly)
         # different GPU model compared to a model for which optimal
         # meta parameters have been computed. In the following we'll
