@@ -538,6 +538,22 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             with self.assertRaises(torch.onnx.InvalidExportOptionsError):
                 raise self._export_exception
 
+    def test_exported_program_torch_distributions_normal_Normal(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                self.normal = torch.distributions.normal.Normal(0, 1)
+                super().__init__()
+
+            def forward(self, x):
+                return self.normal.sample(x.shape)
+
+        x = torch.randn(2, 3)
+        exported_program = torch.export.export(Model(), args=(x,))
+        _ = torch.onnx.dynamo_export(
+            exported_program,
+            x,
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

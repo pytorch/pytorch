@@ -2112,6 +2112,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
                 self.assertEqual(res_bf16, expected)
 
+    @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
+                         'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
+                         ' with instruction set support avx2 or newer.')
+    def test_fb_fc_packed(self):
+        X = np.random.rand(16, 16).astype(np.float32) - 0.5
+        W = np.random.rand(16, 16).astype(np.float32) - 0.5
+        b = np.random.rand(16).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return np.dot(X, W.T) + b
+
+        x_tensor = torch.tensor(X)
+        w_tensor = torch.tensor(W)
+        b_tensor = torch.tensor(b)
+        packed_w_tensor = torch.fbgemm_pack_gemm_matrix_fp16(w_tensor)
+        actual_output = torch.fbgemm_linear_fp16_weight(x_tensor, packed_w_tensor, b_tensor)
+        expected_output = fc_op(X, W, b)
+        torch.testing.assert_close(torch.from_numpy(expected_output), actual_output.cpu(), atol=1e-3, rtol=1e-3)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
@@ -5376,6 +5395,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
                         self.assertEqual(result.item(), expected.item(), atol=0.001, rtol=0)
 
+    def test_cosine_embedding_loss_error_on_diff_shapes(self):
+        for device in device_():
+            input1 = torch.empty((0, 0), dtype=torch.double, device=device)
+            input2 = torch.empty((0,), dtype=torch.double, device=device)
+            target = torch.empty((0,), dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, ".*expects 2D.*"):
+                torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+
+    def test_cosine_embedding_loss_error_on_nonexpandable_shapes(self):
+        for device in device_():
+            input1 = torch.empty((1, 5), dtype=torch.double, device=device)
+            input2 = torch.empty((1, 6), dtype=torch.double, device=device)
+            target = torch.ones((1,), dtype=torch.int, device=device)
+            with self.assertRaisesRegex(RuntimeError, ".*must match the size.*"):
+                torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+
     def test_kl_div_with_diff_type(self):
         for device in device_():
             input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
@@ -6966,30 +7001,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
-
-    def test_log_softmax_cpu(self, dtype=torch.bfloat16):
-        for dim in [0, 1]:
-            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).detach().requires_grad_(True)
-            outf = F.log_softmax(inputf, dim=dim)
-            out = F.log_softmax(input, dim=dim)
-            self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
-
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
-
-    def test_softmax_cpu(self, dtype=torch.bfloat16):
-        for dim in [0, 1]:
-            inputf = torch.rand(200, 200, device="cpu", dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).detach().requires_grad_(True)
-            outf = F.softmax(inputf, dim=dim)
-            out = F.softmax(input, dim=dim)
-            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
-
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
 
     def test_adaptive_log_softmax(self):
         # args validation
@@ -10222,6 +10233,34 @@ class TestNNDeviceType(NNTestCase):
         pt_res = self._slow_masked_softmax(input, mask)
         self.assertEqual(pt_res, native_res, exact_dtype=True)
 
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    def test_log_softmax_cpu(self, device, dtype):
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.log_softmax(inputf, dim=dim)
+            out = F.log_softmax(input, dim=dim)
+            self.assertEqual(out, outf.to(dtype=dtype), atol=0.1, rtol=0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.half)
+    def test_softmax_cpu(self, device, dtype):
+        for dim in [0, 1]:
+            inputf = torch.rand(200, 200, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            outf = F.softmax(inputf, dim=dim)
+            out = F.softmax(input, dim=dim)
+            self.assertEqual(out, outf.to(dtype), atol=1e-3, rtol=0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=1e-3, rtol=0)
+
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
     def test_softmax_results(self, device, dtype):
@@ -10477,6 +10516,26 @@ class TestNNDeviceType(NNTestCase):
                                            align_corners=align_corners)
 
                 self.assertEqual(out_half, out_double.half(), msg=f"grid_sample with mode = {mode} doesn't match")
+
+        helper((32, 64, 16, 16), (32, 8, 8, 2), True)
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
+        helper((32, 64, 16, 16), (32, 8, 8, 2), False)
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), False)
+
+    @onlyCUDA
+    def test_grid_sample_bfloat16_precision(self):
+        def helper(shape_in, shape_out, align_corners):
+            for mode in ('bilinear', 'nearest', 'bicubic'):
+                if len(shape_in) != 4 and mode == 'bicubic':
+                    continue
+                data = torch.randn(shape_in, device='cuda', dtype=torch.bfloat16)
+                grid = torch.rand(shape_out, device='cuda', dtype=torch.bfloat16) * 2.0 - 1.0
+
+                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=align_corners)
+                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
+                                           align_corners=align_corners)
+
+                self.assertEqual(out_half, out_double.bfloat16(), msg=f"grid_sample with mode = {mode} doesn't match")
 
         helper((32, 64, 16, 16), (32, 8, 8, 2), True)
         helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
@@ -11473,7 +11532,7 @@ class TestNNDeviceType(NNTestCase):
 
     # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):

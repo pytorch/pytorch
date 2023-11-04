@@ -461,10 +461,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("Dropout"),
     ),
     xfail(
-        "nn.functional.embedding",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
-    ),
-    xfail(
         "nn.functional.max_pool2d",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
@@ -773,6 +769,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.batch_norm",
         "native_batch_norm",
         "dot",
+        "logit",
     ]
 
     @common_device_type.ops(

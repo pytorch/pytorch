@@ -3314,6 +3314,22 @@
   dispatch:
     CUDA: _mixed_dtypes_linear
 
+- func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
+
+- func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
+
+- func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
+
+- func: fbgemm_pack_quantized_matrix(Tensor input) -> Tensor
+
+- func: fbgemm_pack_quantized_matrix.KN(Tensor input, int K, int N) -> Tensor
+
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
 
@@ -5084,12 +5100,14 @@
   python_module: nn
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu
+  tags: pointwise
 
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: silu.out
   python_module: nn
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu_
+  tags: pointwise
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5098,6 +5116,7 @@
   dispatch:
     CPU, CUDA: silu_out
     MPS: silu_out_mps
+  tags: pointwise
 
 - func: silu_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5106,6 +5125,7 @@
   dispatch:
     CPU, CUDA: silu_backward_out
     MPS: silu_backward_out_mps
+  tags: pointwise
 
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: silu_backward.grad_input
@@ -5113,6 +5133,7 @@
   dispatch:
     CompositeImplicitAutograd: math_silu_backward
     NestedTensorCPU, NestedTensorCUDA: silu_backward_nested
+  tags: pointwise
 
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
@@ -7623,6 +7644,15 @@
 
 # - func: quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
 #
+
+# Quantized RNN cells
+- func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
+
+- func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+
+- func: quantized_rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
+
+- func: quantized_rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
