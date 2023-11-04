@@ -280,7 +280,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
-            x.sigmoid = False
+            fn(x)
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+        with torch._dynamo.config.patch(
+            traceable_tensor_subclasses={LocalSubclass}
+        ), self.assertRaisesRegex(
+            TypeError,
+            "'bool' object is not callable",
+        ):
+            LocalSubclass.sigmoid = False
             fn(x)
 
     def test_torch_function_call_on_attr(self):
