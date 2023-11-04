@@ -118,7 +118,6 @@ class PyCodegen:
                 SymNodeVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
-                torch._dynamo.variables.user_defined.AccumulateGradVariable,
             ),
         ):
             graph_outputs_key = self.add_graph_output(value)

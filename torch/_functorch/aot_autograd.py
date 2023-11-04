@@ -2016,7 +2016,7 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
 
-    # fw_module.graph.eliminate_dead_code()
+    fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)

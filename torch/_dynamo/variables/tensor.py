@@ -311,12 +311,6 @@ class TensorVariable(VariableTracker):
                 if type(static_attr) != types.GetSetDescriptorType:
                     return None
 
-                if name == "grad_fn":
-                    return variables.user_defined.AutogradNodeVariable(
-                        self.as_proxy().node.meta["example_value"].grad_fn,
-                        self.as_proxy().grad_fn,
-                        **options,
-                    )
                 return wrap_fx_proxy(
                     tx=tx,
                     proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
@@ -782,21 +776,11 @@ class TensorVariable(VariableTracker):
                     hook_callable(fn)
                     return tensor
 
-                def _register_post_acc_grad_hook_trampoline(tensor):
-                    print("REGISTER register_post_accumulate_grad_hook")
-                    tensor.register_post_accumulate_grad_hook(fn)
-                    return tensor
-
-                if name == "register_hook":
-                    _hook_fn = _register_hook_trampoline
-                else:
-                    _hook_fn = _register_post_acc_grad_hook_trampoline
-
                 return wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(
                         "call_function",
-                        _hook_fn,
+                        _register_hook_trampoline,
                         (self.as_proxy(),),
                         {},
                     ),
