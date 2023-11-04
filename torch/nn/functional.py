@@ -1281,10 +1281,10 @@ def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace
 
 
 def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""Randomly zero out entire channels a channel is a 1D feature map.
+    r"""Randomly zero out entire channels (a channel is a 1D feature map).
     
     For example, the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 1D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    batched input is a 1D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1319,10 +1319,10 @@ def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""Randomly zero out entire channels a channel is a 2D feature map.
+    r"""Randomly zero out entire channels (a channel is a 2D feature map).
     
     For example, the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    batched input is a 2D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1363,10 +1363,10 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
-    r"""Randomly zero out entire channels (a channel is a 3D feature map.
+    r"""Randomly zero out entire channels (a channel is a 3D feature map).
     
-    E.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`\text{input}[i, j]` of the input tensor.
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -1402,10 +1402,10 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
-    r"""Randomly masks out entire channels (a channel is a feature map.
+    r"""Randomly masks out entire channels (a channel is a feature map).
     
-    E.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    For example, the :math:`j`-th channel of the :math:`i`-th sample in the batch input
+    is a tensor :math:`\text{input}[i, j]` of the input tensor. Instead of
     setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function.
 
@@ -1431,7 +1431,7 @@ def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False,
 
 
 def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = False) -> Tensor:
-    r"""Threshold each element of the input Tensor.
+    r"""Apply a threshold to each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
@@ -1602,12 +1602,9 @@ In-place version of :func:`~selu`.
 
 def celu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
     r"""Apply CELU, a continously differentiable ELU.
-
+    
     Applies element-wise,
     :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
-
-    Refer paper for further information:
-    `Continuously Differentiable Exponential Linear Units`_.
     
     See :class:`~torch.nn.CELU` for more details.
     """
@@ -1744,7 +1741,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 
 
 def tanhshrink(input):
-    r"""Apply the following function element-wise.
+    r"""Apply the TanhShrink function element-wise.
 
     Function :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
 
@@ -1756,7 +1753,7 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    r"""Apply the following function element-wise.
+    r"""Apply the SoftSign function element-wise.
 
     Function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
 
@@ -1858,7 +1855,7 @@ def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
 
 def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1) -> Tensor:
     r"""
-    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
+    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretize.
 
     Args:
       logits: `[..., num_features]` unnormalized log probabilities
@@ -1960,8 +1957,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 def tanh(input):
     r"""Apply hyperbolic tangent (tanh) function element-wise.
     
-    tanh defined as - 
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
+     Applies :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
 
     See :class:`~torch.nn.Tanh` for more details.
     """
@@ -2128,7 +2124,7 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    r"""Lookup table that looks up embeddings in a fixed dictionary and size.
+    r"""Generate a simple lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
     The input to the module is a list of indices, and the embedding matrix,
@@ -2559,7 +2555,7 @@ def group_norm(
 def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
     r"""Apply local response normalization over an input signal.
     
-    Input ignal is composed of several input planes, where channels occupy the second dimension.
+    Input signal is composed of several input planes, where channels occupy the second dimension.
     Normalization is applied across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
@@ -3062,7 +3058,7 @@ def binary_cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Calculate Binary Cross Entropy between the target and input probabilities.
+    r"""Measure Binary Cross Entropy between the target and input probabilities.
 
     See :class:`~torch.nn.BCELoss` for details.
 
@@ -4804,8 +4800,7 @@ def _in_projection_packed(
     w: Tensor,
     b: Optional[Tensor] = None,
 ) -> List[Tensor]:
-    r"""
-    Perform the in-projection step of the attention operation, using packed weights.
+    r"""Perform the in-projection step of the attention operation, using packed weights.
     
     Output is a triple containing projection tensors for query, key and value.
 
@@ -4872,8 +4867,7 @@ def _in_projection(
     b_k: Optional[Tensor] = None,
     b_v: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    r"""
-    Perform the in-projection step of the attention operation.
+    r"""Perform the in-projection step of the attention operation.
     
     This is simply a triple of linear projections,
     with shape constraints on the weights which
@@ -4985,7 +4979,6 @@ Note:
     {cudnn_reproducibility_note}
 """.format(**reproducibility_notes)
     + r"""
-
 Args:
     query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
     key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
@@ -5135,8 +5128,7 @@ def multi_head_attention_forward(
     average_attn_weights: bool = True,
     is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""
-    Foward method for MultiHeadAttention.
+    r"""Foward method for MultiHeadAttention.
     
     See :class:`torch.nn.MultiheadAttention` for details.
     
