@@ -1,4 +1,5 @@
 import functools
+import torch
 
 from .allowed_functions import is_in_graph_function
 
