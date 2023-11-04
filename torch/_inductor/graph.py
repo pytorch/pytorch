@@ -38,7 +38,6 @@ from .ir import (
     Constant,
     FixedLayout,
     InputBuffer,
-    MutableBox,
     Pointwise,
     Reduction,
     StorageBox,
