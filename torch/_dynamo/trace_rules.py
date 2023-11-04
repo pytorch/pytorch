@@ -52,6 +52,10 @@ torch_name_rule_map = {
     "torch._C.Generator.get_state": TorchInGraphFunctionVariable,
     "torch.default_generator.set_state": TorchInGraphFunctionVariable,
     "torch._C.Generator.set_state": TorchInGraphFunctionVariable,
+    "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
+    "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
+    "torch.jit.is_scripting": TorchInGraphFunctionVariable,
+    "torch.jit.is_tracing": TorchInGraphFunctionVariable,
 }
 
 
