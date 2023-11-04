@@ -221,9 +221,12 @@ class InferenceModeVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values,
-        initial_values=torch.is_inference_mode_enabled(),
+        initial_values=None,
         **kwargs,
     ):
+        if initial_values is None:
+            # This must be called here since function defaults are evaluated at import time
+            initial_values = torch.is_inference_mode_enabled()
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
