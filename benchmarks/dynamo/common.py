@@ -3387,7 +3387,7 @@ def run(runner, args, original_dir=None):
             args.repeat = 2
 
             # Set translation validation on by default on CI accuracy runs.
-            torch._dynamo.config.translation_validation = True
+            torch.fx.experimental._config.translation_validation = True
 
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
@@ -3709,7 +3709,7 @@ def run(runner, args, original_dir=None):
 
     if args.no_translation_validation:
         # Overwrite 'translation_validation' config, if specified.
-        torch._dynamo.config.translation_validation = False
+        torch.fx.experimental._config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
