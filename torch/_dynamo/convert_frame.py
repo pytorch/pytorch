@@ -511,6 +511,8 @@ def _compile(
             if translation_validation_enabled():
                 bisect(tracer.output.shape_env)
             raise
+        finally:
+            tracer.output.call_cleanup_hooks()
 
         output = tracer.output
         assert output is not None
