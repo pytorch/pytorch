@@ -111,17 +111,21 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        if (shape is not None) != (stride is not None):
-            raise RuntimeError("Please pass both shape and stride at the same time.")
-
-        if not shape or not stride:
+        if shape and stride:
+            tensor_shape, tensor_stride = shape, stride
+        elif not shape and not stride:
             # if it's not by default run_check, we assume user is certain that each
             # rank has the same tensor shape, and we just use that to calculate the
             # global shape
-            shape, stride = compute_global_tensor_info(input, device_mesh, placements)
-            tensor_shape, tensor_stride = torch.Size(shape), tuple(stride)
+            global_shape, global_stride = compute_global_tensor_info(
+                input, device_mesh, placements
+            )
+            tensor_shape, tensor_stride = torch.Size(global_shape), tuple(global_stride)
         else:
-            tensor_shape, tensor_stride = shape, stride
+            raise RuntimeError(
+                f"Found shape:{shape}, stride:{stride}.",
+                "Please pass both shape and stride at the same time.",
+            )
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
