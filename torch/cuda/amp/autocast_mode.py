@@ -15,8 +15,8 @@ __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
 
 class autocast(torch.amp.autocast_mode.autocast):
-    r"""See :class:`torch.autocast`.
-
+    r"""
+    See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
 
@@ -87,10 +87,9 @@ def _cast(value, dtype):
 #     @custom_fwd(cast_inputs=torch.float)
 #     def forward(...):
 def custom_fwd(fwd=None, *, cast_inputs=None):
-    """Create a helper decorator for ``forward`` methods of custom autograd functions.
-    
-    Autograd functions are subclasses of :class:`torch.autograd.Function`.
-    See the :ref:`example page<amp-custom-examples>` for more detail.
+    """
+    Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
+    :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Args:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
@@ -128,9 +127,9 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 # cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
 # cast_inputs supplied to custom_fwd.
 def custom_bwd(bwd):
-    """Create a helper decorator for backward methods of custom autograd functions.
-    
-    Autograd functions are subclasses of :class:`torch.autograd.Function`.
+    """
+    Helper decorator for backward methods of custom autograd functions (subclasses of
+    :class:`torch.autograd.Function`).
     Ensures that ``backward`` executes with the same autocast state as ``forward``.
     See the :ref:`example page<amp-custom-examples>` for more detail.
     """
