@@ -735,7 +735,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         continue_inst, state = self.checkpoint
 
         cannot_restore_entry = next(
-            entry for entry in reversed(self.block_stack) if not entry.can_restore()
+            (entry for entry in reversed(self.block_stack) if not entry.can_restore()),
+            None,
         )
         if cannot_restore_entry:
             cannot_restore_target = cannot_restore_entry.target
