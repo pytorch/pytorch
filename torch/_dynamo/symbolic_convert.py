@@ -729,7 +729,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             log.debug("step triggered compile", exc_info=True)
 
-        # generate code from checkpoint
+        # generate code from checkpoint 
         assert not self.output.output_instructions
         assert self.checkpoint is not None
         continue_inst, state = self.checkpoint
@@ -738,10 +738,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             (entry for entry in reversed(self.block_stack) if not entry.can_restore()),
             None,
         )
+        last_jump_forward = None
         if cannot_restore_entry and not self.one_graph:
             cannot_restore_target = cannot_restore_entry.target
             insts = self.instructions[self.instruction_pointer :]
-            last_jump_forward = None
             in_active_region = False
             for inst in insts:
                 if inst == cannot_restore_target:
