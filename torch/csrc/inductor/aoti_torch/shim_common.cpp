@@ -1,4 +1,5 @@
 #include <c10/core/DeviceType.h>
+#include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -57,6 +58,14 @@ int32_t aoti_torch_device_type_cuda() {
   return (int32_t)c10::DeviceType::CUDA;
 }
 
+int32_t aoti_torch_dtype_float8_e5m2() {
+  return (int32_t)c10::ScalarType::Float8_e5m2;
+}
+
+int32_t aoti_torch_dtype_float8_e4m3fn() {
+  return (int32_t)c10::ScalarType::Float8_e4m3fn;
+}
+
 int32_t aoti_torch_dtype_bfloat16() {
   return (int32_t)c10::ScalarType::BFloat16;
 }
@@ -95,6 +104,14 @@ int32_t aoti_torch_dtype_int64() {
 
 int32_t aoti_torch_dtype_bool() {
   return (int32_t)c10::ScalarType::Bool;
+}
+
+bool aoti_torch_grad_mode_is_enabled() {
+  return c10::GradMode::is_enabled();
+}
+
+void aoti_torch_grad_mode_set_enabled(bool enabled) {
+  return c10::GradMode::set_enabled(enabled);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
@@ -348,6 +365,15 @@ AOTITorchError aoti_torch_assign_tensors(
   });
 }
 
+AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = self_tensor->clone();
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *ret = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
@@ -447,5 +473,27 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         flatten_int_args,
         num_tensors,
         flatten_tensor_args);
+  });
+}
+
+AOTITorchError aoti_torch__alloc_from_pool(
+    AtenTensorHandle self,
+    int64_t offset_bytes,
+    int32_t dtype,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    AtenTensorHandle* ret_new_tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    c10::IntArrayRef sizes(sizes_ptr, ndim);
+    c10::IntArrayRef strides(strides_ptr, ndim);
+    at::Tensor* new_tensor = new at::Tensor(torch::inductor::_alloc_from_pool(
+        *self_tensor,
+        offset_bytes,
+        static_cast<c10::ScalarType>(dtype),
+        sizes,
+        strides));
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }

@@ -454,7 +454,7 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {b}"
 
     @staticmethod
-    def div(a, b):
+    def truediv(a, b):
         return f"{a} / {b}"
 
     @staticmethod
@@ -2663,6 +2663,7 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:

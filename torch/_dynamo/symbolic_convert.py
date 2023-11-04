@@ -50,6 +50,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder
@@ -72,7 +73,13 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
+from .variables.base import (
+    _is_top_level_scope,
+    is_side_effect_safe,
+    MutableLocal,
+    typestr,
+    VariableTracker,
+)
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -81,7 +88,7 @@ from .variables.ctx_manager import (
     GenericContextWrappingVariable,
     WithExitFunctionVariable,
 )
-from .variables.dicts import ConstDictVariable
+from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
@@ -92,7 +99,6 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -342,8 +348,9 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
             # if __bool__ is missing, trying __len__ to infer a truth value.
-            if x.is_python_constant() and x.as_python_constant() is None:
+            if isinstance(x, GetAttrVariable):
                 x = value.var_getattr(self, "__len__")
+
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
@@ -520,11 +527,20 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
     inline_depth: int
+    inconsistent_side_effects: bool
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
+
+    def mark_inconsistent_side_effects(self):
+        """
+        InstructionTranslator has encountered instructions which may cause
+        dynamo to see a different version of history from eager
+        See: https://github.com/pytorch/pytorch/issues/110765
+        """
+        self.inconsistent_side_effects = True
 
     def has_backedge(self):
         cur_offset = self.current_instruction.offset
@@ -583,8 +599,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             return v
 
         def skip(v: VariableTracker):
-            return oldvar.mutable_local not in v.recursively_contains
+            return v.parents_tracker not in recursive_parents
 
+        recursive_parents = oldvar.parents_tracker.recursive_parents()
         cache: Dict[int, Tuple[object, object]] = dict()
         self.output.side_effects.apply(repl, cache, skip_fn=skip)
         self.stack = [
@@ -804,7 +821,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        loaded_vt = loaded_vt.rename(self, name)
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if _is_top_level_scope(current_scope_id()):
+            loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -1055,11 +1076,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, ListIteratorVariable):
+        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
             try:
-                val, next_iter = it.next_variables()
-                self.replace_all(it, next_iter)
+                val, next_iter = it.next_variables(self)
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
@@ -1069,8 +1089,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def COMPARE_OP(self, inst):
         left, right = self.popn(2)
-        left = left.as_specialized(self)
-        right = right.as_specialized(self)
+        left = left
+        right = right
         options = VariableTracker.propagate([left, right])
         op = inst.argval
         supported_any = dict(
@@ -1304,7 +1324,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(
             SliceVariable(
-                [x.as_specialized(self) for x in items],
+                items,
                 **options,
             )
         )
@@ -1423,19 +1443,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.stack[-inst.arg]
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
-        # only copy if the new obj contains other mutables
-        new_rec_contains = obj.recursively_contains
-        if v.recursively_contains or v.mutable_local:
-            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
-
-            if v.mutable_local:
-                new_rec_contains.add(v.mutable_local)
-
         self.replace_all(
             obj,
             ListVariable(
                 obj.items + [v],
-                recursively_contains=new_rec_contains,
                 regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
@@ -1727,7 +1738,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BINARY_OP(self, inst):
         if sys.version_info >= (3, 11):
-            opname = dis._nb_ops[inst.arg][0][3:]
+            opname = dis._nb_ops[inst.arg][0][3:]  # type: ignore[attr-defined]
             if opname.startswith("INPLACE"):
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
@@ -1991,6 +2002,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 self.push(BuiltinVariable(None))
 
         self.inline_depth = inline_depth
+        self.inconsistent_side_effects = False
         linecache.lazycache(f_code.co_filename, f_globals)
         self.log_starts_line()
 
@@ -2214,6 +2226,7 @@ class InstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
+            and not self.inconsistent_side_effects
             and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
@@ -2388,6 +2401,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # Merge symbolic_globals back if parent and child are in the same namespace
             parent.symbolic_globals.update(tracer.symbolic_globals)
 
+        parent.inconsistent_side_effects |= tracer.inconsistent_side_effects
+
         log.debug("DONE INLINING %s", code)
 
         if is_generator(code):
@@ -2554,11 +2569,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-            if isinstance(tos, ListIteratorVariable):
+            if isinstance(
+                tos, (variables.ListIteratorVariable, variables.IteratorVariable)
+            ):
                 self.output.guards.update(tos.guards)
                 try:
-                    val, next_iter = tos.next_variables()
-                    self.replace_all(tos, next_iter)
+                    val, next_iter = tos.next_variables(self)
                     self.push(val)
                     # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)
