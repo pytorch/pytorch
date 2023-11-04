@@ -173,7 +173,6 @@ class GradModeVariable(ContextWrappingVariable):
         )
         if var.initialized:
             var._call_func(tx, var.target_values)
-            var.set_cleanup_hook(tx)
         return var
 
     def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
@@ -186,7 +185,12 @@ class GradModeVariable(ContextWrappingVariable):
     def enter(self, tx):
         if not self.initialized:
             self._call_func(tx, self.target_values)
-            self.set_cleanup_hook(tx)
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(
             None, **VariableTracker.propagate(self)
         )
