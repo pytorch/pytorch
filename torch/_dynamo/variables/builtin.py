@@ -1114,6 +1114,7 @@ class BuiltinVariable(VariableTracker):
                             return False
 
                         if _grad_changed(old_grad, new_grad):
+                            print("GRAD CHANGED!?")
                             grad_shape_specialized = [int(x) for x in new_grad.shape]
                             # We lazily update the grad on the example to its real state as tracked by fake tensor.
                             # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
@@ -1124,6 +1125,7 @@ class BuiltinVariable(VariableTracker):
                         out = VariableBuilder(tx, source)(
                             grapharg.example.grad
                         ).add_options(options)
+                        print("GRAD ACCESS?", grapharg.example.grad)
                         return out
                 unimplemented("tensor grad")
             else:

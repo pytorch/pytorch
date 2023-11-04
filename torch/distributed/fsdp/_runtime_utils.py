@@ -748,6 +748,7 @@ def _post_backward_hook(
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
         if flat_param.grad is None:
+            # print("GRAD NONE?")
             return
         if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
