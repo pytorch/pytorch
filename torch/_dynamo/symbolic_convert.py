@@ -654,7 +654,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.lineno = inst.starts_line
             self.log_starts_line()
 
-        if len(self.stack) == 0 and self.should_compile_partial_graph():
+        if (
+            len(self.stack) == 0
+            and self.should_compile_partial_graph()
+            and self.is_non_empty_graph()
+        ):
             self.checkpoint = inst, self.copy_graphstate()
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
@@ -1857,6 +1861,13 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.lineno,
         ) = state
         self.output.restore_graphstate(output_state)
+
+    def is_non_empty_graph(self):
+        if self.output.count_calls() > 1:
+            # perf optimization only
+            self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
+            return True
+        return False
 
     def format_frame_summary(self, additional_stack_frames=None):
         if additional_stack_frames is None:
