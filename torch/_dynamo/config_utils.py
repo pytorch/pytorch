@@ -49,11 +49,10 @@ def install_config_module(module):
                 visit(value, proxy, f"{name}.")
                 setattr(dest, key, proxy)
             else:
-                breakpoint()
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config = dict()
-    default = dict()
+    config: Dict[str, Any] = dict()
+    default: Dict[str, Any] = dict()
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
