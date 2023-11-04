@@ -2328,9 +2328,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
             # FIXME handle embedded optional types?
-            result = (
-                f"{{{', '.join(list(map(lambda x: self.val_to_arg_str(x), val)))}}}"
-            )
+            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
             if config.aot_inductor.abi_compatible:
                 # Need to pass the array length because we can't use std::vector
                 return f"{self.codegen_int_array_var(result)}, {len(val)}"
