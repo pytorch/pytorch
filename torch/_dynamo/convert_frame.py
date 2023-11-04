@@ -122,7 +122,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_convert_context(fn):
+def preserve_global_state(fn):
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
@@ -135,6 +135,7 @@ def wrap_convert_context(fn):
     def _fn(*args, **kwargs):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+        prior_inference_mode = torch.is_inference_mode_enabled()
         prior_deterministic = torch.are_deterministic_algorithms_enabled()
         prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         py_rng_state = random.getstate()
@@ -149,6 +150,7 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
+            torch.torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
             torch.use_deterministic_algorithms(
                 prior_deterministic, warn_only=prior_warn_only
             )
@@ -425,7 +427,7 @@ def convert_frame_assert(
         return convert_frame_assert(backend, one_graph, export, export_constraints)
 
     _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
-    return wrap_convert_context(_convert_frame_assert)
+    return _convert_frame_assert
 
 
 def maybe_cprofile(func):
@@ -479,6 +481,7 @@ def _compile(
     mutated_closure_cell_contents: Set[str] = set()
     fail_reason: Optional[str] = None
 
+    @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -505,6 +508,8 @@ def _compile(
             if translation_validation_enabled():
                 bisect(tracer.output.shape_env)
             raise
+        finally:
+            tracer.output.call_cleanup_hooks()
 
         output = tracer.output
         assert output is not None
