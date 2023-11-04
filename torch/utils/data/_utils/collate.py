@@ -23,8 +23,8 @@ def default_convert(data):
 
     If the input is a `Sequence`, `Collection`, or `Mapping`, it tries to convert each element inside to a :class:`torch.Tensor`.
     If the input is not an NumPy array, it is left unchanged.
-    This is used as the default function for collation when both `batch_sampler` and
-    `batch_size` are NOT defined in :class:`~torch.utils.data.DataLoader`.
+    This is used as the default function for collation when both `batch_sampler` and `batch_size`
+    are NOT defined in :class:`~torch.utils.data.DataLoader`.
 
     The general input type to output type mapping is similar to that
     of :func:`~torch.utils.data.default_collate`. See the description there for more details.
