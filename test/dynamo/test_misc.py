@@ -8020,6 +8020,123 @@ def ___make_guard_fn():
 
         self.assertEqual(eager, compiled)
 
+    def test_listlike_from_user_defined_iter(self):
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += 1
+                if self.a > 10:
+                    raise StopIteration()
+                return self.a
+
+        for listlike in [list, tuple, set]:
+
+            def fn(x):
+                c = iter(MyClass())
+                next(c)
+                unpacked = listlike(c)
+                assert unpacked == listlike(MyClass())
+                if listlike is set:
+                    unpacked = list(unpacked)
+                x += unpacked[0]
+                x += unpacked[5]
+                return x
+
+            x = torch.zeros(3)
+            eager = fn(x)
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(x)
+
+            self.assertEqual(eager, compiled)
+
+    def test_functionals_on_user_defined_iter(self):
+        import functools
+        import itertools
+
+        class MyClass:
+            def __iter__(self):
+                self.a = 1
+                self.incr = 1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += self.incr
+                if self.a > 10 or self.a <= 1:
+                    raise StopIteration()
+                return self.a
+
+            def __reversed__(self):
+                return Reversed()
+
+        class Reversed:
+            def __iter__(self):
+                self.a = 11
+                self.incr = -1
+                return self
+
+            def __next__(self):
+                x = self.a
+                self.a += self.incr
+                if self.a > 10 or self.a <= 1:
+                    raise StopIteration()
+                return self.a
+
+        # TODO: make these fallback on polyfill instead
+        # may not be worth it - they will escape anyway when inlining
+        # the resultant generator?
+        non_terminating = [
+            functools.partial(map, lambda x: x * 2),
+            enumerate,
+            lambda seq: itertools.chain([1, 2, 3], seq),
+            lambda seq: zip(seq, range(12)),
+        ]
+
+        terminating = [
+            sum,
+            reversed,
+            functools.partial(functools.reduce, lambda x, y: x * y),
+            lambda seq: sorted(reversed(seq)),
+            lambda seq: itertools.islice(seq, 5),
+            lambda seq: itertools.islice(seq, 2, 9, 2),
+        ]
+
+        for functional in non_terminating + terminating:
+            torch._dynamo.reset()
+
+            def fn(x):
+                x += 1
+                c = iter(MyClass())
+                next(c)  # The correct behaviour needs to happen
+                applied = functional(c)
+                x += 1
+                return x, applied
+
+            x = torch.zeros(3)
+            eager = fn(x)
+
+            compiled_fn = torch._dynamo.optimize(backend="eager", nopython=True)(fn)
+            compiled = compiled_fn(x)
+
+            self.assertEqual(eager[0], compiled[0])
+
+            listify = True
+            try:
+                list_eager = list(eager[1])
+                print(functional, list_eager)
+            except Exception:
+                listify = False
+
+            if listify:
+                self.assertEqual(list_eager, list(compiled[1]))
+            else:
+                self.assertEqual(eager, compiled)
+
     def test_zip_user_defined(self):
         # https://github.com/pytorch/pytorch/issues/107691
         class MyClass:

@@ -16,7 +16,7 @@ from torch._guards import TracingContext
 
 from .. import variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented
+from ..exc import InlinedUserStopIteration, unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
@@ -216,6 +216,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self.value = value
         self.value_type = value_type or type(value)
         try:
+            # assert self.source is None or is_constant_source(self.source)
             self._is_iterator = self._getattr_static("__next__") is not None
         except Exception:
             self._is_iterator = _is_iterator
@@ -240,11 +241,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return self._is_iterator
 
     def next_variables(self, tx):
-        assert self.mutable_local
-        assert self.is_iterator()
+        assert self.mutable_local and self.is_iterator()
 
         next_item = self.call_method(tx, "__next__", [], {})
-        return next_item.add_options(self), self
+        return next_item, self
 
     @staticmethod
     @functools.lru_cache(None)
@@ -453,6 +453,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         else:
             subobj = inspect.getattr_static(self.value, name)
         return subobj
+
+    def has_unpack_var_sequence(self, tx):
+        return self.is_iterator()
+
+    def unpack_var_sequence(self, tx):
+        if not self.is_iterator():
+            raise NotImplementedError()
+        assert self.mutable_local
+        MAX_UNPACK_SEQUENCE = 3000
+        sequence = []
+        for _ in range(MAX_UNPACK_SEQUENCE):
+            try:
+                sequence.append(self.call_method(tx, "__next__", [], {}))
+            except InlinedUserStopIteration:
+                return sequence
+        unimplemented(
+            f"unpacking user-defined iterator exceeding length of {MAX_UNPACK_SEQUENCE}"
+        )
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable

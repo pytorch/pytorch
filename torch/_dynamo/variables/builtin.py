@@ -813,6 +813,15 @@ class BuiltinVariable(VariableTracker):
             cls = SetVariable
         else:
             cls = variables.BaseListVariable.cls_for(self.fn)
+
+        if isinstance(obj, variables.UserDefinedObjectVariable):
+            # Handle as `UserDefinedObjectVariable` if it implements `__iter__`
+            obj = obj.call_method(tx, "__iter__", [], {})
+            if self.fn is iter:
+                return obj
+            # Else the lifetime of the resultant iter obj should end
+            # at this function's exit (it will be consumed)
+
         if obj is None:
             if cls is SetVariable:
                 return cls(
@@ -829,23 +838,14 @@ class BuiltinVariable(VariableTracker):
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
                     guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
-                else:
+                elif not isinstance(obj, variables.UserDefinedObjectVariable):
                     guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
-            if cls is SetVariable:
-                return cls(
-                    list(obj.unpack_var_sequence(tx)),
-                    mutable_local=MutableLocal(),
-                    guards=guards,
-                ).add_options(self, obj)
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
                 guards=guards,
             ).add_options(self, obj)
-        elif isinstance(obj, variables.UserDefinedObjectVariable):
-            # Handle as `UserDefinedObjectVariable` if it implements `__iter__`
-            return obj.call_method(tx, "__iter__", [], {})
 
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
@@ -902,13 +902,19 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
-        if all(x.has_unpack_var_sequence(tx) for x in args):
+        if all(
+            not isinstance(x, variables.UserDefinedObjectVariable)
+            and x.has_unpack_var_sequence(tx)
+            for x in args
+        ):
             items = [
                 variables.TupleVariable(list(item), **options)
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
             ]
             return variables.TupleVariable(items, **options)
         else:
+            # Since UserDefinedObjectVariable iterator can be infinite, handle
+            # the `zip` iterator as a polyfill
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
@@ -926,13 +932,14 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 2
             assert isinstance(args[1], variables.ConstantVariable)
             start = args[1].as_python_constant()
-        if args[0].has_unpack_var_sequence(tx):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=args[0])
+        if seq.has_unpack_var_sequence(tx):
             items = [
                 variables.TupleVariable(
                     [variables.ConstantVariable.create(idx, **options), var],
                     **options,
                 )
-                for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
+                for idx, var in enumerate(seq.unpack_var_sequence(tx), start)
             ]
             return variables.TupleVariable(items, **options)
 
@@ -1001,23 +1008,13 @@ class BuiltinVariable(VariableTracker):
             return obj.call_hasattr(tx, name).add_options(self, obj, attr)
 
     def call_map(self, tx, fn, seq):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
         if seq.has_unpack_var_sequence(tx):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
-            return variables.TupleVariable(items).add_options(self, fn, seq)
+            return variables.ListIteratorVariable(items).add_options(self, fn, seq)
 
     def call_sum(self, tx, seq, **kwargs):
-        # Special case for sum on tuple of floats and ints
-        if (
-            isinstance(seq, (variables.ListVariable, variables.TupleVariable))
-            and all(
-                isinstance(x, variables.ConstantVariable)
-                and isinstance(x.value, (int, float))
-                for x in seq.items
-            )
-            and not kwargs
-        ):
-            new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable.create(sum(new_list))
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
         if seq.has_unpack_var_sequence(tx):
             start = kwargs.pop(
                 "start", variables.ConstantVariable.create(0)
@@ -1039,9 +1036,10 @@ class BuiltinVariable(VariableTracker):
 
         return UserDefinedObjectVariable(StopIteration())
 
-    def call_reduce(self, tx, function, iterable, initializer=None):
-        if iterable.has_unpack_var_sequence(tx):
-            items = iterable.unpack_var_sequence(tx)
+    def call_reduce(self, tx, function, seq, initializer=None):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
+        if seq.has_unpack_var_sequence(tx):
+            items = seq.unpack_var_sequence(tx)
             if initializer is None:
                 value, items = items[0], items[1:]
             else:
@@ -1271,19 +1269,22 @@ class BuiltinVariable(VariableTracker):
             case_name="type_reflection_method",
         )
 
-    def call_reversed(self, tx, obj: VariableTracker):
-        if obj.has_unpack_var_sequence(tx):
-            items = list(reversed(obj.unpack_var_sequence(tx)))
+    def call_reversed(self, tx, seq: VariableTracker):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
+        if seq.has_unpack_var_sequence(tx):
+            items = list(reversed(seq.unpack_var_sequence(tx)))
             return variables.TupleVariable(
-                items, **VariableTracker.propagate(self, obj)
+                items, **VariableTracker.propagate(self, seq)
             )
 
-    def call_sorted(self, tx, obj: VariableTracker, **kwargs):
-        if (
-            obj.has_unpack_var_sequence(tx)
-            and not isinstance(obj, variables.TensorVariable)
-            and all(x.is_python_constant() for x in obj.unpack_var_sequence(tx))
+    def call_sorted(self, tx, seq: VariableTracker, **kwargs):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
+        if seq.has_unpack_var_sequence(tx) and not isinstance(
+            seq, variables.TensorVariable
         ):
+            unpacked = seq.unpack_var_sequence(tx)
+            if not all(x.is_python_constant() for x in unpacked):
+                return
             function = kwargs.pop("key", None)
             reverse = kwargs.pop(
                 "reverse", ConstantVariable.create(False)
@@ -1291,7 +1292,7 @@ class BuiltinVariable(VariableTracker):
             assert len(kwargs) == 0
             if function:
                 items = sorted(
-                    obj.unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: function.call_function(
                         tx, [x], {}
                     ).as_python_constant(),
@@ -1299,13 +1300,14 @@ class BuiltinVariable(VariableTracker):
                 )
             else:
                 items = sorted(
-                    obj.unpack_var_sequence(tx),
+                    unpacked,
                     key=lambda x: x.as_python_constant(),
                     reverse=reverse,
                 )
-            return variables.ListVariable(items, **VariableTracker.propagate(self, obj))
+            return variables.ListVariable(items, **VariableTracker.propagate(self, seq))
 
     def call_chain(self, tx, *args):
+        args = [BuiltinVariable(iter).call_iter(tx, obj=seq) for seq in args]
         if all(obj.has_unpack_var_sequence(tx) for obj in args):
             items = []
             for obj in args:
@@ -1314,15 +1316,16 @@ class BuiltinVariable(VariableTracker):
                 items, **VariableTracker.propagate(self, *args)
             )
 
-    def call_islice(self, tx, iterable, *args):
-        if iterable.has_unpack_var_sequence(tx) and all(
+    def call_islice(self, tx, seq, *args):
+        seq = BuiltinVariable(iter).call_iter(tx, obj=seq)
+        if seq.has_unpack_var_sequence(tx) and all(
             x.is_python_constant() for x in args
         ):
             const_args = [x.as_python_constant() for x in args]
-            items = iterable.unpack_var_sequence(tx)
+            items = seq.unpack_var_sequence(tx)
             items = list(itertools.islice(items, *const_args))
             return variables.TupleVariable(
-                items, **VariableTracker.propagate(self, iterable, *args)
+                items, **VariableTracker.propagate(self, seq, *args)
             )
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
