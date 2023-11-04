@@ -3828,7 +3828,6 @@ class UserDefinedTritonKernel(ExternKernel):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
-                V.graph.mark_buffer_mutated(t.get_name())
             else:
                 constant_args.append(v)
                 kwargs[k] = v
@@ -3846,18 +3845,17 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
-
-    @classmethod
-    def create(cls, *, kernel_idx, grid, kernel_args):
-        packed = UserDefinedTritonKernel(
-            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
-        )
-        for arg in kernel_args.values():
-            if isinstance(arg, TensorBox):
-                MutationOutput(arg.layout, arg, packed)
+        mark_node_as_mutating(self, *kernel_args.values())
 
     def get_alias_names(self):
         return [i.get_name() for i in self.inputs]
+
+
+def mark_node_as_mutating(cur_buffer, *mutated_ops):
+    for op in mutated_ops:
+        if isinstance(op, TensorBox):
+            V.graph.mark_buffer_mutated(op.get_name())
+            MutationOutput(op.layout, op, cur_buffer)
 
 
 class MutationOutput(ExternKernel):
@@ -3898,7 +3896,7 @@ class InplaceBernoulliFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
+        return []
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -3910,8 +3908,8 @@ class InplaceBernoulliFallback(ExternKernel):
             self.unwrap_storage([x]),
             constant_args,
         )
-        V.graph.mark_buffer_mutated(x.get_name())
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, x)
 
 
 class AccumulateGrad(ExternKernel):
@@ -3929,7 +3927,7 @@ class AccumulateGrad(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
+        return []
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -3940,8 +3938,8 @@ class AccumulateGrad(ExternKernel):
             NoneLayout(variable.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([variable, new_grad]),
         )
-        V.graph.mark_buffer_mutated(variable.get_name())
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, variable)
 
 
 class ScatterFallback(ExternKernel):
@@ -3989,7 +3987,7 @@ class ScatterFallback(ExternKernel):
         return kernel
 
     def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
+        return []
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -4026,7 +4024,6 @@ class ScatterFallback(ExternKernel):
             tensors = [self.realize_input(t) for t in [x, index]]
             constant_args = (dim, src)
 
-        V.graph.mark_buffer_mutated(x.get_name())
         super().__init__(
             None,
             NoneLayout(x.get_device()),  # type: ignore[arg-type]
@@ -4036,6 +4033,7 @@ class ScatterFallback(ExternKernel):
         )
         self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, x)
 
 
 class IndexPutFallback(ExternKernel):
@@ -4061,7 +4059,7 @@ class IndexPutFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return [self.inputs[0].get_name()]
+        return []
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -4070,7 +4068,6 @@ class IndexPutFallback(ExternKernel):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
-        V.graph.mark_buffer_mutated(x.get_name())
         super().__init__(
             None,
             NoneLayout(x.get_device()),  # type: ignore[arg-type]
@@ -4079,6 +4076,7 @@ class IndexPutFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
+        mark_node_as_mutating(self, x)
 
 
 class DeviceCopy(ExternKernelOut):
@@ -5064,11 +5062,13 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        return ConvolutionBinaryInplace(
+        packed = ConvolutionBinaryInplace(
             kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
+        mark_node_as_mutating(packed, inputs[1])
+        return packed
 
 
 class MKLPackedLinear(ExternKernelAlloc):
@@ -6660,12 +6660,13 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
         V.graph.mark_buffer_mutated(inplace_inputs[0])
-        _ = AllReduceCoalesced(
+        packed = AllReduceCoalesced(
             layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
         )
+        mark_node_as_mutating(packed, inplace_inputs[0])
         return inplace_inputs
 
     def codegen_collective(self, wrapper, output_name, input_names):
@@ -6696,12 +6697,13 @@ class AllReduce(InPlaceCollectiveKernel):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
         V.graph.mark_buffer_mutated(inplace_inputs[0])
 
-        _ = AllReduce(
+        packed = AllReduce(
             layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
         )
+        mark_node_as_mutating(packed, inplace_inputs[0])
         return inplace_inputs[0]
 
     def codegen_collective(self, wrapper, output_name, input_names):
