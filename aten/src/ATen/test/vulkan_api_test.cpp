@@ -3952,33 +3952,65 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
+void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
+  at::Tensor in_cpu =
+      at::rand(shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  const at::Tensor in_vulkan = in_cpu.vulkan();
+
+  // Cast to signed to test negative index for dim
+  int64_t size = static_cast<int64_t>(shape.size());
+
+  // Test on all dim
+  for (auto dim = -size; dim < size; dim++) {
+    const at::Tensor out_cpu =
+        log_softmax ? at::log_softmax(in_cpu, dim) : at::softmax(in_cpu, dim);
+
+    const at::Tensor out_vulkan = log_softmax ? at::log_softmax(in_vulkan, dim)
+                                              : at::softmax(in_vulkan, dim);
+    const bool check = almostEqual(out_cpu, out_vulkan.cpu());
+
+    if (!check) {
+      std::cout << "Softmax test failed on axis " << dim << "for tensor dims {";
+      for (uint32_t place = 0; place < shape.size() - 1; place++) {
+        std::cout << shape[place] << " ";
+      }
+      std::cout << shape.back() << "}" << std::endl;
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+    ASSERT_TRUE(check);
+  }
+}
 
 TEST_F(VulkanAPITest, softmax) {
   c10::InferenceMode mode;
   std::vector<std::vector<int64_t>> test_in_dims = {
-    {1, 3, 4, 2},
-    {4, 8, 5, 7},
-    {9, 11, 12, 12},
+      {1, 3, 4, 2},
+      {4, 8, 5, 7},
+      {9, 11, 12, 12},
   };
-  for (const std::vector<int64_t >& dim_vec : test_in_dims) {
+  bool log_softmax = false;
+  for (const std::vector<int64_t>& dim_vec : test_in_dims) {
     for (uint32_t trunc = 0; trunc < dim_vec.size(); trunc++) {
-      const std::vector<int64_t> trunc_dim_vec = std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
-      at::Tensor in_cpu = at::rand(trunc_dim_vec, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      for (uint32_t dim = 0; dim < trunc_dim_vec.size(); dim++) {
-        const at::Tensor out_cpu = at::softmax(in_cpu, dim);
-        const at::Tensor in_vulkan = in_cpu.vulkan();
-        const at::Tensor out_vulkan = at::softmax(in_vulkan, dim);
-        const bool check = almostEqual(out_cpu, out_vulkan.cpu());
-        if (!check) {
-          std::cout << "Softmax test failed on axis " << dim << "for tensor dims {";
-          for (uint32_t place = 0; place < trunc_dim_vec.size() - 1; place++) {
-            std::cout << trunc_dim_vec[place] << " ";
-          }
-          std::cout << trunc_dim_vec.back() << "}" << std::endl;
-          showRtol(out_cpu, out_vulkan.cpu());
-        }
-        ASSERT_TRUE(check);
-      }
+      const std::vector<int64_t> trunc_dim_vec =
+          std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
+      test_softmax(trunc_dim_vec, log_softmax);
+    }
+  }
+}
+
+TEST_F(VulkanAPITest, log_softmax) {
+  c10::InferenceMode mode;
+  std::vector<std::vector<int64_t>> test_in_dims = {
+      {1, 3, 4, 2},
+      {4, 8, 5, 7},
+      {9, 11, 12, 12},
+  };
+  bool log_softmax = true;
+  for (const std::vector<int64_t>& dim_vec : test_in_dims) {
+    for (uint32_t trunc = 0; trunc < dim_vec.size(); trunc++) {
+      const std::vector<int64_t> trunc_dim_vec =
+          std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
+      test_softmax(trunc_dim_vec, log_softmax);
     }
   }
 }
@@ -4817,6 +4849,58 @@ TEST_F(VulkanAPITest, unary_op_sqrt_) {
   test_sqrt_({5, 6});
   test_sqrt_({7, 3, 5});
   test_sqrt_({11, 1, 4, 2});
+}
+
+void test_log(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  // Need to add a very small constant to avoid 0.
+  const auto in_cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.0001;
+  const auto out_cpu = at::log(in_cpu);
+
+  const auto in_vulkan = in_cpu.vulkan();
+  const auto out_vulkan = at::log(in_vulkan);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "log test failed with input shape: " << input_shape
+              << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_log) {
+  test_log({5});
+  test_log({5, 6});
+  test_log({7, 3, 5});
+  test_log({11, 1, 4, 2});
+}
+
+void test_log_(const at::IntArrayRef input_shape) {
+  c10::InferenceMode mode;
+  // Need to add a very small constant to avoid 0.
+  const auto cpu =
+      at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat)) + 0.0001;
+  const auto vulkan = cpu.vulkan();
+
+  cpu.log_();
+  vulkan.log_();
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "log_ test failed with input shape: " << input_shape
+              << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, unary_op_log_) {
+  test_log_({5});
+  test_log_({5, 6});
+  test_log_({7, 3, 5});
+  test_log_({11, 1, 4, 2});
 }
 
 void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
