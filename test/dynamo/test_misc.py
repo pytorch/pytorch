@@ -1716,6 +1716,25 @@ utils_device.CURRENT_DEVICE == None""",
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_array_of_arrays(self):
+        def fn(x, y):
+            return np.array([x, y])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x, y = np.float64(1), np.float64(2)
+        res = opt_fn(x, y)
+        self.assertEqual(res, np.array([1, 2], dtype=float))
+        self.assertEqual(type(res), np.ndarray)
+        self.assertEqual(cnts.frame_count, 1)
+
+        x, y = np.arange(2), np.arange(2) + 2
+        res = opt_fn(x, y)
+        self.assertEqual(res, np.array([[0, 1], [2, 3]]))
+        self.assertEqual(type(res), np.ndarray)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_numpy_readonly(self):
         @torch.compile(fullgraph=True)
         def fn(x):
@@ -2013,6 +2032,17 @@ utils_device.CURRENT_DEVICE == None""",
             opt_val = opt_fn(dtyp)
 
             self.assertEqual(cnts.frame_count, 1)  # no graph break
+
+    def test_numpy_random_config_to_numpy(self):
+        # setting the config value makes the PRNG identical to numpy's
+        # NB this may involve a graph break
+        torch._dynamo.config.use_numpy_random_stream = True
+
+        @torch.compile
+        def fn():
+            return np.random.uniform(size=13)
+
+        self.assertEqual(fn().shape, (13,))
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
@@ -8131,8 +8161,8 @@ ShapeEnv not equal: field values don't match:
         other.create_unbacked_symint()
 
         # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
-        #   - +1 defferred_runtime_asserts entry
-        #   - Change: num_defferred_runtime_asserts
+        #   - +1 deferred_runtime_asserts entry
+        #   - Change: num_deferred_runtime_asserts
         expect_true(r % 3 == 0)
 
         self.assertExpectedRaisesInline(
