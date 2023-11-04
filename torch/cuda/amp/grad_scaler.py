@@ -14,8 +14,9 @@ __all__ = ["OptState", "GradScaler"]
 
 
 class _MultiDeviceReplicator:
-    """
-    Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
+    """Lazily serves copies of a tensor to requested devices.
+    
+    Copies are cached per-device.
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
@@ -47,8 +48,9 @@ def _refresh_per_optimizer_state() -> Dict[str, Any]:
 
 
 class GradScaler:
-    """
-    An instance ``scaler`` of :class:`GradScaler` helps perform the steps of gradient scaling
+    """An instance ``scaler`` of :class:`GradScaler`.
+    
+    Helps perform the steps of gradient scaling
     conveniently.
 
     * ``scaler.scale(loss)`` multiplies a given loss by ``scaler``'s current scale factor.
@@ -351,7 +353,8 @@ class GradScaler:
     def step(
         self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
     ) -> Optional[float]:
-        """
+        """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
+        
         :meth:`step` carries out the following two operations:
 
         1.  Internally invokes ``unscale_(optimizer)`` (unless :meth:`unscale_` was explicitly called for ``optimizer``
@@ -453,8 +456,7 @@ class GradScaler:
         return retval
 
     def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
-        """
-        Updates the scale factor.
+        """Update the scale factor.
 
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``
         to reduce it. If ``growth_interval`` unskipped iterations occurred consecutively,
@@ -526,8 +528,7 @@ class GradScaler:
         return self._scale
 
     def get_scale(self) -> float:
-        """
-        Returns a Python float containing the current scale, or 1.0 if scaling is disabled.
+        """Return a Python float containing the current scale, or 1.0 if scaling is disabled.
 
         .. warning::
             :meth:`get_scale` incurs a CPU-GPU sync.
@@ -541,39 +542,36 @@ class GradScaler:
         return 1.0
 
     def get_growth_factor(self) -> float:
-        r"""
-        Returns a Python float containing the scale growth factor.
-        """
+        r"""Return a Python float containing the scale growth factor."""
         return self._growth_factor
 
     def set_growth_factor(self, new_factor: float) -> None:
-        r"""
+        r"""Set new scale growth factor.
+
         Args:
             new_scale (float):  Value to use as the new scale growth factor.
         """
         self._growth_factor = new_factor
 
     def get_backoff_factor(self) -> float:
-        r"""
-        Returns a Python float containing the scale backoff factor.
-        """
+        r"""Return a Python float containing the scale backoff factor."""
         return self._backoff_factor
 
     def set_backoff_factor(self, new_factor: float) -> None:
-        r"""
+        r"""Set new scale backoff factor.
+
         Args:
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
 
     def get_growth_interval(self) -> int:
-        r"""
-        Returns a Python int containing the growth interval.
-        """
+        r"""Return a Python int containing the growth interval."""
         return self._growth_interval
 
     def set_growth_interval(self, new_interval: int) -> None:
-        r"""
+        r"""Set new growth interval.
+
         Args:
             new_interval (int):  Value to use as the new growth interval.
         """
@@ -589,14 +587,13 @@ class GradScaler:
         return 0
 
     def is_enabled(self) -> bool:
-        r"""
-        Returns a bool indicating whether this instance is enabled.
-        """
+        r"""Return a bool indicating whether this instance is enabled."""
         return self._enabled
 
     def state_dict(self) -> Dict[str, Any]:
-        r"""
-        Returns the state of the scaler as a :class:`dict`.  It contains five entries:
+        r"""Return the state of the scaler as a :class:`dict`.
+
+        It contains five entries:
 
         * ``"scale"`` - a Python float containing the current scale
         * ``"growth_factor"`` - a Python float containing the current growth factor
@@ -621,8 +618,9 @@ class GradScaler:
         return {}
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        r"""
-        Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
+        r"""Load the scaler state.
+        
+        If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
         Args:
            state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
