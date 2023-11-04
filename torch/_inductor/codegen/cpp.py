@@ -2826,6 +2826,9 @@ class CppScheduling(BaseScheduling):
 
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
+        
+        args_num = len(cpp_kernel_proxy.args.input_buffers) + len(cpp_kernel_proxy.args.output_buffers)
+        print("codegen_nodes --> args_num", args_num)
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
