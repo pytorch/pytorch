@@ -1029,7 +1029,6 @@ def lp_pool2d(
     ceil_mode: bool = False
 ) -> Tensor:
     r"""
-    
     Apply a 2D power-average pooling over an input signal composed of several input planes.
     
     If the sum of all inputs to the power of `p` is
