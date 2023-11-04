@@ -5,6 +5,7 @@ import operator
 from typing import Any, Tuple
 
 import torch
+from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import free_symbols
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
@@ -286,6 +287,8 @@ def _register_quantized_conv_lowering(
             unary_attr.scalars_attr,
             unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qconv2d_unary_matcher_count"] += 1
+        counters["inductor"]["qconv2d_unary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv
@@ -361,6 +364,8 @@ def _register_quantized_linear_lowering(
             unary_attr.scalars_attr,
             unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qlinear_unary_matcher_count"] += 1
+        counters["inductor"]["qlinear_unary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qlinear
@@ -424,6 +429,8 @@ def _register_quantized_conv_binary_lowering(
             binary_unary_attr.scalars_attr,
             binary_unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qconv2d_binary_matcher_count"] += 1
+        counters["inductor"]["qconv2d_binary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv_binary
@@ -901,6 +908,8 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
             new_sub_node = clone_to_new_node(graph, sub_node, new_mul_node)
             # Step3: Duplicate the to_fp32 node
             _ = clone_to_new_node(graph, to_fp32_node, new_sub_node)
+        counters["inductor"]["dequant_promotion_matcher_count"] += 1
+        counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
 def _is_valid_dequant_conv2d_pattern(dtype):
@@ -1090,6 +1099,10 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             if dtype == torch.bfloat16:
                 graph.erase_node(weight_to_bf16_node)
             graph.erase_node(dequant_per_channel)
+            counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
 
 
 def _generate_dequant_convolution_node_pattern(
@@ -1279,6 +1292,10 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number, dtype=torch.floa
             if dtype == torch.bfloat16:
                 graph.erase_node(weight_to_bf16_node)
             graph.erase_node(dequant_per_channel)
+            counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
 
 
 def _generate_dequant_linear_node_pattern(
