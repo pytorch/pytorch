@@ -404,23 +404,12 @@ def make_pointwise(
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
-            # The following reduces the Python stack frame usage of
-            # fn(*[load(index) for load in loaders])
-            # as list comprehensions create a new frame prior to CPython 3.12.
-            # An invariant is that they must share all the same index.
-            # This invariant is currently true for Inductor.
-            res = []
-            for load in loaders:
-                while load := load(index):
-                    if not callable(load):
-                        break
-                res.append(load)
             if dtype == torch.bool and override_fn_when_input_bool is not None:
-                return override_fn_when_input_bool(*res)
+                return override_fn_when_input_bool(*[load(index) for load in loaders])
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
-                return override_fn_when_cuda_float64(*res)
+                return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
-                return fn(*res)
+                return fn(*[load(index) for load in loaders])
 
         if not override_device:
             device = None
