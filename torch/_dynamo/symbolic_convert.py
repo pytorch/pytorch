@@ -738,7 +738,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             (entry for entry in reversed(self.block_stack) if not entry.can_restore()),
             None,
         )
-        if cannot_restore_entry:
+        if cannot_restore_entry and not self.one_graph:
             cannot_restore_target = cannot_restore_entry.target
             insts = self.instructions[self.instruction_pointer :]
             last_jump_forward = None
@@ -756,20 +756,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
-        # If the reason why we fail is due to non-restorable block stack entries.
-        # Hence, resume at the jump target of its unwind/cleanup block
-        if cannot_restore_entry and not self.one_graph:
-            assert last_jump_forward is not None
-            jump_fwd_index = None
+        # The reason why we fail is due to non-restorable block stack entries.
+        # If a jump target in its unwind/cleanup block exits, resume at the jump target.
+        if last_jump_forward:
             target_index = None
             for idx, instruction in enumerate(self.instructions):
-                if instruction == last_jump_forward:
-                    jump_fwd_index = idx
                 if instruction == last_jump_forward.target:
                     target_index = idx
                     break
             assert target_index is not None
-            assert jump_fwd_index is not None
 
             resume_at = self.create_call_resume_at(last_jump_forward.target)
             for inst in self.instructions:
