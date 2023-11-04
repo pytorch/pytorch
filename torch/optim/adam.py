@@ -132,7 +132,7 @@ class Adam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -279,9 +279,9 @@ def adam(params: List[Tensor],
          eps: float,
          maximize: bool):
     r"""Functional API that performs Adam algorithm computation.
-    
     See :class:`~torch.optim.Adam` for details.
     """
+
     # Respect when the user inputs False/True for foreach or fused. We only want to change
     # the default when neither have been user-specified. Note that we default to foreach
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
