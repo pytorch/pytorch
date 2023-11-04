@@ -1,5 +1,4 @@
-"""Provides an API for writing protocol buffers to event files to be
-consumed by TensorBoard for visualization."""
+"""Provide an API for writing protocol buffers to event files to be consumed by TensorBoard for visualization."""
 
 import os
 import time
@@ -41,7 +40,8 @@ __all__ = ["FileWriter", "SummaryWriter"]
 
 
 class FileWriter:
-    """Writes protocol buffers to event files to be consumed by TensorBoard.
+    """
+    Writes protocol buffers to event files to be consumed by TensorBoard.
 
     The `FileWriter` class provides a mechanism to create an event file in a
     given directory and add summaries and events to it. The class updates the
@@ -51,7 +51,9 @@ class FileWriter:
     """
 
     def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=""):
-        """Creates a `FileWriter` and an event file.
+        """
+        Create a `FileWriter` and an event file.
+
         On construction the writer creates a new event file in `log_dir`.
         The other arguments to the constructor control the asynchronous writes to
         the event file.
@@ -77,11 +79,13 @@ class FileWriter:
         )
 
     def get_logdir(self):
-        """Returns the directory where event file will be written."""
+        """Return the directory where event file will be written."""
         return self.event_writer.get_logdir()
 
     def add_event(self, event, step=None, walltime=None):
-        """Adds an event to the event file.
+        """
+        Add an event to the event file.
+
         Args:
           event: An `Event` protocol buffer.
           step: Number. Optional global step value for training process
@@ -97,7 +101,9 @@ class FileWriter:
         self.event_writer.add_event(event)
 
     def add_summary(self, summary, global_step=None, walltime=None):
-        """Adds a `Summary` protocol buffer to the event file.
+        """
+        Add a `Summary` protocol buffer to the event file.
+
         This method wraps the provided summary in an `Event` protocol buffer
         and adds it to the event file.
 
@@ -112,7 +118,8 @@ class FileWriter:
         self.add_event(event, global_step, walltime)
 
     def add_graph(self, graph_profile, walltime=None):
-        """Adds a `Graph` and step stats protocol buffer to the event file.
+        """
+        Add a `Graph` and step stats protocol buffer to the event file.
 
         Args:
           graph_profile: A `Graph` and step stats protocol buffer.
@@ -131,7 +138,8 @@ class FileWriter:
         self.add_event(event, None, walltime)
 
     def add_onnx_graph(self, graph, walltime=None):
-        """Adds a `Graph` protocol buffer to the event file.
+        """
+        Add a `Graph` protocol buffer to the event file.
 
         Args:
           graph: A `Graph` protocol buffer.
@@ -142,20 +150,26 @@ class FileWriter:
         self.add_event(event, None, walltime)
 
     def flush(self):
-        """Flushes the event file to disk.
+        """
+        Flush the event file to disk.
+
         Call this method to make sure that all pending events have been written to
         disk.
         """
         self.event_writer.flush()
 
     def close(self):
-        """Flushes the event file to disk and close the file.
+        """
+        Flush the event file to disk and close the file.
+
         Call this method when you do not need the summary writer anymore.
         """
         self.event_writer.close()
 
     def reopen(self):
-        """Reopens the EventFileWriter.
+        """
+        Reopens the EventFileWriter.
+
         Can be called after `close()` to add more events in the same directory.
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
@@ -164,8 +178,8 @@ class FileWriter:
 
 
 class SummaryWriter:
-    """Writes entries directly to event files in the log_dir to be
-    consumed by TensorBoard.
+    """
+    Write entries directly to event files in the log_dir to be consumed by TensorBoard.
 
     The `SummaryWriter` class provides a high-level API to create an event file
     in a given directory and add summaries and events to it. The class updates the
@@ -183,8 +197,8 @@ class SummaryWriter:
         flush_secs=120,
         filename_suffix="",
     ):
-        """Creates a `SummaryWriter` that will write out events and summaries
-        to the event file.
+        """
+        Create a `SummaryWriter` that will write out events and summaries to the event file.
 
         Args:
             log_dir (str): Save directory location. Default is
@@ -257,6 +271,8 @@ class SummaryWriter:
 
     def _check_caffe2_blob(self, item):
         """
+        Check if the input is a string representing a Caffe2 blob name.
+
         Caffe2 users have the option of passing a string representing the name of
         a blob in the workspace instead of passing the actual Tensor/array containing
         the numeric values. Thus, we need to check if we received a string as input
@@ -271,7 +287,7 @@ class SummaryWriter:
         return isinstance(item, str)
 
     def _get_file_writer(self):
-        """Returns the default FileWriter instance. Recreates it if closed."""
+        """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
@@ -292,13 +308,14 @@ class SummaryWriter:
         return self.file_writer
 
     def get_logdir(self):
-        """Returns the directory where event files will be written."""
+        """Return the directory where event files will be written."""
         return self.log_dir
 
     def add_hparams(
         self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None, global_step=None
     ):
-        """Add a set of hyperparameters to be compared in TensorBoard.
+        """
+        Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
             hparam_dict (dict): Each key-value pair in the dictionary is the
@@ -354,7 +371,8 @@ class SummaryWriter:
         new_style=False,
         double_precision=False,
     ):
-        """Add scalar data to summary.
+        """
+        Add scalar data to summary.
 
         Args:
             tag (str): Data identifier
@@ -391,7 +409,8 @@ class SummaryWriter:
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
     def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
-        """Adds many scalar data to summary.
+        """
+        Add many scalar data to summary.
 
         Args:
             main_tag (str): The parent name for the tags
@@ -445,7 +464,8 @@ class SummaryWriter:
         global_step=None,
         walltime=None,
     ):
-        """Add tensor data to summary.
+        """
+        Add tensor data to summary.
 
         Args:
             tag (str): Data identifier
@@ -483,7 +503,8 @@ class SummaryWriter:
         walltime=None,
         max_bins=None,
     ):
-        """Add histogram to summary.
+        """
+        Add histogram to summary.
 
         Args:
             tag (str): Data identifier
@@ -534,7 +555,8 @@ class SummaryWriter:
         global_step=None,
         walltime=None,
     ):
-        """Adds histogram with raw data.
+        """
+        Add histogram with raw data.
 
         Args:
             tag (str): Data identifier
@@ -599,7 +621,8 @@ class SummaryWriter:
     def add_image(
         self, tag, img_tensor, global_step=None, walltime=None, dataformats="CHW"
     ):
-        """Add image data to summary.
+        """
+        Add image data to summary.
 
         Note that this requires the ``pillow`` package.
 
@@ -654,7 +677,8 @@ class SummaryWriter:
     def add_images(
         self, tag, img_tensor, global_step=None, walltime=None, dataformats="NCHW"
     ):
-        """Add batched image data to summary.
+        """
+        Add batched image data to summary.
 
         Note that this requires the ``pillow`` package.
 
@@ -710,7 +734,8 @@ class SummaryWriter:
         dataformats="CHW",
         labels=None,
     ):
-        """Add image and draw bounding boxes on the image.
+        """
+        Add image and draw bounding boxes on the image.
 
         Args:
             tag (str): Data identifier
@@ -766,7 +791,8 @@ class SummaryWriter:
         close: bool = True,
         walltime: Optional[float] = None
     ) -> None:
-        """Render matplotlib figure into an image and add it to summary.
+        """
+        Render matplotlib figure into an image and add it to summary.
 
         Note that this requires the ``matplotlib`` package.
 
@@ -797,7 +823,8 @@ class SummaryWriter:
             )
 
     def add_video(self, tag, vid_tensor, global_step=None, fps=4, walltime=None):
-        """Add video data to summary.
+        """
+        Add video data to summary.
 
         Note that this requires the ``moviepy`` package.
 
@@ -819,7 +846,8 @@ class SummaryWriter:
     def add_audio(
         self, tag, snd_tensor, global_step=None, sample_rate=44100, walltime=None
     ):
-        """Add audio data to summary.
+        """
+        Add audio data to summary.
 
         Args:
             tag (str): Data identifier
@@ -841,7 +869,8 @@ class SummaryWriter:
         )
 
     def add_text(self, tag, text_string, global_step=None, walltime=None):
-        """Add text data to summary.
+        """
+        Add text data to summary.
 
         Args:
             tag (str): Data identifier
@@ -860,13 +889,15 @@ class SummaryWriter:
         )
 
     def add_onnx_graph(self, prototxt):
+        """Add ONNX graph data to summary."""
         torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
     def add_graph(
         self, model, input_to_model=None, verbose=False, use_strict_trace=True
     ):
-        """Add graph data to summary.
+        """
+        Add graph data to summary.
 
         Args:
             model (torch.nn.Module): Model to draw.
@@ -923,7 +954,8 @@ class SummaryWriter:
         tag="default",
         metadata_header=None,
     ):
-        """Add embedding projector data to summary.
+        """
+        Add embedding projector data to summary.
 
         Args:
             mat (torch.Tensor or numpy.ndarray): A matrix which each row is the feature vector of the data point
@@ -1022,7 +1054,9 @@ class SummaryWriter:
         weights=None,
         walltime=None,
     ):
-        """Adds precision recall curve.
+        """
+        Add precision recall curve.
+
         Plotting a precision-recall curve lets you understand your model's
         performance under different threshold settings. With this function,
         you provide the ground truth labeling (T/F) and prediction confidence
@@ -1074,7 +1108,8 @@ class SummaryWriter:
         weights=None,
         walltime=None,
     ):
-        """Adds precision recall curve with raw data.
+        """
+        Add precision recall curve with raw data.
 
         Args:
             tag (str): Data identifier
@@ -1110,7 +1145,10 @@ class SummaryWriter:
     def add_custom_scalars_multilinechart(
         self, tags, category="default", title="untitled"
     ):
-        """Shorthand for creating multilinechart. Similar to ``add_custom_scalars()``, but the only necessary argument
+        """
+        Shorthand for creating multilinechart.
+        
+        Similar to ``add_custom_scalars()``, but the only necessary argument
         is *tags*.
 
         Args:
@@ -1129,7 +1167,10 @@ class SummaryWriter:
     def add_custom_scalars_marginchart(
         self, tags, category="default", title="untitled"
     ):
-        """Shorthand for creating marginchart. Similar to ``add_custom_scalars()``, but the only necessary argument
+        """
+        Shorthand for creating marginchart.
+        
+        Similar to ``add_custom_scalars()``, but the only necessary argument
         is *tags*, which should have exactly 3 elements.
 
         Args:
@@ -1147,8 +1188,11 @@ class SummaryWriter:
         self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_custom_scalars(self, layout):
-        """Create special chart by collecting charts tags in 'scalars'. Note that this function can only be called once
-        for each SummaryWriter() object. Because it only provides metadata to tensorboard, the function can be called
+        """
+        Create special chart by collecting charts tags in 'scalars'.
+        
+        NOTE: This function can only be called once for each SummaryWriter() object. 
+        Because it only provides metadata to tensorboard, the function can be called
         before or after the training loop.
 
         Args:
@@ -1178,11 +1222,13 @@ class SummaryWriter:
         global_step=None,
         walltime=None,
     ):
-        """Add meshes or 3D point clouds to TensorBoard. The visualization is based on Three.js,
-        so it allows users to interact with the rendered object. Besides the basic definitions
-        such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
-        Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
-        advanced usage.
+        """
+        Add meshes or 3D point clouds to TensorBoard.
+        
+        The visualization is based on Three.js, so it allows users to interact with the rendered object. 
+        Besides the basic definitions such as vertices, faces, users can further provide camera parameter, 
+        lighting condition, etc. Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene 
+        for advanced usage.
 
         Args:
             tag (str): Data identifier
@@ -1234,7 +1280,9 @@ class SummaryWriter:
         )
 
     def flush(self):
-        """Flushes the event file to disk.
+        """
+        Flush the event file to disk.
+        
         Call this method to make sure that all pending events have been written to
         disk.
         """
@@ -1244,6 +1292,7 @@ class SummaryWriter:
             writer.flush()
 
     def close(self):
+        """Close the event file and release resources."""
         if self.all_writers is None:
             return  # ignore double close
         for writer in self.all_writers.values():
@@ -1252,7 +1301,9 @@ class SummaryWriter:
         self.file_writer = self.all_writers = None
 
     def __enter__(self):
+        """No-op for compatibility with Python's with syntax."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Flush the data and close the file on `with` exit."""
         self.close()

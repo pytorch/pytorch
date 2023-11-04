@@ -5,9 +5,11 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
 def attr_value_proto(dtype, shape, s):
-    """Creates a dict of objects matching
-    https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/attr_value.proto
-    specifically designed for a NodeDef. The values have been
+    """
+    Create a dict of objects matching the AttrValue proto.
+
+    Following https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/attr_value.proto
+    which is specifically designed for a NodeDef. The values have been
     reverse engineered from standard TensorBoard logged data.
     """
     attr = {}
@@ -20,8 +22,10 @@ def attr_value_proto(dtype, shape, s):
 
 
 def tensor_shape_proto(outputsize):
-    """Creates an object matching
-    https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/tensor_shape.proto
+    """
+    Create an object matching the TensorShapeProto proto.
+
+    Following https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/tensor_shape.proto
     """
     return TensorShapeProto(dim=[TensorShapeProto.Dim(size=d) for d in outputsize])
 
@@ -35,8 +39,9 @@ def node_proto(
     outputsize=None,
     attributes="",
 ):
-    """Creates an object matching
-    https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/node_def.proto
+    """Create an object matching the NodeDef proto.
+
+    Following https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/node_def.proto
     """
     if input is None:
         input = []

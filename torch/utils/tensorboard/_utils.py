@@ -3,7 +3,8 @@ import numpy as np
 
 # Functions for converting
 def figure_to_image(figures, close=True):
-    """Render matplotlib figure to numpy format.
+    """
+    Render matplotlib figure to numpy format.
 
     Note that this requires the ``matplotlib`` package.
 
@@ -38,8 +39,11 @@ def figure_to_image(figures, close=True):
 
 def _prepare_video(V):
     """
-    Converts a 5D tensor [batchsize, time(frame), channel(color), height, width]
+    Prepare video in a specific format.
+
+    Convert a 5D tensor [batchsize, time(frame), channel(color), height, width]
     into 4D tensor with dimension [time(frame), new_width, new_height, channel].
+    
     A batch of images are spreaded to a grid, which forms a frame.
     e.g. Video with batchsize 16 will have a 4x4 grid.
     """
@@ -67,6 +71,16 @@ def _prepare_video(V):
 
 
 def make_grid(I, ncols=8):
+    """
+    Make a grid of images.
+
+    Args:
+      I (numpy.ndarray): a batch of images
+      ncols (int): number of columns
+
+    Returns:
+      numpy.ndarray: a grid of images
+    """
     # I: N1HW or N3HW
     assert isinstance(I, np.ndarray), "plugin error, should pass numpy array here"
     if I.shape[1] == 1:
@@ -93,6 +107,7 @@ def make_grid(I, ncols=8):
 
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
+    """Convert tensor to HWC format."""
     assert len(set(input_format)) == len(
         input_format
     ), f"You can not use the same dimension shordhand twice.         input_format: {input_format}"

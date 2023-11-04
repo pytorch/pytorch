@@ -1,3 +1,5 @@
+"""Utilities for generating TensorBoard summaries."""
+
 import json
 import logging
 import os
@@ -161,7 +163,9 @@ def _draw_single_box(
 
 
 def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
-    """Outputs three `Summary` protocol buffers needed by hparams plugin.
+    """
+    Output three `Summary` protocol buffers needed by hparams plugin.
+
     `Experiment` keeps the metadata of an experiment, such as the name of the
       hyperparameters and the name of the metrics.
     `SessionStartInfo` keeps key-value pairs of the hyperparameters
@@ -349,7 +353,9 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
 
 
 def scalar(name, tensor, collections=None, new_style=False, double_precision=False):
-    """Outputs a `Summary` protocol buffer containing a single scalar value.
+    """
+    Output a `Summary` protocol buffer containing a single scalar value.
+    
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
       name: A name for the generated node. Will also serve as the series name in
@@ -391,7 +397,9 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
 
 
 def tensor_proto(tag, tensor):
-    """Outputs a `Summary` protocol buffer containing the full tensor.
+    """
+    Output a `Summary` protocol buffer containing the full tensor.
+
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
       name: A name for the generated node. Will also serve as the series name in
@@ -429,7 +437,9 @@ def tensor_proto(tag, tensor):
 
 def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
     # pylint: disable=line-too-long
-    """Outputs a `Summary` protocol buffer with a histogram.
+    """
+    Output a `Summary` protocol buffer with a histogram.
+    
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -461,7 +471,9 @@ def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_c
 
 def histogram(name, values, bins, max_bins=None):
     # pylint: disable=line-too-long
-    """Outputs a `Summary` protocol buffer with a histogram.
+    """
+    Output a `Summary` protocol buffer with a histogram.
+
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -536,7 +548,9 @@ def make_histogram(values, bins, max_bins=None):
 
 
 def image(tag, tensor, rescale=1, dataformats="NCHW"):
-    """Outputs a `Summary` protocol buffer with images.
+    """
+    Output a `Summary` protocol buffer with images.
+
     The summary has up to `max_images` summary values containing images. The
     images are built from `tensor` which must be 3-D with shape `[height, width,
     channels]` and where `channels` can be:
@@ -574,7 +588,7 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
 def image_boxes(
     tag, tensor_image, tensor_boxes, rescale=1, dataformats="CHW", labels=None
 ):
-    """Outputs a `Summary` protocol buffer with images."""
+    """Output a `Summary` protocol buffer with images."""
     tensor_image = make_np(tensor_image)
     tensor_image = convert_to_HWC(tensor_image, dataformats)
     tensor_boxes = make_np(tensor_boxes)
@@ -589,7 +603,19 @@ def image_boxes(
 
 
 def draw_boxes(disp_image, boxes, labels=None):
-    # xyxy format
+    """
+    Draw bounding boxes on an image tensor.
+
+    Args:
+      disp_image: A numpy array of shape [height, width, 3] representing the
+          image pixels in RGB format.
+      boxes: A numpy array of shape [num_boxes, 4] representing the coordinates
+          of the boxes in xyxy format.
+      labels: A list of strings representing the class labels for each box.
+
+    Returns:
+      A numpy array representing the image overlaid with boxes.
+    """
     num_boxes = boxes.shape[0]
     list_gt = range(num_boxes)
     for i in list_gt:
@@ -606,7 +632,7 @@ def draw_boxes(disp_image, boxes, labels=None):
 
 
 def make_image(tensor, rescale=1, rois=None, labels=None):
-    """Convert a numpy representation of an image to Image protobuf"""
+    """Convert a numpy representation of an image to Image protobuf."""
     from PIL import Image
 
     height, width, channel = tensor.shape
@@ -635,6 +661,18 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
 
 
 def video(tag, tensor, fps=4):
+    """
+    Create a video summary of a tensor.
+
+    Args:
+      tag: A name for the generated node. Will also serve as a series 
+        name in TensorBoard.
+      tensor : Input tensor containing consecutive video frames
+      fps : Frames per second of the video
+
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol
+    """
     tensor = make_np(tensor)
     tensor = _prepare_video(tensor)
     # If user passes in uint8, then we don't need to rescale by 255
@@ -646,6 +684,16 @@ def video(tag, tensor, fps=4):
 
 
 def make_video(tensor, fps):
+    """
+    Convert a numpy representation of a video to a video protobuf.
+
+    Args:
+      tensor : Input tensor containing consecutive video frames
+      fps : Frames per second of the video
+
+    Returns:
+        A video protobuf in a `Summary` protobuf.
+    """
     try:
         import moviepy  # noqa: F401
     except ImportError:
@@ -689,6 +737,18 @@ def make_video(tensor, fps):
 
 
 def audio(tag, tensor, sample_rate=44100):
+    """
+    Create an audio summary of a tensor.
+
+    Args:
+      tag: A name for the generated node. Will also serve as a series 
+          name in TensorBoard.
+      tensor : Input tensor containing consecutive audio frames
+      sample_rate : Sample rate of the audio
+
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol
+    """
     array = make_np(tensor)
     array = array.squeeze()
     if abs(array).max() > 1:
@@ -719,6 +779,16 @@ def audio(tag, tensor, sample_rate=44100):
 
 
 def custom_scalars(layout):
+    """
+    Output a `Summary` protocol buffer with custom scalar data.
+
+    Args:
+      layout: A list of category-title pairs. Within each category, a chart
+          will be generated for each scalar.
+    
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol
+    """
     categories = []
     for k, v in layout.items():
         charts = []
@@ -756,6 +826,18 @@ def custom_scalars(layout):
 
 
 def text(tag, text):
+    """
+    Create a text summary.
+
+    Args:
+      tag: A name for the generated node. Will also serve as a series 
+          name in TensorBoard.
+      text : A string
+    
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol.
+
+    """
     plugin_data = SummaryMetadata.PluginData(
         plugin_name="text", content=TextPluginData(version=0).SerializeToString()
     )
@@ -773,6 +855,25 @@ def text(tag, text):
 def pr_curve_raw(
     tag, tp, fp, tn, fn, precision, recall, num_thresholds=127, weights=None
 ):
+    """
+    Output a `Summary` protocol buffer with PR curve data.
+
+    Args:
+      tag: A name for the generated node. Will also serve as a series 
+          name in TensorBoard.
+      tp: True positives counts.
+      fp: False positives counts.
+      tn: True negatives counts.
+      fn: False negatives counts.
+      precision: Precision values.
+      recall: Recall values.
+      num_thresholds: Number of thresholds used to draw the curve.
+      weights: Optional weight each value of the curve by threshold.
+
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol.
+
+    """
     if num_thresholds > 127:  # weird, value > 127 breaks protobuf
         num_thresholds = 127
     data = np.stack((tp, fp, tn, fn, precision, recall))
@@ -797,6 +898,20 @@ def pr_curve_raw(
 
 
 def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
+    """
+    Output a `Summary` protocol buffer with PR curve data.
+
+    Args:
+      tag: A name for the generated node. Will also serve as a series 
+          name in TensorBoard.
+      labels: Ground truth values. shape = [batch_size, d0, .. dN].
+      predictions: The predicted values. shape = [batch_size, d0, .. dN].
+      num_thresholds: Number of thresholds used to draw the curve.
+      weights: Optional weight each value of the curve by threshold.
+
+    Returns:
+      A scalar `Tensor` of type `string`. The serialized `Summary` protocol.
+    """
     # weird, value > 127 breaks protobuf
     num_thresholds = min(num_thresholds, 127)
     data = compute_curve(
@@ -824,6 +939,19 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
 
 # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/summary.py
 def compute_curve(labels, predictions, num_thresholds=None, weights=None):
+    """
+    Compute the entries of the PR curve.
+
+    Args:
+      labels: Ground truth values. shape = [batch_size, d0, .. dN].
+      predictions: The predicted values. shape = [batch_size, d0, .. dN].
+      num_thresholds: Number of thresholds used to draw the curve.
+      weights: Optional weight each value of the curve by threshold.
+
+    Returns:
+      numpy array with columns [tp, fp, tn, fn, precision, recall].
+    
+    """
     _MINIMUM_COUNT = 1e-7
 
     if weights is None:
@@ -859,7 +987,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
 def _get_tensor_summary(
     name, display_name, description, tensor, content_type, components, json_config
 ):
-    """Creates a tensor summary with summary metadata.
+    """Create a tensor summary with summary metadata.
 
     Args:
       name: Uniquely identifiable name of the summary op. Could be replaced by
@@ -916,7 +1044,7 @@ def _get_tensor_summary(
 
 
 def _get_json_config(config_dict):
-    """Parses and returns JSON string from python dictionary."""
+    """Parse and returns JSON string from python dictionary."""
     json_config = "{}"
     if config_dict is not None:
         json_config = json.dumps(config_dict, sort_keys=True)
@@ -927,7 +1055,8 @@ def _get_json_config(config_dict):
 def mesh(
     tag, vertices, colors, faces, config_dict, display_name=None, description=None
 ):
-    """Outputs a merged `Summary` protocol buffer with a mesh/point cloud.
+    """
+    Output a merged `Summary` protocol buffer with a mesh/point cloud.
 
     Args:
       tag: A name for this summary operation.
