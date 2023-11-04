@@ -283,10 +283,9 @@ ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::EventBlock() {
 template <class... Args>
 std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::
     TorchOpStorage::OpList::emplace_back(Args&&... args) {
-  maybe_grow();
-  *next_ = {std::forward<Args>(args)...};
-  auto corr_id = buffer_last_->correlation_id(next_);
-  return {next_++, corr_id};
+  auto event_ptr = AppendOnlyList::emplace_back(std::forward<Args>(args)...);
+  auto corr_id = buffer_last_->correlation_id(event_ptr);
+  return {event_ptr, corr_id};
 }
 
 uint64_t ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(
