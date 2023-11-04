@@ -19,10 +19,16 @@ namespace {
 #endif
 
 bool checkRtol(const at::Tensor& diff, float maxTolerance) {
+  if (diff.numel() == 0) {
+    return true;
+  }
   return diff.abs().max().item<float>() <= maxTolerance;
 }
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+  if (diff.numel() == 0) {
+    return true;
+  }
   float maxValue = 0.0f;
 
   for (const auto& tensor : inputs) {
@@ -167,7 +173,12 @@ static void gen_all_subsets(
   }
 }
 
-static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+static void slice_test(
+    const std::vector<int64_t>& size,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -6373,20 +6384,17 @@ TEST_F(VulkanAPITest, slice_batch_success) {
   slice_tests(dim2sizes);
 }
 
+TEST_F(VulkanAPITest, slice_zero_sized) {
+  // When start == end
+  slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
+  // When start > end
+  slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
+}
+
 TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   // Act: slice step must be positive
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
-  }, ::c10::Error);
-
-  // Act: Vulkan doesn't support zero-sized slice (when start=end)
-  EXPECT_THROW({
-    slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
-  }, ::c10::Error);
-
-  // Act: Vulkan doesn't support zero-sized slice (when start > end)
-  EXPECT_THROW({
-    slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
   }, ::c10::Error);
 }
 
