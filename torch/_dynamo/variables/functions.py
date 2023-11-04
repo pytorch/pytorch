@@ -644,11 +644,6 @@ class FunctoolsPartialVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen.load_import_from("functools", "partial")
         codegen(self.func.source)
-        # codegen.extend_output([create_instruction("LOAD_NAME", argval="_post_backward_hook")])
-        print("CODEGEN SOME SHIT", self.func.source)
-        # keys = tuple(self.keywords.keys())
-        # for key in keys:
-        #     codegen(self.keywords[key])
         for arg in self.args:
             codegen(arg)
         codegen.extend_output(create_call_function(3, True))

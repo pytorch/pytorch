@@ -185,8 +185,6 @@
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
 
-- func: _set_data(Tensor(a!) self, Tensor new_data) -> Tensor
-
 
 - func: _same_storage(Tensor(a!) self, Tensor b) -> bool
 
@@ -195,14 +193,6 @@
 - func: _same_storage_size(Tensor(a!) self, int size) -> bool
 
 - func: _storage_size_allocated(Tensor(a!) self) -> bool
-
-- func: resize_storage_(Tensor(a!) self, int s) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: resize_storage_cpu_
-    CUDA: resize_storage_cuda_
-    Meta: resize_storage_meta_
-  autogen: resize_storage, resize_storage.out
 
 - func: sym_constrain_range_for_size(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:

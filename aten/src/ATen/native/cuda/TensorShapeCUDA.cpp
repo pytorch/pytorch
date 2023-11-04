@@ -29,14 +29,6 @@ Tensor& set_cuda_(Tensor& result) {
   return result;
 }
 
-Tensor& resize_storage_cuda_(Tensor& result, int64_t s) {
-  auto size_bytes = s * elementSize(result.scalar_type());
-  const auto new_size_bytes = static_cast<size_t>(size_bytes);
-  const Storage &storage = result.unsafeGetTensorImpl()->unsafe_storage();
-  std::cout << "resize_storage_cuda_ on " <<  storage.device_type() << " to " << new_size_bytes << std::endl;
-  resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes);
-  return result;
-}
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cuda_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {

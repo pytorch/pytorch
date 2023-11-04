@@ -389,19 +389,6 @@ bool _storage_size_allocated(at::Tensor&a) {
   return a.storage().nbytes() > 0;
 }
 
-Tensor& resize_storage_cpu_(Tensor& result, int64_t s) {
-  auto storage = result.storage().unsafeGetStorageImpl();
-  auto size_bytes = s * elementSize(result.scalar_type());
-  resize_bytes_cpu(storage, size_bytes);
-  return result;
-}
-
-Tensor& resize_storage_meta_(Tensor& result, int64_t s) {
-  auto storage = result.storage().unsafeGetStorageImpl();
-  auto size_bytes = s * elementSize(result.scalar_type());
-  resize_bytes_meta(storage, size_bytes);
-  return result;
-}
 
 // unify with cuda implementation?  This is not done to avoid a dispatch in resize_impl_cpu_
 Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {

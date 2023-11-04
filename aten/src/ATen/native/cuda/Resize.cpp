@@ -11,18 +11,13 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-#include <iostream>
 
 namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
-  LOG(WARNING) << "resize_bytes_cuda start";
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
-  LOG(WARNING) << "check 1";
   auto allocator = storage->allocator();
-  LOG(WARNING) << "allocator";
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
-  LOG(WARNING) << "check 2";
 
   auto device = at::cuda::current_device();
   if (size_bytes == 0) {
@@ -46,11 +41,8 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   }
 
   // Destructively overwrite data_ptr
-  LOG(WARNING) << "made data";
   storage->set_data_ptr_noswap(std::move(data));
-  LOG(WARNING) << "set data";
   storage->set_nbytes(size_bytes);
-  LOG(WARNING) << "Resized storage to" << storage->nbytes() << " bytes";
 }
 
 const Tensor& resize_cuda_(
