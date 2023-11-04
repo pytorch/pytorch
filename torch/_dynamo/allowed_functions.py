@@ -370,6 +370,9 @@ def is_allowed(obj) -> bool:
     if id(obj) in _allowed_function_ids:
         return True
 
+    #  if config.trace_numpy and np and ((obj is np) or is_numpy(obj)):
+    #      return True
+
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
