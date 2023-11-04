@@ -1,4 +1,4 @@
-"""Adds docstrings to functions defined in the torch._C"""
+"""Adds docstrings to functions defined in the 'torch._C'."""
 
 import re
 
@@ -7,7 +7,9 @@ from torch._C import _add_docstr as add_docstr
 
 
 def parse_kwargs(desc):
-    """Maps a description of args to a dictionary of {argname: description}.
+    r"""
+    Map a description of args to a dictionary of {argname: description}.
+
     Input:
         ('    weight (Tensor): a weight tensor\n' +
          '        Some optional description')
@@ -24,6 +26,14 @@ def parse_kwargs(desc):
 
 
 def merge_dicts(*dicts):
+    """
+    Merge dictionaries.
+
+    Input:
+        *dicts  (List[Dict]): a list of dictionaries
+    Output:
+        merged_dict (Dict): the merged dictionary
+    """
     return {x: d[x] for d in dicts for x in d}
 
 
