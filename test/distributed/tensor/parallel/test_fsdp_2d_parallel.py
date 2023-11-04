@@ -17,8 +17,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.checkpoint.state_dict import (
     get_optimizer_state_dict,
-    get_state_dict,
-    set_state_dict,
+    set_optimizer_state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
@@ -572,9 +571,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
         no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
         no_wrap_optim.step()
-        _, no_wrap_osd = get_state_dict(
-            no_wrap_model, optimizers=no_wrap_optim, optim_only=True
-        )
+        no_wrap_osd = get_optimizer_state_dict(no_wrap_model, optimizers=no_wrap_optim)
 
         # Create a model and sharded it with 2D FSDP + TP
         torch.manual_seed(0)
@@ -596,7 +593,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
         model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
         optim_2d.step()
-        _, optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
+        optim_2d_osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
         ref_optim_2d_osd = deepcopy(optim_2d_osd)
 
         no_wrap_osd_states = no_wrap_osd["state"]
@@ -624,8 +621,8 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
         optim_2d.step()
 
-        set_state_dict(model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd)
-        _, new_optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
+        set_optimizer_state_dict(model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd)
+        new_optim_2d_osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
 
         ref_optim_2d_osd_states = ref_optim_2d_osd["state"]
         new_optim_2d_osd_states = optim_2d_osd["state"]
