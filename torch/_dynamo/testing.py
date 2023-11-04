@@ -8,7 +8,7 @@ import re
 import sys
 import types
 import unittest
-from typing import Optional, Sequence, Union
+from typing import List, Optional, Sequence, Union
 from unittest.mock import patch
 
 np: Optional[types.ModuleType] = None
@@ -188,7 +188,7 @@ class CompileCounter:
         self.frame_count = 0
         self.op_count = 0
 
-    def __call__(self, gm: torch.fx.GraphModule):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.frame_count += 1
         for node in gm.graph.nodes:
             if "call" in node.op:
@@ -207,7 +207,7 @@ class CompileCounterWithBackend:
         self.backend = backend
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         from .backends.registry import lookup_backend
 
         self.frame_count += 1
@@ -224,7 +224,7 @@ class EagerAndRecordGraphs:
     def __init__(self):
         self.graphs = []
 
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
         return gm
 
@@ -249,16 +249,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
-    if expected_ops is None:
-        expected = CompileCounter()
-        try:
-            gm = torch.fx.symbolic_trace(fn)
-            expected(gm)
-            print("\nfx.symbolic_trace graph:")
-            gm.graph.print_tabular()
-            expected_ops = expected.op_count
-        except Exception:
-            pass  # Silently ignore FX errors (not our issue)
 
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]

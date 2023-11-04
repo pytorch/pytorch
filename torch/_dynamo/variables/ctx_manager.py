@@ -25,10 +25,6 @@ class ContextWrappingVariable(VariableTracker):
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
-        self.recursively_contains = (
-            set()
-        )  # This var doesn't contain any child vars and doesn't support clone() properly,
-        # so don't populate this automatically
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
@@ -226,7 +222,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     def create(tx, **kwargs):
         var = TorchFunctionDisableVariable(
             target_values=[False],
-            initial_values=[torch._C._is_torch_function_enabled()],
+            initial_values=[tx.output.torch_function_enabled],
             **kwargs,
         )
         # mlazos: I think this is here to make sure we don't reinvoke on clone()
