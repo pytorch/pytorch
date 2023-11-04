@@ -37,7 +37,7 @@ class SparseAdam(Optimizer):
 
     @torch.no_grad()
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
