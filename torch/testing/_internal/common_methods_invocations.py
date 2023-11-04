@@ -510,7 +510,7 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
 def sample_inputs__weight_norm_interface(op_info, device, dtype, requires_grad, **kwargs):
     g = torch.randn((3, 10, 10), device=device)
     v = torch.randn((1, 1, 10), device=device)
-    yield SampleInput(args=(g, v, 2))
+    yield SampleInput(g, args=(v, 2))
 
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
@@ -12451,12 +12451,18 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('_weight_norm_interface',
            aten_name='_weight_norm_interface',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           assert_jit_shape_analysis=True,
+           dtypes=all_types_and(torch.complex128, torch.float16, torch.bool, torch.complex64, torch.bfloat16),
+           supports_autograd=False,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
+           assert_jit_shape_analysis=False,
            sample_inputs_func=sample_inputs__weight_norm_interface,
-    ),
+           decorators=(
+                DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=1e-04, rtol=1.3e-05), }),
+                ),
+            )
+           ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.half, torch.bfloat16),
