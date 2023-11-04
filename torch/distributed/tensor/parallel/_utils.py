@@ -4,7 +4,7 @@ from typing import Callable, Tuple, Optional, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.device_mesh import mesh_resources
+from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import Placement
 try:
     from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
@@ -191,7 +191,7 @@ def _validate_tp_mesh_dim(
         `True` if the mesh dimension
         is valid, `False` otherwise.
     """
-    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
         if parent_mesh.ndim != 2:
             raise RuntimeError(
@@ -199,7 +199,7 @@ def _validate_tp_mesh_dim(
                 "Currently we only support 2D TP composition with DP.",
             )
 
-        tp_mesh_dim = mesh_resources.get_parent_mesh_dim(device_mesh)
+        tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
         if tp_mesh_dim != 1:
             raise RuntimeError(
                 f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",

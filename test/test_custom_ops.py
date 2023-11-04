@@ -467,15 +467,15 @@ class TestCustomOp(CustomOpTestCaseBase):
                 raise NotImplementedError()
 
     def test_unsupported_schemas(self):
-        with self.assertRaisesRegex(ValueError, "does not support non-functional"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a!) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "does not support view functions"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(
                 f"{TestCustomOp.test_ns}::foo", "(Tensor(a) x) -> Tensor(a)"
             )(foo)
-        with self.assertRaisesRegex(ValueError, "no outputs"):
+        with self.assertRaisesRegex(ValueError, "only supports functional"):
             custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo", "(Tensor x) -> ()")(
                 foo
             )
@@ -1468,10 +1468,10 @@ class TestCustomOp(CustomOpTestCaseBase):
             gm.code.strip(),
             """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    sym_size_1 = torch.ops.aten.sym_size(x_1, 1)
-    sym_size_2 = torch.ops.aten.sym_size(x_1, 2)
-    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size, sym_size_1, sym_size_2]);  x_1 = sym_size = sym_size_1 = sym_size_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(x_1, 2)
+    numpy_view_copy = torch.ops._torch_testing.numpy_view_copy.default(x_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  x_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = None
     return numpy_view_copy""",  # noqa: B950
         )
 
@@ -1692,6 +1692,21 @@ def forward(self, x_1):
         actual = self.ns().foo.default.tags
         self.assertTrue(isinstance(actual, list))
         self.assertEqual(actual, list(tags))
+
+    def test_builtin_aten_ops_are_pt2_compliant(self):
+        for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
+    def test_resolve_packet(self):
+        x = torch.randn(3)
+        result = torch._C._jit_resolve_packet("aten::sum", x)
+        self.assertEqual(result, "default")
+
+        result = torch._C._jit_resolve_packet("aten::sum", x, dim=1)
+        self.assertEqual(result, "dim_IntList")
+
+        with self.assertRaisesRegex(RuntimeError, "failed to many any schema"):
+            result = torch._C._jit_resolve_packet("aten::sum", x, x, x)
 
     def test_define_bad_schema(self):
         lib = self.lib()

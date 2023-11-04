@@ -16,6 +16,7 @@ from .dicts import (
     CustomizedDictVariable,
     DataClassVariable,
     DefaultDictVariable,
+    SetVariable,
 )
 from .functions import (
     NestedUserFunctionVariable,
@@ -23,13 +24,18 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
+from .iter import (
+    CountIteratorVariable,
+    CycleIteratorVariable,
+    IteratorVariable,
+    RepeatIteratorVariable,
+)
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
-    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -45,6 +51,7 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    SkipFilesVariable,
     SuperVariable,
     UnknownVariable,
 )
@@ -56,7 +63,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchVariable
+from .torch import TorchCtxManagerClassVariable, TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -78,6 +85,10 @@ __all__ = [
     "GetAttrVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
+    "IteratorVariable",
+    "RepeatIteratorVariable",
+    "CountIteratorVariable",
+    "CycleIteratorVariable",
     "LambdaVariable",
     "ListIteratorVariable",
     "ListVariable",
@@ -91,8 +102,10 @@ __all__ = [
     "PythonModuleVariable",
     "RangeVariable",
     "SliceVariable",
+    "SkipFilesVariable",
     "SuperVariable",
     "TensorVariable",
+    "TorchCtxManagerClassVariable",
     "TorchVariable",
     "TupleVariable",
     "UnknownVariable",
