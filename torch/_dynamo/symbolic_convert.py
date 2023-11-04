@@ -625,14 +625,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
-        state = self.copy_graphstate()
-        try:
-            result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-            self.output.guards.update(fn.guards)
-            return result
-        except Exception:
-            self.restore_graphstate(state)
-            raise
+        result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        self.output.guards.update(fn.guards)
+        return result
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:

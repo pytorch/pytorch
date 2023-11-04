@@ -6,7 +6,7 @@ torchrec_dlrm,pass,8
 
 
 
-BERT_pytorch,pass,8
+BERT_pytorch,pass,10
 
 
 
@@ -35,10 +35,6 @@ basic_gnn_gin,pass,8
 
 
 basic_gnn_sage,pass,8
-
-
-
-clip,pass_due_to_skip,0
 
 
 
@@ -214,8 +210,8 @@ vgg16,pass,8
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_accuracy,39
 
 
 
-yolov3,pass,10
+yolov3,pass,12
