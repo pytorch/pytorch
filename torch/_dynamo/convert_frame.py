@@ -190,7 +190,7 @@ def has_tensor_in_frame(frame):
 
         for co_name in frame.f_code.co_names:
             if co_name in frame.f_globals:
-                if frame.f_globals[co_name] in get_np_to_tnp_map():
+                if id(frame.f_globals[co_name]) in {id(x) for x in get_np_to_tnp_map()}:
                     return True
 
     seen_ids: Dict[int, bool] = dict()
