@@ -311,9 +311,7 @@ class DTensorTest(DTensorTestBase):
         # we haven't synced the collective yet).
         from torch.distributed._functional_collectives_impl import _tensor_needs_wait
 
-        mesh = DeviceMesh(
-            self.device_type, torch.arange(self.world_size), _validate_mesh=False
-        )
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(dt):
             dt_out_redistribute = dt.redistribute(mesh, [Replicate()])
