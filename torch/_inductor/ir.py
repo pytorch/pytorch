@@ -3816,16 +3816,14 @@ class UserDefinedTritonKernel(ExternKernel):
         return {}
 
     def get_mutation_names(self):
-        return [t.get_name() for t in self.inputs]
+        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
         constant_args = []
-        device = None
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
-                device = v.get_device()
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
@@ -3833,7 +3831,9 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 constant_args.append(v)
                 kwargs[k] = v
-        assert device is not None
+
+        assert len(inputs) != 0
+        device = inputs[0].get_device()
 
         super().__init__(
             None,
@@ -3845,6 +3845,39 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+    @classmethod
+    def create(cls, *, kernel_idx, grid, kernel_args):
+        packed = UserDefinedTritonKernel(
+            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
+        )
+        for arg in kernel_args.values():
+            if isinstance(arg, TensorBox):
+                MutationOutput(arg.layout, arg, packed)
+
+    def get_alias_names(self):
+        return [i.get_name() for i in self.inputs]
+
+
+class MutationOutput(ExternKernel):
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def __init__(self, layout, input, parent):
+        super().__init__(None, layout, [input, parent], ())
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def is_no_op(self):
+        return True
+
+    def has_side_effects(self):
+        return True
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name()]
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -4276,11 +4309,15 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def has_aliasing(self):
+    def get_alias_names(self):
         # TODO - some fallbacks are still OpOverloadPackets
         if not isinstance(self.op_overload, torch._ops.OpOverload):
-            return False
-        return torch._inductor.utils.is_view(self.op_overload)
+            return []
+        if torch._inductor.utils.is_view(self.op_overload):
+            # TODO - use op._schema.arguments alias_info to figure out
+            # precise list
+            return [inp.get_name() for inp in self.inputs]
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -4455,9 +4492,6 @@ class ComplexView(ExternKernelAlloc):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return True
-
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
@@ -4556,11 +4590,13 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return any(
-            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
+    def get_alias_names(self):
+        return [
+            inp.get_name()
             for inp in self.inputs
-        )
+            if isinstance(inp, (FallbackKernel, ComplexView))
+            and len(inp.get_alias_names()) > 0
+        ]
 
 
 def _prepare_convolution_fusion_create(
