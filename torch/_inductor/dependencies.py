@@ -407,21 +407,29 @@ def extract_input_node_reduction_ranges(  # noqa: F722
     reads = input_node.get_reads()
     reduction_size = None
     size = None
-    for read in reads:
-        if not isinstance(read, MemoryDep):
-            continue
-        buffer = V.graph.get_buffer(read.name)
-        if buffer is None:
-            continue
-        if isinstance(buffer, ComputedBuffer) and len(buffer.get_reduction_size()) > 0:
-            if reduction_size is None:
-                reduction_size = buffer.get_reduction_size()
-                size = buffer.get_size()
-            elif (
-                reduction_size != buffer.get_reduction_size()
-                or size != buffer.get_size()
-            ):
-                return (None, None)
+    while reduction_size is None and len(reads) > 0:
+        new_reads = []
+        for read in reads:
+            if not isinstance(read, MemoryDep):
+                continue
+            buffer = V.graph.get_buffer(read.name)
+            if buffer is None:
+                continue
+            if isinstance(buffer, ComputedBuffer) and len(buffer.get_reduction_size()) > 0:
+                if reduction_size is None:
+                    reduction_size = buffer.get_reduction_size()
+                    size = buffer.get_size()
+                elif (
+                    reduction_size != buffer.get_reduction_size()
+                    or size != buffer.get_size()
+                ):
+                    return (None, None)
+            else:
+                new_reads.extend(buffer.get_reads())
+        if reads == new_reads:
+            return (size, reduction_size)
+        else:
+            reads = new_reads
     return (size, reduction_size)
 
 
