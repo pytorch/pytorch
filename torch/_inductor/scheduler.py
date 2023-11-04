@@ -1490,6 +1490,7 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
+        node_num = len(fused_nodes)
         for node1, node2 in self.get_possible_fusions():
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
@@ -1503,6 +1504,7 @@ class Scheduler:
                 self.name_to_fused_node.update(
                     {n.get_name(): node3 for n in node3.get_nodes()}
                 )
+        print("fuse_nodes_once --> node_num:", node_num)
         self.nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         self.topological_sort_schedule()
         self.prune_redundant_deps()
