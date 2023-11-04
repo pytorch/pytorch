@@ -620,7 +620,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         if len(kwargs) > 0:
-            unsupported(
+            unimplemented(
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
