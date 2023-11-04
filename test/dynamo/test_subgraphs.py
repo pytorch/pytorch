@@ -326,7 +326,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifdynstaticdefault(4, 1))
+        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
