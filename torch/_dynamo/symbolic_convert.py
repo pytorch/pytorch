@@ -757,7 +757,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         # The reason why we fail is due to non-restorable block stack entries.
-        # If a jump target in its unwind/cleanup block exits, resume at the jump target.
+        # If a jump target in its unwind/cleanup block exists, resume at the jump target.
         if last_jump_forward:
             target_index = None
             for idx, instruction in enumerate(self.instructions):
