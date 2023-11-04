@@ -146,6 +146,14 @@ class SpeculationEntry:
 
 @dataclasses.dataclass
 class SpeculationLog:
+    """
+    SpeculationLog replaces the prior copy_graphstate/restore_graphstate
+    checkpointing.  Rather than saving/restoring state, we restart the
+    dynamo conversion process over from the beginning -- but when we hit
+    the start of the speculation that failed, we take instead generate
+    a graph break.
+    """
+
     entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
 
