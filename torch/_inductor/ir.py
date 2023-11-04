@@ -2471,6 +2471,7 @@ class NoneLayout(IRNode):
     def __init__(self, device):
         self.device = device
         self.size = [0]
+        self.stride = [0]
 
     def storage_size(self):
         return 0
@@ -3896,7 +3897,7 @@ class InplaceBernoulliFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return []
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -3927,7 +3928,7 @@ class AccumulateGrad(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return []
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -3987,7 +3988,7 @@ class ScatterFallback(ExternKernel):
         return kernel
 
     def get_mutation_names(self):
-        return []
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return {}
@@ -4059,7 +4060,7 @@ class IndexPutFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        return []
+        return [self.inputs[0].get_name()]
 
     def get_unbacked_symbol_defs(self):
         return {}
