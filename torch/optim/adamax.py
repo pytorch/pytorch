@@ -88,7 +88,7 @@ class Adamax(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Perform a single optimization step.
+        """Performs a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -204,6 +204,7 @@ def adamax(
 
     See :class:`~torch.optim.Adamax` for details.
     """
+
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
