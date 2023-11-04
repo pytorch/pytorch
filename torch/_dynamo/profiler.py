@@ -50,7 +50,7 @@ class ProfileResult:
         self.total: ProfileMetrics = total or ProfileMetrics()
         self.unique_graphs: int = unique_graphs
 
-    def __iadd__(self, other: ProfileMetrics):
+    def __iadd__(self, other: ProfileResult):
         self.captured += other.captured
         self.total += other.total
         self.unique_graphs += other.unique_graphs
@@ -166,15 +166,16 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
             # symbols in the input shapes, we can still do the assert by
             # doing matching and substitution.  However, I'm guessing that
             # this assert doesn't matter too much so it's not worth the work
+            # FIXME <file a task>
             assert shapes_of(args) == input_shapes or any(
-                free_symbols(s) for s in input_shapes
+                free_symbols(s) for s in input_shapes  # type: ignore[name-defined]
             ), debug_print(shapes_of(args))
             result = gm.forward(*args)
             if output_shapes is None:
                 output_shapes = shapes_of(result)
             else:
                 assert shapes_of(result) == output_shapes or any(
-                    free_symbols(s) for s in input_shapes
+                    free_symbols(s) for s in input_shapes  # type: ignore[name-defined]
                 ), debug_print(shapes_of(result))
             return result
 
