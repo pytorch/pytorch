@@ -123,6 +123,8 @@ class ConfigModule(ModuleType):
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
+    _is_dirty: bool
+    _hash_digest: Optional[bytes]
 
     def __init__(self):
         raise NotImplementedError(
@@ -186,8 +188,8 @@ class ConfigModule(ModuleType):
     def to_dict(self) -> Dict[str, Any]:
         warnings.warn(
             (
-                "config.to_dict() has been deprecated. It may no longer change the underlying config.",
-                "use config.shallow_copy_dict() or config.get_config_copy() instead",
+                "config.to_dict() has been deprecated. It may no longer change the underlying config."
+                "use config.shallow_copy_dict() or config.get_config_copy() instead"
             ),
             DeprecationWarning,
         )
@@ -196,16 +198,23 @@ class ConfigModule(ModuleType):
     def shallow_copy_dict(self) -> Dict[str, Any]:
         return {**self._config}
 
-    def load_config(self, config: Union[bytes, Dict[str, Any]]) -> None:
+    def load_config(self, maybe_pickled_config: Union[bytes, Dict[str, Any]]) -> None:
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
-        if not isinstance(config, dict):
-            config = pickle.loads(config)
+        if not isinstance(maybe_pickled_config, dict):
+            config = pickle.loads(maybe_pickled_config)
+        else:
+            config = maybe_pickled_config
         self._config.update(config)
 
     def get_config_copy(self) -> Dict[str, Any]:
         return copy.deepcopy(self._config)
 
-    def patch(self, arg1: Optional[Union[str, Dict[str, Any]]] = None, arg2: Any = None, **kwargs):
+    def patch(
+        self,
+        arg1: Optional[Union[str, Dict[str, Any]]] = None,
+        arg2: Any = None,
+        **kwargs,
+    ):
         """
         Decorator and/or context manager to make temporary changes to a config.
 
@@ -222,11 +231,14 @@ class ConfigModule(ModuleType):
             with config.patch("name", val):
                 ...
         """
+        changes: Dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
+                assert isinstance(arg1, str)
                 # patch("key", True) syntax
                 changes = {arg1: arg2}
             else:
+                assert isinstance(arg1, dict)
                 # patch({"key": True}) syntax
                 changes = arg1
             assert not kwargs
@@ -235,7 +247,7 @@ class ConfigModule(ModuleType):
             changes = kwargs
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
-        prior = {}
+        prior: Dict[str, Any] = {}
         config = self
         dirty = False
 
@@ -265,10 +277,16 @@ class ContextDecorator(contextlib.ContextDecorator):
     `unittest.TestCase`
     """
 
+    def __enter__(self):
+        raise NotImplementedError()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        raise NotImplementedError()
+
     def __call__(self, func):
         if isinstance(func, type) and issubclass(func, unittest.TestCase):
 
-            class _TestCase(func):
+            class _TestCase(func):  # type: ignore[valid-type, misc]
                 @classmethod
                 def setUpClass(cls):
                     self.__enter__()
