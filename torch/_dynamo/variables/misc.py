@@ -984,6 +984,14 @@ class NumpyVariable(VariableTracker):
                     " Please file an issue to request support for this function."
                 )
 
+            if (
+                func.__module__ == "torch._numpy.random"
+                and config.use_numpy_random_stream
+            ):
+                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
+                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                unimplemented(msg)
+
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
             proxy = tx.output.create_proxy(
