@@ -90,7 +90,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_observation(self):
-        r"""Enable accumulation of data without updating quantization parameters.
+        """Enable accumulation of data without updating quantization parameters.
 
         Enables static observer accumulating data from input but doesn't
         update the quantization parameters. Forward path returns the original X.
