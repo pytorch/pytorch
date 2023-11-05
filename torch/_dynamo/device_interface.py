@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Callable, Dict, Optional, Iterable, Type, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Type, Union
 
 import torch
 from torch._streambase import _EventBase, _StreamBase
