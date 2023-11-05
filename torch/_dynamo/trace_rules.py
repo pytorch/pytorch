@@ -1,5 +1,6 @@
 import functools
-import torch
+
+import torch   # noqa: F401
 
 from .allowed_functions import is_in_graph_function
 
@@ -58,6 +59,12 @@ torch_name_rule_map = {
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
     "torch.jit.is_scripting": TorchInGraphFunctionVariable,
     "torch.jit.is_tracing": TorchInGraphFunctionVariable,
+    "torch.jit.annotate": TorchInGraphFunctionVariable,
+    "torch.distributed.is_available": TorchInGraphFunctionVariable,
+    "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
+    "torch.distributed.get_rank": TorchInGraphFunctionVariable,
+    "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
+    "torch.distributed._tensor.DTensor.from_local": TorchInGraphFunctionVariable,
 }
 
 
