@@ -57,7 +57,7 @@ from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator
+from .symbolic_convert import InstructionTranslator, SpeculationLog
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -480,10 +480,12 @@ def _compile(
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_reason: Optional[str] = None
+    speculation_log = SpeculationLog()
 
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -497,12 +499,16 @@ def _compile(
             export_constraints,
             mutated_closure_cell_contents,
             frame_state=frame_state,
+            speculation_log=speculation_log,
         )
 
         try:
             with tracing(tracer.output.tracing_context):
                 tracer.run()
-        except (exc.RestartAnalysis, exc.SkipFrame):
+        except exc.UnspecializeRestartAnalysis:
+            speculation_log.clear()
+            raise
+        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
             if translation_validation_enabled():
