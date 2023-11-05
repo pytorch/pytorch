@@ -11,20 +11,20 @@ namespace {
 
 DriverAPI create_driver_api() {
   void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
-  TORCH_INTERNAL_ASSERT(handle_0);
+  TORCH_INTERNAL_ASSERT(handle_0, "Can't open libcuda.so: ", dlerror());
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
 #define LOOKUP_LIBCUDA_ENTRY(name)                       \
   r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_)
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
 #undef LOOKUP_LIBCUDA_ENTRY
 
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
   r.name##_ = ((decltype(&name))dlsym(handle_1, #name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_)
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
     C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
 #undef LOOKUP_NVML_ENTRY
   }
