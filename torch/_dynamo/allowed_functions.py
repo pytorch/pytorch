@@ -370,8 +370,8 @@ def is_allowed(obj) -> bool:
     if id(obj) in _allowed_function_ids:
         return True
 
-    #  if config.trace_numpy and np and ((obj is np) or is_numpy(obj)):
-    #      return True
+    if config.trace_numpy and np and (obj is np or id(obj) in _numpy_function_ids):
+          return True
 
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
@@ -408,4 +408,6 @@ def is_builtin_constant(obj) -> bool:
 def is_numpy(obj) -> bool:
     if np is None:
         return False
+    if obj is np:
+        return True
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids

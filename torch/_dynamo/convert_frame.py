@@ -181,18 +181,6 @@ def has_tensor_in_frame(frame):
             if is_allowed(frame.f_globals[co_name]):
                 return True
 
-    # check if there's something from numpy. XXX: refactor
-    if np and config.trace_numpy:
-        if np in frame.f_globals.values():
-            return True
-        # Detect `from numpy import arange` etc
-        from .variables.misc import get_np_to_tnp_map
-
-        for co_name in frame.f_code.co_names:
-            if co_name in frame.f_globals:
-                if id(frame.f_globals[co_name]) in {id(x) for x in get_np_to_tnp_map()}:
-                    return True
-
     seen_ids: Dict[int, bool] = dict()
 
     def has_tensor(obj):
