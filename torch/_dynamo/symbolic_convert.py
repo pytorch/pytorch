@@ -460,14 +460,17 @@ def break_graph_if_unsupported(*, push):
     def decorator(inner_fn):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
-            state = self.copy_graphstate()
+            speculation = self.speculate()
+            if speculation.failed:
+                assert speculation.reason is not None
+                return handle_graph_break(self, inst, speculation.reason)
             try:
                 TracingContext.set_current_loc(
                     self.f_code.co_filename, self.lineno, self.f_code.co_name
                 )
                 return inner_fn(self, inst)
             except Unsupported as excp:
-                if self.has_backedge() and self.should_compile_partial_graph():
+                if self.should_compile_partial_graph() and self.has_backedge():
                     msg = (
                         "Skipping frame because there is a graph break in a for/while loop\n"
                         f"{self.frame_summary()}"
@@ -508,9 +511,14 @@ def break_graph_if_unsupported(*, push):
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
-                reason = GraphCompileReason(excp.msg, user_stack)
-            self.restore_graphstate(state)
+                speculation.reason = GraphCompileReason(excp.msg, user_stack)
+            speculation.fail_and_restart_analysis()
 
+        def handle_graph_break(
+            self: "InstructionTranslatorBase",
+            inst: Instruction,
+            reason: GraphCompileReason,
+        ):
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
@@ -779,6 +787,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 log.debug("empty checkpoint")
                 raise
             log.debug("step triggered compile", exc_info=True)
+
         self.current_speculation.fail_and_restart_analysis()
 
     def step_graph_break(self, continue_inst):

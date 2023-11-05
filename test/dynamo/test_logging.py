@@ -551,7 +551,7 @@ print("arf")
         fn_opt = torch._dynamo.optimize("eager")(fn)
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -562,7 +562,7 @@ print("arf")
                 ~~^~~""",
         )
         self.assertExpectedInline(
-            messages[1],
+            messages[-1],
             """\
             return x * 3
                    ~~^~~""",
