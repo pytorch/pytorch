@@ -1728,7 +1728,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BINARY_OP(self, inst):
         if sys.version_info >= (3, 11):
-            opname = dis._nb_ops[inst.arg][0][3:]
+            opname = dis._nb_ops[inst.arg][0][3:]  # type: ignore[attr-defined]
             if opname.startswith("INPLACE"):
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
