@@ -88,10 +88,31 @@ ignored_torch_name_rule_set = {
     "torch.utils.hooks.RemovableHandle",
 }
 
+additional_torch_name_rule_set = {
+    "torch.default_generator#get_state",
+    "torch._C.Generator#get_state",
+    "torch.default_generator#set_state",
+    "torch._C.Generator#set_state",
+    "torch.onnx.is_in_onnx_export",
+    "torch.onnx.operators.shape_as_tensor",
+    "torch.overrides.is_tensor_like",
+    "torch.jit.is_scripting",
+    "torch.jit.is_tracing",
+    "torch.jit.annotate",
+    "torch.distributed.is_available",
+    "torch.distributed.is_initialized",
+    "torch.distributed.get_rank",
+    "torch.distributed.get_world_size",
+    "torch.distributed._tensor.DTensor#from_local",
+    "torch._utils.is_compiling",
+    "torch.overrides.get_default_nowrap_functions",
+}
+
 
 if torch.distributed.is_available():
     ignored_torch_name_rule_set |= {
         "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
+        "torch.distributed._device_mesh.DeviceMesh",
     }
 
 
@@ -318,7 +339,12 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_torch_name_rule_map(self):
-        generated_torch_name_rule_set = generate_allow_list()
+        additional_torch_obj_rule_set = {
+            load_object(x) for x in additional_torch_name_rule_set
+        }
+        generated_torch_name_rule_set = (
+            generate_allow_list() | additional_torch_obj_rule_set
+        )
         ignored_torch_obj_rule_set = {
             load_object(x) for x in ignored_torch_name_rule_set
         }

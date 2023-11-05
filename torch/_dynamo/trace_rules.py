@@ -1,6 +1,8 @@
 import functools
 
-import torch   # noqa: F401
+import importlib
+
+import torch  # noqa: F401
 
 from .allowed_functions import is_in_graph_function
 
@@ -50,10 +52,10 @@ torch_name_rule_map = {
     "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
-    "torch.default_generator.get_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator.get_state": TorchInGraphFunctionVariable,
-    "torch.default_generator.set_state": TorchInGraphFunctionVariable,
-    "torch._C.Generator.set_state": TorchInGraphFunctionVariable,
+    "torch.default_generator#get_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator#get_state": TorchInGraphFunctionVariable,
+    "torch.default_generator#set_state": TorchInGraphFunctionVariable,
+    "torch._C.Generator#set_state": TorchInGraphFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -64,7 +66,9 @@ torch_name_rule_map = {
     "torch.distributed.is_initialized": TorchInGraphFunctionVariable,
     "torch.distributed.get_rank": TorchInGraphFunctionVariable,
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
-    "torch.distributed._tensor.DTensor.from_local": TorchInGraphFunctionVariable,
+    "torch.distributed._tensor.DTensor#from_local": TorchInGraphFunctionVariable,
+    "torch._utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
 }
 
 
@@ -78,8 +82,19 @@ def get_torch_obj_rule_map():
     return d
 
 
+def _load_obj_from_str(fully_qualified_name):
+    module, obj_name = fully_qualified_name.rsplit(".", maxsplit=1)
+    return getattr(importlib.import_module(module), obj_name)
+
+
 def load_object(name):
-    return eval(name)
+    x = name.split("#")
+    if len(x) == 2:
+        obj = _load_obj_from_str(x[0])
+        return getattr(obj, x[1])
+    else:
+        assert len(x) == 1
+        return _load_obj_from_str(x[0])
 
 
 def lookup(obj):
