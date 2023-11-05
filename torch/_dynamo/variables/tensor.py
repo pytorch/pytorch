@@ -265,8 +265,8 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "size", [], {})
         elif name == "ndim" and self.ndim is None:
             result = self.call_method(tx, "dim", [], {})
-        elif name == "data":
-            result = self.call_method(tx, "detach", [], {})
+        # elif name == "data":
+            # result = self.call_method(tx, "data", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
 

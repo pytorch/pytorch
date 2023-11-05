@@ -140,12 +140,14 @@ class AutogradCompilerInstance:
         return outputs
 
     def post_acc_grad_hook(self, inputs, hook_id):
+        print("INPUTS TO HOOK?", id(inputs))
         assert self.hooks_proxy is not None
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
             inputs,
         )
+        # breakpoint()
         with disable_proxy_modes_tracing():
             if isinstance(inputs, list):
                 inputs = [maybe_clone(x) for x in inputs]

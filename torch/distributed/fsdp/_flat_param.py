@@ -1485,20 +1485,20 @@ class FlatParamHandle:
             "Expects to be in `BACKWARD_PRE` or `IDLE` (if prefetching)",
         )
         flat_param = self.flat_param
-        if flat_param.grad is not None and (
-            flat_param.grad.size() != flat_param._unpadded_unsharded_size
-            or flat_param.grad.device != flat_param.device  # grad on CPU
+        if self.flat_param.grad is not None and (
+            self.flat_param.grad.size() != self.flat_param._unpadded_unsharded_size
+            or self.flat_param.grad.device != self.flat_param.device  # grad on CPU
         ):
             self._check_on_compute_device(self.flat_param)
-            grad_offloaded = flat_param.grad.device != self.device
+            grad_offloaded = self.flat_param.grad.device != self.device
             _p_assert(
                 not grad_offloaded or self._offload_params,
                 f"Expects the sharded gradient to be on {self.device} "
-                f"but got {flat_param.grad.device}",
+                f"but got {self.flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
-                flat_param.grad.size()
-                == flat_param._local_shard.size()  # type: ignore[attr-defined]
+                self.flat_param.grad.size()
+                == self.flat_param._local_shard.size()  # type: ignore[attr-defined]
             )
             if prev_iter_synced_gradients:
                 # TODO (awgu): Gradient accumulation outside `no_sync()`
@@ -1507,14 +1507,14 @@ class FlatParamHandle:
                 # between a CPU tensor (the existing sharded gradient) and
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
-                    flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
-                    sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+                    self.flat_param._saved_grad_shard = self.flat_param.grad.data  # type: ignore[attr-defined]
+                    sharded_grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
                 else:
                     _p_assert(
-                        hasattr(flat_param, "_cpu_grad"),
+                        hasattr(self.flat_param, "_cpu_grad"),
                         "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
-                    sharded_grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+                    sharded_grad = self.flat_param._cpu_grad  # type: ignore[attr-defined]
                 # If user specified to keep the gradient in low precision, then
                 # the gradient may still be of the low precision dtype if the
                 # user did not set the gradient to `None` after the previous
@@ -1522,21 +1522,21 @@ class FlatParamHandle:
                 # precision dtype so that FSDP can accumulate in that dtype in
                 # the post-backward hook and assign to `.grad` in that dtype in
                 # the post-backward callback.
-                local_shard_dtype = flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                local_shard_dtype = self.flat_param._local_shard.dtype  # type: ignore[attr-defined]
                 if (
                     self._keep_low_precision_grads
                     and sharded_grad.dtype != local_shard_dtype
                 ):
                     sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
-                padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
+                padded_unsharded_size = self.flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 _p_assert(
-                    flat_param.grad.size() == padded_unsharded_size,
+                    self.flat_param.grad.size() == padded_unsharded_size,
                     "Expects `.grad` to be the unsharded gradient in "
                     f"`no_sync()` with size {padded_unsharded_size} "
-                    f"but got size {flat_param.grad.size()}",
+                    f"but got size {self.flat_param.grad.size()}",
                 )
-            flat_param.grad = None
+            self.flat_param.grad = None
 
     def prepare_gradient_for_optim(self):
         """
@@ -1684,7 +1684,6 @@ class FlatParamHandle:
 
     def _use_sharded_flat_param(self) -> None:
         """Switches to using the sharded flat parameter."""
-        flat_param = self.flat_param
         if self._use_orig_params:
             in_forward = self._training_state == HandleTrainingState.FORWARD
             skip_use_sharded_views = (
@@ -1695,14 +1694,14 @@ class FlatParamHandle:
             )
             # Only incur the extra `.data` call if needed
             if skip_use_sharded_views:
-                unsharded_flat_param = flat_param.data
+                unsharded_flat_param = self.flat_param.data
         if self._offload_params:
-            device = flat_param._local_shard.device  # type: ignore[attr-defined]
+            device = self.flat_param._local_shard.device  # type: ignore[attr-defined]
             _p_assert(
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
-        flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
+        self.flat_param.data = self.flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
             if skip_use_sharded_views:
                 self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
@@ -1722,9 +1721,9 @@ class FlatParamHandle:
                 # TODO: Change `_unpadded_unsharded_size` if we change the
                 # gradient to be computed directly with padding.
                 accumulated_grad_in_no_sync = (
-                    flat_param.grad is not None
+                    self.flat_param.grad is not None
                     and self.uses_sharded_strategy
-                    and flat_param.grad.shape == flat_param._unpadded_unsharded_size
+                    and self.flat_param.grad.shape == self.flat_param._unpadded_unsharded_size
                 )
                 if accumulated_grad_in_no_sync:
                     self._use_unsharded_grad_views()

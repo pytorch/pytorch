@@ -705,6 +705,7 @@ def _pre_backward_hook(
 def _post_backward_hook(
     state: _FSDPState,
     handle: FlatParamHandle,
+    flat_param,
     *unused: Any,
 ):
     # gpu_id = int(os.environ["LOCAL_RANK"])
@@ -730,7 +731,8 @@ def _post_backward_hook(
     gradient (accumulating with any existing gradient).
     """
     _log_post_backward_hook(state, handle, log)
-    flat_param = handle.flat_param
+    # flat_param = handle.flat_param
+    assert flat_param is handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
         "FullyShardedDataParallel._post_backward_hook"
@@ -748,8 +750,11 @@ def _post_backward_hook(
         handle._training_state = HandleTrainingState.BACKWARD_POST
 
         if flat_param.grad is None:
-            # print("GRAD NONE?")
+        #     # print("GRAD NONE?")
+            # print("No bwd grad")
+            assert False
             return
+        print("Bwd grad?", flat_param.grad)
         if flat_param.grad.requires_grad:
             raise RuntimeError("FSDP does not support gradients of gradients")
 

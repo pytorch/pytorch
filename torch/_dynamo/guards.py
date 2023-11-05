@@ -664,7 +664,7 @@ class GuardBuilder(GuardBuilderBase):
                 value = value()
 
             value = value if value is not None else self.get(guard.name)
-            assert isinstance(value, torch.Tensor)
+            assert isinstance(value, torch.Tensor), breakpoint()
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]

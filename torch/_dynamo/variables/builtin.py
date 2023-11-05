@@ -1115,6 +1115,7 @@ class BuiltinVariable(VariableTracker):
 
                         if _grad_changed(old_grad, new_grad):
                             print("GRAD CHANGED!?")
+                            breakpoint()
                             grad_shape_specialized = [int(x) for x in new_grad.shape]
                             # We lazily update the grad on the example to its real state as tracked by fake tensor.
                             # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
@@ -1125,11 +1126,26 @@ class BuiltinVariable(VariableTracker):
                         out = VariableBuilder(tx, source)(
                             grapharg.example.grad
                         ).add_options(options)
-                        print("GRAD ACCESS?", grapharg.example.grad)
+                        print("GRAD ACCESS old?", grapharg.example.grad)
+                        print("GRAD ACCESS new?", grapharg.example.grad)
                         return out
-                unimplemented("tensor grad")
+                # # No grapharg found
+                # ftensor = obj.as_proxy().node.meta["example_value"].grad
+                # if ftensor is not None:
+                #     grad_shape_specialized = [int(x) for x in ftensor.shape]
+                #     # We lazily update the grad on the example to its real state as tracked by fake tensor.
+                #     # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
+                #     # the underlying value to always be correct.
+                #     rtensor = torch.zeros(
+                #         grad_shape_specialized, device=ftensor.device
+                #     )
+                #     breakpoint()
+                #     return VariableBuilder(tx, source)(
+                #             rtensor
+                #         ).add_options(options)
+                unimplemented("tensor grad w/o arg, w/o value")
             else:
-                unimplemented("tensor grad")
+                unimplemented("tensor grad w/o source")
         elif isinstance(
             obj,
             (

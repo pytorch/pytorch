@@ -809,6 +809,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
                     b.size(), b.stride(), b.storage_offset()
                 )
             except:
+                # breakpoint()
                 reshaped_base_tensor = aliased_base_tensor
         else:
             reshaped_base_tensor = aliased_base_tensor
@@ -840,6 +841,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         try:
             aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
         except:
+            # breakpoint()
             aliased_out = aliased_base_tensor
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
     if aliased_base_tensor.requires_grad and not target_requires_grad:
@@ -1073,8 +1075,8 @@ def run_functionalized_fw_and_collect_metadata(
                 new_arg = arg
             else:
                 new_arg = from_fun(f_arg)
-            if arg is not new_arg and False:
-                if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
+            if was_updated(arg, new_arg):
+                if was_metadata_updated(arg, new_arg):
                     mutates_data = False
                     mutates_metadata = True
                 else:
