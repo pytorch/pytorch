@@ -11,6 +11,7 @@ import linecache
 import logging
 import operator
 import sys
+import textwrap
 import traceback
 import types
 import typing
@@ -128,6 +129,66 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+
+
+@dataclasses.dataclass
+class SpeculationEntry:
+    filename: str
+    lineno: int
+    instruction_pointer: int
+    failed: bool = False
+    reason: Optional[GraphCompileReason] = None
+
+    def fail_and_restart_analysis(self):
+        """
+        Start tracing of the current frame over again, and don't take this branch.
+        """
+        self.failed = True
+        raise exc.SpeculationRestartAnalysis()
+
+
+@dataclasses.dataclass
+class SpeculationLog:
+    """
+    SpeculationLog replaces the prior copy_graphstate/restore_graphstate
+    checkpointing.  Rather than saving/restoring state, we restart the
+    dynamo conversion process over from the beginning -- but when we
+    hit the start of the speculation that failed, we instead generate
+    a graph break.
+    """
+
+    entries: List[SpeculationEntry] = dataclasses.field(default_factory=list)
+    index: int = 0
+
+    def restart(self):
+        self.index = 0
+
+    def clear(self):
+        self.entries.clear()
+        self.index = 0
+
+    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
+        """
+        Lookup or create a SpeculationEntry() that is shared across
+        RestartAnalysis calls.  Args are used only for debug checks.
+        """
+        if len(self.entries) == self.index:
+            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
+        entry = self.entries[self.index]
+        self.index += 1
+        assert (
+            entry.instruction_pointer == instruction_pointer
+            and entry.filename == filename
+            and entry.lineno == lineno
+        ), textwrap.dedent(
+            f"""
+            SpecuationLog diverged at {self.index} of {len(self.entries)}:
+            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
+            - Run2: {filename}:{lineno} (ip={instruction_pointer})
+            Please submit a bug report.
+            """
+        )
+        return entry
 
 
 @functools.lru_cache(None)
@@ -519,8 +580,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     prefix_insts: List[Instruction]
     inline_depth: int
     inconsistent_side_effects: bool
-
-    checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
+    current_speculation: Optional[SpeculationEntry]
     random_calls: List[
         Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
     ]
@@ -659,7 +719,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             and self.should_compile_partial_graph()
             and self.is_non_empty_graph()
         ):
-            self.checkpoint = inst, self.copy_graphstate()
+            self.current_speculation = self.speculate()
+            if self.current_speculation.failed:
+                return self.step_graph_break(inst)
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
@@ -713,17 +775,16 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
-            if self.checkpoint is None:
+            if self.current_speculation is None:
                 log.debug("empty checkpoint")
                 raise
-
             log.debug("step triggered compile", exc_info=True)
+        self.current_speculation.fail_and_restart_analysis()
 
+    def step_graph_break(self, continue_inst):
         # generate code from checkpoint
         assert not self.output.output_instructions
-        assert self.checkpoint is not None
-        continue_inst, state = self.checkpoint
-        self.restore_graphstate(state)
+        assert self.current_speculation is not None
         self.output.compile_subgraph(
             self,
             partial_convert=True,
@@ -1242,7 +1303,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(result)
 
     def STORE_ATTR(self, inst):
-        prior = self.copy_graphstate()
+        speculation = self.speculate()
+        if speculation.failed:
+            return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
         if isinstance(obj, NNModuleVariable):
@@ -1267,9 +1330,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.debug("STORE_ATTR triggered compile", exc_info=True)
             e.remove_from_stats()
             e.add_to_stats("graph_break")
-            self.restore_graphstate(prior)
+        speculation.fail_and_restart_analysis()
 
-        # break the graph
+    def store_attr_graph_break(self, inst):
         self.output.compile_subgraph(
             self, reason=GraphCompileReason("store_attr", [self.frame_summary()])
         )
@@ -1911,6 +1974,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         finally:
             self.strict_checks_enabled = False
 
+    def speculate(self) -> SpeculationEntry:
+        return self.speculation_log.next(
+            self.f_code.co_filename, self.lineno, self.instruction_pointer
+        )
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1924,8 +1992,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
+        speculation_log: SpeculationLog,
     ):
         super().__init__()
+        self.speculation_log = speculation_log
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -1965,7 +2035,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
         self._fake_mode = output.tracing_context.fake_mode
 
-        self.checkpoint = None
+        self.current_speculation = None
         self.random_calls = []
 
         self.strict_checks_enabled = False
@@ -2006,6 +2076,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
+        speculation_log: SpeculationLog,
     ):
         _step_logger()(
             logging.INFO,
@@ -2034,6 +2105,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
             inline_depth=0,
+            speculation_log=speculation_log,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2429,6 +2501,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_code=code,
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
+            speculation_log=parent.speculation_log,
         )
         self.parent = parent
         self.symbolic_result = None
@@ -2478,7 +2551,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
-                    raise exc.RestartAnalysis()
+                    raise exc.UnspecializeRestartAnalysis()
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
