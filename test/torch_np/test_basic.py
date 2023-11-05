@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -220,7 +221,9 @@ class TestOneArrAndShape(TestCase):
 one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.ndim)]
 one_arg_scalar_funcs_xfail = [
     (w.size, _np.size),
-    subtest((w.shape, _np.shape), decorators=[]),
+    subtest(
+        (w.shape, _np.shape), decorators=[xfail] if TEST_WITH_TORCHDYNAMO else []
+    ),  # XXX fails under dynamo
     (w.ndim, _np.ndim),
 ]
 

@@ -814,9 +814,8 @@ class MockModule(torch.nn.Module):
 class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
-        opt__do_paste_mask = torch._dynamo.optimize(
-            torch._dynamo.testing.CompileCounter()
-        )(_do_paste_mask)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt__do_paste_mask = torch.compile(_do_paste_mask, backend=cnt)
         opt__do_paste_mask(
             torch.randn(1, 1, 28, 28),
             torch.tensor([[0.0, 1, 2, 4]]) * 1,
@@ -852,12 +851,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             640,
             False,
         )
-
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
-        self.assertEqual(
-            torch._dynamo.utils.counters["frames"]["total"],
-            torch._dynamo.utils.counters["frames"]["ok"],
-        )
+        # (dynamic shapes, static shapes)
+        self.assertIn(cnt.frame_count, (5, 7))
+        self.assertIn(cnt.op_count, (106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
