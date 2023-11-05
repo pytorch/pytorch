@@ -1,4 +1,4 @@
-"""Adds docstrings to Tensor functions"""
+"""Adds docstrings to Tensor functions."""
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
