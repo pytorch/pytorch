@@ -4,7 +4,6 @@ import math
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-import torch.distributed._functional_collectives as funcol
 
 from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
@@ -124,6 +123,13 @@ class DeviceMesh:
     DTensor implementation.
 
     DeviceMesh can be used as a context manager.
+
+    .. note::
+        DeviceMesh follows SPMD programming model, which means the same PyTorch Python program
+        is running on all processes/ranks in the cluster. Therefore, users need to make sure the
+        `mesh` array (which describes the layout of devices) should be identical across all ranks.
+        Inconsistent `mesh` will lead to silent hang.
+
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
         mesh (ndarray): could be a multi-dimension array or an integer tensor that
@@ -161,7 +167,6 @@ class DeviceMesh:
         *,
         mesh_dim_names: Optional[Tuple[str, ...]] = None,
         _init_process_groups: bool = True,
-        _validate_mesh: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -183,7 +188,7 @@ class DeviceMesh:
             # process (we need to know if the current global rank is in the mesh or not).
             self._get_or_create_default_group()
             if _init_process_groups:
-                self._init_process_groups(_validate_mesh)
+                self._init_process_groups()
 
     def _get_or_create_default_group(self):
         default_initialized = is_initialized()
@@ -220,32 +225,7 @@ class DeviceMesh:
         )
         return _get_default_group()
 
-    def _validate_mesh(self):
-        # check mesh tensor validity
-        unique_mesh_values = self.mesh.unique(sorted=True)
-        if unique_mesh_values.numel() != self.mesh.numel():
-            raise RuntimeError(
-                f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
-            )
-
-        # validate that all calling ranks pass in the same `mesh` argument.
-        self_mesh = self.mesh.to(self.device_type).contiguous()
-        mesh_tensor = funcol.all_gather_tensor(
-            self_mesh, gather_dim=0, group=_get_default_group()
-        )
-        mesh_tensor_chunked = torch.chunk(mesh_tensor, get_world_size())
-        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
-            if not torch.equal(self_mesh, other_mesh):
-                raise RuntimeError(
-                    f"DeviceMesh initialization does not allow different mesh argument:"
-                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
-                    f"has mesh {other_mesh}!"
-                )
-
-    def _init_process_groups(self, _validate_mesh):
-        if _validate_mesh:
-            self._validate_mesh()
-
+    def _init_process_groups(self):
         # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
         dim_group_infos: List[Tuple[str, List[int]]] = []
@@ -408,10 +388,15 @@ def init_device_mesh(
     and ith dimension being in size mesh_shape[i]. If mesh_dim_names is provided, each dimension is
     labeled as mesh_dim_names[i].
 
+    .. note::
+        `init_device_mesh` follows SPMD programming model, which means the same PyTorch Python program
+        is running on all processes/ranks in the cluster. Therefore, users need to make sure the `mesh_shape`
+        tuple (the dimension of the nD array that describes the layout of devices) should be identical across
+        all ranks. Inconsistent `mesh_shape` will lead to silent hang.
 
     Args:
         device_type (str): device type of the mesh. Currently supports: cpu, cuda/cuda-like.
-        mesh_shape: Tuple[int]: A tuple describes the dimension of the multi-dimesnion array
+        mesh_shape: Tuple[int]: A tuple defines the dimension of the multi-dimesnion array
         that describes the layout of devices.
     Kwargs:
         mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
@@ -434,7 +419,7 @@ def init_device_mesh(
     if mesh_dim_names is not None:
         if len(set(mesh_dim_names)) != len(mesh_dim_names):
             raise RuntimeError(
-                "Each mesh_dim_name must be uqique.",
+                "Each mesh_dim_name must be unique.",
                 f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
             )
 

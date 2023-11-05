@@ -3855,9 +3855,6 @@ class UserDefinedTritonKernel(ExternKernel):
             if isinstance(arg, TensorBox):
                 MutationOutput(arg.layout, arg, packed)
 
-    def has_aliasing(self):
-        return True
-
     def get_alias_names(self):
         return [i.get_name() for i in self.inputs]
 
@@ -3877,9 +3874,6 @@ class MutationOutput(ExternKernel):
         return True
 
     def has_side_effects(self):
-        return True
-
-    def has_aliasing(self):
         return True
 
     def get_alias_names(self):
@@ -4315,11 +4309,15 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def has_aliasing(self):
+    def get_alias_names(self):
         # TODO - some fallbacks are still OpOverloadPackets
         if not isinstance(self.op_overload, torch._ops.OpOverload):
-            return False
-        return torch._inductor.utils.is_view(self.op_overload)
+            return []
+        if torch._inductor.utils.is_view(self.op_overload):
+            # TODO - use op._schema.arguments alias_info to figure out
+            # precise list
+            return [inp.get_name() for inp in self.inputs]
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -4494,9 +4492,6 @@ class ComplexView(ExternKernelAlloc):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return True
-
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
@@ -4595,11 +4590,13 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return any(
-            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
+    def get_alias_names(self):
+        return [
+            inp.get_name()
             for inp in self.inputs
-        )
+            if isinstance(inp, (FallbackKernel, ComplexView))
+            and len(inp.get_alias_names()) > 0
+        ]
 
 
 def _prepare_convolution_fusion_create(
@@ -5470,7 +5467,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 int64_t groups,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
                 torch::List<c10::optional<at::Scalar>> scalars,
                 c10::optional<c10::string_view> algorithm)"""
@@ -5494,7 +5491,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5514,7 +5511,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5545,7 +5542,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5578,16 +5575,17 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWisePT2E(
             layout=kernel_layout,
@@ -5643,7 +5641,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 int64_t groups,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
                 c10::optional<at::Scalar> alpha,
                 c10::optional<c10::string_view> attr,
@@ -5671,7 +5669,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -5695,7 +5693,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             groups,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -5732,7 +5730,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: "TensorBox",
         output_zero_point: "TensorBox",
-        fp32_output,
+        output_dtype,
         binary_attr,
         alpha,
         unary_attr,
@@ -5778,17 +5776,17 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        if fp32_output:
+        if output_dtype is not None:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if output_dtype is not None, the output buf should be dtype output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWiseBinaryPT2E(
             layout=kernel_layout,
@@ -5835,7 +5833,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 c10::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 std::string post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
                 std::string post_op_algorithm)"""
@@ -5855,7 +5853,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5871,7 +5869,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             bias,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5898,7 +5896,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         bias: "TensorBox",
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5918,16 +5916,17 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwisePT2E(
             layout=kernel_layout,
