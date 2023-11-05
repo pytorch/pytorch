@@ -41,7 +41,7 @@ def get_param(module, attr):
         return param
 
 class MeanShadowLogger(ns.Logger):
-    r"""Mean Logger for a Shadow module.
+    """Mean Logger for a Shadow module.
 
     A logger for a Shadow module whose purpose is to record the rolling mean
     of the data passed to the floating point and quantized models
