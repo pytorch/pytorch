@@ -25,7 +25,8 @@ The togglable commmand line arguments to the script are as follows:
     excluding the first warmup request
   - `batch_size` (default: 32): the batch size of the requests.
   - `model_dir` (default: '.'): the directory to load the checkpoint from
-  - `compile` (default: True): whether to `torch.compile()` the model
+  - `compile` (default: compile): or `--no-compile` whether to `torch.compile()`
+    the model
 
 e.g. A sample command to run the benchmark
 
@@ -55,3 +56,9 @@ to be lazily imported (e.g. triton).
 The script `runner.sh` will run a sweep of the benchmark over different batch
 sizes with compile on and off. The `results/` directory will contain the metrics
 from running a sweep as we develop this benchmark.
+
+To run the script
+```
+./runner.sh <filename>.md
+```
+will create `results/<filename>/md`.
