@@ -79,7 +79,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_estimate(self):
-        r"""Enable static estimates of quantization parameters.
+        """Enable static estimates of quantization parameters.
 
         Enables static observer estimates and disables learning of
         quantization parameters. Forward path returns fake quantized X.
