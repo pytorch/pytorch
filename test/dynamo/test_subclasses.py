@@ -271,7 +271,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
                     kwargs = {}
                 return super().__torch_function__(func, types, args, kwargs)
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(x):
             return x.sigmoid()
 
