@@ -186,6 +186,7 @@ class MetaConverter:
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
+        dynamic_storage_offset=None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -244,10 +245,12 @@ class MetaConverter:
                     # for any important subclasses later.
                     dynamic_dims=dynamic_dims,
                     constraint_dims=constraint_dims,
+                    dynamic_storage_offset=dynamic_storage_offset,
                 )
             else:
                 assert dynamic_dims is None
                 assert constraint_dims is None
+                assert dynamic_storage_offset is None
             return (t.size(), t.stride(), t.storage_offset())
 
         # see expired-storages
@@ -617,6 +620,7 @@ class MetaConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
+        dynamic_storage_offset=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -670,6 +674,7 @@ class MetaConverter:
                                 source=source,
                                 dynamic_dims=dynamic_dims,
                                 constraint_dims=constraint_dims,
+                                dynamic_storage_offset=dynamic_storage_offset,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -689,6 +694,7 @@ class MetaConverter:
                                 source=source,
                                 dynamic_dims=dynamic_dims,
                                 constraint_dims=constraint_dims,
+                                dynamic_storage_offset=dynamic_storage_offset,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
@@ -711,6 +717,7 @@ class MetaConverter:
                         source=source,
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
+                        dynamic_storage_offset=dynamic_storage_offset,
                     )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor

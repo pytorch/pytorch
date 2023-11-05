@@ -332,6 +332,7 @@ class FakeTensorConverter:
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
+        dynamic_storage_offset=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -369,6 +370,7 @@ class FakeTensorConverter:
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
+            dynamic_storage_offset=dynamic_storage_offset,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -407,6 +409,7 @@ class FakeTensorConverter:
         dynamic_dims=None,
         constraint_dims=None,
         memoized_only=False,
+        dynamic_storage_offset=None,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -418,6 +421,7 @@ class FakeTensorConverter:
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
+            dynamic_storage_offset=dynamic_storage_offset,
         )
 
 
@@ -1864,6 +1868,7 @@ class FakeTensorMode(TorchDispatchMode):
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
+        dynamic_storage_offset=None,
     ):
         shape_env = self.shape_env
         if static_shapes is None:
@@ -1882,6 +1887,7 @@ class FakeTensorMode(TorchDispatchMode):
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
+            dynamic_storage_offset=dynamic_storage_offset,
         )
 
 

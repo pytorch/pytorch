@@ -1839,6 +1839,7 @@ class ShapeEnv:
         *,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_storage_offset: Optional[DimConstraint] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -1901,7 +1902,8 @@ class ShapeEnv:
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             dynamic_dims=dynamic_dims,
-            constraint_dims=constraint_dims
+            constraint_dims=constraint_dims,
+            dynamic_storage_offset=dynamic_storage_offset,
         )
 
     @record_shapeenv_event()
@@ -1915,6 +1917,7 @@ class ShapeEnv:
         *,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
+        dynamic_storage_offset: Optional[DimConstraint] = None,
     ):
         dim = len(ex_size)
 
@@ -1941,7 +1944,8 @@ class ShapeEnv:
         # do this, and arguably we should ALWAYS allow for dynamic offset,
         # this is cheap.
         # TODO: This should be DYNAMIC, using DUCK for BC
-        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_strides = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+        dynamic_storage_offset = DimDynamic.STATIC if dynamic_storage_offset is None else dynamic_storage_offset
 
         assert len(dynamic_dims) == dim
         assert len(constraint_dims) == dim
@@ -1979,7 +1983,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dynamic_strides_offset,
+                    dynamic_dim=dynamic_strides,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -1999,8 +2003,11 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex_storage_offset,
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=dynamic_strides_offset,
+            dynamic_dim=dynamic_storage_offset,
             constraint_dim=None,
+            # TODO: I don't think we want to specialize on 0/1 for storage offset?
+            # But do_not_specialize_zero_one=False fails assertion for dynamic shape w/ example = 1
+            # do_not_specialize_zero_one=True,
         ), hint=ex_storage_offset, source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 

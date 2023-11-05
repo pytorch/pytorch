@@ -206,6 +206,7 @@ class GraphArg:
 class FrameStateSizeEntry:
     scalar: Optional[int]
     size: Optional[List[int]]
+    storage_offset: Optional[int]
 
 
 class VariableBuilder:
@@ -1242,7 +1243,9 @@ class VariableBuilder:
                     # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
                     # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
                     # sure that is necessary for now.
-                    frame_state_entry = FrameStateSizeEntry(scalar=value, size=None)
+                    frame_state_entry = FrameStateSizeEntry(
+                        scalar=value, size=None, storage_offset=None
+                    )
                 else:
                     frame_state_entry = self.tx.output.frame_state[name]
                     if frame_state_entry.scalar != value:
@@ -1661,8 +1664,9 @@ def _automatic_dynamic(e, tx, name, static_shapes):
     if name not in tx.output.frame_state:
         # If there is no entry for this source, add the tensor to frame state with its current static size.
         # E.g., {} -> {"x": [2, 4]}
-        frame_state_entry = FrameStateSizeEntry(None, None)
+        frame_state_entry = FrameStateSizeEntry(None, None, None)
         frame_state_entry.size = list(e.size())
+        frame_state_entry.storage_offset = e.storage_offset()
     else:
         frame_state_entry = tx.output.frame_state[name]
         if frame_state_entry.size is not None:
@@ -1689,6 +1693,18 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                             dim,
                         )
                         frame_state_entry.size[i] = None
+
+            if (
+                frame_state_entry.storage_offset is not None
+                and frame_state_entry.storage_offset != e.storage_offset()
+            ):
+                log.debug(
+                    "automatic dynamic storage_offset %s: %s != %s",
+                    name,
+                    e.storage_offset(),
+                    frame_state_entry.storage_offset,
+                )
+                frame_state_entry.storage_offset = None
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -1734,6 +1750,32 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     dynamic_dims = []
     constraint_dims = []
+
+    def handle_storage_offset():
+        # TODO: way to mark static/dynamic storage_offset, deal with constraints
+
+        automatic_dynamic = config.automatic_dynamic_shapes and (
+            frame_state_entry.storage_offset is None
+        )
+
+        if True:  # if constraint is None...
+            # i don't understand this part
+            if automatic_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=True)
+            else:
+                constraint = None
+
+        if constraint is not None:
+            dynamic = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default:
+            dynamic = DimDynamic.STATIC
+        else:
+            dynamic = DimDynamic.DUCK
+
+        return dynamic
+
+    dynamic_storage_offset = handle_storage_offset()
+
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
@@ -1784,7 +1826,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     tx.output.frame_state[name] = frame_state_entry
 
-    return dynamic_dims, constraint_dims
+    return dynamic_dims, constraint_dims, dynamic_storage_offset
 
 
 def wrap_to_fake_tensor_and_record(
@@ -1800,10 +1842,10 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        dynamic_dims, constraint_dims = None, None
+        dynamic_dims, constraint_dims, dynamic_storage_offset = None, None, None
         if not e.is_nested:
             # TODO: We should probably support this for nested tensors too
-            dynamic_dims, constraint_dims = _automatic_dynamic(
+            dynamic_dims, constraint_dims, dynamic_storage_offset = _automatic_dynamic(
                 e, tx, source.name(), static_shapes
             )
 
@@ -1821,6 +1863,7 @@ def wrap_to_fake_tensor_and_record(
                 source=source,
                 dynamic_dims=dynamic_dims,
                 constraint_dims=constraint_dims,
+                dynamic_storage_offset=dynamic_storage_offset,
             )
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
@@ -1829,6 +1872,7 @@ def wrap_to_fake_tensor_and_record(
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
+            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:

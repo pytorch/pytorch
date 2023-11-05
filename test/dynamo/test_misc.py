@@ -8213,6 +8213,25 @@ ShapeEnv not equal: field values don't match:
         with set_default_dtype(torch.double):
             foo()
 
+    def test_dynamic_storage_offset(self):
+        def fn(x, y):
+            return torch.add(x, y)
+
+        def get_inputs(offset):
+            dim = 1024
+            return [
+                torch.rand(dim * (dim + 1)).as_strided((dim, dim), (dim, 1), offset)
+                for _ in range(2)
+            ]
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True, dynamic=True)(fn)
+
+        opt_fn(*get_inputs(3))
+        self.assertEqual(cnt.frame_count, 1)
+        opt_fn(*get_inputs(5))
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_torch_dynamo_codegen_pow(self):
         def pow(x):
             return x**2

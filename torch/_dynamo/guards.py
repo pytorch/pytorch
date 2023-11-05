@@ -1051,18 +1051,21 @@ class CheckFunctionManager:
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            def convert(size_or_stride):
+            def convert_int_or_symint(x):
+                if not is_symbolic(x):
+                    return x
+                else:
+                    assert isinstance(x, torch.SymInt)
+                    return x.node.maybe_as_int()
+
+            def convert_list(size_or_stride):
                 converted: List[Optional[int]] = []
                 for dim in size_or_stride:
-                    if not is_symbolic(dim):
-                        converted.append(dim)
-                    else:
-                        assert isinstance(dim, torch.SymInt)
-                        converted.append(dim.node.maybe_as_int())
+                    converted.append(convert_int_or_symint(dim))
                 return converted
 
             dynamic_dims_sizes = [
-                convert(
+                convert_list(
                     self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
                         "size"
                     ]
@@ -1071,9 +1074,18 @@ class CheckFunctionManager:
             ]
 
             dynamic_dims_strides = [
-                convert(
+                convert_list(
                     self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
                         "stride"
+                    ]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_storage_offsets = [
+                convert_int_or_symint(
+                    self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
+                        "storage_offset"
                     ]
                 )
                 for t in tensor_check_examples
@@ -1083,6 +1095,7 @@ class CheckFunctionManager:
                 *tensor_check_examples,
                 dynamic_dims_sizes=dynamic_dims_sizes,
                 dynamic_dims_strides=dynamic_dims_strides,
+                dynamic_storage_offsets=dynamic_storage_offsets,
             )
             check_tensors_fn = tensor_guards.check
             check_tensors_verbose_fn = tensor_guards.check_verbose
