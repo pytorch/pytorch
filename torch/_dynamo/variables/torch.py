@@ -260,6 +260,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -520,6 +521,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             from .builder import SourcelessBuilder
 
             return SourcelessBuilder()(tx, invocation_result).add_options(options)
+        elif any(
+            self.value is method
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
+        ):
+            assert len(args) == 1
+            return StreamContextVariable.create(tx, args[0], **options)
         elif is_from_local(self.value):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
@@ -741,7 +750,7 @@ class TorchVariable(BaseTorchVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable, StreamContextVariable
+        from . import ConstantVariable
 
         from .builder import wrap_fx_proxy
 
@@ -765,14 +774,6 @@ class TorchVariable(BaseTorchVariable):
                 return variables.UserDefinedClassVariable(
                     self.value, source=self.source, **options
                 ).call_function(tx, args, kwargs)
-        elif any(
-            self.value is method
-            for method in [
-                interface_elem.stream for interface_elem in device_interfaces.values()
-            ]
-        ):
-            assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0], **options)
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.nn.Parameter:

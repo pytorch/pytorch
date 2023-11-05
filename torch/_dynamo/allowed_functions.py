@@ -223,7 +223,7 @@ def _allowed_function_ids() -> Dict[int, str]:
             # "torch.distributed.rpc",
             # "torch.distributed.utils",
             "torch.jit",
-            "torch.masked",
+            # "torch.masked",
             "torch.nn.init",
             "torch.nn.modules.module",
             "torch.nn.parallel",
