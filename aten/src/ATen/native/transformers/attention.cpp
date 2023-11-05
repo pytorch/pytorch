@@ -747,8 +747,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
 std::tuple<
     at::Tensor,
     at::Tensor,
-    at::Tensor,
-    at::Tensor,
+    c10::optional<at::Tensor>,
+    c10::optional<at::Tensor>,
     c10::SymInt,
     c10::SymInt,
     at::Tensor,

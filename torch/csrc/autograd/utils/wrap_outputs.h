@@ -70,6 +70,14 @@ inline PyObject* wrap(at::Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
+inline PyObject* wrap(c10::optional<at::Tensor> tensor) {
+  if (tensor.has_value()) {
+    return THPVariable_Wrap(Variable(std::move(tensor.value())));
+  } else {
+    Py_RETURN_NONE;
+  }
+}
+
 inline PyObject* wrap(const at::Scalar& scalar) {
   return wrap(scalar_to_tensor(scalar));
 }

@@ -1,6 +1,7 @@
 #include <numeric>
 #include <algorithm>
 #include <type_traits>
+#include "c10/util/Optional.h"
 #include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
@@ -218,8 +219,8 @@ Tensor NestedTensor_to_padded_tensor_cuda(
 std::tuple<
     Tensor,
     Tensor,
-    Tensor,
-    Tensor,
+    c10::optional<Tensor>,
+    c10::optional<Tensor>,
     c10::SymInt,
     c10::SymInt,
     Tensor,

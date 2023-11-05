@@ -269,12 +269,12 @@ AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
     *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
     // ret2 and ret3 may be null
-    if (ret2) {
-      at::Tensor* ret2_tensor = new at::Tensor(std::move(r2));
+    if (r2.has_value()) {
+      at::Tensor* ret2_tensor = new at::Tensor(std::move(r2.value()));
       *ret2 = tensor_pointer_to_tensor_handle(ret2_tensor);
     }
-    if (ret3) {
-      at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
+    if (r3.has_value()) {
+      at::Tensor* ret3_tensor = new at::Tensor(std::move(r3.value()));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
     *ret4 = r4.expect_int();
