@@ -103,12 +103,16 @@ def _reparametrize_module(
             raise NotImplementedError
         orig_parameters_and_buffers = parameters_and_buffers.empty()
         try:
-            orig_parameters_and_buffers = parameters_and_buffers.to_module(module, return_swap=True)
+            orig_parameters_and_buffers = parameters_and_buffers.to_module(
+                module, return_swap=True
+            )
             yield
         finally:
             # tensordict is locked by default in this case, so we unlock it as we can't tell if an inplace update
             # can be done (most likely not)
-            orig_parameters_and_buffers.to_module(module, return_swap=True, swap_dest=parameters_and_buffers)
+            orig_parameters_and_buffers.to_module(
+                module, return_swap=True, swap_dest=parameters_and_buffers
+            )
     else:
         if tie_weights:
             untied_parameters_and_buffers = _untie_named_tensors_map(
@@ -128,7 +132,9 @@ def _reparametrize_module(
                     f"Unexpected key(s): {', '.join(map(repr, unexpected_keys))}."
                 )
             if len(missing_keys) > 0:
-                error_msgs.append(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
+                error_msgs.append(
+                    f"Missing key(s): {', '.join(map(repr, missing_keys))}."
+                )
             if len(error_msgs) > 0:
                 raise RuntimeError(
                     "Error(s) in reparametrizing for {}:\n\t{}".format(

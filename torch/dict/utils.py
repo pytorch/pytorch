@@ -7,26 +7,25 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+
+import math
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from collections.abc import KeysView
 from copy import copy
 from functools import wraps
 from importlib import import_module
 from numbers import Number
 from textwrap import indent
-from typing import Any, Callable, List, Sequence, Tuple, Union, \
-    Iterator, TypeVar
-from collections import OrderedDict
+from typing import Any, Callable, Iterator, List, Sequence, Tuple, TypeVar, Union
 
-import math
 import numpy as np
 from packaging.version import parse
-from torch._C._functorch import get_unwrapped, is_batchedtensor
 
 import torch
 from torch import Tensor
 from torch._C import _disabled_torch_function_impl
+from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch.nn.parameter import _ParameterMeta
 
 T = TypeVar("T", bound="TensorDictBase")
@@ -92,19 +91,14 @@ def convert_ellipsis_to_idx(
         idx = (...,)
 
     num_ellipsis = sum(_idx is Ellipsis for _idx in idx)
-    if num_dims < (
-        len(idx) - num_ellipsis - sum(item is None for item in idx)):
-        raise RuntimeError(
-            "Not enough dimensions in TensorDict for index provided."
-        )
+    if num_dims < (len(idx) - num_ellipsis - sum(item is None for item in idx)):
+        raise RuntimeError("Not enough dimensions in TensorDict for index provided.")
 
     start_pos, after_ellipsis_length = None, 0
     for i, item in enumerate(idx):
         if item is Ellipsis:
             if start_pos is not None:
-                raise RuntimeError(
-                    "An index can only have one ellipsis at most."
-                )
+                raise RuntimeError("An index can only have one ellipsis at most.")
             else:
                 start_pos = i
         if item is not Ellipsis and start_pos is not None:
@@ -125,7 +119,7 @@ def convert_ellipsis_to_idx(
     ellipsis_end = start_pos + ellipsis_length
     new_index += (slice(None),) * (ellipsis_end - ellipsis_start)
 
-    new_index += idx[start_pos + 1: start_pos + 1 + after_ellipsis_length]
+    new_index += idx[start_pos + 1 : start_pos + 1 + after_ellipsis_length]
 
     if len(new_index) != num_dims:
         raise RuntimeError(
@@ -241,9 +235,7 @@ def expand_as_right(
     return tensor.expand(dest.shape)
 
 
-def expand_right(
-    tensor: Tensor, shape: Sequence[int]
-) -> Tensor:
+def expand_right(tensor: Tensor, shape: Sequence[int]) -> Tensor:
     """Expand a tensor on the right to match a desired shape.
 
     Args:
@@ -338,6 +330,7 @@ def _is_shared(tensor: Tensor) -> bool:
             return None
         return tensor.is_shared()
     from functorch import dim as ftdim
+
     if isinstance(tensor, ftdim.Tensor):
         return None
     else:
@@ -365,9 +358,7 @@ def _get_item(tensor: Tensor, index: IndexType) -> Tensor:
         return tensor[index]
 
 
-def _set_item(
-    tensor: Tensor, index: IndexType, value: Tensor, *, validated
-) -> Tensor:
+def _set_item(tensor: Tensor, index: IndexType, value: Tensor, *, validated) -> Tensor:
     # the tensor must be validated
     if not validated:
         raise RuntimeError
@@ -547,11 +538,9 @@ class implement_for:
 
     @staticmethod
     def check_version(version, from_version, to_version):
-        return (from_version is None or parse(version) >= parse(
-            from_version
-        )) and (
-                   to_version is None or parse(version) < parse(to_version)
-               )
+        return (from_version is None or parse(version) >= parse(from_version)) and (
+            to_version is None or parse(version) < parse(to_version)
+        )
 
     @staticmethod
     def get_class_that_defined_method(f):
@@ -600,11 +589,7 @@ class implement_for:
             try:
                 # check that backends don't conflict
                 version = self.import_module(self.module_name)
-                if self.check_version(
-                    version,
-                    self.from_version,
-                    self.to_version
-                ):
+                if self.check_version(version, self.from_version, self.to_version):
                     do_set = True
                 if not do_set:
                     return implementations[func_name]
@@ -614,11 +599,7 @@ class implement_for:
         else:
             try:
                 version = self.import_module(self.module_name)
-                if self.check_version(
-                    version,
-                    self.from_version,
-                    self.to_version
-                ):
+                if self.check_version(version, self.from_version, self.to_version):
                     do_set = True
             except ModuleNotFoundError:
                 return unsupported
@@ -936,9 +917,8 @@ def assert_allclose_td(
 ) -> bool:
     """Compares two tensordicts and raise an exception if their content does not match exactly."""
     from torch.dict.base import _is_tensor_collection
-    if not _is_tensor_collection(
-        actual.__class__
-    ) or not _is_tensor_collection(
+
+    if not _is_tensor_collection(actual.__class__) or not _is_tensor_collection(
         expected.__class__
     ):
         raise TypeError("assert_allclose inputs must be of TensorDict type")
@@ -996,6 +976,7 @@ def _get_repr_custom(cls, shape, device, dtype, is_shared) -> str:
 
 def _make_repr(key: str, item: "CompatibleType", tensordict: T) -> str:
     from torch.dict.base import _is_tensor_collection
+
     if _is_tensor_collection(type(item)):
         return f"{key}: {repr(tensordict.get(key))}"
     return f"{key}: {_get_repr(item)}"
@@ -1016,6 +997,7 @@ def _td_fields(td: T, keys=None) -> str:
             temp_td = td
             tensor = temp_td.get(key)
             from torch.dict import TensorDictBase
+
             if isinstance(tensor, TensorDictBase):
                 substr = _td_fields(tensor)
             else:
@@ -1077,6 +1059,7 @@ def _expand_to_match_shape(
     else:
         # tensordict
         from torch.dict import TensorDict
+
         out = TensorDict(
             {},
             [*parent_batch_size, *_shape(tensor)[self_batch_dims:]],
@@ -1091,6 +1074,7 @@ def _set_max_batch_size(source: T, batch_dims=None):
 
     for val in tensor_data:
         from torch.dict.base import _is_tensor_collection
+
         if _is_tensor_collection(val.__class__):
             _set_max_batch_size(val, batch_dims=batch_dims)
     batch_size = []
@@ -1105,9 +1089,7 @@ def _set_max_batch_size(source: T, batch_dims=None):
             source.batch_size = batch_size
             return
         for tensor in tensor_data[1:]:
-            if tensor.dim() <= curr_dim or tensor.size(
-                curr_dim
-            ) != curr_dim_size:
+            if tensor.dim() <= curr_dim or tensor.size(curr_dim) != curr_dim_size:
                 source.batch_size = batch_size
                 return
         if batch_dims is None or len(batch_size) < batch_dims:
@@ -1117,6 +1099,7 @@ def _set_max_batch_size(source: T, batch_dims=None):
 
 def _clone_value(value: "CompatibleType", recurse: bool) -> "CompatibleType":
     from torch.dict.base import _is_tensor_collection
+
     if recurse:
         return value.clone()
     elif _is_tensor_collection(value.__class__):
@@ -1131,6 +1114,7 @@ def _is_number(item):
     if isinstance(item, np.ndarray) and item.ndim == 0:
         return True
     from functorch import dim as ftdim
+
     if isinstance(item, (Number, ftdim.Dim)):
         return True
     return False
@@ -1153,13 +1137,10 @@ def _broadcast_tensors(index):
         if isinstance(tensor, (range, list, np.ndarray, Tensor))
     }
     if tensors:
-        shape = torch.broadcast_shapes(
-            *[tensor.shape for tensor in tensors.values()]
-        )
+        shape = torch.broadcast_shapes(*[tensor.shape for tensor in tensors.values()])
         tensors = {i: tensor.expand(shape) for i, tensor in tensors.items()}
         index = tuple(
-            idx if i not in tensors else tensors[i] for i, idx in
-            enumerate(index)
+            idx if i not in tensors else tensors[i] for i, idx in enumerate(index)
         )
     return index
 
@@ -1173,7 +1154,7 @@ def _reduce_index(index):
     return index
 
 
-def _get_shape_from_args(*args, kwarg_name='size', **kwargs):
+def _get_shape_from_args(*args, kwarg_name="size", **kwargs):
     if not args and not kwargs:
         return ()
     if args:
@@ -1250,8 +1231,7 @@ class Buffer(Tensor, metaclass=_ParameterMeta):
             return memo[id(self)]
         else:
             result = type(self)(
-                self.data.clone(memory_format=torch.preserve_format),
-                self.requires_grad
+                self.data.clone(memory_format=torch.preserve_format), self.requires_grad
             )
             memo[id(self)] = result
             return result

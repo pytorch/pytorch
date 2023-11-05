@@ -6,21 +6,16 @@
 from __future__ import annotations
 
 import functools
-from typing import (
-    Any,
-    Callable,
-    Sequence, TypeVar,
-)
+from typing import Any, Callable, Sequence, TypeVar
 
 import torch
 from torch import Tensor
-from .base import TensorDictBase, NO_DEFAULT
+from .base import NO_DEFAULT, TensorDictBase
 from .tensordict import TensorDict
-from .utils import DeviceType, _check_keys, _ErrorInteceptor
+from .utils import _check_keys, _ErrorInteceptor, DeviceType
 
 
-def implements_for_td(torch_function: Callable) -> Callable[
-    [Callable], Callable]:
+def implements_for_td(torch_function: Callable) -> Callable[[Callable], Callable]:
     """Register a torch function override for TensorDict."""
 
     @functools.wraps(torch_function)
@@ -201,12 +196,10 @@ def _cat(
         out = {}
         for key in keys:
             with _ErrorInteceptor(
-                key,
-                "Attempted to concatenate tensors on different devices at key"
+                key, "Attempted to concatenate tensors on different devices at key"
             ):
                 out[key] = torch.cat(
-                    [td._get_str(key, NO_DEFAULT) for td in
-                     list_of_tensordicts], dim
+                    [td._get_str(key, NO_DEFAULT) for td in list_of_tensordicts], dim
                 )
         if device is None:
             device = list_of_tensordicts[0].device
@@ -220,11 +213,7 @@ def _cat(
         if list_of_tensordicts[0]._has_names():
             names = list_of_tensordicts[0].names
         return TensorDict(
-            out,
-            device=device,
-            batch_size=batch_size,
-            _run_checks=False,
-            names=names
+            out, device=device, batch_size=batch_size, _run_checks=False, names=names
         )
     else:
         if out.batch_size != batch_size:
@@ -236,8 +225,7 @@ def _cat(
 
         for key in keys:
             with _ErrorInteceptor(
-                key,
-                "Attempted to concatenate tensors on different devices at key"
+                key, "Attempted to concatenate tensors on different devices at key"
             ):
                 if isinstance(out, TensorDict):
                     torch.cat(
@@ -247,11 +235,7 @@ def _cat(
                     )
                 else:
                     out.set_(
-                        key,
-                        torch.cat(
-                            [td.get(key) for td in list_of_tensordicts],
-                            dim
-                        )
+                        key, torch.cat([td.get(key) for td in list_of_tensordicts], dim)
                     )
         return out
 
@@ -290,12 +274,10 @@ def _stack(
         out = {}
         for key in keys:
             with _ErrorInteceptor(
-                key,
-                "Attempted to stack tensors on different devices at key"
+                key, "Attempted to stack tensors on different devices at key"
             ):
                 out[key] = torch.stack(
-                    [_tensordict.get(key) for _tensordict in
-                     list_of_tensordicts],
+                    [_tensordict.get(key) for _tensordict in list_of_tensordicts],
                     dim,
                 )
         return TensorDict(
@@ -305,7 +287,6 @@ def _stack(
             _run_checks=False,
         )
     else:
-
         if out.batch_size != result_batch_size:
             raise RuntimeError(
                 "out.batch_size and stacked batch size must match, "

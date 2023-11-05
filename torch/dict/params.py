@@ -8,18 +8,17 @@ from copy import copy
 from functools import wraps
 from typing import Any, Callable, Iterator, OrderedDict, Sequence
 
+from functorch import dim as ftdim
+
 from tensordict.utils import erase_cache, IndexType, NestedKey
 
 import torch
-from functorch import dim as ftdim
 from torch import multiprocessing as mp, nn, Tensor
 from torch.utils._pytree import tree_map
 from ._torch_func import TD_HANDLED_FUNCTIONS
-from .base import TensorDictBase, _is_tensor_collection, CompatibleType, \
-    NO_DEFAULT
+from .base import _is_tensor_collection, CompatibleType, NO_DEFAULT, TensorDictBase
 from .tensordict import _SubTensorDict, TensorDict
-from .utils import Buffer, _LOCK_ERROR
-from .utils import lock_blocked
+from .utils import _LOCK_ERROR, Buffer, lock_blocked
 
 
 def _apply_leaves(data, fn):
@@ -253,10 +252,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
             func = _maybe_make_param
         else:
             func = _maybe_make_param_or_buffer
-        self._param_td = _apply_leaves(
-            self._param_td,
-            lambda x: func(x)
-            ).lock_()
+        self._param_td = _apply_leaves(self._param_td, lambda x: func(x)).lock_()
         self._reset_params()
         self._is_locked = False
         self._locked_tensordicts = []
@@ -304,8 +300,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
         if kwargs is None:
             kwargs = {}
         if func not in TDPARAM_HANDLED_FUNCTIONS or not all(
-            issubclass(t, (Tensor, ftdim.Tensor, TensorDictBase)) for t in
-            types
+            issubclass(t, (Tensor, ftdim.Tensor, TensorDictBase)) for t in types
         ):
             return NotImplemented
         return TDPARAM_HANDLED_FUNCTIONS[func](*args, **kwargs)
@@ -339,11 +334,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
     @lock_blocked
     @_unlock_and_set
     def set(
-        self,
-        key: NestedKey,
-        item: CompatibleType,
-        inplace: bool = False,
-        **kwargs: Any
+        self, key: NestedKey, item: CompatibleType, inplace: bool = False, **kwargs: Any
     ) -> TensorDictBase:
         ...
 
@@ -362,12 +353,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
         else:
             input_dict_or_td = tree_map(func, input_dict_or_td)
         with self._param_td.unlock_():
-            TensorDictBase.update(
-                self,
-                input_dict_or_td,
-                clone=clone,
-                inplace=inplace
-                )
+            TensorDictBase.update(self, input_dict_or_td, clone=clone, inplace=inplace)
             self._reset_params()
         return self
 
@@ -465,20 +451,15 @@ class TensorDictParams(TensorDictBase, nn.Module):
 
         """
         if not recurse:
-            return TensorDictParams(
-                self._param_td.clone(False),
-                no_convert=True
-                )
+            return TensorDictParams(self._param_td.clone(False), no_convert=True)
+
         def _clone(tensor):
             if isinstance(tensor, nn.Parameter):
                 tensor = nn.Parameter(
                     tensor.data.clone(), requires_grad=tensor.requires_grad
                 )
             else:
-                tensor = Buffer(
-                    tensor.data.clone(),
-                    requires_grad=tensor.requires_grad
-                    )
+                tensor = Buffer(tensor.data.clone(), requires_grad=tensor.requires_grad)
             return tensor
 
         return TensorDictParams(self._param_td.apply(_clone), no_convert=True)
@@ -703,7 +684,6 @@ class TensorDictParams(TensorDictBase, nn.Module):
         else:
             self._locked_tensordicts += _locked_tensordicts
 
-
     @erase_cache
     def _propagate_unlock(self, lock_ids=None):
         if lock_ids is not None:
@@ -799,12 +779,11 @@ class TensorDictParams(TensorDictBase, nn.Module):
         ...
 
     @_fallback
-    def split(self, split_size: int | list[int], dim: int = 0) -> list[
-        TensorDictBase]:
+    def split(self, split_size: int | list[int], dim: int = 0) -> list[TensorDictBase]:
         ...
 
     @_fallback
-    def to_module(self, module: nn.Module, return_swap: bool=False):
+    def to_module(self, module: nn.Module, return_swap: bool = False):
         ...
 
     @_fallback
@@ -827,9 +806,14 @@ class TensorDictParams(TensorDictBase, nn.Module):
                 continue
             yield self._apply_get_post_hook(v)
 
-    def state_dict(self, *args, destination=None, prefix="", keep_vars=False, flatten=False):
+    def state_dict(
+        self, *args, destination=None, prefix="", keep_vars=False, flatten=False
+    ):
         return self._param_td.state_dict(
-            destination=destination, prefix=prefix, keep_vars=keep_vars, flatten=flatten,
+            destination=destination,
+            prefix=prefix,
+            keep_vars=keep_vars,
+            flatten=flatten,
         )
 
     def load_state_dict(
@@ -845,9 +829,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
             TensorDict(state_dict_tensors, []).unflatten_keys(".")
         )
         state_dict.update(state_dict_tensors)
-        self.data.load_state_dict(
-            state_dict, strict=True, assign=False
-        )
+        self.data.load_state_dict(state_dict, strict=True, assign=False)
         return self
 
     def _load_from_state_dict(
@@ -911,10 +893,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
             # `with torch.no_grad():`
             with torch.no_grad():
                 param_applied = fn(param)
-            should_use_set_data = compute_should_use_set_data(
-                param,
-                param_applied
-                )
+            should_use_set_data = compute_should_use_set_data(param, param_applied)
             if should_use_set_data:
                 param.data = param_applied
                 out_param = param
@@ -947,10 +926,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
             # `with torch.no_grad():`
             with torch.no_grad():
                 buffer_applied = fn(buffer)
-            should_use_set_data = compute_should_use_set_data(
-                buffer,
-                buffer_applied
-                )
+            should_use_set_data = compute_should_use_set_data(buffer, buffer_applied)
             if should_use_set_data:
                 buffer.data = buffer_applied
                 out_buffer = buffer
@@ -981,8 +957,7 @@ class TensorDictParams(TensorDictBase, nn.Module):
 TDPARAM_HANDLED_FUNCTIONS = copy(TD_HANDLED_FUNCTIONS)
 
 
-def implements_for_tdparam(torch_function: Callable) -> Callable[
-    [Callable], Callable]:
+def implements_for_tdparam(torch_function: Callable) -> Callable[[Callable], Callable]:
     """Register a torch function override for TensorDictParams."""
 
     @functools.wraps(torch_function)

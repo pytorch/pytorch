@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import functools
 import warnings
-from typing import TypeVar, Sequence
+from typing import Sequence, TypeVar
 
 import torch
 from .base import _is_tensor_collection
-from .utils import _shape, DeviceType, _check_keys
 from .tensordict import TensorDict
+from .utils import _check_keys, _shape, DeviceType
 
 T = TypeVar("T", bound="TensorDictBase")
 
@@ -61,16 +61,12 @@ def pad(tensordict: T, pad_size: Sequence[int], value: float = 0.0) -> T:
         reverse_pad[i], reverse_pad[i + 1] = reverse_pad[i + 1], reverse_pad[i]
 
     out = TensorDict(
-        {},
-        torch.Size(new_batch_size),
-        device=tensordict.device,
-        _run_checks=False
+        {}, torch.Size(new_batch_size), device=tensordict.device, _run_checks=False
     )
     for key, tensor in tensordict.items():
         cur_pad = reverse_pad
         if len(pad_size) < len(_shape(tensor)) * 2:
-            cur_pad = [0] * (
-                    len(_shape(tensor)) * 2 - len(pad_size)) + reverse_pad
+            cur_pad = [0] * (len(_shape(tensor)) * 2 - len(pad_size)) + reverse_pad
 
         if _is_tensor_collection(tensor.__class__):
             padded = pad(tensor, pad_size, value)
@@ -125,11 +121,7 @@ def pad_sequence(
             td.clone(False).set("mask", torch.ones(td.shape, dtype=torch.bool))
             for td in list_of_tensordicts
         ]
-    keys = _check_keys(
-        list_of_tensordicts,
-        leaves_only=True,
-        include_nested=True
-        )
+    keys = _check_keys(list_of_tensordicts, leaves_only=True, include_nested=True)
     shape = max(len(td) for td in list_of_tensordicts)
     if shape == 0:
         shape = [
@@ -154,9 +146,7 @@ def pad_sequence(
                     ),
                 )
             except Exception as err:
-                raise RuntimeError(
-                    f"pad_sequence failed for key {key}"
-                    ) from err
+                raise RuntimeError(f"pad_sequence failed for key {key}") from err
         return out
     else:
         for key in keys:

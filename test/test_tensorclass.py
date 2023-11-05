@@ -8,11 +8,15 @@ import re
 from multiprocessing import Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, Optional, Tuple, Union
 
 import torch
-from torch.testing._internal.common_utils import run_tests, \
-    parametrize, instantiate_parametrized_tests, TemporaryDirectoryName
-from typing import Any, Optional, Tuple, Union
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TemporaryDirectoryName,
+)
 
 try:
     import torchsnapshot
@@ -98,47 +102,41 @@ class TestTensorClass(TestCase):
             TypeError,
             expected_regex=re.escape(
                 "MyData.__init__() missing 3 required positional arguments: 'X', 'y', 'z'"
-                )
-            ):
+            ),
+        ):
             self.MyData(batch_size=[10])
 
         with self.assertRaisesRegex(
             TypeError,
             expected_regex=re.escape(
                 "MyData.__init__() missing 2 required positional arguments: 'y', 'z'"
-                )
-            ):
+            ),
+        ):
             self.MyData(X=torch.rand(10), batch_size=[10])
 
         with self.assertRaisesRegex(
             TypeError,
             expected_regex=re.escape(
                 "MyData.__init__() missing 1 required positional argument: 'z'"
-                )
-            ):
+            ),
+        ):
             self.MyData(
-                X=torch.rand(10),
-                y=torch.rand(10),
-                batch_size=[10],
-                device="cpu"
-                )
+                X=torch.rand(10), y=torch.rand(10), batch_size=[10], device="cpu"
+            )
 
         # if all positional arguments are specified, ommitting batch_size gives error
         with self.assertRaisesRegex(
             TypeError,
             expected_regex=re.escape(
                 "MyData.__init__() missing 1 required keyword-only argument: 'batch_size'"
-                )
+            ),
         ):
             self.MyData(X=torch.rand(10), y=torch.rand(10))
 
         # all positional arguments + batch_size is fine
         self.MyData(
-            X=torch.rand(10),
-            y=torch.rand(10),
-            z="test_tensorclass",
-            batch_size=[10]
-            )
+            X=torch.rand(10), y=torch.rand(10), z="test_tensorclass", batch_size=[10]
+        )
 
     @parametrize("device", get_available_devices())
     def test_device(self, device):
@@ -154,14 +152,13 @@ class TestTensorClass(TestCase):
         assert data.y.device == device
 
         with self.assertRaisesRegex(
-            AttributeError,
-            expected_regex="'str' object has no attribute 'device'"
-            ):
+            AttributeError, expected_regex="'str' object has no attribute 'device'"
+        ):
             assert data.z.device == device
 
         with self.assertRaisesRegex(
             RuntimeError,
-            expected_regex="device cannot be set using tensorclass.device = device"
+            expected_regex="device cannot be set using tensorclass.device = device",
         ):
             data.device = torch.device("cpu")
 
@@ -209,8 +206,7 @@ class TestTensorClass(TestCase):
             subclass: Union[MyOptionalClass, TensorDict] = None
 
         data = MyUnionClass(
-            subclass=MyUnionClass._from_tensordict(TensorDict({}, [3])),
-            batch_size=[3]
+            subclass=MyUnionClass._from_tensordict(TensorDict({}, [3])), batch_size=[3]
         )
         assert data.subclass is not None
 
@@ -243,6 +239,7 @@ class TestTensorClass(TestCase):
             AttributeError,
             expected_regex="Attribute name reshape can't be used with @tensorclass",
         ):
+
             @tensorclass
             class MyInvalidClass:
                 x: torch.Tensor
@@ -316,9 +313,8 @@ class TestTensorClass(TestCase):
             data[1][1][1]
 
         with self.assertRaisesRegex(
-            ValueError,
-            expected_regex="Invalid indexing arguments."
-            ):
+            ValueError, expected_regex="Invalid indexing arguments."
+        ):
             data["X"]
 
     def test_setitem(self):
@@ -359,8 +355,7 @@ class TestTensorClass(TestCase):
         assert data[:, [1, 2]].z == z
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex="indexed destination TensorDict batch size is"
+            RuntimeError, expected_regex="indexed destination TensorDict batch size is"
         ):
             data[:, [1, 2]] = data.clone()
 
@@ -394,12 +389,7 @@ class TestTensorClass(TestCase):
         assert data[:2].z == z
 
         # Negative Scenario
-        data3 = MyDataNested(
-            X=X2,
-            y=data_nest2,
-            z=["e", "f"],
-            batch_size=batch_size
-            )
+        data3 = MyDataNested(X=X2, y=data_nest2, z=["e", "f"], batch_size=batch_size)
         with self.assertWarnsRegex(
             UserWarning,
             expected_regex="Meta data at 'z' may or may not be equal, this may result in undefined behaviours",
@@ -545,8 +535,7 @@ class TestTensorClass(TestCase):
 
         with self.assertRaisesRegex(
             TypeError,
-            expected_regex=(
-            "Multiple dispatch failed|no implementation found"),
+            expected_regex=("Multiple dispatch failed|no implementation found"),
         ):
             torch.stack([data1, data3], dim=0)
 
@@ -580,8 +569,7 @@ class TestTensorClass(TestCase):
 
         with self.assertRaisesRegex(
             TypeError,
-            expected_regex=(
-            "Multiple dispatch failed|no implementation found"),
+            expected_regex=("Multiple dispatch failed|no implementation found"),
         ):
             torch.cat([data1, data3], dim=0)
 
@@ -708,8 +696,7 @@ class TestTensorClass(TestCase):
         assert torch.all(torch.eq(split_tcs[0].X, torch.ones(3, 3, 5)))
         assert torch.all(torch.eq(split_tcs[0].y[0].X, torch.ones(3, 3, 5)))
         assert split_tcs[0].z == split_tcs[1].z == split_tcs[2].z == z
-        assert split_tcs[0].y[0].z == split_tcs[0].y[1].z == split_tcs[0].y[
-            2].z == z
+        assert split_tcs[0].y[0].z == split_tcs[0].y[1].z == split_tcs[0].y[2].z == z
 
     def test_reshape(self):
         @tensorclass
@@ -877,14 +864,7 @@ class TestTensorClass(TestCase):
         data_nest = MyDataNest(X=X, v="test_nested", batch_size=batch_size)
         td = TensorDict({}, batch_size)
         v = "test_tensorclass"
-        data = MyDataParent(
-            X=X,
-            y=data_nest,
-            z=td,
-            W=W,
-            v=v,
-            batch_size=batch_size
-            )
+        data = MyDataParent(X=X, y=data_nest, z=td, W=W, v=v, batch_size=batch_size)
         assert isinstance(data.y, MyDataNest)
         assert isinstance(data.y.X, Tensor)
         assert isinstance(data.X, Tensor)
@@ -925,14 +905,7 @@ class TestTensorClass(TestCase):
         td = TensorDict({}, batch_size)
         data_nest = MyDataNest(X=X, v="test_nested", batch_size=batch_size)
         v = "test_tensorclass"
-        data = MyDataParent(
-            X=X,
-            y=data_nest,
-            z=td,
-            W=W,
-            v=v,
-            batch_size=batch_size
-            )
+        data = MyDataParent(X=X, y=data_nest, z=td, W=W, v=v, batch_size=batch_size)
         assert isinstance(data.y, type(data_nest))
         assert (data.X == X).all()
         assert data.batch_size == torch.Size(batch_size)
@@ -971,12 +944,7 @@ class TestTensorClass(TestCase):
         td = TensorDict({}, batch_size)
         data_nest = MyDataNest(X=X, v="test_nested", batch_size=batch_size)
         data = MyDataParent(
-            X=X,
-            y=data_nest,
-            z=td,
-            W=W,
-            v="test_tensorclass",
-            batch_size=batch_size
+            X=X, y=data_nest, z=td, W=W, v="test_tensorclass", batch_size=batch_size
         )
         assert isinstance(data.y, type(data_nest))
         assert data.y._tensordict is data_nest._tensordict
@@ -988,16 +956,13 @@ class TestTensorClass(TestCase):
         # check that you can't mess up the batch_size
         with self.assertRaisesRegex(
             RuntimeError,
-            expected_regex=re.escape(
-                "the tensor smth has shape torch.Size([1]) which"
-                )
+            expected_regex=re.escape("the tensor smth has shape torch.Size([1]) which"),
         ):
             data.z = TensorDict({"smth": torch.zeros(1)}, [])
         # check that you can't write any attribute
         with self.assertRaisesRegex(
-            AttributeError,
-            expected_regex=re.escape("Cannot set the attribute")
-            ):
+            AttributeError, expected_regex=re.escape("Cannot set the attribute")
+        ):
             data.newattr = TensorDict({"smth": torch.zeros(1)}, [])
         # Testing nested cases
         data_nest.X = torch.zeros(3, 4, 5)
@@ -1055,16 +1020,13 @@ class TestTensorClass(TestCase):
         # check that you can't mess up the batch_size
         with self.assertRaisesRegex(
             RuntimeError,
-            expected_regex=re.escape(
-                "the tensor smth has shape torch.Size([1]) which"
-                )
+            expected_regex=re.escape("the tensor smth has shape torch.Size([1]) which"),
         ):
             data.set("z", TensorDict({"smth": torch.zeros(1)}, []))
         # check that you can't write any attribute
         with self.assertRaisesRegex(
-            AttributeError,
-            expected_regex=re.escape("Cannot set the attribute")
-            ):
+            AttributeError, expected_regex=re.escape("Cannot set the attribute")
+        ):
             data.set("newattr", TensorDict({"smth": torch.zeros(1)}, []))
 
         # Testing nested cases
@@ -1090,9 +1052,8 @@ class TestTensorClass(TestCase):
         data.set("v", torch.zeros(3, 4, 5), inplace=True)
         assert (vorig == 0).all()
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex="Cannot update an existing"
-            ):
+            RuntimeError, expected_regex="Cannot update an existing"
+        ):
             data.set("v", "les chaussettes", inplace=True)
 
         data.set("v", "test")
@@ -1101,9 +1062,8 @@ class TestTensorClass(TestCase):
         assert "v" in data._non_tensordict.keys()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex="Cannot update an existing"
-            ):
+            RuntimeError, expected_regex="Cannot update an existing"
+        ):
             data.set("v", vorig, inplace=True)
 
         # ensure optional fields are writable
@@ -1207,10 +1167,7 @@ class TestTensorClass(TestCase):
         data = MyDataParent(X=X, y=data_nest, z=td, v=v, batch_size=batch_size)
 
         assert (data.get("X")[2:3] == data.get_at("X", slice(2, 3))).all()
-        assert (data.get(("y", "X"))[2:3] == data.get_at(
-            ("y", "X"),
-            slice(2, 3)
-            )).all()
+        assert (data.get(("y", "X"))[2:3] == data.get_at(("y", "X"), slice(2, 3))).all()
 
         # check default
         assert data.get_at(("y", "foo"), slice(2, 3), "working") == "working"
@@ -1230,10 +1187,7 @@ class TestTensorClass(TestCase):
             X: Any
 
         m1 = M1(M2(M3(X=None, batch_size=[4]), batch_size=[4]), batch_size=[4])
-        m2 = M1(
-            M2(M3(X=torch.randn(2), batch_size=[]), batch_size=[]),
-            batch_size=[]
-            )
+        m2 = M1(M2(M3(X=torch.randn(2), batch_size=[]), batch_size=[]), batch_size=[])
         assert m1.X.X.X is None
         m1[0] = m2
         assert (m1[0].X.X.X == m2.X.X.X).all()
@@ -1263,16 +1217,15 @@ class TestTensorClass(TestCase):
 
         with self.assertRaises(AssertionError):
             MyDataPostInit._from_tensordict(
-                TensorDict(
-                    {"X": -torch.ones(2), "y": torch.rand(2)},
-                    batch_size=[2]
-                    )
+                TensorDict({"X": -torch.ones(2), "y": torch.rand(2)}, batch_size=[2])
             )
 
     def test_default(self):
         @tensorclass
         class MyData:
-            X: torch.Tensor = None  # TODO: do we want to allow any default, say an integer?
+            X: torch.Tensor = (
+                None  # TODO: do we want to allow any default, say an integer?
+            )
             y: torch.Tensor = torch.ones(3, 4, 5)
 
         data = MyData(batch_size=[3, 4])
@@ -1284,18 +1237,19 @@ class TestTensorClass(TestCase):
         MyData(batch_size=[3])
         MyData(batch_size=[])
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex="batch dimension mismatch"
-            ):
+            RuntimeError, expected_regex="batch dimension mismatch"
+        ):
             MyData(batch_size=[4])
 
     def test_defaultfactory(self):
         @tensorclass
         class MyData:
-            X: torch.Tensor = None  # TODO: do we want to allow any default, say an integer?
+            X: torch.Tensor = (
+                None  # TODO: do we want to allow any default, say an integer?
+            )
             y: torch.Tensor = dataclasses.field(
                 default_factory=lambda: torch.ones(3, 4, 5)
-                )
+            )
 
         data = MyData(batch_size=[3, 4])
         assert (data.y == 1).all()
@@ -1306,9 +1260,8 @@ class TestTensorClass(TestCase):
         MyData(batch_size=[3])
         MyData(batch_size=[])
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex="batch dimension mismatch"
-            ):
+            RuntimeError, expected_regex="batch dimension mismatch"
+        ):
             MyData(batch_size=[4])
 
     def test_pickle(self):
@@ -1344,9 +1297,8 @@ class TestTensorClass(TestCase):
     def test_multiprocessing(self):
         with Pool(os.cpu_count()) as p:
             catted = torch.cat(
-                p.map(self._make_data, [(i, 2) for i in range(1, 9)]),
-                dim=0
-                )
+                p.map(self._make_data, [(i, 2) for i in range(1, 9)]), dim=0
+            )
 
         assert catted.batch_size == torch.Size([36])
         assert catted.z == "test_tensorclass"
@@ -1369,30 +1321,26 @@ class TestTensorClass(TestCase):
         sd = tc.state_dict()
         sd["a"] = None
         with self.assertRaisesRegex(
-            KeyError,
-            expected_regex="Key 'a' wasn't expected in the state-dict"
-            ):
+            KeyError, expected_regex="Key 'a' wasn't expected in the state-dict"
+        ):
             tc.load_state_dict(sd)
         del sd["a"]
         sd["_tensordict"]["a"] = None
         with self.assertRaisesRegex(
-            KeyError,
-            expected_regex="Key 'a' wasn't expected in the state-dict"
-            ):
+            KeyError, expected_regex="Key 'a' wasn't expected in the state-dict"
+        ):
             tc.load_state_dict(sd)
         del sd["_tensordict"]["a"]
         sd["_non_tensordict"]["a"] = None
         with self.assertRaisesRegex(
-            KeyError,
-            expected_regex="Key 'a' wasn't expected in the state-dict"
-            ):
+            KeyError, expected_regex="Key 'a' wasn't expected in the state-dict"
+        ):
             tc.load_state_dict(sd)
         del sd["_non_tensordict"]["a"]
         sd["_tensordict"]["y"]["_tensordict"]["a"] = None
         with self.assertRaisesRegex(
-            KeyError,
-            expected_regex="Key 'a' wasn't expected in the state-dict"
-            ):
+            KeyError, expected_regex="Key 'a' wasn't expected in the state-dict"
+        ):
             tc.load_state_dict(sd)
 
     def test_equal(self):
@@ -1430,10 +1378,7 @@ class TestTensorClass(TestCase):
             ),
             batch_size=[3],
         )
-        c = TensorDict(
-            {"x": torch.zeros(3), "y": {"x": torch.ones(3)}},
-            batch_size=[3]
-            )
+        c = TensorDict({"x": torch.zeros(3), "y": {"x": torch.ones(3)}}, batch_size=[3])
 
         assert (a == a.clone()).all()
         assert (a != 1.0).any()
@@ -1537,12 +1482,7 @@ class TestTensorClass(TestCase):
         assert c_gather.z == "foo"
         c_gather_zero = c_gather.clone().zero_()
         if from_torch:
-            c_gather2 = torch.gather(
-                c,
-                index=index,
-                dim=dim,
-                out=c_gather_zero
-                )
+            c_gather2 = torch.gather(c, index=index, dim=dim, out=c_gather_zero)
         else:
             c_gather2 = c.gather(index=index, dim=dim, out=c_gather_zero)
 
@@ -1661,16 +1601,10 @@ class TestNesting:
         test: str
 
     def get_nested(self):
-        c = self.TensorClass(
-            torch.ones(1),
-            ("a", "b", "c"),
-            "Hello",
-            batch_size=[]
-            )
+        c = self.TensorClass(torch.ones(1), ("a", "b", "c"), "Hello", batch_size=[])
 
         td = torch.stack(
-            [TensorDict({"t": torch.ones(1), "c": c}, batch_size=[]) for _ in
-             range(3)]
+            [TensorDict({"t": torch.ones(1), "c": c}, batch_size=[]) for _ in range(3)]
         )
         return td
 
@@ -1699,5 +1633,5 @@ class TestNesting:
         assert isinstance(td.get("c")[0], self.TensorClass)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

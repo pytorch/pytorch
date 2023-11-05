@@ -11,7 +11,9 @@ from torch.dict import TensorDictBase
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]], TensorDictBase],
+    parameter_and_buffer_dicts: Union[
+        Dict[str, Tensor], Sequence[Dict[str, Tensor]], TensorDictBase
+    ],
     args: Union[Any, Tuple],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
