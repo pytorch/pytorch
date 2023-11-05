@@ -1,3 +1,10 @@
+r"""
+This file is in the process of migration to `torch/ao/quantization`, and
+is kept here for compatibility while the migration process is ongoing.
+If you are adding a new entry/functionality, please, add it to the
+`torch/ao/ns/_numeric_suite_fx.py`, while adding an import statement
+here.
+"""
 from .quantize import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403

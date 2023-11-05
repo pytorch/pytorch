@@ -1,3 +1,8 @@
+r"""
+The quantization package contains data structures for quantization.
+
+Benefits include reduced memory usage and improved computational speed in deep learning models.
+"""
 # flake8: noqa: F403
 
 from .fake_quantize import *  # noqa: F403
@@ -141,7 +146,8 @@ __all__ = [
 ]
 
 def default_eval_fn(model, calib_data):
-    r"""
+    r"""Define the default evaluation function.
+
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
@@ -149,9 +155,12 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 class _DerivedObserverOrFakeQuantize(ObserverBase):
-    r""" This observer is used to describe an observer whose quantization parameters
+    r"""Define an observer whose parameters are defined from other observers.
+
+    This observer is used to describe an observer whose quantization parameters
     are derived from other observers
     """
+
     def __init__(
         self,
         dtype: torch.dtype,

@@ -20,48 +20,49 @@ _supported_intrinsic_types = {torch.ao.nn.intrinsic.ConvReLU2d, torch.ao.nn.intr
 _all_supported_types = _supported_types.union(_supported_intrinsic_types)
 
 def set_module_weight(module, weight) -> None:
+    """Set the weight of a given module to a specified value."""
     if type(module) in _supported_types:
         module.weight = torch.nn.Parameter(weight)
     else:
         module[0].weight = torch.nn.Parameter(weight)
 
 def set_module_bias(module, bias) -> None:
+    """Set the bias of a given module to a specified value."""
     if type(module) in _supported_types:
         module.bias = torch.nn.Parameter(bias)
     else:
         module[0].bias = torch.nn.Parameter(bias)
 
 def get_module_weight(module):
+    """Get the weight of a given module."""
     if type(module) in _supported_types:
         return module.weight
     else:
         return module[0].weight
 
 def get_module_bias(module):
+    """Get the bias of a given module."""
     if type(module) in _supported_types:
         return module.bias
     else:
         return module[0].bias
 
 def max_over_ndim(input, axis_list, keepdim=False):
-    ''' Applies 'torch.max' over the given axises
-    '''
+    """Apply 'torch.max' over the given axes."""
     axis_list.sort(reverse=True)
     for axis in axis_list:
         input, _ = input.max(axis, keepdim)
     return input
 
 def min_over_ndim(input, axis_list, keepdim=False):
-    ''' Applies 'torch.min' over the given axises
-    '''
+    """Apply 'torch.min' over the given axes."""
     axis_list.sort(reverse=True)
     for axis in axis_list:
         input, _ = input.min(axis, keepdim)
     return input
 
 def channel_range(input, axis=0):
-    ''' finds the range of weights associated with a specific channel
-    '''
+    """Find the range of weights associated with a specific channel."""
     size_of_tensor_dim = input.ndim
     axis_list = list(range(size_of_tensor_dim))
     axis_list.remove(axis)
@@ -73,10 +74,12 @@ def channel_range(input, axis=0):
     return maxs - mins
 
 def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
-    ''' Given two adjacent tensors', the weights are scaled such that
+    """Scale the range of Tensor1.output to equal Tensor2.input.
+
+    Given two adjacent tensors', the weights are scaled such that
     the ranges of the first tensors' output channel are equal to the
     ranges of the second tensors' input channel
-    '''
+    """
     if type(module1) not in _all_supported_types or type(module2) not in _all_supported_types:
         raise ValueError("module type not supported:", type(module1), " ", type(module2))
 
@@ -117,7 +120,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     set_module_weight(module2, weight2)
 
 def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
-    ''' Given a list of adjacent modules within a model, equalization will
+    """Equalize modules until convergence is achieved.
+
+    Given a list of adjacent modules within a model, equalization will
     be applied between each pair, this will repeated until convergence is achieved
 
     Keeps a copy of the changing modules from the previous iteration, if the copies
@@ -134,7 +139,7 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
         threshold: a number used by the converged function to determine what degree
             similarity between models is necessary for them to be called equivalent
         inplace: determines if function is inplace or not
-    '''
+    """
     if not inplace:
         model = copy.deepcopy(model)
 
@@ -156,14 +161,16 @@ def equalize(model, paired_modules_list, threshold=1e-4, inplace=True):
     return model
 
 def converged(curr_modules, prev_modules, threshold=1e-4):
-    ''' Tests for the summed norm of the differences between each set of modules
+    """Test whether modules are converged to a specified threshold.
+
+    Tests for the summed norm of the differences between each set of modules
     being less than the given threshold
 
     Takes two dictionaries mapping names to modules, the set of names for each dictionary
     should be the same, looping over the set of names, for each name take the difference
     between the associated modules in each dictionary
 
-    '''
+    """
     if curr_modules.keys() != prev_modules.keys():
         raise ValueError("The keys to the given mappings must have the same set of names of modules")
 
