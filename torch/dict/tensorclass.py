@@ -12,24 +12,28 @@ from dataclasses import dataclass
 from textwrap import indent
 from typing import Any, Callable, Sequence, TypeVar
 
-from torch.dict._torch_func import TD_HANDLED_FUNCTIONS
-from torch.dict.tensordict import TensorDict
+import torch
 
 import torch.dict as tensordict_lib
+from torch import Tensor
 
-import torch
-from torch.dict.base import _unravel_key_to_tuple
-from torch.dict._memmap import MemoryMappedTensor as MemmapTensor
+from torch.dict._torch_func import TD_HANDLED_FUNCTIONS
 from torch.dict.base import (
+    _unravel_key_to_tuple,
     is_tensor_collection,
     NO_DEFAULT,
     TensorDictBase,
 )
+from torch.dict.tensordict import TensorDict
 
-from torch.dict.utils import DeviceType, IndexType, is_tensorclass, NestedKey, \
-    _LOCK_ERROR
-from torch import Tensor
-from torch.dict.utils import _get_repr
+from torch.dict.utils import (
+    _get_repr,
+    _LOCK_ERROR,
+    DeviceType,
+    IndexType,
+    is_tensorclass,
+    NestedKey,
+)
 
 T = TypeVar("T", bound=TensorDictBase)
 PY37 = sys.version_info < (3, 8)
