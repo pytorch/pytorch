@@ -2081,8 +2081,10 @@ class InstructionTranslator(InstructionTranslatorBase):
     def set_current_tx(self):
         prior = getattr(tls, "current_tx", None)
         tls.current_tx = self
-        yield
-        tls.current_tx = prior
+        try:
+            yield
+        finally:
+            tls.current_tx = prior
 
     def __init__(
         self,
