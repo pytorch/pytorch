@@ -4450,19 +4450,22 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
-    const bool upper) {
+    const bool upper,
+    std::array<bool, 2> output_mask) {
   at::NoTF32Guard disable_tf32;
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
 
-    Tensor common_term = at::matmul(grad_self, result.mH());
-    common_term = common_term + common_term.mH();
+    if (output_mask[1]) {
+      Tensor common_term = at::matmul(grad_self, result.mH());
+      common_term = common_term + common_term.mH();
 
-    if (upper) {
-      grad_input2 = -at::matmul(input2, common_term);
-    } else {
-      grad_input2 = -at::matmul(common_term, input2);
+      if (upper) {
+        grad_input2 = -at::matmul(input2, common_term);
+      } else {
+        grad_input2 = -at::matmul(common_term, input2);
+      }
     }
   }
   return std::tuple<Tensor, Tensor>{grad_self, grad_input2};
