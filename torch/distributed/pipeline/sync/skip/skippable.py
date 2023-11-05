@@ -242,7 +242,7 @@ class Skippable(nn.Module):
 def skippable(
     stash: Iterable[str] = (), pop: Iterable[str] = (),
 ) -> Callable[[Type[SkippableModule]], Type[Skippable]]:
-    """Define decorator to create :class:`nn.Module <torch.nn.Module>` with skip connections.
+    """Define a decorator to create :class:`nn.Module <torch.nn.Module>` with skip connections.
 
     These decorated modules are called "skippable". This functionality works perfectly
     fine even when the module is not wrapped by :class:`~torch.distributed.pipeline.sync.Pipe`.

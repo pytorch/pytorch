@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -41,7 +41,7 @@ log = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Contain blueprint information about a particular type of worker.
+    """Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -111,7 +111,7 @@ class WorkerSpec:
 
 
 class Worker:
-    """Represent a worker instance.
+    """A worker instance.
 
     Contrast this with ``WorkerSpec`` that represents the specifications of a
     worker. A ``Worker`` is created from a ``WorkerSpec``. A ``Worker`` is to
@@ -186,7 +186,7 @@ class Worker:
 
 class WorkerState(str, Enum):
     """
-    State of the ``WorkerGroup``.
+    A state of the ``WorkerGroup``.
 
     Workers in a worker group change state as a unit. If a single worker
     in a worker group fails the entire set is considered failed::
@@ -240,9 +240,9 @@ class WorkerState(str, Enum):
 
 
 class WorkerGroup:
-    """Represent the set of ``Worker`` instances.
+    """A set of ``Worker`` instances.
 
-    The class define a set of ``Worker`` instances for the given ``WorkerSpec`` managed by ``ElasticAgent``. Whether the worker
+    The class defines a set of ``Worker`` instances for the given ``WorkerSpec`` managed by ``ElasticAgent``. Whether the worker
     group contains cross instance workers or not depends on the implementation of the agent.
     """
 
@@ -284,7 +284,6 @@ class _RoleInstanceInfo:
         self.local_world_size = local_world_size
 
     def serialize(self) -> bytes:
-        """Return the serialized data for the agent."""
         dict_data = {
             "role": self.role,
             "rank": self.rank,
@@ -294,7 +293,6 @@ class _RoleInstanceInfo:
 
     @staticmethod
     def deserialize(data: bytes):
-        """Create agent instance from serialized data."""
         dict_data = json.loads(data.decode(encoding="UTF-8"))
         return _RoleInstanceInfo(
             dict_data["role"], dict_data["rank"], dict_data["local_world_size"]
@@ -392,7 +390,7 @@ def _get_fq_hostname() -> str:
 
 
 class ElasticAgent(abc.ABC):
-    """Agent process responsible for managing one or more worker processes.
+    """An agent process responsible for managing one or more worker processes.
 
     The worker processes are assumed to be regular distributed PyTorch scripts.
     When the worker process is created by the agent, the agent provides the
@@ -455,9 +453,10 @@ class ElasticAgent(abc.ABC):
 
 class SimpleElasticAgent(ElasticAgent):
     """
-    An ``ElasticAgent`` that manages workers (``WorkerGroup``) for a single ``WorkerSpec``.
+    An ``ElasticAgent`` that manages one particular type of worker role.
 
-    (e.g. one particular type of worker role)
+    An ``ElasticAgent`` that manages workers (``WorkerGroup``) for a single ``WorkerSpec``
+    such as one particular type of worker role.
     """
 
     def __init__(self, spec: WorkerSpec, exit_barrier_timeout: float = 300):
@@ -468,7 +467,6 @@ class SimpleElasticAgent(ElasticAgent):
         self._total_execution_time = 0
 
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
-        """Return the worker group managed by ElasticAgent."""
         return self._worker_group
 
     @abc.abstractmethod
@@ -539,7 +537,7 @@ class SimpleElasticAgent(ElasticAgent):
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
     def _rendezvous(self, worker_group: WorkerGroup) -> None:
-        r"""Run rendezvous for the workers specified by worker spec.
+        r"""Run rendezvous for the workers specified by the worker spec.
 
         Assigns workers a new global rank and world size.
         Updates the rendezvous store for the worker group.
@@ -690,7 +688,7 @@ class SimpleElasticAgent(ElasticAgent):
         r"""
         Start a fresh set of workers for the worker_group.
 
-        Essentially a rendezvous followed by a start_workers.
+        Essentially, a rendezvous followed by a ``start_workers``.
         The caller should first call ``_stop_workers()`` to stop running workers
         prior to calling this method.
 
@@ -921,7 +919,7 @@ class SimpleElasticAgent(ElasticAgent):
 
     def _exit_barrier(self):
         """
-        Define barrier that keeps agent process alive until all workers finish.
+        Define a barrier that keeps the agent process alive until all workers finish.
 
         Wait for ``exit_barrier_timeout`` seconds for all agents to finish
         executing their local workers (either successfully or not). This
