@@ -1646,18 +1646,28 @@ class TrackedFake:
 
 
 # Performs automatic dynamic dim determination.
-# Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
+# Returns tuple of (dynamic_dims, constraint_dims, dynamic_storage_offset) where:
+#  - dynamic_dims and constraint_dims are both either a list of dims or None
+#  - dynamic_storage_offset is a dim
 def _automatic_dynamic(e, tx, name, static_shapes):
     if static_shapes:
-        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim(), DimDynamic.STATIC
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    if any(isinstance(s, SymInt) for s in e.size()):
-        return [
-            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
-            for s in e.size()
-        ], [None] * e.dim()
+    if any(isinstance(s, SymInt) for s in e.size()) or isinstance(
+        e.storage_offset(), SymInt
+    ):
+        return (
+            [
+                DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+                for s in e.size()
+            ],
+            [None] * e.dim(),
+            DimDynamic.DYNAMIC
+            if isinstance(e.storage_offset(), SymInt)
+            else DimDynamic.STATIC,
+        )
 
     # Prep for automatic dynamic
     frame_state_entry = None
