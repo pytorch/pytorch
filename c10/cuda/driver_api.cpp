@@ -10,8 +10,8 @@ namespace cuda {
 namespace {
 
 DriverAPI create_driver_api() {
-  void* handle_0 = dlopen("libcuda.so", RTLD_LAZY | RTLD_NOLOAD);
-  TORCH_INTERNAL_ASSERT(handle_0, "Can't open libcuda.so: ", dlerror());
+  void* handle_0 = dlopen("libcuda.so.1", RTLD_LAZY | RTLD_NOLOAD);
+  TORCH_CHECK(handle_0, "Can't open libcuda.so.1: ", dlerror());
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
