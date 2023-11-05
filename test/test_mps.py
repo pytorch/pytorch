@@ -164,7 +164,9 @@ def mps_ops_grad_modifier(ops):
         '__rpow__': [torch.float32],
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32],
+        'cumprod': [torch.float32, torch.float16],
+        # See https://github.com/pytorch/pytorch/issues/109166 for more information
+        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
@@ -10943,6 +10945,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.kl_div',
         'nn.functional.softmin',
         'cross', 'linalg.cross',
+        'prod', 'masked.prod',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
