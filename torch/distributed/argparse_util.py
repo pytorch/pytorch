@@ -12,7 +12,7 @@ from argparse import Action
 class env(Action):
     """
     Get argument values from ``PET_{dest}`` before defaultingto the given ``default`` value.
-    
+
     For flags (e.g. ``--standalone``)
     use ``check_env`` instead.
 
