@@ -10,31 +10,45 @@
 
 #include <climits>
 
+#if AT_MKL_ENABLED()
+#if MKL_ILP64
+#define INT_T int64_t
+#else
+#define INT_T int32_t
+#endif
+#else
+#ifdef OPENBLAS_USE64BITINT
+#define INT_T int64_t
+#else
+#define INT_T int
+#endif
+#endif
+
 #if AT_BUILD_WITH_BLAS()
 #if C10_IOS
 #include <Accelerate/Accelerate.h>
 #else
-extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, const double *a, int *lda, const double *b, int *ldb, double *beta, double *c, int *ldc);
-extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
-extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
-extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+extern "C" void dgemm_(char *transa, char *transb, INT_T *m, INT_T *n, INT_T *k, double *alpha, const double *a, INT_T *lda, const double *b, INT_T *ldb, double *beta, double *c, INT_T *ldc);
+extern "C" void sgemm_(char *transa, char *transb, INT_T *m, INT_T *n, INT_T *k, float *alpha, const float *a, INT_T *lda, const float *b, INT_T *ldb, float *beta, float *c, INT_T *ldc);
+extern "C" void cgemm_(char *transa, char *transb, INT_T *m, INT_T *n, INT_T *k, void *alpha, const void *a, INT_T *lda, const void *b, INT_T *ldb, void *beta, void *c, INT_T *ldc);
+extern "C" void zgemm_(char *transa, char *transb, INT_T *m, INT_T *n, INT_T *k, void *alpha, const void *a, INT_T *lda, const void *b, INT_T *ldb, void *beta, void *c, INT_T *ldc);
 #ifdef BLAS_HAS_SBGEMM
-extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
+extern "C" void sbgemm_(char *transa, char *transb, INT_T *m, INT_T *n, INT_T *k,
                 float *alpha,
-                const at::BFloat16 *a, int *lda,
-                const at::BFloat16 *b, int *ldb,
+                const at::BFloat16 *a, INT_T *lda,
+                const at::BFloat16 *b, INT_T *ldb,
                 float *beta,
-                float *c, int *ldc);
+                float *c, INT_T *ldc);
 #endif  // BLAS_HAS_SBGEMM
-extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
-extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
-extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy);
-extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy);
-extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy);
-extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
-extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
+extern "C" void cswap_(INT_T *n, const void *x, INT_T *incx, void *y, INT_T *incy);
+extern "C" void dcopy_(INT_T *n, const double *x, INT_T *incx, double *y, INT_T *incy);
+extern "C" void scopy_(INT_T *n, const float *x, INT_T *incx, float *y, INT_T *incy);
+extern "C" void zcopy_(INT_T *n, const void *x, INT_T *incx, void *y, INT_T *incy);
+extern "C" void ccopy_(INT_T *n, const void *x, INT_T *incx, void *y, INT_T *incy);
+extern "C" void daxpy_(INT_T *n, double *a, const double *x, INT_T *incx, double *y, INT_T *incy);
+extern "C" void saxpy_(INT_T *n, float *a, const float *x, INT_T *incx, float *y, INT_T *incy);
+extern "C" void caxpy_(INT_T *n, void *a, const void *x, INT_T *incx, void *y, INT_T *incy);
+extern "C" void zaxpy_(INT_T *n, void *a, const void *x, INT_T *incx, void *y, INT_T *incy);
 #endif  // C10_IOS
 #endif  // AT_BUILD_WITH_BLAS
 
@@ -126,7 +140,7 @@ void gemm(
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    INT_T m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     double alpha_ = alpha, beta_ = beta;
     #if C10_IOS
     CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
@@ -169,7 +183,7 @@ void gemm(
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    INT_T m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     float alpha_ = alpha, beta_ = beta;
     #if C10_IOS
     CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
@@ -212,7 +226,7 @@ void gemm(
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    INT_T m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     c10::complex<double> alpha_ = alpha, beta_ = beta;
     #if C10_IOS
     CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
@@ -255,7 +269,7 @@ void gemm(
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS()
   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-    int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+    INT_T m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
     c10::complex<float> alpha_ = alpha, beta_ = beta;
     #if C10_IOS
     CBLAS_TRANSPOSE transa_ = to_apple_accelerate_transpose(transa);
@@ -298,10 +312,10 @@ void gemm(
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-      int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+      INT_T m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       float alpha_ = alpha, beta_ = beta;
-      int c_size = n_ * ldc_;
+      INT_T c_size = n_ * ldc_;
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       std::vector<float> float_v(c, c + c_size);
       sbgemm_(&transa_, &transb_,
@@ -380,7 +394,7 @@ static void gemm_batched_mkl_impl(
       scalar_t beta,
       scalar_t **c, int64_t ldc) {
   for (int64_t i = 0; i < batch_size;) {
-    int sub_batch = std::min(batch_size - i, int64_t{INT_MAX});
+    INT_T sub_batch = std::min(batch_size - i, int64_t{INT_MAX});
     mkl_gemm_batched(transa, transb, sub_batch, m, n, k, alpha,
                      &a[i], lda, &b[i], ldb, beta, &c[i], ldc);
     i += sub_batch;
@@ -524,9 +538,9 @@ void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_daxpy(i_n, a, x, i_incx, y, i_incy);
     #else
@@ -549,9 +563,9 @@ void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t in
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_saxpy(i_n, a, x, i_incx, y, i_incy);
     #else
@@ -574,9 +588,9 @@ void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int6
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_zaxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
@@ -599,9 +613,9 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
   {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_caxpy(i_n, &a, x, i_incx, y, i_incy);
     #else
@@ -625,9 +639,9 @@ void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_dcopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -649,9 +663,9 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_scopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -673,9 +687,9 @@ void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<d
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_zcopy(i_n, x, i_incx, y, i_incy);
     #else
@@ -697,9 +711,9 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
   }
   #if AT_BUILD_WITH_BLAS()
   if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     #if C10_IOS
     cblas_ccopy(i_n, &x, i_incx, y, i_incy);
     #else

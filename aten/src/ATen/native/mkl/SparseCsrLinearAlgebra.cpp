@@ -36,6 +36,7 @@ Tensor& _sparse_mm_mkl_(
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Exceptions.h>
 #include <ATen/mkl/Limits.h>
+#include <ATen/mkl/Utils.h>
 #include <mkl.h>
 #include <mkl_spblas.h>
 
@@ -194,8 +195,8 @@ static inline void sparse_mm_mkl_template(
     IntArrayRef size,
     IntArrayRef dense_size) {
   SparseCsrMKLInterface mkl_impl(
-      col_indices.data_ptr<MKL_INT>(),
-      crow_indices.data_ptr<MKL_INT>(),
+      MKL_TENSOR_DATA_PTR(col_indices),
+      MKL_TENSOR_DATA_PTR(crow_indices),
       values.data_ptr<scalar_t>(),
       size[0],
       size[1]);

@@ -36,6 +36,7 @@
 #endif
 
 #if AT_MAGMA_ENABLED()
+#include <ATen/mkl/Utils.h>
 #include <magma_types.h>
 #include <magma_v2.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
@@ -1057,10 +1058,10 @@ void apply_ldl_factor_magma(
   auto a_data = A.mutable_data_ptr<scalar_t>();
   Tensor pivots_cpu =
       at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-  auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
+  auto pivots_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(pivots_cpu);
   Tensor info_cpu =
       at::empty_like(info, info.options().device(kCPU).pinned_memory(true));
-  auto info_data = info_cpu.mutable_data_ptr<magma_int_t>();
+  auto info_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(info_cpu);
 
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* a_working_ptr = &a_data[i * a_stride];
@@ -1169,7 +1170,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
-  int info_tmp = 0;
+  magma_int_t info_tmp = 0;
   if (b.dim() == 2) {
     magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, lda,
                                  b_data, lda, &info_tmp);
@@ -1277,10 +1278,10 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
     // magmaCholesky requires info to be on CPU
     magma_int_t info_cpu = 0;
     magmaCholesky<scalar_t>(uplo, n, self_data, lda, &info_cpu);
-    info.fill_(info_cpu);
+    info.fill_(static_cast<int64_t>(info_cpu));
   } else {
     TORCH_INTERNAL_ASSERT(info.is_cuda());
-    auto info_data = info.data_ptr<magma_int_t>();
+    auto info_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(info);
 
     // magmaCholeskyBatched supports only upper=false
     uplo = MagmaLower;
@@ -1306,7 +1307,7 @@ static void apply_cholesky(const Tensor& self, bool upper, const Tensor& info) {
     int64_t batch_limit = self.is_complex() ? 65535 : 262140;
 
     for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
-      int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
+      int64_t nbatches = std::min(batch_limit, static_cast<int64_t>(batch_size) - mini_idx);
       scalar_t** self_array_cur = &self_array[mini_idx];
       magma_int_t* info_array_cur = &info_data[mini_idx];
 
@@ -1483,7 +1484,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
   Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
 
   auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos_cpu.mutable_data_ptr<magma_int_t>();
+  auto infos_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(infos_cpu);
   auto input_matrix_stride = matrixStride(input);
   auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(input);
@@ -1493,18 +1494,18 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
 
   if (compute_pivots) {
     Tensor pivots_cpu = at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-    auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
+    auto pivots_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(pivots_cpu);
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-      int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-      int* infos_working_ptr = &infos_data[i];
+      magma_int_t* pivots_working_ptr = &pivots_data[i * pivots_stride];
+      magma_int_t* infos_working_ptr = &infos_data[i];
       magmaLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
     }
     pivots.copy_(pivots_cpu);
   } else {
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-      int* infos_working_ptr = &infos_data[i];
+      magma_int_t* infos_working_ptr = &infos_data[i];
       magmaLuNoPiv<scalar_t>(m, n, input_working_ptr, leading_dimension, infos_working_ptr);
     }
   }
@@ -1542,7 +1543,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
   TORCH_CHECK(!magma_batched_buggy, "linalg.lu_factor has buggs on MAGMA < 2.5.2. Please update your MAGMA version to a newer one.");
 
   auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto infos_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(infos);
   auto input_matrix_stride = matrixStride(input);
   magma_int_t batch_size = magma_int_cast(batchCount(input), "batchCount");
 
@@ -1564,7 +1565,7 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
   MAGMAQueue magma_queue(input.get_device());
 
   if (compute_pivots) {
-    auto pivots_data = pivots.data_ptr<magma_int_t>();
+    auto pivots_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(pivots);
     auto pivots_stride = pivots.size(-1);
     // fill pivots with ones to avoid memory access violations inside magma kernels
     // magmaLuBatched might not set the values for it
@@ -1897,7 +1898,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
 
   auto vectors_data = vectors.data_ptr<scalar_t>();
   auto values_data = values.data_ptr<value_t>();
-  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto infos_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(infos);
 
   scalar_t* wA;
   ALLOCATE_ARRAY(wA, scalar_t, lda * lda);
@@ -2033,7 +2034,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
   auto values_stride = values.size(-1);
   auto input_data = input.data_ptr<scalar_t>();
   auto values_data = values.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto infos_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(infos);
   auto rvectors_data = compute_eigenvectors ? vectors.data_ptr<scalar_t>() : nullptr;
   scalar_t* lvectors_data = nullptr;  // only right eigenvectors are computed
   int64_t ldvr = compute_eigenvectors ? lda : 1;
@@ -2060,7 +2061,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* values_working_ptr = &values_data[i * values_stride];
     scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
-    int* info_working_ptr = &infos_data[i];
+    magma_int_t* info_working_ptr = &infos_data[i];
     magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
       lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
   }
@@ -2106,7 +2107,7 @@ AT_ERROR("linalg.svd: MAGMA library not found in "
   const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
   const auto S_data = S.data_ptr<value_t>();
   const auto Vh_data = compute_uv ? Vh.data_ptr<scalar_t>() : nullptr;
-  const auto info_data = info.data_ptr<magma_int_t>();
+  const auto info_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(info);
   const auto A_stride = matrixStride(A);
   const auto U_stride = compute_uv ? matrixStride(U) : 0;
   const auto S_stride = S.size(-1);
@@ -2270,7 +2271,7 @@ static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, 
 
   // MAGMA requires pivots to be a CPU tensor
   Tensor pivots_cpu = pivots.cpu();
-  auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
+  auto pivots_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(pivots_cpu);
 
   auto b_stride = matrixStride(B);
   auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
@@ -2288,12 +2289,12 @@ static void apply_lu_solve_looped_magma(const Tensor& LU, const Tensor& pivots, 
   BroadcastLinearIndices lu_index(
       batchCount(LU), lu_batch_shape, b_batch_shape);
 
-  int info = 0;
+  magma_int_t info = 0;
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     int64_t lu_index_i = lu_index(i);
     scalar_t* b_working_ptr = &b_data[i * b_stride];
     scalar_t* lu_working_ptr = &lu_data[lu_index_i * lu_stride];
-    int* pivots_working_ptr = &pivots_data[lu_index_i * pivots_stride];
+    magma_int_t* pivots_working_ptr = &pivots_data[lu_index_i * pivots_stride];
 
     magmaLuSolve<scalar_t>(n, nrhs, lu_working_ptr, leading_dimension, pivots_working_ptr, b_working_ptr, leading_dimension, &info, trans);
 
@@ -2336,7 +2337,7 @@ static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots,
   magma_int_t nrhs = magma_int_cast(B.size(-1), "nrhs");
   auto leading_dimension = std::max<magma_int_t>(1, n);
 
-  auto pivots_data = pivots.data_ptr<magma_int_t>();
+  auto pivots_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(pivots);
 
   auto b_stride = matrixStride(B);
   auto lu_stride = matrixStride(LU);
@@ -2364,12 +2365,12 @@ static void apply_lu_solve_batched_magma(const Tensor& LU, const Tensor& pivots,
   constexpr int64_t batch_limit = 65535;
 
   for (int64_t mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
-    int64_t nbatches = std::min(batch_limit, batch_size - mini_idx);
+    int64_t nbatches = std::min(batch_limit, static_cast<int64_t>(batch_size) - mini_idx);
     scalar_t** lu_array_cur = &lu_array[mini_idx];
     scalar_t** b_array_cur = &b_array[mini_idx];
     magma_int_t** pivots_array_cur = &pivots_array[mini_idx];
 
-    int info;
+    magma_int_t info;
     magmaLuSolveBatched<scalar_t>(
         n, nrhs, lu_array_cur, leading_dimension,
         pivots_array_cur, b_array_cur, leading_dimension,
@@ -2614,7 +2615,7 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 
   // MAGMA requires infos tensor to live on CPU
   infos = infos.to(at::kCPU);
-  auto infos_data = infos.data_ptr<magma_int_t>();
+  auto infos_data = MAGMA_TENSOR_MUTABLE_DATA_PTR(infos);
 
   batch_iterator_with_broadcasting<scalar_t>(a, b,
     [&](scalar_t* a_working_ptr, scalar_t* b_working_ptr,

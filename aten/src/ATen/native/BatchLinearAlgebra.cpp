@@ -123,290 +123,290 @@
 #if AT_BUILD_WITH_LAPACK()
 
 // getrf
-extern "C" void zgetrf_(int *m, int *n, std::complex<double> *a, int *lda, int *ipiv, int *info);
-extern "C" void cgetrf_(int *m, int *n, std::complex<float> *a, int *lda, int *ipiv, int *info);
-extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
-extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
+extern "C" void zgetrf_(INT_T *m, INT_T *n, std::complex<double> *a, INT_T *lda, INT_T *ipiv, INT_T *info);
+extern "C" void cgetrf_(INT_T *m, INT_T *n, std::complex<float> *a, INT_T *lda, INT_T *ipiv, INT_T *info);
+extern "C" void dgetrf_(INT_T *m, INT_T *n, double *a, INT_T *lda, INT_T *ipiv, INT_T *info);
+extern "C" void sgetrf_(INT_T *m, INT_T *n, float *a, INT_T *lda, INT_T *ipiv, INT_T *info);
 
 // potrs
-extern "C" void zpotrs_(char *uplo, int *n, int *nrhs, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb, int *info);
-extern "C" void cpotrs_(char *uplo, int *n, int *nrhs, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dpotrs_(char *uplo, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, int *info);
-extern "C" void spotrs_(char *uplo, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, int *info);
+extern "C" void zpotrs_(char *uplo, INT_T *n, INT_T *nrhs, std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb, INT_T *info);
+extern "C" void cpotrs_(char *uplo, INT_T *n, INT_T *nrhs, std::complex<float> *a, INT_T *lda, std::complex<float> *b, INT_T *ldb, INT_T *info);
+extern "C" void dpotrs_(char *uplo, INT_T *n, INT_T *nrhs, double *a, INT_T *lda, double *b, INT_T *ldb, INT_T *info);
+extern "C" void spotrs_(char *uplo, INT_T *n, INT_T *nrhs, float *a, INT_T *lda, float *b, INT_T *ldb, INT_T *info);
 
 // potrf
-extern "C" void zpotrf_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
-extern "C" void cpotrf_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
-extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
-extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
+extern "C" void zpotrf_(char *uplo, INT_T *n, std::complex<double> *a, INT_T *lda, INT_T *info);
+extern "C" void cpotrf_(char *uplo, INT_T *n, std::complex<float> *a, INT_T *lda, INT_T *info);
+extern "C" void dpotrf_(char *uplo, INT_T *n, double *a, INT_T *lda, INT_T *info);
+extern "C" void spotrf_(char *uplo, INT_T *n, float *a, INT_T *lda, INT_T *info);
 
 // potri
-extern "C" void zpotri_(char *uplo, int *n, std::complex<double> *a, int *lda, int *info);
-extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, int *info);
-extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
-extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
+extern "C" void zpotri_(char *uplo, INT_T *n, std::complex<double> *a, INT_T *lda, INT_T *info);
+extern "C" void cpotri_(char *uplo, INT_T *n, std::complex<float> *a, INT_T *lda, INT_T *info);
+extern "C" void dpotri_(char *uplo, INT_T *n, double *a, INT_T *lda, INT_T *info);
+extern "C" void spotri_(char *uplo, INT_T *n, float *a, INT_T *lda, INT_T *info);
 
 // sytrf
 extern "C" void dsytrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     double* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     double* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 extern "C" void ssytrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     float* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     float* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 extern "C" void zsytrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     std::complex<double>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<double>* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 extern "C" void csytrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     std::complex<float>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<float>* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 
 // hetrf
 extern "C" void zhetrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     std::complex<double>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<double>* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 extern "C" void chetrf_(
     char* uplo,
-    int* n,
+    INT_T* n,
     std::complex<float>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<float>* work,
-    int* lwork,
-    int* info);
+    INT_T* lwork,
+    INT_T* info);
 
 // sytrs
 extern "C" void dsytrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     double* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     double* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 extern "C" void ssytrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     float* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     float* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 extern "C" void zsytrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     std::complex<double>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<double>* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 extern "C" void csytrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     std::complex<float>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<float>* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 
 // hetrs
 extern "C" void zhetrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     std::complex<double>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<double>* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 extern "C" void chetrs_(
     char* uplo,
-    int* n,
-    int* nrhs,
+    INT_T* n,
+    INT_T* nrhs,
     std::complex<float>* a,
-    int* lda,
-    int* ipiv,
+    INT_T* lda,
+    INT_T* ipiv,
     std::complex<float>* b,
-    int* ldb,
-    int* info);
+    INT_T* ldb,
+    INT_T* info);
 
 // geqrf
-extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
-extern "C" void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+extern "C" void zgeqrf_(INT_T *m, INT_T *n, std::complex<double> *a, INT_T *lda, std::complex<double> *tau, std::complex<double> *work, INT_T *lwork, INT_T *info);
+extern "C" void cgeqrf_(INT_T *m, INT_T *n, std::complex<float> *a, INT_T *lda, std::complex<float> *tau, std::complex<float> *work, INT_T *lwork, INT_T *info);
+extern "C" void dgeqrf_(INT_T *m, INT_T *n, double *a, INT_T *lda, double *tau, double *work, INT_T *lwork, INT_T *info);
+extern "C" void sgeqrf_(INT_T *m, INT_T *n, float *a, INT_T *lda, float *tau, float *work, INT_T *lwork, INT_T *info);
 
 // orgqr
-extern "C" void zungqr_(int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cungqr_(int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dorgqr_(int *m, int *n, int *k, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
-extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
+extern "C" void zungqr_(INT_T *m, INT_T *n, INT_T *k, std::complex<double> *a, INT_T *lda, std::complex<double> *tau, std::complex<double> *work, INT_T *lwork, INT_T *info);
+extern "C" void cungqr_(INT_T *m, INT_T *n, INT_T *k, std::complex<float> *a, INT_T *lda, std::complex<float> *tau, std::complex<float> *work, INT_T *lwork, INT_T *info);
+extern "C" void dorgqr_(INT_T *m, INT_T *n, INT_T *k, double *a, INT_T *lda, double *tau, double *work, INT_T *lwork, INT_T *info);
+extern "C" void sorgqr_(INT_T *m, INT_T *n, INT_T *k, float *a, INT_T *lda, float *tau, float *work, INT_T *lwork, INT_T *info);
 
 // ormqr
-extern "C" void zunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *c, int *ldc, std::complex<double> *work, int *lwork, int *info);
-extern "C" void cunmqr_(char *side, char *trans, int *m, int *n, int *k, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *c, int *ldc, std::complex<float> *work, int *lwork, int *info);
-extern "C" void dormqr_(char *side, char *trans, int *m, int *n, int *k, double *a, int *lda, double *tau, double *c, int *ldc, double *work, int *lwork, int *info);
-extern "C" void sormqr_(char *side, char *trans, int *m, int *n, int *k, float *a, int *lda, float *tau, float *c, int *ldc, float *work, int *lwork, int *info);
+extern "C" void zunmqr_(char *side, char *trans, INT_T *m, INT_T *n, INT_T *k, std::complex<double> *a, INT_T *lda, std::complex<double> *tau, std::complex<double> *c, INT_T *ldc, std::complex<double> *work, INT_T *lwork, INT_T *info);
+extern "C" void cunmqr_(char *side, char *trans, INT_T *m, INT_T *n, INT_T *k, std::complex<float> *a, INT_T *lda, std::complex<float> *tau, std::complex<float> *c, INT_T *ldc, std::complex<float> *work, INT_T *lwork, INT_T *info);
+extern "C" void dormqr_(char *side, char *trans, INT_T *m, INT_T *n, INT_T *k, double *a, INT_T *lda, double *tau, double *c, INT_T *ldc, double *work, INT_T *lwork, INT_T *info);
+extern "C" void sormqr_(char *side, char *trans, INT_T *m, INT_T *n, INT_T *k, float *a, INT_T *lda, float *tau, float *c, INT_T *ldc, float *work, INT_T *lwork, INT_T *info);
 
 // syevd
-extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a, int *lda, double *w, std::complex<double> *work, int *lwork, double *rwork, int *lrwork, int *iwork, int *liwork, int *info);
-extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
-extern "C" void dsyevd_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *iwork, int *liwork, int *info);
-extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *iwork, int *liwork, int *info);
+extern "C" void zheevd_(char *jobz, char *uplo, INT_T *n, std::complex<double> *a, INT_T *lda, double *w, std::complex<double> *work, INT_T *lwork, double *rwork, INT_T *lrwork, INT_T *iwork, INT_T *liwork, INT_T *info);
+extern "C" void cheevd_(char *jobz, char *uplo, INT_T *n, std::complex<float> *a, INT_T *lda, float *w, std::complex<float> *work, INT_T *lwork, float *rwork, INT_T *lrwork, INT_T *iwork, INT_T *liwork, INT_T *info);
+extern "C" void dsyevd_(char *jobz, char *uplo, INT_T *n, double *a, INT_T *lda, double *w, double *work, INT_T *lwork, INT_T *iwork, INT_T *liwork, INT_T *info);
+extern "C" void ssyevd_(char *jobz, char *uplo, INT_T *n, float *a, INT_T *lda, float *w, float *work, INT_T *lwork, INT_T *iwork, INT_T *liwork, INT_T *info);
 
 // geev
-extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
-extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
-extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
-             std::complex<float> *a, int *lda,
+extern "C" void dgeev_(char *jobvl, char *jobvr, INT_T *n, double *a, INT_T *lda, double *wr, double *wi, double* vl, INT_T *ldvl, double *vr, INT_T *ldvr, double *work, INT_T *lwork, INT_T *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, INT_T *n, float *a, INT_T *lda, float *wr, float *wi, float* vl, INT_T *ldvl, float *vr, INT_T *ldvr, float *work, INT_T *lwork, INT_T *info);
+extern "C" void cgeev_(char *jobvl, char *jobvr, INT_T *n,
+             std::complex<float> *a, INT_T *lda,
              std::complex<float> *w,
-             std::complex<float> *vl, int *ldvl,
-             std::complex<float> *vr, int *ldvr,
-             std::complex<float> *work, int *lwork,
+             std::complex<float> *vl, INT_T *ldvl,
+             std::complex<float> *vr, INT_T *ldvr,
+             std::complex<float> *work, INT_T *lwork,
              float *rwork,
-             int *info);
-extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
-             std::complex<double> *a, int *lda,
+             INT_T *info);
+extern "C" void zgeev_(char *jobvl, char *jobvr, INT_T *n,
+             std::complex<double> *a, INT_T *lda,
              std::complex<double> *w,
-             std::complex<double> *vl, int *ldvl,
-             std::complex<double> *vr, int *ldvr,
-             std::complex<double> *work, int *lwork,
+             std::complex<double> *vl, INT_T *ldvl,
+             std::complex<double> *vr, INT_T *ldvr,
+             std::complex<double> *work, INT_T *lwork,
              double *rwork,
-             int *info);
+             INT_T *info);
 
 // gesdd
-extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
-                        double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
-extern "C" void cgesdd_(char *jobz, int *m, int *n, std::complex<float> *a, int *lda,
-                        float *s, std::complex<float> *u, int *ldu, std::complex<float> *vt, int *ldvt, std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info);
-extern "C" void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda,
-                        double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
-extern "C" void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda,
-                        float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
+extern "C" void zgesdd_(char *jobz, INT_T *m, INT_T *n, std::complex<double> *a, INT_T *lda,
+                        double *s, std::complex<double> *u, INT_T *ldu, std::complex<double> *vt, INT_T *ldvt, std::complex<double> *work, INT_T *lwork, double *rwork, INT_T *iwork, INT_T *info);
+extern "C" void cgesdd_(char *jobz, INT_T *m, INT_T *n, std::complex<float> *a, INT_T *lda,
+                        float *s, std::complex<float> *u, INT_T *ldu, std::complex<float> *vt, INT_T *ldvt, std::complex<float> *work, INT_T *lwork, float *rwork, INT_T *iwork, INT_T *info);
+extern "C" void dgesdd_(char *jobz, INT_T *m, INT_T *n, double *a, INT_T *lda,
+                        double *s, double *u, INT_T *ldu, double *vt, INT_T *ldvt, double *work, INT_T *lwork, INT_T *iwork, INT_T *info);
+extern "C" void sgesdd_(char *jobz, INT_T *m, INT_T *n, float *a, INT_T *lda,
+                        float *s, float *u, INT_T *ldu, float *vt, INT_T *ldvt, float *work, INT_T *lwork, INT_T *iwork, INT_T *info);
 
 // getrs
-extern "C" void zgetrs_(char *trans, int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
-extern "C" void cgetrs_(char *trans, int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
-extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
-extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
+extern "C" void zgetrs_(char *trans, INT_T *n, INT_T *nrhs, std::complex<double> *a, INT_T *lda, INT_T *ipiv, std::complex<double> *b, INT_T *ldb, INT_T *info);
+extern "C" void cgetrs_(char *trans, INT_T *n, INT_T *nrhs, std::complex<float> *a, INT_T *lda, INT_T *ipiv, std::complex<float> *b, INT_T *ldb, INT_T *info);
+extern "C" void dgetrs_(char *trans, INT_T *n, INT_T *nrhs, double *a, INT_T *lda, INT_T *ipiv, double *b, INT_T *ldb, INT_T *info);
+extern "C" void sgetrs_(char *trans, INT_T *n, INT_T *nrhs, float *a, INT_T *lda, INT_T *ipiv, float *b, INT_T *ldb, INT_T *info);
 
 // gels
-extern "C" void zgels_(char *trans, int *m, int *n, int *nrhs,
-    std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
-    std::complex<double> *work, int *lwork, int *info);
-extern "C" void cgels_(char *trans, int *m, int *n, int *nrhs,
-    std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
-    std::complex<float> *work, int *lwork, int *info);
-extern "C" void dgels_(char *trans, int *m, int *n, int *nrhs,
-    double *a, int *lda, double *b, int *ldb,
-    double *work, int *lwork, int *info);
-extern "C" void sgels_(char *trans, int *m, int *n, int *nrhs,
-    float *a, int *lda, float *b, int *ldb,
-    float *work, int *lwork, int *info);
+extern "C" void zgels_(char *trans, INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb,
+    std::complex<double> *work, INT_T *lwork, INT_T *info);
+extern "C" void cgels_(char *trans, INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<float> *a, INT_T *lda, std::complex<float> *b, INT_T *ldb,
+    std::complex<float> *work, INT_T *lwork, INT_T *info);
+extern "C" void dgels_(char *trans, INT_T *m, INT_T *n, INT_T *nrhs,
+    double *a, INT_T *lda, double *b, INT_T *ldb,
+    double *work, INT_T *lwork, INT_T *info);
+extern "C" void sgels_(char *trans, INT_T *m, INT_T *n, INT_T *nrhs,
+    float *a, INT_T *lda, float *b, INT_T *ldb,
+    float *work, INT_T *lwork, INT_T *info);
 
 // gelsd
-extern "C" void zgelsd_(int *m, int *n, int *nrhs,
-    std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
-    double *s, double *rcond, int *rank,
-    std::complex<double> *work, int *lwork, double *rwork, int *iwork, int *info);
-extern "C" void cgelsd_(int *m, int *n, int *nrhs,
-    std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
-    float *s, float *rcond, int *rank,
-    std::complex<float> *work, int *lwork, float *rwork, int *iwork, int *info);
-extern "C" void dgelsd_(int *m, int *n, int *nrhs,
-    double *a, int *lda, double *b, int *ldb,
-    double *s, double *rcond, int *rank,
-    double *work, int *lwork, int *iwork, int *info);
-extern "C" void sgelsd_(int *m, int *n, int *nrhs,
-    float *a, int *lda, float *b, int *ldb,
-    float *s, float *rcond, int *rank,
-    float *work, int *lwork, int *iwork, int *info);
+extern "C" void zgelsd_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb,
+    double *s, double *rcond, INT_T *rank,
+    std::complex<double> *work, INT_T *lwork, double *rwork, INT_T *iwork, INT_T *info);
+extern "C" void cgelsd_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<float> *a, INT_T *lda, std::complex<float> *b, INT_T *ldb,
+    float *s, float *rcond, INT_T *rank,
+    std::complex<float> *work, INT_T *lwork, float *rwork, INT_T *iwork, INT_T *info);
+extern "C" void dgelsd_(INT_T *m, INT_T *n, INT_T *nrhs,
+    double *a, INT_T *lda, double *b, INT_T *ldb,
+    double *s, double *rcond, INT_T *rank,
+    double *work, INT_T *lwork, INT_T *iwork, INT_T *info);
+extern "C" void sgelsd_(INT_T *m, INT_T *n, INT_T *nrhs,
+    float *a, INT_T *lda, float *b, INT_T *ldb,
+    float *s, float *rcond, INT_T *rank,
+    float *work, INT_T *lwork, INT_T *iwork, INT_T *info);
 
 // gelsy
-extern "C" void zgelsy_(int *m, int *n, int *nrhs,
-    std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
-    int *jpvt, double *rcond, int *rank,
-    std::complex<double> *work, int *lwork,
-    double *rwork, int *info);
-extern "C" void cgelsy_(int *m, int *n, int *nrhs,
-    std::complex<float> * a, int *lda, std::complex<float> *b, int *ldb,
-    int *jpvt, float *rcond, int *rank,
-    std::complex<float> *work, int *lwork,
-    float *rwork, int *info);
-extern "C" void dgelsy_(int *m, int *n, int *nrhs,
-    double *a, int *lda, double *b, int *ldb,
-    int *jpvt, double *rcond, int *rank,
-    double *work, int *lwork, int *info);
-extern "C" void sgelsy_(int *m, int *n, int *nrhs,
-    float *a, int *lda, float *b, int *ldb,
-    int *jpvt, float *rcond, int *rank,
-    float *work, int *lwork, int *info);
+extern "C" void zgelsy_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb,
+    INT_T *jpvt, double *rcond, INT_T *rank,
+    std::complex<double> *work, INT_T *lwork,
+    double *rwork, INT_T *info);
+extern "C" void cgelsy_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<float> * a, INT_T *lda, std::complex<float> *b, INT_T *ldb,
+    INT_T *jpvt, float *rcond, INT_T *rank,
+    std::complex<float> *work, INT_T *lwork,
+    float *rwork, INT_T *info);
+extern "C" void dgelsy_(INT_T *m, INT_T *n, INT_T *nrhs,
+    double *a, INT_T *lda, double *b, INT_T *ldb,
+    INT_T *jpvt, double *rcond, INT_T *rank,
+    double *work, INT_T *lwork, INT_T *info);
+extern "C" void sgelsy_(INT_T *m, INT_T *n, INT_T *nrhs,
+    float *a, INT_T *lda, float *b, INT_T *ldb,
+    INT_T *jpvt, float *rcond, INT_T *rank,
+    float *work, INT_T *lwork, INT_T *info);
 
 // gelss
-extern "C" void zgelss_(int *m, int *n, int *nrhs,
-    std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb,
-    double *s, double *rcond, int *rank,
-    std::complex<double> *work, int *lwork,
-    double *rwork, int *info);
-extern "C" void cgelss_(int *m, int *n, int *nrhs,
-    std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb,
-    float *s, float *rcond, int *rank,
-    std::complex<float> *work, int *lwork,
-    float *rwork, int *info);
-extern "C" void dgelss_(int *m, int *n, int *nrhs,
-    double *a, int *lda, double *b, int *ldb,
-    double *s, double *rcond, int *rank,
-    double *work, int *lwork, int *info);
-extern "C" void sgelss_(int *m, int *n, int *nrhs,
-    float *a, int *lda, float *b, int *ldb,
-    float *s, float *rcond, int *rank,
-    float *work, int *lwork, int *info);
+extern "C" void zgelss_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb,
+    double *s, double *rcond, INT_T *rank,
+    std::complex<double> *work, INT_T *lwork,
+    double *rwork, INT_T *info);
+extern "C" void cgelss_(INT_T *m, INT_T *n, INT_T *nrhs,
+    std::complex<float> *a, INT_T *lda, std::complex<float> *b, INT_T *ldb,
+    float *s, float *rcond, INT_T *rank,
+    std::complex<float> *work, INT_T *lwork,
+    float *rwork, INT_T *info);
+extern "C" void dgelss_(INT_T *m, INT_T *n, INT_T *nrhs,
+    double *a, INT_T *lda, double *b, INT_T *ldb,
+    double *s, double *rcond, INT_T *rank,
+    double *work, INT_T *lwork, INT_T *info);
+extern "C" void sgelss_(INT_T *m, INT_T *n, INT_T *nrhs,
+    float *a, INT_T *lda, float *b, INT_T *ldb,
+    float *s, float *rcond, INT_T *rank,
+    float *work, INT_T *lwork, INT_T *info);
 #endif
 
 #if AT_BUILD_WITH_BLAS()
 // trsm
-extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<double> *alpha, std::complex<double> *a, int *lda, std::complex<double> *b, int *ldb);
-extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, std::complex<float> *alpha, std::complex<float> *a, int *lda, std::complex<float> *b, int *ldb);
-extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, double *alpha, double *a, int *lda, double *b, int *ldb);
-extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, int *nrhs, float *alpha, float *a, int *lda, float *b, int *ldb);
+extern "C" void ztrsm_(char *side, char *uplo, char *trans, char *diag, INT_T *n, INT_T *nrhs, std::complex<double> *alpha, std::complex<double> *a, INT_T *lda, std::complex<double> *b, INT_T *ldb);
+extern "C" void ctrsm_(char *side, char *uplo, char *trans, char *diag, INT_T *n, INT_T *nrhs, std::complex<float> *alpha, std::complex<float> *a, INT_T *lda, std::complex<float> *b, INT_T *ldb);
+extern "C" void dtrsm_(char *side, char *uplo, char *trans, char *diag, INT_T *n, INT_T *nrhs, double *alpha, double *a, INT_T *lda, double *b, INT_T *ldb);
+extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int64_t *n, int64_t *nrhs, float *alpha, float *a, int64_t *lda, float *b, int64_t *ldb);
 #endif
 
 namespace at {
@@ -784,144 +784,144 @@ namespace native {
 // linear algebra operations
 
 template<class scalar_t>
-void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
+void lapackCholeskySolve(char uplo, INT_T n, INT_T nrhs, scalar_t *a, INT_T lda, scalar_t *b, INT_T ldb, INT_T *info);
 
 template<class scalar_t, class value_t=scalar_t>
-void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
+void lapackSymeig(char jobz, char uplo, INT_T n, scalar_t *a, INT_T lda, value_t *w, scalar_t *work, INT_T lwork, value_t *rwork, INT_T *info);
 
-template<> void lapackLu<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<c10::complex<double>>(INT_T m, INT_T n, c10::complex<double> *a, INT_T lda, INT_T *ipiv, INT_T *info) {
   zgetrf_(&m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, info);
 }
 
-template<> void lapackLu<c10::complex<float>>(int m, int n, c10::complex<float> *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<c10::complex<float>>(INT_T m, INT_T n, c10::complex<float> *a, INT_T lda, INT_T *ipiv, INT_T *info) {
   cgetrf_(&m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, info);
 }
 
-template<> void lapackLu<double>(int m, int n, double *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<double>(INT_T m, INT_T n, double *a, INT_T lda, INT_T *ipiv, INT_T *info) {
   dgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackLu<float>(int m, int n, float *a, int lda, int *ipiv, int *info) {
+template<> void lapackLu<float>(INT_T m, INT_T n, float *a, INT_T lda, INT_T *ipiv, INT_T *info) {
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackCholeskySolve<c10::complex<double>>(char uplo, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<c10::complex<double>>(char uplo, INT_T n, INT_T nrhs, c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb, INT_T *info) {
   zpotrs_(&uplo, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackCholeskySolve<c10::complex<float>>(char uplo, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<c10::complex<float>>(char uplo, INT_T n, INT_T nrhs, c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb, INT_T *info) {
   cpotrs_(&uplo, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
-template<> void lapackCholeskySolve<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<double>(char uplo, INT_T n, INT_T nrhs, double *a, INT_T lda, double *b, INT_T ldb, INT_T *info) {
   dpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackCholeskySolve<float>(char uplo, int n, int nrhs, float *a, int lda, float *b, int ldb, int *info) {
+template<> void lapackCholeskySolve<float>(char uplo, INT_T n, INT_T nrhs, float *a, INT_T lda, float *b, INT_T ldb, INT_T *info) {
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackCholesky<c10::complex<double>>(char uplo, int n, c10::complex<double> *a, int lda, int *info) {
+template<> void lapackCholesky<c10::complex<double>>(char uplo, INT_T n, c10::complex<double> *a, INT_T lda, INT_T *info) {
   zpotrf_(&uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, info);
 }
 
-template<> void lapackCholesky<c10::complex<float>>(char uplo, int n, c10::complex<float> *a, int lda, int *info) {
+template<> void lapackCholesky<c10::complex<float>>(char uplo, INT_T n, c10::complex<float> *a, INT_T lda, INT_T *info) {
   cpotrf_(&uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, info);
 }
 
-template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int *info) {
+template<> void lapackCholesky<double>(char uplo, INT_T n, double *a, INT_T lda, INT_T *info) {
   dpotrf_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *info) {
+template<> void lapackCholesky<float>(char uplo, INT_T n, float *a, INT_T lda, INT_T *info) {
   spotrf_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackCholeskyInverse<c10::complex<double>>(char uplo, int n, c10::complex<double> *a, int lda, int *info) {
+template<> void lapackCholeskyInverse<c10::complex<double>>(char uplo, INT_T n, c10::complex<double> *a, INT_T lda, INT_T *info) {
   zpotri_(&uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, info);
 }
 
-template<> void lapackCholeskyInverse<c10::complex<float>>(char uplo, int n, c10::complex<float> *a, int lda, int *info) {
+template<> void lapackCholeskyInverse<c10::complex<float>>(char uplo, INT_T n, c10::complex<float> *a, INT_T lda, INT_T *info) {
   cpotri_(&uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, info);
 }
 
-template<> void lapackCholeskyInverse<double>(char uplo, int n, double *a, int lda, int *info) {
+template<> void lapackCholeskyInverse<double>(char uplo, INT_T n, double *a, INT_T lda, INT_T *info) {
   dpotri_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackCholeskyInverse<float>(char uplo, int n, float *a, int lda, int *info) {
+template<> void lapackCholeskyInverse<float>(char uplo, INT_T n, float *a, INT_T lda, INT_T *info) {
   spotri_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackGeqrf<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
+template<> void lapackGeqrf<c10::complex<double>>(INT_T m, INT_T n, c10::complex<double> *a, INT_T lda, c10::complex<double> *tau, c10::complex<double> *work, INT_T lwork, INT_T *info) {
   zgeqrf_(&m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackGeqrf<c10::complex<float>>(int m, int n, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *work, int lwork, int *info) {
+template<> void lapackGeqrf<c10::complex<float>>(INT_T m, INT_T n, c10::complex<float> *a, INT_T lda, c10::complex<float> *tau, c10::complex<float> *work, INT_T lwork, INT_T *info) {
   cgeqrf_(&m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
-template<> void lapackGeqrf<double>(int m, int n, double *a, int lda, double *tau, double *work, int lwork, int *info) {
+template<> void lapackGeqrf<double>(INT_T m, INT_T n, double *a, INT_T lda, double *tau, double *work, INT_T lwork, INT_T *info) {
   dgeqrf_(&m, &n, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackGeqrf<float>(int m, int n, float *a, int lda, float *tau, float *work, int lwork, int *info) {
+template<> void lapackGeqrf<float>(INT_T m, INT_T n, float *a, INT_T lda, float *tau, float *work, INT_T lwork, INT_T *info) {
   sgeqrf_(&m, &n, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackOrgqr<c10::complex<double>>(int m, int n, int k, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
+template<> void lapackOrgqr<c10::complex<double>>(INT_T m, INT_T n, INT_T k, c10::complex<double> *a, INT_T lda, c10::complex<double> *tau, c10::complex<double> *work, INT_T lwork, INT_T *info) {
   zungqr_(&m, &n, &k, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackOrgqr<c10::complex<float>>(int m, int n, int k, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *work, int lwork, int *info) {
+template<> void lapackOrgqr<c10::complex<float>>(INT_T m, INT_T n, INT_T k, c10::complex<float> *a, INT_T lda, c10::complex<float> *tau, c10::complex<float> *work, INT_T lwork, INT_T *info) {
   cungqr_(&m, &n, &k, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
-template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, double *tau, double *work, int lwork, int *info) {
+template<> void lapackOrgqr<double>(INT_T m, INT_T n, INT_T k, double *a, INT_T lda, double *tau, double *work, INT_T lwork, INT_T *info) {
   dorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackOrgqr<float>(int m, int n, int k, float *a, int lda, float *tau, float *work, int lwork, int *info) {
+template<> void lapackOrgqr<float>(INT_T m, INT_T n, INT_T k, float *a, INT_T lda, float *tau, float *work, INT_T lwork, INT_T *info) {
   sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackOrmqr<c10::complex<double>>(char side, char trans, int m, int n, int k, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *c, int ldc, c10::complex<double> *work, int lwork, int *info) {
+template<> void lapackOrmqr<c10::complex<double>>(char side, char trans, INT_T m, INT_T n, INT_T k, c10::complex<double> *a, INT_T lda, c10::complex<double> *tau, c10::complex<double> *c, INT_T ldc, c10::complex<double> *work, INT_T lwork, INT_T *info) {
   zunmqr_(&side, &trans, &m, &n, &k, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(c), &ldc, reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackOrmqr<c10::complex<float>>(char side, char trans, int m, int n, int k, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *c, int ldc, c10::complex<float> *work, int lwork, int *info) {
+template<> void lapackOrmqr<c10::complex<float>>(char side, char trans, INT_T m, INT_T n, INT_T k, c10::complex<float> *a, INT_T lda, c10::complex<float> *tau, c10::complex<float> *c, INT_T ldc, c10::complex<float> *work, INT_T lwork, INT_T *info) {
   cunmqr_(&side, &trans, &m, &n, &k, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(c), &ldc, reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
-template<> void lapackOrmqr<double>(char side, char trans, int m, int n, int k, double *a, int lda, double *tau, double *c, int ldc, double *work, int lwork, int *info) {
+template<> void lapackOrmqr<double>(char side, char trans, INT_T m, INT_T n, INT_T k, double *a, INT_T lda, double *tau, double *c, INT_T ldc, double *work, INT_T lwork, INT_T *info) {
   dormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
 }
 
-template<> void lapackOrmqr<float>(char side, char trans, int m, int n, int k, float *a, int lda, float *tau, float *c, int ldc, float *work, int lwork, int *info) {
+template<> void lapackOrmqr<float>(char side, char trans, INT_T m, INT_T n, INT_T k, float *a, INT_T lda, float *tau, float *c, INT_T ldc, float *work, INT_T lwork, INT_T *info) {
   sormqr_(&side, &trans, &m, &n, &k, a, &lda, tau, c, &ldc, work, &lwork, info);
 }
 
-template<> void lapackSyevd<c10::complex<double>, double>(char jobz, char uplo, int n, c10::complex<double> *a, int lda, double *w, c10::complex<double> *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
+template<> void lapackSyevd<c10::complex<double>, double>(char jobz, char uplo, INT_T n, c10::complex<double> *a, INT_T lda, double *w, c10::complex<double> *work, INT_T lwork, double *rwork, INT_T lrwork, INT_T *iwork, INT_T liwork, INT_T *info) {
   zheevd_(&jobz, &uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, w, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, &lrwork, iwork, &liwork, info);
 }
 
-template<> void lapackSyevd<c10::complex<float>, float>(char jobz, char uplo, int n, c10::complex<float> *a, int lda, float *w, c10::complex<float> *work, int lwork, float *rwork, int lrwork, int *iwork, int liwork, int *info) {
+template<> void lapackSyevd<c10::complex<float>, float>(char jobz, char uplo, INT_T n, c10::complex<float> *a, INT_T lda, float *w, c10::complex<float> *work, INT_T lwork, float *rwork, INT_T lrwork, INT_T *iwork, INT_T liwork, INT_T *info) {
   cheevd_(&jobz, &uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, w, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, &lrwork, iwork, &liwork, info);
 }
 
-template<> void lapackSyevd<double>(char jobz, char uplo, int n, double *a, int lda, double *w, double *work, int lwork, double *rwork, int lrwork, int *iwork, int liwork, int *info) {
+template<> void lapackSyevd<double>(char jobz, char uplo, INT_T n, double *a, INT_T lda, double *w, double *work, INT_T lwork, double *rwork, INT_T lrwork, INT_T *iwork, INT_T liwork, INT_T *info) {
   (void)rwork;  // unused
   (void)lrwork;  // unused
   dsyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
-template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, float *rwork, int lrwork, int *iwork, int liwork, int *info) {
+template<> void lapackSyevd<float>(char jobz, char uplo, INT_T n, float *a, INT_T lda, float *w, float *work, INT_T lwork, float *rwork, INT_T lrwork, INT_T *iwork, INT_T liwork, INT_T *info) {
   (void)rwork;  // unused
   (void)lrwork;  // unused
   ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
-template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *w, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, double *rwork, int *info) {
+template<> void lapackEig<double>(char jobvl, char jobvr, INT_T n, double *a, INT_T lda, double *w, double* vl, INT_T ldvl, double *vr, INT_T ldvr, double *work, INT_T lwork, double *rwork, INT_T *info) {
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   double *wr = w;
@@ -930,7 +930,7 @@ template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int 
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *w, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, float *rwork, int *info) {
+template<> void lapackEig<float>(char jobvl, char jobvr, INT_T n, float *a, INT_T lda, float *w, float* vl, INT_T ldvl, float *vr, INT_T ldvr, float *work, INT_T lwork, float *rwork, INT_T *info) {
   // lapack [sd]geev wants to separate output arrays: wr and wi for the real
   // and imaginary parts
   float *wr = w;
@@ -939,7 +939,7 @@ template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int ld
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, int n, c10::complex<double> *a, int lda, c10::complex<double> *w, c10::complex<double> *vl, int ldvl, c10::complex<double> *vr, int ldvr, c10::complex<double> *work, int lwork, double *rwork, int *info) {
+template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, INT_T n, c10::complex<double> *a, INT_T lda, c10::complex<double> *w, c10::complex<double> *vl, INT_T ldvl, c10::complex<double> *vr, INT_T ldvr, c10::complex<double> *work, INT_T lwork, double *rwork, INT_T *info) {
   zgeev_(&jobvl, &jobvr, &n,
          reinterpret_cast<std::complex<double>*>(a), &lda,
          reinterpret_cast<std::complex<double>*>(w),
@@ -949,7 +949,7 @@ template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, 
          rwork, info);
 }
 
-template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
+template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, INT_T n, c10::complex<float> *a, INT_T lda, c10::complex<float> *w, c10::complex<float> *vl, INT_T ldvl, c10::complex<float> *vr, INT_T ldvr, c10::complex<float> *work, INT_T lwork, float *rwork, INT_T *info) {
   cgeev_(&jobvl, &jobvr, &n,
          reinterpret_cast<std::complex<float>*>(a), &lda,
          reinterpret_cast<std::complex<float>*>(w),
@@ -959,64 +959,64 @@ template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, in
          rwork, info);
 }
 
-template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
-                                  double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, double *rwork, int *iwork, int *info) {
+template<> void lapackSvd<c10::complex<double>, double>(char jobz, INT_T m, INT_T n, c10::complex<double> *a, INT_T lda,
+                                  double *s, c10::complex<double> *u, INT_T ldu, c10::complex<double> *vt, INT_T ldvt, c10::complex<double> *work, INT_T lwork, double *rwork, INT_T *iwork, INT_T *info) {
   zgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, s, reinterpret_cast<std::complex<double>*>(u), &ldu,
           reinterpret_cast<std::complex<double>*>(vt), &ldvt, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, iwork, info);
 }
 
-template<> void lapackSvd<c10::complex<float>, float>(char jobz, int m, int n, c10::complex<float> *a, int lda,
-                                 float *s, c10::complex<float> *u, int ldu, c10::complex<float> *vt, int ldvt, c10::complex<float> *work, int lwork, float *rwork, int *iwork, int *info) {
+template<> void lapackSvd<c10::complex<float>, float>(char jobz, INT_T m, INT_T n, c10::complex<float> *a, INT_T lda,
+                                 float *s, c10::complex<float> *u, INT_T ldu, c10::complex<float> *vt, INT_T ldvt, c10::complex<float> *work, INT_T lwork, float *rwork, INT_T *iwork, INT_T *info) {
   cgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, s, reinterpret_cast<std::complex<float>*>(u), &ldu,
           reinterpret_cast<std::complex<float>*>(vt), &ldvt, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, iwork, info);
 }
 
-template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
-                                  double *s, double *u, int ldu, double *vt, int ldvt, double *work, int lwork, double *rwork, int *iwork, int *info) {
+template<> void lapackSvd<double>(char jobz, INT_T m, INT_T n, double *a, INT_T lda,
+                                  double *s, double *u, INT_T ldu, double *vt, INT_T ldvt, double *work, INT_T lwork, double *rwork, INT_T *iwork, INT_T *info) {
   dgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
-template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
-                                 float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, float *rwork, int *iwork, int *info) {
+template<> void lapackSvd<float>(char jobz, INT_T m, INT_T n, float *a, INT_T lda,
+                                 float *s, float *u, INT_T ldu, float *vt, INT_T ldvt, float *work, INT_T lwork, float *rwork, INT_T *iwork, INT_T *info) {
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
 template <>
 void lapackLdlSymmetric<double>(
     char uplo,
-    int n,
+    INT_T n,
     double* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     double* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   dsytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
 void lapackLdlSymmetric<float>(
     char uplo,
-    int n,
+    INT_T n,
     float* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     float* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   ssytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
 void lapackLdlSymmetric<c10::complex<double>>(
     char uplo,
-    int n,
+    INT_T n,
     c10::complex<double>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<double>* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   zsytrf_(
       &uplo,
       &n,
@@ -1031,13 +1031,13 @@ void lapackLdlSymmetric<c10::complex<double>>(
 template <>
 void lapackLdlSymmetric<c10::complex<float>>(
     char uplo,
-    int n,
+    INT_T n,
     c10::complex<float>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<float>* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   csytrf_(
       &uplo,
       &n,
@@ -1052,39 +1052,39 @@ void lapackLdlSymmetric<c10::complex<float>>(
 template <>
 void lapackLdlHermitian<double>(
     char uplo,
-    int n,
+    INT_T n,
     double* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     double* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   dsytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
 void lapackLdlHermitian<float>(
     char uplo,
-    int n,
+    INT_T n,
     float* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     float* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   ssytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
 }
 
 template <>
 void lapackLdlHermitian<c10::complex<double>>(
     char uplo,
-    int n,
+    INT_T n,
     c10::complex<double>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<double>* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   zhetrf_(
       &uplo,
       &n,
@@ -1099,13 +1099,13 @@ void lapackLdlHermitian<c10::complex<double>>(
 template <>
 void lapackLdlHermitian<c10::complex<float>>(
     char uplo,
-    int n,
+    INT_T n,
     c10::complex<float>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<float>* work,
-    int lwork,
-    int* info) {
+    INT_T lwork,
+    INT_T* info) {
   chetrf_(
       &uplo,
       &n,
@@ -1120,42 +1120,42 @@ void lapackLdlHermitian<c10::complex<float>>(
 template <>
 void lapackLdlSolveSymmetric<double>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     double* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     double* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   dsytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
 template <>
 void lapackLdlSolveSymmetric<float>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     float* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     float* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   ssytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
 template <>
 void lapackLdlSolveSymmetric<c10::complex<double>>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     c10::complex<double>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<double>* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   zsytrs_(
       &uplo,
       &n,
@@ -1171,14 +1171,14 @@ void lapackLdlSolveSymmetric<c10::complex<double>>(
 template <>
 void lapackLdlSolveSymmetric<c10::complex<float>>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     c10::complex<float>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<float>* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   csytrs_(
       &uplo,
       &n,
@@ -1194,42 +1194,42 @@ void lapackLdlSolveSymmetric<c10::complex<float>>(
 template <>
 void lapackLdlSolveHermitian<double>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     double* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     double* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   dsytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
 template <>
 void lapackLdlSolveHermitian<float>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     float* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     float* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   ssytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
 template <>
 void lapackLdlSolveHermitian<c10::complex<double>>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     c10::complex<double>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<double>* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   zhetrs_(
       &uplo,
       &n,
@@ -1245,14 +1245,14 @@ void lapackLdlSolveHermitian<c10::complex<double>>(
 template <>
 void lapackLdlSolveHermitian<c10::complex<float>>(
     char uplo,
-    int n,
-    int nrhs,
+    INT_T n,
+    INT_T nrhs,
     c10::complex<float>* a,
-    int lda,
-    int* ipiv,
+    INT_T lda,
+    INT_T* ipiv,
     c10::complex<float>* b,
-    int ldb,
-    int* info) {
+    INT_T ldb,
+    INT_T* info) {
   chetrs_(
       &uplo,
       &n,
@@ -1265,26 +1265,26 @@ void lapackLdlSolveHermitian<c10::complex<float>>(
       info);
 }
 
-template<> void lapackLuSolve<c10::complex<double>>(char trans, int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
+template<> void lapackLuSolve<c10::complex<double>>(char trans, INT_T n, INT_T nrhs, c10::complex<double> *a, INT_T lda, INT_T *ipiv, c10::complex<double> *b, INT_T ldb, INT_T *info) {
   zgetrs_(&trans, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackLuSolve<c10::complex<float>>(char trans, int n, int nrhs, c10::complex<float> *a, int lda, int *ipiv, c10::complex<float> *b, int ldb, int *info) {
+template<> void lapackLuSolve<c10::complex<float>>(char trans, INT_T n, INT_T nrhs, c10::complex<float> *a, INT_T lda, INT_T *ipiv, c10::complex<float> *b, INT_T ldb, INT_T *info) {
   cgetrs_(&trans, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
-template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
+template<> void lapackLuSolve<double>(char trans, INT_T n, INT_T nrhs, double *a, INT_T lda, INT_T *ipiv, double *b, INT_T ldb, INT_T *info) {
   dgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
+template<> void lapackLuSolve<float>(char trans, INT_T n, INT_T nrhs, float *a, INT_T lda, INT_T *ipiv, float *b, INT_T ldb, INT_T *info) {
   sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
 template<> void lapackGels<c10::complex<double>>(
-    char trans, int m, int n, int nrhs,
-    c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb,
-    c10::complex<double> *work, int lwork, int *info) {
+    char trans, INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb,
+    c10::complex<double> *work, INT_T lwork, INT_T *info) {
   zgels_(&trans, &m, &n, &nrhs,
       reinterpret_cast<std::complex<double>*>(a), &lda,
       reinterpret_cast<std::complex<double>*>(b), &ldb,
@@ -1292,9 +1292,9 @@ template<> void lapackGels<c10::complex<double>>(
 }
 
 template<> void lapackGels<c10::complex<float>>(
-    char trans, int m, int n, int nrhs,
-    c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb,
-    c10::complex<float> *work, int lwork, int *info) {
+    char trans, INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb,
+    c10::complex<float> *work, INT_T lwork, INT_T *info) {
   cgels_(&trans, &m, &n, &nrhs,
       reinterpret_cast<std::complex<float>*>(a), &lda,
       reinterpret_cast<std::complex<float>*>(b), &ldb,
@@ -1302,27 +1302,27 @@ template<> void lapackGels<c10::complex<float>>(
 }
 
 template<> void lapackGels<double>(
-    char trans, int m, int n, int nrhs,
-    double *a, int lda, double *b, int ldb,
-    double *work, int lwork, int *info) {
+    char trans, INT_T m, INT_T n, INT_T nrhs,
+    double *a, INT_T lda, double *b, INT_T ldb,
+    double *work, INT_T lwork, INT_T *info) {
   dgels_(&trans, &m, &n, &nrhs,
       a, &lda, b, &ldb, work, &lwork, info);
 }
 
 template<> void lapackGels<float>(
-    char trans, int m, int n, int nrhs,
-    float *a, int lda, float *b, int ldb,
-    float *work, int lwork, int *info) {
+    char trans, INT_T m, INT_T n, INT_T nrhs,
+    float *a, INT_T lda, float *b, INT_T ldb,
+    float *work, INT_T lwork, INT_T *info) {
   sgels_(&trans, &m, &n, &nrhs,
       a, &lda, b, &ldb, work, &lwork, info);
 }
 
 template<> void lapackGelsd<c10::complex<double>, double>(
-    int m, int n, int nrhs,
-    c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb,
-    double *s, double rcond, int *rank,
-    c10::complex<double> *work, int lwork,
-    double *rwork, int *iwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb,
+    double *s, double rcond, INT_T *rank,
+    c10::complex<double> *work, INT_T lwork,
+    double *rwork, INT_T *iwork, INT_T *info) {
   zgelsd_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<double>*>(a), &lda,
       reinterpret_cast<std::complex<double>*>(b), &ldb,
@@ -1332,11 +1332,11 @@ template<> void lapackGelsd<c10::complex<double>, double>(
 }
 
 template<> void lapackGelsd<c10::complex<float>, float>(
-    int m, int n, int nrhs,
-    c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb,
-    float *s, float rcond, int *rank,
-    c10::complex<float> *work, int lwork,
-    float *rwork, int *iwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb,
+    float *s, float rcond, INT_T *rank,
+    c10::complex<float> *work, INT_T lwork,
+    float *rwork, INT_T *iwork, INT_T *info) {
   cgelsd_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<float>*>(a), &lda,
       reinterpret_cast<std::complex<float>*>(b), &ldb,
@@ -1346,11 +1346,11 @@ template<> void lapackGelsd<c10::complex<float>, float>(
 }
 
 template<> void lapackGelsd<double>(
-    int m, int n, int nrhs,
-    double *a, int lda, double *b, int ldb,
-    double *s, double rcond, int *rank,
-    double *work, int lwork,
-    double *rwork, int *iwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    double *a, INT_T lda, double *b, INT_T ldb,
+    double *s, double rcond, INT_T *rank,
+    double *work, INT_T lwork,
+    double *rwork, INT_T *iwork, INT_T *info) {
   dgelsd_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       s, &rcond, rank,
@@ -1358,11 +1358,11 @@ template<> void lapackGelsd<double>(
 }
 
 template<> void lapackGelsd<float>(
-    int m, int n, int nrhs,
-    float *a, int lda, float *b, int ldb,
-    float *s, float rcond, int *rank,
-    float *work, int lwork,
-    float *rwork, int *iwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    float *a, INT_T lda, float *b, INT_T ldb,
+    float *s, float rcond, INT_T *rank,
+    float *work, INT_T lwork,
+    float *rwork, INT_T *iwork, INT_T *info) {
   sgelsd_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       s, &rcond, rank,
@@ -1370,10 +1370,10 @@ template<> void lapackGelsd<float>(
 }
 
 template<> void lapackGelsy<c10::complex<double>, double>(
-    int m, int n, int nrhs,
-    c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb,
-    int *jpvt, double rcond, int *rank,
-    c10::complex<double> *work, int lwork, double *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb,
+    INT_T *jpvt, double rcond, INT_T *rank,
+    c10::complex<double> *work, INT_T lwork, double *rwork, INT_T *info) {
   zgelsy_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<double>*>(a), &lda,
       reinterpret_cast<std::complex<double>*>(b), &ldb,
@@ -1383,10 +1383,10 @@ template<> void lapackGelsy<c10::complex<double>, double>(
 }
 
 template<> void lapackGelsy<c10::complex<float>, float>(
-    int m, int n, int nrhs,
-    c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb,
-    int *jpvt, float rcond, int *rank,
-    c10::complex<float> *work, int lwork, float *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb,
+    INT_T *jpvt, float rcond, INT_T *rank,
+    c10::complex<float> *work, INT_T lwork, float *rwork, INT_T *info) {
   cgelsy_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<float>*>(a), &lda,
       reinterpret_cast<std::complex<float>*>(b), &ldb,
@@ -1396,10 +1396,10 @@ template<> void lapackGelsy<c10::complex<float>, float>(
 }
 
 template<> void lapackGelsy<double>(
-    int m, int n, int nrhs,
-    double *a, int lda, double *b, int ldb,
-    int *jpvt, double rcond, int *rank,
-    double *work, int lwork, double *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    double *a, INT_T lda, double *b, INT_T ldb,
+    INT_T *jpvt, double rcond, INT_T *rank,
+    double *work, INT_T lwork, double *rwork, INT_T *info) {
   dgelsy_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       jpvt, &rcond, rank,
@@ -1407,10 +1407,10 @@ template<> void lapackGelsy<double>(
 }
 
 template<> void lapackGelsy<float>(
-    int m, int n, int nrhs,
-    float *a, int lda, float *b, int ldb,
-    int *jpvt, float rcond, int *rank,
-    float *work, int lwork, float *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    float *a, INT_T lda, float *b, INT_T ldb,
+    INT_T *jpvt, float rcond, INT_T *rank,
+    float *work, INT_T lwork, float *rwork, INT_T *info) {
   sgelsy_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       jpvt, &rcond, rank,
@@ -1418,11 +1418,11 @@ template<> void lapackGelsy<float>(
 }
 
 template<> void lapackGelss<c10::complex<double>, double>(
-    int m, int n, int nrhs,
-    c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb,
-    double *s, double rcond, int *rank,
-    c10::complex<double> *work, int lwork,
-    double *rwork, int *info
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb,
+    double *s, double rcond, INT_T *rank,
+    c10::complex<double> *work, INT_T lwork,
+    double *rwork, INT_T *info
     ) {
   zgelss_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<double>*>(a), &lda,
@@ -1433,11 +1433,11 @@ template<> void lapackGelss<c10::complex<double>, double>(
 }
 
 template<> void lapackGelss<c10::complex<float>, float>(
-    int m, int n, int nrhs,
-    c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb,
-    float *s, float rcond, int *rank,
-    c10::complex<float> *work, int lwork,
-    float *rwork, int *info
+    INT_T m, INT_T n, INT_T nrhs,
+    c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb,
+    float *s, float rcond, INT_T *rank,
+    c10::complex<float> *work, INT_T lwork,
+    float *rwork, INT_T *info
     ) {
   cgelss_(&m, &n, &nrhs,
       reinterpret_cast<std::complex<float>*>(a), &lda,
@@ -1448,11 +1448,11 @@ template<> void lapackGelss<c10::complex<float>, float>(
 }
 
 template<> void lapackGelss<double>(
-    int m, int n, int nrhs,
-    double *a, int lda, double *b, int ldb,
-    double *s, double rcond, int *rank,
-    double *work, int lwork,
-    double *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    double *a, INT_T lda, double *b, INT_T ldb,
+    double *s, double rcond, INT_T *rank,
+    double *work, INT_T lwork,
+    double *rwork, INT_T *info) {
   dgelss_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       s, &rcond, rank,
@@ -1460,11 +1460,11 @@ template<> void lapackGelss<double>(
 }
 
 template<> void lapackGelss<float>(
-    int m, int n, int nrhs,
-    float *a, int lda, float *b, int ldb,
-    float *s, float rcond, int *rank,
-    float *work, int lwork,
-    float *rwork, int *info) {
+    INT_T m, INT_T n, INT_T nrhs,
+    float *a, INT_T lda, float *b, INT_T ldb,
+    float *s, float rcond, INT_T *rank,
+    float *work, INT_T lwork,
+    float *rwork, INT_T *info) {
   sgelss_(&m, &n, &nrhs,
       a, &lda, b, &ldb,
       s, &rcond, rank,
@@ -1473,24 +1473,28 @@ template<> void lapackGelss<float>(
 #endif
 
 #if AT_BUILD_WITH_BLAS()
-template<> void blasTriangularSolve<c10::complex<double>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb) {
+template<> void blasTriangularSolve<c10::complex<double>>(char side, char uplo, char trans, char diag, INT_T n, INT_T nrhs, c10::complex<double> *a, INT_T lda, c10::complex<double> *b, INT_T ldb) {
   std::complex<double> one{1., 0.};
   ztrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb);
 }
 
-template<> void blasTriangularSolve<c10::complex<float>>(char side, char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb) {
+template<> void blasTriangularSolve<c10::complex<float>>(char side, char uplo, char trans, char diag, INT_T n, INT_T nrhs, c10::complex<float> *a, INT_T lda, c10::complex<float> *b, INT_T ldb) {
   std::complex<float> one{1.f, 0.f};
   ctrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb);
 }
 
-template<> void blasTriangularSolve<double>(char side, char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb) {
+template<> void blasTriangularSolve<double>(char side, char uplo, char trans, char diag, INT_T n, INT_T nrhs, double *a, INT_T lda, double *b, INT_T ldb) {
   auto one = 1.;
   dtrsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
 }
 
-template<> void blasTriangularSolve<float>(char side, char uplo, char trans, char diag, int n, int nrhs, float *a, int lda, float *b, int ldb) {
+template<> void blasTriangularSolve<float>(char side, char uplo, char trans, char diag, INT_T n, INT_T nrhs, float *a, INT_T lda, float *b, INT_T ldb) {
   auto one = 1.f;
-  strsm_(&side, &uplo, &trans, &diag, &n, &nrhs, &one, a, &lda, b, &ldb);
+  int64_t lda_ = lda;
+  int64_t ldb_ = ldb;
+  int64_t n_ = n;
+  int64_t nrhs_ = nrhs;
+  strsm_(&side, &uplo, &trans, &diag, &n_, &nrhs_, &one, a, &lda_, b, &ldb_);
 }
 #endif
 
@@ -1639,7 +1643,7 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   auto nrhs = b.size(-1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
+  INT_T info;
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];

@@ -221,6 +221,7 @@ class CMake:
                     "INTEL_MKL_DIR",
                     "INTEL_OMP_DIR",
                     "MKL_THREADING",
+                    "MKL_MODEL",
                     "MKLDNN_CPU_RUNTIME",
                     "MSVC_Z7_OVERRIDE",
                     "CAFFE2_USE_MSVC_STATIC_RUNTIME",

@@ -9,7 +9,6 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/MaybeOwned.h>
-
 #if AT_USE_MKL_SPARSE()
 #include <ATen/mkl/SparseBlas.h>
 #include <ATen/mkl/SparseDescriptors.h>
@@ -148,13 +147,13 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
     std::memcpy(
         input_values.mutable_data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
     std::memcpy(
-        col_indices.mutable_data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+        MKL_TENSOR_MUTABLE_DATA_PTR(col_indices), columns, nnz * sizeof(MKL_INT));
   }
   if (rows > 0) {
     std::memcpy(
-        crow_indices.mutable_data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+        MKL_TENSOR_MUTABLE_DATA_PTR(crow_indices), rows_start, rows * sizeof(MKL_INT));
   }
-  crow_indices.mutable_data_ptr<MKL_INT>()[rows] = nnz;
+  MKL_TENSOR_MUTABLE_DATA_PTR(crow_indices)[rows] = nnz;
 }
 #endif
 
@@ -333,7 +332,6 @@ void addmm_sparse_result(
             mkl_sparse_mat1.descriptor(),
             mkl_sparse_mat2.descriptor(),
             &result_desc));
-
         // copy the data from MKL, otherwise computed result will be destroyed
         // together with `mkl_result`
         mkl_result_copy_<scalar_t>(mat1_mat2, result_desc);
