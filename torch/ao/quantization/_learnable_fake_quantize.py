@@ -30,7 +30,6 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     * :attr:`learning_enabled` defines the flag for enabling backpropagation for scale and zero point.
     """
-    
     def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
                  use_grad_scaling=False, **observer_kwargs):
         super().__init__()

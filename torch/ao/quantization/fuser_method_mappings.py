@@ -17,7 +17,6 @@ __all__ = [
 
 def fuse_conv_bn(is_qat, conv, bn):
     r"""Return the fused the conv and bn modules.
-    
     Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
@@ -56,7 +55,7 @@ def fuse_conv_bn(is_qat, conv, bn):
 
 def fuse_conv_bn_relu(is_qat, conv, bn, relu):
     r"""Return the fused conv and bv modules.
-    
+
     Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
@@ -105,7 +104,6 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
 
 def fuse_linear_bn(is_qat, linear, bn):
     r"""Return the fused linear and bn modules.
-    
     Given the linear and bn modules, fuses them and returns the fused module
 
     Args:
@@ -136,7 +134,6 @@ def fuse_linear_bn(is_qat, linear, bn):
 
 def fuse_convtranspose_bn(is_qat, convt, bn):
     r"""Return the fused ConvTranspose and bn modules.
-    
     Given ConvTranspose and bn modules, fuses them and returns the fused module
 
     Args:
@@ -161,7 +158,6 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
 
 def _sequential_wrapper2(sequential):
     """Return a sequential wrapped that for is_qat and two modules.
-    
     Given a sequential class for two modules, return a function that takes
     is_qat, and then two modules as argument, that ignores the is_qat flag
     and always returns the sequential that combines the two input modules
