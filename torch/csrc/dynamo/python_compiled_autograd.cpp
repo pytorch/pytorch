@@ -274,13 +274,14 @@ static TraceState call_begin_capture(
         compiler_call.tensor_args.lookup(compiler_call.tensor_args.inputs[i]);
     arg.proxy_tensor = proxy_inputs[i];
   }
-
+  std::cout << "Start capture" << std::endl;
   return TraceState(cache.unwrap_dynamic_inputs(fake_sizes), num_outputs);
 }
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   static PyObject* method_name = PyUnicode_InternFromString("end_capture");
   THPObjectPtr pyinput(THPVariable_WrapList(inputs));
+  std::cout << "End capture" << std::endl;
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 

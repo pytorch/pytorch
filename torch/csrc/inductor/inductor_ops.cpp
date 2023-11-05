@@ -8,6 +8,8 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <iostream>
+
 namespace torch {
 namespace inductor {
 using namespace at;
@@ -42,13 +44,19 @@ Tensor _reinterpret_tensor(
 static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   at::Tensor& grad = variable.mutable_grad();
   if (new_grad.device() != kMeta) {
-    torch::autograd::AccumulateGrad::accumulateGrad(
-        variable,
-        grad,
-        new_grad,
-        1 /* num_expected_refs */,
-        [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
+    std::cout << "Running real acc grad" << std::endl;
+    // torch::autograd::AccumulateGrad::accumulateGrad(
+    //     variable,
+    //     grad,
+    //     new_grad,
+    //     1 /* num_expected_refs */,
+    //     [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
+
+    if (!grad.defined()) {
+      grad = new_grad;
+    }
   } else {
+    std::cout << "Fake acc grad" << std::endl;
     // no shape checking for `device="meta"` to workaround FSDP inplace mutation
     if (!grad.defined()) {
       grad = new_grad;
