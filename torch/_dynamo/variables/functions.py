@@ -9,13 +9,7 @@ import torch
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
-from ..source import (
-    AttrSource,
-    ConstantSource,
-    DefaultsSource,
-    GetItemSource,
-    GlobalSource,
-)
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import make_cell
 from .base import typestr, VariableTracker
 
@@ -534,7 +528,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 def _traceable_collective_remaps():
-    # We can't rely on importing from distributed, since its not always built
+    # We can't rely on importing from distributed, since it's not always built
     if torch.distributed.is_available():
         from torch.distributed._functional_collectives import (
             traceable_collective_remaps,
@@ -544,7 +538,7 @@ def _traceable_collective_remaps():
     return {}
 
 
-def _traceable_collectives_source(fn):
+def _traceable_collectives_source(tx, fn):
     assert torch.distributed.is_available(), "Illegal invocation."
     from torch.distributed._functional_collectives import (
         all_gather_tensor_inplace,
@@ -554,12 +548,7 @@ def _traceable_collectives_source(fn):
     valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
     assert fn in valid_values
     inner_name = fn.__name__
-    path_source = AttrSource(
-        base=AttrSource(
-            base=GlobalSource(global_name="__import_torch"), member="distributed"
-        ),
-        member="_functional_collectives",
-    )
+    path_source = tx.import_source("torch.distributed._functional_collectives")
     return AttrSource(path_source, inner_name)
 
 
@@ -574,13 +563,20 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     than status-quo as we currently graph-break on all distributed.* collectives.
     """
 
-    def __init__(self, fn, *, orig_fn, orig_source, **kwargs):
-        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
-        self.orig_fn = orig_fn
-        self.orig_source = orig_source
-
-        # remapped_fn gets stuffed in self.fn and used in super().call_function
+    def __init__(self, fn, *, replacement_var, **kwargs):
         super().__init__(fn, **kwargs)
+        assert isinstance(replacement_var, UserFunctionVariable)
+        self.replacement_var = replacement_var
+
+    @staticmethod
+    def create(tx, old_fn, source, **options):
+        new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(tx, old_fn)
+        return CollectiveFunctionRewriteVariable(
+            old_fn,
+            replacement_var=UserFunctionVariable(new_fn, source=new_source, **options),
+            source=source,
+            **options,
+        )
 
     @staticmethod
     def can_rewrite(variable):
@@ -589,9 +585,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         )
 
     @staticmethod
-    def rewrite(fn):
+    def rewrite(tx, fn):
         new_fn = _traceable_collective_remaps()[fn]
-        return new_fn, _traceable_collectives_source(new_fn)
+        return new_fn, _traceable_collectives_source(tx, new_fn)
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -600,13 +596,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         if kwargs.get("async_op", False):
-            # Put the old source back, this function will always graph break, but this ensures
-            # we produce the correct guards.
-            self.source = self.orig_source
             unimplemented(
-                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
-        return super().call_function(tx, args, kwargs)
+        return self.replacement_var.call_function(tx, args, kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):
