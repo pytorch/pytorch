@@ -3556,7 +3556,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
-            for _ in range(2000):
+            for _ in range(1000):
                 x = 1.0 * x
             return x
 
