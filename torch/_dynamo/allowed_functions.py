@@ -148,7 +148,7 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-torch_in_graph_functions = set()
+# torch_in_graph_functions = set()
 
 
 # We are in progress of refactoring and moving the following functions to test_trace_rules.py.
@@ -198,7 +198,7 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch._C._nvtx",
             "torch._C._lazy",
             "torch._C._profiler",
-            "torch._C._special",
+            # "torch._C._special",
             "torch.__config__",
             "torch._custom_op",
             "torch._dispatch",
