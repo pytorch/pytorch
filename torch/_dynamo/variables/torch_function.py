@@ -234,4 +234,4 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
             return dispatch_torch_function(tx, func_var, [self] + args, kwargs)
         else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)
