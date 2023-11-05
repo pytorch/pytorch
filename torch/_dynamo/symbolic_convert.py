@@ -11,6 +11,7 @@ import linecache
 import logging
 import operator
 import sys
+import textwrap
 import threading
 import traceback
 import types
@@ -134,6 +135,8 @@ tls = threading.local()
 
 @dataclasses.dataclass
 class SpeculationEntry:
+    filename: str
+    lineno: int
     instruction_pointer: int
     failed: bool = False
     reason: Optional[GraphCompileReason] = None
@@ -162,20 +165,31 @@ class SpeculationLog:
     def restart(self):
         self.index = 0
 
-    def next(self, instruction_pointer) -> SpeculationEntry:
-        """
-        Lookup or create a SpeculationEntry() that is shared across RestartAnalysis calls.
+    def clear(self):
+        self.entries.clear()
+        self.index = 0
 
-        Args:
-            instruction_pointer: Snapshot of InstructionTranslator.instruction_pointer for debug asserts
+    def next(self, filename: str, lineno: int, instruction_pointer) -> SpeculationEntry:
+        """
+        Lookup or create a SpeculationEntry() that is shared across
+        RestartAnalysis calls.  Args are used only for debug checks.
         """
         if len(self.entries) == self.index:
-            self.entries.append(SpeculationEntry(instruction_pointer))
+            self.entries.append(SpeculationEntry(filename, lineno, instruction_pointer))
         entry = self.entries[self.index]
         self.index += 1
         assert (
             entry.instruction_pointer == instruction_pointer
-        ), "Speculation log diverged"
+            and entry.filename == filename
+            and entry.lineno == lineno
+        ), textwrap.dedent(
+            f"""
+            SpecuationLog diverged at {self.index} of {len(self.entries)}:
+            - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
+            - Run2: {filename}:{lineno} (ip={instruction_pointer})
+            Please submit a bug report.
+            """
+        )
         return entry
 
 
@@ -1972,7 +1986,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.strict_checks_enabled = False
 
     def speculate(self) -> SpeculationEntry:
-        return self.speculation_log.next(self.instruction_pointer)
+        return self.speculation_log.next(
+            self.f_code.co_filename, self.lineno, self.instruction_pointer
+        )
 
     def __init__(
         self,
