@@ -155,9 +155,7 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 class _DerivedObserverOrFakeQuantize(ObserverBase):
-    r"""Define an observer whose parameters are defined from other observers.
-
-    This observer is used to describe an observer whose quantization parameters
+    r"""This observer is used to describe an observer whose quantization parameters
     are derived from other observers
     """
 
