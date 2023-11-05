@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import itertools
-import math
 import operator
 import os
 import tempfile
@@ -137,7 +136,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
     def test_sympy_operatons_return_numeric(self):
         def func(x, y):
             return (
-                # torch.tensor([operator.add(x.item(), y.item())]),
+                torch.tensor([operator.add(x.item(), y.item())]),
                 # torch.tensor([operator.sub(x.item(), y.item())]),
                 # torch.tensor([operator.mul(x.item(), y.item())]),
                 # torch.tensor([operator.truediv(x.item(), y.item())]),
@@ -146,7 +145,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # torch.tensor([operator.abs(x.item())]),
                 # torch.tensor([operator.neg(x.item())]),
                 # TODO: type mismatch
-                torch.tensor([math.ceil(x.item())]),
+                # torch.tensor([math.ceil(x.item())]),
                 # torch.tensor([math.floor(x.item())]),
             )
 

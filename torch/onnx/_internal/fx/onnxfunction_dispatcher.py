@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-
 import math
 import operator
+import types
 from typing import (
     Any,
     Callable,
@@ -318,9 +318,7 @@ class OnnxFunctionDispatcher:
             aten_op_default = node.target.default
             return registration.OpName.from_op_overload(op_overload=aten_op_default)  # type: ignore[no-any-return]
 
-        if (
-            aten_op := _symint_symfloat_builtin_to_exporter_key_table(node.target)
-        ) is not None:
+        if isinstance(node.target, types.BuiltinFunctionType):
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
@@ -340,11 +338,14 @@ class OnnxFunctionDispatcher:
                     )
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-            return registration.OpName.from_op_overload(op_overload=aten_op)
+            return registration.OpName.from_builtin_function(node.target)
 
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
 
+        import pdb
+
+        pdb.set_trace()
         # Unexpected target, raise error.
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,
