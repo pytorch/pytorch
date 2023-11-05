@@ -523,12 +523,11 @@ class VariableBuilder:
             return NumpyVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
-            old_source = self.source
-            self.source = new_source
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return CollectiveFunctionRewriteVariable(
-                new_fn, orig_fn=value, orig_source=old_source, source=new_source
+            return CollectiveFunctionRewriteVariable.create(
+                self.tx,
+                value,
+                source=self.source,
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
