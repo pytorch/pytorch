@@ -2033,6 +2033,17 @@ utils_device.CURRENT_DEVICE == None""",
 
             self.assertEqual(cnts.frame_count, 1)  # no graph break
 
+    def test_numpy_random_config_to_numpy(self):
+        # setting the config value makes the PRNG identical to numpy's
+        # NB this may involve a graph break
+        torch._dynamo.config.use_numpy_random_stream = True
+
+        @torch.compile
+        def fn():
+            return np.random.uniform(size=13)
+
+        self.assertEqual(fn().shape, (13,))
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -8150,8 +8161,8 @@ ShapeEnv not equal: field values don't match:
         other.create_unbacked_symint()
 
         # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
-        #   - +1 defferred_runtime_asserts entry
-        #   - Change: num_defferred_runtime_asserts
+        #   - +1 deferred_runtime_asserts entry
+        #   - Change: num_deferred_runtime_asserts
         expect_true(r % 3 == 0)
 
         self.assertExpectedRaisesInline(

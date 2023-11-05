@@ -1295,14 +1295,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
