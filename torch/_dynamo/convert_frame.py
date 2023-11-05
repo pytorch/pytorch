@@ -505,7 +505,10 @@ def _compile(
         try:
             with tracing(tracer.output.tracing_context):
                 tracer.run()
-        except (exc.RestartAnalysis, exc.SkipFrame):
+        except exc.UnspecializeRestartAnalysis:
+            speculation_log.clear()
+            raise
+        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
             if translation_validation_enabled():
