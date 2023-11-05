@@ -33,11 +33,8 @@ DriverAPI create_driver_api() {
 } // namespace
 
 void* DriverAPI::get_nvml_handle() {
-  static c10::once_flag once;
-  static void* handle_1;
-  c10::call_once(
-      once, [] { handle_1 = dlopen("libnvidia-ml.so.1", RTLD_LAZY); });
-  return handle_1;
+  static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  return nvml_hanle;
 }
 
 DriverAPI* DriverAPI::get() {
