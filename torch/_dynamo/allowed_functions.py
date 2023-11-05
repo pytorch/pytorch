@@ -148,7 +148,7 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-# torch_in_graph_functions = set()
+torch_in_graph_functions = set()
 
 
 # We are in progress of refactoring and moving the following functions to test_trace_rules.py.
@@ -222,8 +222,9 @@ def _allowed_function_ids() -> Dict[int, str]:
             # "torch.distributed.distributed_c10d",
             # "torch.distributed.rpc",
             # "torch.distributed.utils",
+            "torch.hub",
             "torch.jit",
-            # "torch.masked",
+            "torch.masked.maskedtensor",
             "torch.nn.init",
             "torch.nn.modules.module",
             "torch.nn.parallel",
@@ -234,7 +235,7 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch.package",
             "torch.profiler",
             "torch.serialization",
-            "torch.signal",
+            # "torch.signal",
             "torch.storage",
             "torch.utils",
         ]
