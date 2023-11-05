@@ -705,6 +705,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 # return ConstantVariable(None)
                 # self.value(args[0].as_proxy().node.meta['example_value'], args[1].value)
 
+            print("RUNNING OP", self.value)
+            tensor_var_to_grad = {}
+            for arg in args:
+                if isinstance(arg, TensorVariable):
+                    grad = arg.as_proxy().node.meta['example_value'].grad
+                    print("GRAD FOR ARG PRE", grad)
+                    tensor_var_to_grad[arg] = grad
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -714,6 +721,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 **options,
             )
+
+            for arg in args:
+                if isinstance(arg, TensorVariable):
+                    if arg in tensor_var_to_grad:
+                        old_grad = tensor_var_to_grad[arg]
+                        new_grad = arg.as_proxy().node.meta['example_value'].grad
+                        def _grad_changed(old, new):
+                            if old is None or new is None:
+                                return old is not new
+                            return old.shape != new.shape or old.strides() != new.strides()
+
+                        if _grad_changed(old_grad, new_grad):
+                            print("Grad changed")
+                            for grapharg in tx.output.graphargs:
+                                if grapharg.source == arg.source:
+                                    print("Matching found")
+                                    grad_shape_specialized = [
+                                       int(x) for x in new_grad.shape
+                                    ]
+                                    grapharg.example.grad = torch.zeros(
+                                        grad_shape_specialized, device=new_grad.device
+                                    )
+                                    print("Set new grad on", grapharg.source.name(), grapharg.example.grad)
+
+                    print("GRAD FOR ARG POST", )
 
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)

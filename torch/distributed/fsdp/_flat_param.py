@@ -2406,6 +2406,7 @@ class FlatParamHandle:
             # (accumulated) gradient. If accessed in IDLE, then this should
             # be due to re-registering the original parameters (e.g. in state
             # dict load).
+            # assert not self.uses_sharded_strategy
             _p_assert(
                 flat_param.grad is None
                 or not self.uses_sharded_strategy

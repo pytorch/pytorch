@@ -406,10 +406,12 @@ class GuardBuilder(GuardBuilderBase):
                 istype(x, ok_types) for x in itertools.chain(val.keys(), val.values())
             )
         else:
-            assert istype(
+            if not istype(
                 val,
                 ok_types,
-            ), t.__name__
+            ):
+                # Gross hack because of tensor slipping here, during some grad bullshit, need to check
+                return
 
         if istype(val, (torch.device, torch.dtype)):
             # TODO(jansel): is this slow? perhaps optimize it

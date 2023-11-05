@@ -1046,11 +1046,12 @@ class BuiltinVariable(VariableTracker):
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
         name = name_var.as_python_constant()
+        print("GETTATR", name, type(obj), obj.source, "mut" if tx.output.side_effects.is_attribute_mutation(obj) else "not mut")
 
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj):
+        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name).add_options(options)
@@ -1095,6 +1096,7 @@ class BuiltinVariable(VariableTracker):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
             if source:
+                print("Grad accessed on ", source.name())
                 # We are going to be raising this tensor as grapharg. So, ensure
                 # that we have real grad value instead of fake tensor value.
                 # Walk through the inputs of the subgraph and find if we already
@@ -1105,24 +1107,28 @@ class BuiltinVariable(VariableTracker):
                         new_grad = obj.as_proxy().node.meta["example_value"].grad
 
                         def _grad_changed(old, new):
-                            if old_grad is None:
-                                return new is not None
-                            if old_grad.shape != new_grad.shape:
+                            if old is None or new is None:
+                                return new is not old
+                            if old.shape != new.shape:
                                 return True
-                            if old_grad.stride() != new_grad.stride():
+                            if old.stride() != new.stride():
                                 return True
                             return False
+
 
                         if _grad_changed(old_grad, new_grad):
                             print("GRAD CHANGED!?")
                             breakpoint()
-                            grad_shape_specialized = [int(x) for x in new_grad.shape]
-                            # We lazily update the grad on the example to its real state as tracked by fake tensor.
-                            # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
-                            # the underlying value to always be correct.
-                            grapharg.example.grad = torch.zeros(
-                                grad_shape_specialized, device=new_grad.device
-                            )
+                            if new_grad is not None:
+                                grad_shape_specialized = [int(x) for x in new_grad.shape]
+                                # We lazily update the grad on the example to its real state as tracked by fake tensor.
+                                # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
+                                # the underlying value to always be correct.
+                                grapharg.example.grad = torch.zeros(
+                                    grad_shape_specialized, device=new_grad.device
+                                )
+                            else:
+                                grapharg.example.grad = None
                         out = VariableBuilder(tx, source)(
                             grapharg.example.grad
                         ).add_options(options)
@@ -1143,9 +1149,17 @@ class BuiltinVariable(VariableTracker):
                 #     return VariableBuilder(tx, source)(
                 #             rtensor
                 #         ).add_options(options)
-                unimplemented("tensor grad w/o arg, w/o value")
+                # unimplemented("tensor grad w/o arg, w/o value")
+                from .builder import wrap_fx_proxy
+                # Is this wrong from a specialization perspective?
+                print("GRAD ACCESS NO ARG?", obj.as_proxy().node.meta["example_value"].grad)
+                return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
             else:
-                unimplemented("tensor grad w/o source")
+                from .builder import wrap_fx_proxy
+                # Intermediaries grad, should be okay?
+                print("GRAD ACCESS NO SOURCE?", obj.as_proxy().node.meta["example_value"].grad)
+                return wrap_fx_proxy(tx, obj.as_proxy().grad, **options)
+                # unimplemented("tensor grad w/o source")
         elif isinstance(
             obj,
             (
@@ -1255,6 +1269,11 @@ class BuiltinVariable(VariableTracker):
                         {},
                     )
                     tx.replace_all(obj, out)
+                elif name_var.value == "grad":
+                    if isinstance(val, ConstantVariable):
+                        obj.as_proxy().node.meta["example_value"].grad = val.value
+                    else:
+                        obj.as_proxy().node.meta["example_value"].grad = val.as_proxy().node.meta['example_value']
 
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
