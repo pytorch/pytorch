@@ -1272,16 +1272,19 @@ def _dataclasses_fields_lambda(obj):
 
 
 def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
-    return wrap_fx_proxy_cls(
-        target_cls=TensorVariable
-        if not subclass_type
-        else TensorWithTFOverrideVariable,
-        tx=tx,
-        proxy=proxy,
-        example_value=example_value,
-        subclass_type=subclass_type,
+    kwargs = {
+        "tx": tx,
+        "proxy": proxy,
+        "example_value": example_value,
+        "subclass_type": subclass_type,
         **options,
-    )
+    }
+    if subclass_type is None:
+        return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
+    else:
+        result = wrap_fx_proxy_cls(target_cls=TensorWithTFOverrideVariable, **kwargs)
+        result.install_global(tx)
+        return result
 
 
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
