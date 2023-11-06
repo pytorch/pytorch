@@ -1249,6 +1249,29 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         _check_nccl_timeout(timedelta(seconds=1240))
         dist.destroy_process_group()
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_tensor_register_hook(self):
+        os.environ["NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_id = self.rank_to_GPU[self.rank][0]
+
+        def allgather_base(output_t, input_t):
+            work = pg._allgather_base(output_t, input_t)
+            work.wait()
+
+        # allgather_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        tensor = torch.tensor([self.rank]).cuda(local_device_id)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(local_device_id)
+
+        allgather_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(torch.arange(self.world_size), output_t)
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
