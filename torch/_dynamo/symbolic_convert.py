@@ -674,6 +674,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
+        elif isinstance(oldvar.mutable_local, side_effects.AttributeMutationExisting):
+            newvar = oldvar
         else:
             assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
             newvar = newvar.clone(mutable_local=variables.base.MutableLocal())

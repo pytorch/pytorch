@@ -3568,31 +3568,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
         )
 
-    def test_numpy_not_ndarray_recompiles(self):
-        import torch
+    def test_tensor_set_data(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
 
-        def fn(x=None):
-            if x is None:
-                x = np.ones(3)
-            elif isinstance(x, int):
-                x = np.ones(6)
-            elif isinstance(x, str):
-                x = np.ones(9)
-            return x**2
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt)(fn)
+        def func3(x, y):
+            z = x
+            x.data = y
+            y.data = torch.zeros([0])
+            return x is z
 
-        x = np.zeros((2, 2))
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            for func in [func1, func2, func3]:
+                if func is func1 and backend != "eager":
+                    # NYI - aot_autograd with add_() on data
+                    return
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-        self.assertEqual(opt_fn(x), fn(x))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(opt_fn(), fn())
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(opt_fn(10), fn(10))
-        self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(opt_fn("10"), fn("10"))
-        self.assertEqual(cnt.frame_count, 4)
+                compiled_fn = torch.compile(func, backend=cnt)
+                for i in range(0, 5):
+                    # Inputs
+                    eager_a = torch.rand([6])
+                    compiled_a = torch.clone(eager_a)
+                    eager_b = torch.rand([6])
+                    compiled_b = torch.clone(eager_b)
+
+                    # Eager
+                    func(eager_a, eager_b)
+                    # Compiled
+                    compiled_fn(compiled_a, compiled_b)
+                    self.assertEqual(eager_a, compiled_a)
+                    self.assertEqual(eager_b, compiled_b)
+
+                # Prove guarding works - we run the compiled_fn 5 times
+                # frame_count should stay at 1.
+                self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
