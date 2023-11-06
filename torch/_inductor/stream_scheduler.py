@@ -748,6 +748,7 @@ def stream_schedule(snodes):
                 content = json.load(fin)
             success = ssgraph.check_fingerprint(content)
             if not success:
+                # TODO: the performance and accuracy mode could be different. when does the accuracy test, the saved stream assignment may be not valid.
                 log.warning("Failed to load existing stream assignment. Reassign the stream.")
         if not success:
             ssgraph.stream_assign()

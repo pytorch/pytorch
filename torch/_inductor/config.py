@@ -31,7 +31,7 @@ pick_loop_orders = True
 inplace_buffers = True
 
 # allow reusing buffers for more efficient memory use
-allow_buffer_reuse = False
+allow_buffer_reuse = True
 
 # codegen benchmark harness
 benchmark_harness = True
