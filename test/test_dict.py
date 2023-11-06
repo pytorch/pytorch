@@ -2380,10 +2380,14 @@ class TestTensorDicts(TestCase):
                 td.memmap_(os.path.join(tmp_path, "tensordict"))
 
             assert os.path.exists(os.path.join(tmp_path, "tensordict", "meta.json"))
-            with open(os.path.join(tmp_path, "tensordict", "meta.json"), 'r') as file:
+            with open(os.path.join(tmp_path, "tensordict", "meta.json"), "r") as file:
                 metadata = json.load(file)
             assert td.batch_size == torch.Size(metadata["shape"])
-            device = torch.device(metadata["device"]) if metadata["device"] != "None" else None
+            device = (
+                torch.device(metadata["device"])
+                if metadata["device"] != "None"
+                else None
+            )
             assert td.device == device, (td.device, device)
 
             td2 = td.__class__.load_memmap(os.path.join(tmp_path, "tensordict"))

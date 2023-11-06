@@ -207,7 +207,7 @@ class TensorDict(TensorDictBase):
 
     @staticmethod
     def from_module(
-        module: "torch.nn.Module", as_module: bool = False, lock: bool = True
+        module: "torch.nn.Module", as_module: bool = False, lock: bool = False
     ):
         td_struct = TensorDict({}, [])
         for key, param in module.named_parameters(recurse=False):
@@ -245,7 +245,13 @@ class TensorDict(TensorDictBase):
 
         for key, value in self.items():
             cls = value.__class__
-            if _is_tensor_collection(cls):  # or issubclass(cls, dict):
+            if _is_tensor_collection(cls):
+                for _ in value.keys():
+                    # if there is at least one key, we must populate the module.
+                    # Otherwise we just go to the next key
+                    break
+                else:
+                    continue
                 if swap_dest is not None:
                     local_dest = swap_dest._get_str(key, default=NO_DEFAULT)
                 else:
