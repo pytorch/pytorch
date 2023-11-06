@@ -3568,6 +3568,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
         )
 
+    def test_numpy_not_ndarray_recompiles(self):
+        import torch
+
+        def fn(x=None):
+            if x is None:
+                x = np.ones(3)
+            elif isinstance(x, int):
+                x = np.ones(6)
+            elif isinstance(x, str):
+                x = np.ones(9)
+            return x**2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+
+        x = np.zeros((2, 2))
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(opt_fn(), fn())
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(10), fn(10))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_fn("10"), fn("10"))
+        self.assertEqual(cnt.frame_count, 4)
+
+
     def test_tensor_set_data(self):
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
@@ -3612,7 +3639,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # Prove guarding works - we run the compiled_fn 5 times
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
