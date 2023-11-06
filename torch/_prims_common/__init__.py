@@ -17,10 +17,17 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -93,6 +100,17 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             return False
 
     return True
+
+
+def _maybe_get_pytype(t):
+    if t is torch.SymFloat:
+        return float
+    elif t is torch.SymInt:
+        return int
+    elif t is torch.SymBool:
+        return bool
+    else:
+        return t
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -1003,9 +1021,10 @@ def get_higher_type(a: type, b: type) -> type:
 
     The types are ordered bool -> int -> float -> complex.
     """
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
     # Type checking
-    assert a in _ordered_types
-    assert b in _ordered_types
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     if a is b:
         return a
@@ -1104,17 +1123,13 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
 
     The comparison is determined by the following type ordering: bool, int, float, complex.
     """
-    ordered_types = (
-        bool,
-        int,
-        float,
-        complex,
-    )
 
-    assert a in ordered_types
-    assert b in ordered_types
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
 
-    for typ in ordered_types:
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
+
+    for typ in _ordered_types:
         if a == typ:
             return True
         if b == typ:
@@ -1367,6 +1382,11 @@ def elementwise_dtypes(
     args = tuple(x for x in _args if x is not None)
 
     highest_type: type = bool
+
+    # Import sympy locally, as importing it eagerly at a module level is too slow
+    # See https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589
+    import sympy
+
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
@@ -1494,11 +1514,27 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    # TODO: Move this somewhere central?
+    def _is_singleton(s):
+        # check for SingletonSymNode
+        if not isinstance(s, torch.SymInt):
+            return False
+        if s.node.singleton_int() is not None:
+            return True
+
+        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
+        return (
+            s.node.is_symbolic()
+            and s.node.hint is not None
+            and isinstance(s.node.hint, torch.SymInt)
+            and s.node.hint.node.singleton_int() is not None
+        )
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 

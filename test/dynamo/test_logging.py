@@ -92,6 +92,14 @@ class LoggingTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
+    @requires_cuda()
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
         def fn(x, y):
@@ -543,7 +551,7 @@ print("arf")
         fn_opt = torch._dynamo.optimize("eager")(fn)
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -554,7 +562,7 @@ print("arf")
                 ~~^~~""",
         )
         self.assertExpectedInline(
-            messages[1],
+            messages[-1],
             """\
             return x * 3
                    ~~^~~""",
@@ -588,7 +596,10 @@ exclusions = {
     "bytecode",
     "output_code",
     "schedule",
+    "fusion",
+    "overlap",
     "aot_graphs",
+    "post_grad_graphs",
     "compiled_autograd",
     "recompiles",
     "graph_breaks",

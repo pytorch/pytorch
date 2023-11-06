@@ -1,9 +1,8 @@
-#include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <torch/library.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 static void metaFallback(
     const c10::OperatorHandle& op,
@@ -25,5 +24,4 @@ TORCH_LIBRARY_IMPL(_, Meta, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&metaFallback>());
 }
 
-}
-}
+} // namespace at::impl

@@ -406,6 +406,10 @@ class Vectorized<float> {
     return map(calc_i0e);
   }
 
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
+  }
+
   DEFINE_MEMBER_OP(operator==, float, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, float, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, float, vec_cmplt)

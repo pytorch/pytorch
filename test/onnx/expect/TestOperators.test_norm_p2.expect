@@ -5,12 +5,12 @@ graph {
   node {
     input: "onnx::Abs_0"
     output: "onnx::Pow_1"
-    name: "Abs_0"
+    name: "Abs_3"
     op_type: "Abs"
   }
   node {
     output: "onnx::Pow_2"
-    name: "Constant_1"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -25,12 +25,12 @@ graph {
     input: "onnx::Pow_1"
     input: "onnx::Pow_2"
     output: "onnx::ReduceSum_3"
-    name: "Pow_2"
+    name: "Pow_5"
     op_type: "Pow"
   }
   node {
     output: "onnx::ReduceSum_4"
-    name: "Constant_3"
+    name: "Constant_6"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -46,7 +46,7 @@ graph {
     input: "onnx::ReduceSum_3"
     input: "onnx::ReduceSum_4"
     output: "onnx::Pow_5"
-    name: "ReduceSum_4"
+    name: "ReduceSum_7"
     op_type: "ReduceSum"
     attribute {
       name: "keepdims"
@@ -61,7 +61,7 @@ graph {
   }
   node {
     output: "onnx::Pow_10"
-    name: "Constant_5"
+    name: "Constant_8"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -76,7 +76,7 @@ graph {
     input: "onnx::Pow_5"
     input: "onnx::Pow_10"
     output: "9"
-    name: "Pow_6"
+    name: "Pow_9"
     op_type: "Pow"
   }
   name: "main_graph"

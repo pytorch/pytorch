@@ -8,6 +8,7 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <thread>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -346,6 +347,88 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
 }
 
+size_t
+PyTorchStreamReader::getRecordMultiReaders(const std::string& name,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+  void *dst, size_t n){
+
+  size_t nthread = additionalReaders.size()+1;
+  size_t recordOff = getRecordOffset(name);
+  std::vector<std::thread> loaderThreads;
+  size_t perThreadSize = (n+nthread-1)/nthread;
+  std::vector<size_t> readSizes(nthread, 0);
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  for(size_t i = 0; i < nthread ; i++){
+    loaderThreads.emplace_back([this, name, i, n, recordOff, perThreadSize, dst, &additionalReaders, &readSizes]{
+      size_t startPos = i*perThreadSize;
+      size_t endPos = std::min((i+1)*perThreadSize,n);
+      if (startPos < endPos){
+        size_t threadReadSize = endPos - startPos;
+        size_t size = 0;
+        if (i==0){
+          size = read(recordOff+startPos, (char *)dst+startPos, threadReadSize);
+        }else{
+          auto reader = additionalReaders[i-1];
+          size = reader->read(recordOff+startPos, (char *)dst+startPos, threadReadSize);
+        }
+        readSizes[i] = size;
+        LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos << "] "
+            << "from " << name << " of size " << n;
+        TORCH_CHECK(
+              threadReadSize == size,
+              "record size ",
+              threadReadSize,
+              " mismatch with read size ",
+              size);
+      }
+    });
+  }
+
+  for (auto& thread : loaderThreads) {
+    thread.join();
+  }
+  loaderThreads.clear();
+
+  size_t total_read_n = 0;
+  for (auto& r : readSizes){
+    total_read_n += r;
+  }
+
+  TORCH_CHECK(
+      n == total_read_n,
+      "Multi reader total read size ",
+      total_read_n,
+      " mismatch with dst size ",
+      n);
+
+  return total_read_n;
+}
+
+// read record with multi clients
+std::tuple<at::DataPtr, size_t>
+PyTorchStreamReader::getRecord(const std::string& name,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    at::DataPtr retval;
+    return std::make_tuple(std::move(retval), 0);
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  auto n = stat.m_uncomp_size;
+  valid("retrieving file meta-data for ", name.c_str());
+  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
+    // No additional readers or record too small, use single threaded version
+    return getRecord(name);
+  }
+
+  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  void* dst = retval.get();
+  PyTorchStreamReader::getRecordMultiReaders(name, additionalReaders, dst, n);
+  return std::make_tuple(std::move(retval), stat.m_uncomp_size);
+}
+
 // inplace memory writing
 size_t
 PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
@@ -369,6 +452,34 @@ PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
   return stat.m_uncomp_size;
 }
 
+
+// inplace memory writing, in-tensor multi-threads, can be used for large tensor.
+size_t
+PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders) {
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return 0;
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  TORCH_CHECK(
+      n == stat.m_uncomp_size,
+      "record size ",
+      stat.m_uncomp_size,
+      " mismatch with dst size ",
+      n);
+  valid("retrieving file meta-data for ", name.c_str());
+
+  if(additionalReaders.empty() || n < additional_reader_size_threshold_){
+    // No additional readers, use single threaded version
+    return getRecord(name, dst, n);
+  }
+
+  PyTorchStreamReader::getRecordMultiReaders(name, additionalReaders, dst, n);
+  return stat.m_uncomp_size;
+}
+
 size_t PyTorchStreamReader::getRecord(
     const std::string& name,
     void* dst,
@@ -379,6 +490,9 @@ size_t PyTorchStreamReader::getRecord(
   std::lock_guard<std::mutex> guard(reader_lock_);
   if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
     return 0;
+  }
+  if (chunk_size <= 0) {
+    chunk_size = n;
   }
   size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
