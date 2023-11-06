@@ -1164,8 +1164,12 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
 void dump_debugging_info() {
   LOG(ERROR)
-      << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info: "
-      << dump_nccl_trace();
+      << "No PGNCCL's watchdog heartbeat detected, so we are dumping debug info.";
+  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
+    // TODO: Find the right and proper way to dump the debug info.
+    // We cannot print out debugging info directly.
+    LOG(ERROR) << "nccl_trace: " << dump_nccl_trace();
+  }
 }
 
 void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
@@ -1195,19 +1199,18 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     }
   }
 
-  // In the timeout case and we will first dump the flight recorder
+  // In the timeout case and we now only dump the flight recorder
   // to std::out. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
-    // TODO: Find the right and proper way to dump the debug info.
-    // We cannot print out debugging info directly.
-    dump_debugging_info();
-  }
+  dump_debugging_info();
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.
   const auto exitMsg = c10::str(
-      "[Rank ", rank_, "] NCCL monitor thread terminated with timeout: ");
+      "[Rank ",
+      rank_,
+      "] NCCL monitor thread timeout. Basically, this could ",
+      "be a system error and please file a bug to pytorch.");
   if (!terminateProcessGroup_.load()) {
     LOG(ERROR)
         << "monitoring thread detects no heartbeat and will kill the process!";
