@@ -989,35 +989,9 @@ class Kernel(CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
-                    expr = getattr(parent_handler, name)(*args, **kwargs)
-
-                    # # We can narrow the bounds of the variable by parsing expr
-                    # # to SymPy
-                    # if isinstance(expr, str):
-                    #     # not everything can be parsed by SymPy. Is there a
-                    #     # better way to do this?
-                    #     try:
-                    #         sympy_expr = sympy.simplify(expr)
-                    #     except sympy.SympifyError:
-                    #         pass
-                    #     else:
-                    #         symbols_map = {str(s): s for s in sympy_expr.free_symbols}
-                    #         ranges = {}
-                    #         for arg in args:
-                    #             if isinstance(arg, CSEVariable):
-                    #                 symbol = symbols_map.get(arg.name)
-                    #                 bounds = arg.bounds
-                    #             elif isinstance(arg, sympy.Symbol):
-                    #                 symbol = symbols_map.get(str(arg))
-                    #                 bounds = ValueRanges.unknown()
-                    #             ranges[symbol] = bounds
-                    #         print(sympy_expr)
-                    #         buf_bounds = bound_sympy(sympy_expr, ranges)
-                    #         print(buf_bounds)
-
                     csevar = self.cse.generate(
                         self.compute,
-                        expr,
+                        getattr(parent_handler, name)(*args, **kwargs),
                         bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
