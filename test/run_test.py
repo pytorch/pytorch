@@ -1811,10 +1811,12 @@ def main():
                     "td_test_failure_stats",
                     {
                         **test_stats,
-                        "confidence_ratings": get_prediction_confidences(selected_tests),
+                        "confidence_ratings": get_prediction_confidences(
+                            selected_tests
+                        ),
                         "failure": str(test),
                         "tests": selected_tests,
-                    }
+                    },
                 )
 
     if len(all_failures):
