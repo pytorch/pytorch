@@ -1175,7 +1175,10 @@ class AOTInductorModelCache:
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            example_outputs = model(*example_args, **example_kwargs)
+            with torch.no_grad():
+                # copy.deepcopy is required to prevent any surprising side-effect,
+                # see https://github.com/pytorch/pytorch/issues/113029
+                example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
             so_path = torch._export.aot_compile(model, example_args, example_kwargs)
