@@ -21,6 +21,45 @@ class TestCase(TorchTestCase):
 
 
 class TestLazyScheduler(TestCase):
+  def test_simple(self):
+    class TestModule(torch.nn.Module):
+      def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(4, 4))
+
+      def func1(self, x, y):
+        z = x + y + self.weight
+        return z
+
+      def forward(self, x, y):
+        z = self.func1(x, y)
+        z = z * z
+        return z
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    from torch._lazy_scheduler import Segment, LazyScheduler
+
+    m = TestModule()
+    Segment._func_to_segment_mapping[m.func1] = "func1"
+    m = m.to(device)
+    x = torch.randn(4, 4, device=device)
+    y = torch.randn(4, 4, device=device)
+
+    schedule = [
+      "func1",
+    ]
+    lazy_scheduler = LazyScheduler(schedule)
+    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
+
+    actual = compiled_m(x, y)
+    actual.sum().backward()
+    print(f"first iter done")
+    actual = compiled_m(x, y)
+    actual.sum().backward()
+    print(f"second iter done")
+    assert lazy_scheduler.is_expected_execution_order_for_named_segments(schedule)
+
   def test1(self):
     class TestSubmodule(torch.nn.Module):
       def __init__(self):
@@ -97,9 +136,10 @@ class TestLazyScheduler(TestCase):
     compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
 
     actual = compiled_m(x, y)
+    actual.sum().backward()
     print(f"first iter done")
     actual = compiled_m(x, y)
-    actual.sum()  # need this to trigger materalization for final output
+    actual.sum().backward()
     print(f"second iter done")
     assert lazy_scheduler.is_expected_execution_order_for_named_segments(schedule)
 
