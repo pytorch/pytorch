@@ -935,7 +935,8 @@ def load(
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
     """Load an object saved with :func:`torch.save` from a file.
 
-    load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
+    load(f, map_location=None, pickle_module=pickle, `*`, weights_only=False, mmap=None, `**pickle_load_args`)
+
 
 
     :func:`torch.load` uses Python's unpickling facilities but treats storages,
