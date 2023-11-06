@@ -3,8 +3,8 @@ import unittest
 import warnings
 
 from torch._dynamo import config
-from torch.fx.experimental import _config as fx_config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.fx.experimental import _config as fx_config
 from torch.testing._internal.common_utils import TEST_Z3
 
 try:
