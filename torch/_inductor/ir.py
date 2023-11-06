@@ -3846,17 +3846,23 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
-        mark_node_as_mutating(self, *kernel_args.values())
+        mark_node_as_mutating(
+            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
+        )
 
     def get_alias_names(self):
         return [i.get_name() for i in self.inputs]
 
 
 def mark_node_as_mutating(cur_buffer, *mutated_ops):
+    """
+    Allows ops in mutated_ops to be marked as being mutated as well as
+    indicates to the scheduler that these ops depend on cur_buffer.
+    """
     for op in mutated_ops:
-        if isinstance(op, TensorBox):
-            V.graph.mark_buffer_mutated(op.get_name())
-            MutationOutput(op.layout, op, cur_buffer)
+        assert isinstance(op, TensorBox)
+        V.graph.mark_buffer_mutated(op.get_name())
+        MutationOutput(op.layout, op, cur_buffer)
 
 
 class MutationOutput(ExternKernel):
