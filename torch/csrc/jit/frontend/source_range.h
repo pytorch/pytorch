@@ -7,6 +7,7 @@
 #include <memory>
 #include <numeric>
 #include <ostream>
+#include <regex>
 #include <sstream>
 #include <unordered_map>
 
@@ -33,6 +34,7 @@ struct TORCH_API StringCordView {
   }
 
   size_t find(const std::string& tok, size_t start) const;
+  size_t find_regex(const std::string& tok, size_t start) const;
   StringCordView substr(size_t start, size_t size) const;
 
   char at(size_t index) const {
