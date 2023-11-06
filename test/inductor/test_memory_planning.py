@@ -1,10 +1,21 @@
 # Owner(s): ["module: inductor"]
 
+import sys
+
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
+
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_memory_planning yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
 import unittest
 from typing import List
 
 import torch
-from test_aot_inductor import AOTInductorModelRunner
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
 from torch._dynamo.test_case import run_tests, TestCase
@@ -49,6 +60,7 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocm
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)
@@ -66,10 +78,12 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
+    @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
+        from test_aot_inductor import AOTInductorModelRunner
+
         f, args = self._generate(device="cuda")
-        constraints: List[torch.export.Constraint] = []
-        constraints = [
+        constraints: List[torch.export.Constraint] = [
             torch._export.dynamic_dim(args[0], 0) >= 1,
             torch._export.dynamic_dim(args[0], 0) <= 2048,
         ]

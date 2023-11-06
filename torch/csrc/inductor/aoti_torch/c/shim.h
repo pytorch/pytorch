@@ -94,6 +94,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 
+AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
+AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
+
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
@@ -204,6 +207,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 // aoti_torch_delete_tensor separately (or not) as before the call.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
+
+// This function will create a new tensor object and its pointer is returned
+// through *ret. The caller is responsible for wrapping the tensor pointer
+// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// when going out of scope.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,

@@ -68,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -559,14 +559,17 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     # NOTE(angelayi): For huggingface benchmark, some example outputs are
     # formatted as a dataclass which pytree cannot consume. So we want
     # to register the pytree implementation here
-    example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+    example_outputs_flat = pytree.tree_leaves(example_outputs)
     output_dataclass_types = [
         type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
     ]
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -1175,27 +1178,18 @@ class AOTInductorModelCache:
             example_outputs = model(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path, exported = torch._export.aot_compile(
-                model, example_args, example_kwargs
-            )
+            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher(so_path, device)],
-                functions=["run"],
+                functions=["run", "get_call_spec"],
                 with_cuda=(device == "cuda"),
             )
 
-            value = {
-                "module": module,
-                "exported": exported,
-            }
-            cls.cache[key] = value
+            cls.cache[key] = module
 
-        return (
-            cls.cache[key]["module"],
-            cls.cache[key]["exported"],
-        )
+        return cls.cache[key]
 
 
 def export(model, example_inputs):
@@ -1213,15 +1207,19 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    module, exported = AOTInductorModelCache.load(model, example_inputs, device)
+    module = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = module.get_call_spec()
+    in_spec = pytree.treespec_loads(call_spec[0])
+    out_spec = pytree.treespec_loads(call_spec[1])
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            (example_args, example_kwargs), exported.call_spec.in_spec
+
+        flat_inputs = fx_pytree.tree_flatten_spec(
+            (example_args, example_kwargs), in_spec
         )
-        output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
+        flat_outputs = module.run(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
 
@@ -1501,7 +1499,7 @@ class OnnxModelFromTorchScript(OnnxModel):
         if isinstance(pt_outputs, torch.Tensor):
             pt_outputs = (pt_outputs,)
 
-        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+        pt_outputs = pytree.tree_leaves(pt_outputs)
 
         # Hack for huggingface model outputs
         try:
@@ -1516,7 +1514,7 @@ class OnnxModelFromTorchScript(OnnxModel):
                 return x
 
             pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
-            pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+            pt_outputs = pytree.tree_leaves(pt_outputs)
 
         return pt_outputs
 
@@ -1636,7 +1634,7 @@ class _OnnxPatch:
             )
 
         # Flatten nested tuple of tensors, i.e. past_key_values
-        correct_result = pytree.tree_flatten(correct_result)[0]
+        correct_result = pytree.tree_leaves(correct_result)
         # Hack to put results from different runs on same device.
         # This is needed for ONNX CPU fallback benchmark, where PyTorch eager is run on GPU.
         # Assuming outputs from a single run are always on same device!
@@ -1645,12 +1643,12 @@ class _OnnxPatch:
             x == devices[0] for x in devices
         ), "All tensors must be on same device!"
         device = devices[0]
-        new_result = pytree.tree_flatten(new_result)[0]
+        new_result = pytree.tree_leaves(new_result)
         new_result = pytree.tree_map(
             lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x,
             new_result,
         )
-        fp64_outputs = pytree.tree_flatten(fp64_outputs)[0]
+        fp64_outputs = pytree.tree_leaves(fp64_outputs)
 
         return correct_result, new_result, fp64_outputs
 
@@ -3887,6 +3885,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

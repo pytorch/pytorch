@@ -26,6 +26,22 @@
             std::to_string(actual_size));                         \
   } while (0)
 
+// AOTInductor uses at::addmm_out, which doesn't supports
+// arguments that requires gradient. For this reason, we
+// enforce no_grad context for run APIs.
+//
+// A RAII, thread local (!) guard that enables or disables grad mode upon
+// construction, and sets it back to the original value upon destruction.
+struct AOTINoGradGuard {
+  AOTINoGradGuard() : prev_mode(aoti_torch_grad_mode_is_enabled()) {
+    aoti_torch_grad_mode_set_enabled(false);
+  }
+  ~AOTINoGradGuard() {
+    aoti_torch_grad_mode_set_enabled(prev_mode);
+  }
+  bool prev_mode;
+};
+
 extern "C" {
 
 AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -79,6 +95,7 @@ AOTIRuntimeError AOTInductorModelContainerRun(
 
   auto stream = reinterpret_cast<torch::aot_inductor::DeviceStreamType>(stream_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
+    AOTINoGradGuard guard;
     container->run(
         input_handles,
         output_handles,
@@ -129,6 +146,19 @@ AOTIRuntimeError AOTInductorModelContainerGetOutputName(
       { *ret_output_names = container->output_name(output_idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
+    AOTInductorModelContainerHandle container_handle,
+    const char** in_spec,
+    const char** out_spec) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *in_spec = container->get_in_spec();
+    *out_spec = container->get_out_spec();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelCreate(
     AOTInductorModelHandle* model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
@@ -154,11 +184,12 @@ AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles) {
   auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-      model->run_impl(
-          input_handles,
-          output_handles,
-          (torch::aot_inductor::DeviceStreamType)nullptr,
-          nullptr);
+    AOTINoGradGuard guard;
+    model->run_impl(
+        input_handles,
+        output_handles,
+        (torch::aot_inductor::DeviceStreamType)nullptr,
+        nullptr);
   })
 }
 
