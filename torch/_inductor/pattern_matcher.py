@@ -1354,7 +1354,12 @@ def get_arg_value(
     node: torch.fx.Node, arg_number: int, kwarg_name: Optional[str] = None
 ):
     # see python_arg_parser.cpp; e.g. kwargs named "dim" also match "axis"
-    numpy_compat = {"dim": ("axis",), "keepdim": ("keepdims",), "input": ("x", "a", "x1"), "other": ("x2",)}
+    numpy_compat = {
+        "dim": ("axis",),
+        "keepdim": ("keepdims",),
+        "input": ("x", "a", "x1"),
+        "other": ("x2",),
+    }
 
     if len(node.args) > arg_number:
         return node.args[arg_number]
@@ -1363,10 +1368,11 @@ def get_arg_value(
     if val is not None:
         return val
 
-    for alt_name in numpy_compat.get(kwarg_name, ()):
-        val = node.kwargs.get(alt_name, None)
-        if val is not None:
-            return val
+    if kwarg_name is not None:
+        for alt_name in numpy_compat.get(kwarg_name, ()):
+            val = node.kwargs.get(alt_name, None)
+            if val is not None:
+                return val
 
     return None
 
