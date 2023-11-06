@@ -2470,7 +2470,6 @@ class NoneLayout(IRNode):
 
     def __init__(self, device):
         self.device = device
-        self.size = [0]
 
     def storage_size(self):
         return 0

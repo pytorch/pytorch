@@ -25,7 +25,6 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
 )
-from torch._inductor import metrics
 from torch.nn import functional as F
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
@@ -1909,7 +1908,7 @@ def forward(self, x_1, output_1):
     def test_triton_kernel_no_clones(self, grad, dynamic):
         from torch._inductor.utils import run_and_get_code
 
-        def call_triton(
+        def call_triton_add(
             x: torch.Tensor,
             y: torch.Tensor,
         ):
@@ -1925,16 +1924,11 @@ def forward(self, x_1, output_1):
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
-        torch_add = call_triton(t1, t2)
-        metrics.reset()
-        test, codes = run_and_get_code(
-            torch.compile(call_triton, dynamic=dynamic), t1, t2
+        torch_add = t1 + t2
+        (test, _), codes = run_and_get_code(
+            torch.compile(call_triton_add, dynamic=dynamic), t1, t2
         )
-        if not grad:
-            self.assertEqual(metrics.generated_kernel_count, 2)
         self.assertEqual(torch_add, test)
-        # These two asserts are not optimal since it requires original aten
-        # to be in the metadata, so there might be false negatives
         self.assertTrue("aten.copy" not in codes[0])
         self.assertTrue("aten.clone" not in codes[0])
 

@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import functools
-import unittest
 from unittest.mock import patch
 
 import functorch
@@ -10,41 +8,8 @@ import torch
 import torch._inductor.config as config
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    skipIfRocm,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils._triton import has_triton
-
-HAS_TRITON = has_triton()
-
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
-if HAS_TRITON:
-    import triton
-    from triton import language as tl
-
-    # Define here so that multiple tests can take advantage of it
-    @triton.jit
-    def add_kernel(
-        in_ptr0,
-        in_ptr1,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        y = tl.load(in_ptr1 + offsets, mask=mask)
-        output = x + y
-        tl.store(out_ptr + offsets, output, mask=mask)
-
 
 aten = torch.ops.aten
 
@@ -729,91 +694,6 @@ class InplacingTests(TestCase):
         inp = (T(10, 10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_inplace_triton_kernel_v1(self):
-        def f(x: torch.Tensor, y: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements,)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            return output
-
-        inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """40""")
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_inplace_triton_kernel_v2(self):
-        def f(x: torch.Tensor, y: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements,)
-            tmp = torch.add(x, 1)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            return output, tmp
-
-        inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_inplace_triton_kernel_v3(self):
-        def f(x: torch.Tensor, y: torch.Tensor):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements,)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            x.add_(1)
-            return output
-
-        inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_inplace_triton_kernel_v4(self):
-        def f(x: torch.Tensor, y: torch.Tensor):
-            x_view = x.view(-1)
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements,)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            output2 = x_view.mul(2)
-            return output, output2
-
-        inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """60""")
-
-    @requires_cuda()
-    @requires_triton()
-    @skipIfRocm
-    def test_inplace_triton_kernel_v5(self):
-        def f(x: torch.Tensor, y: torch.Tensor):
-            x_view = x.view(-1)
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = (n_elements,)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
-            x_view.mul_(2)
-            return output
-
-        inp = (T(10), T(10))
-        self.assertExpectedInline(count_numel(f, *inp), """90""")
-
-    def test_inplace_randperm_scatter(self):
-        def scaled_index_add(x, y, scale_y):
-            index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
-            out = x.index_add_(dim=0, source=y * scale_y, index=index)
-            return out
-
-        inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
-
 
 # Test cases where we don't do the right thing yet.
 class WouldBeNiceIfItWorked:
@@ -854,6 +734,17 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 1, 8), T(1, 10, 8))
         self.assertExpectedInline(count_numel(f, *inp), """170""")
+
+    # We need more sophisticated decisions for inplacing
+    # This tests randperm + scatter pattern match as well as inplacing
+    def test_inplace_randperm_scatter(self):
+        def scaled_index_add(x, y, scale_y):
+            index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
+            out = x.index_add_(dim=0, source=y * scale_y, index=index)
+            return out
+
+        inp = (T(10, 10), T(5, 10), T(10))
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
 
 
 if __name__ == "__main__":
