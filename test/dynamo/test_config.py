@@ -67,7 +67,6 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             # (no silent change to compilation behaviour)
             "cache_size_limit",
             "accumulated_cache_size_limit",
-            "print_specializations",
             "replay_record_enabled",
             "cprofile",  # only wraps _compile, not graph
             "repro_after",
