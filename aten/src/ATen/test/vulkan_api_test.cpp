@@ -7,6 +7,7 @@
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
+#include <c10/util/ArrayRef.h>
 
 // TODO: These functions should move to a common place.
 
@@ -19,10 +20,16 @@ namespace {
 #endif
 
 bool checkRtol(const at::Tensor& diff, float maxTolerance) {
+  if (diff.numel() == 0) {
+    return true;
+  }
   return diff.abs().max().item<float>() <= maxTolerance;
 }
 
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor>& inputs) {
+  if (diff.numel() == 0) {
+    return true;
+  }
   float maxValue = 0.0f;
 
   for (const auto& tensor : inputs) {
@@ -167,7 +174,12 @@ static void gen_all_subsets(
   }
 }
 
-static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+static void slice_test(
+    const std::vector<int64_t>& size,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
@@ -1167,6 +1179,93 @@ TEST_F(VulkanAPITest, clamp_) {
 
   ASSERT_TRUE(check);
 }
+
+TEST_F(VulkanAPITest, conv1d_simple) {
+  // This is a simple case using arange for input, ones for weights, and arange
+  // for bias. This makes debugging easiser.
+  int64_t kernel_size = 3;
+  int64_t channels = 5;
+  int64_t lengths = 9;
+
+  c10::InferenceMode mode;
+
+  const auto input_cpu = at::arange(lengths * channels, at::kFloat).reshape({1, channels, lengths});
+  const auto weights_cpu = at::ones({channels, 1, kernel_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::arange(channels, at::kFloat);
+
+  const auto input_vk = input_cpu.vulkan();
+  const auto weights_vk = weights_cpu.vulkan();
+  const auto bias_vk = bias_cpu.vulkan();
+
+  std::array<int64_t, 1> stride{1};
+  std::array<int64_t, 1> padding{0};
+  std::array<int64_t, 1> dilation{1};
+
+  const auto output_cpu = at::conv1d(
+      input_cpu, weights_cpu, bias_cpu,
+      stride, padding, dilation, channels);
+
+  const auto output_vk = at::conv1d(
+      input_vk, weights_vk, bias_vk,
+      stride,
+      padding,
+      dilation,
+      channels);
+  const auto output_vk_cpu = output_vk.cpu();
+
+  const bool check = almostEqual(output_cpu, output_vk_cpu);
+  if (!check) {
+    showRtol(output_cpu, output_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+void test_conv1d(int64_t kernel_size, int64_t channels, int64_t lengths) {
+  c10::InferenceMode mode;
+
+  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+
+  const auto input_vk = input_cpu.vulkan();
+  const auto weights_vk = weights_cpu.vulkan();
+  const auto bias_vk = bias_cpu.vulkan();
+
+  std::array<int64_t, 1> stride{1};
+  std::array<int64_t, 1> padding{0};
+  std::array<int64_t, 1> dilation{1};
+  int64_t groups = channels;
+
+  const auto output_cpu = at::conv1d(
+      input_cpu, weights_cpu, bias_cpu,
+      stride, padding, dilation, groups);
+
+  const auto output_vk = at::conv1d(
+      input_vk, weights_vk, bias_vk,
+      stride,
+      padding,
+      dilation,
+      channels);
+  const auto output_vk_cpu = output_vk.cpu();
+
+  const bool check = almostEqual(output_cpu, output_vk_cpu);
+  if (!check) {
+    showRtol(output_cpu, output_vk_cpu);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv1d) {
+  test_conv1d(3, 5, 8);
+  test_conv1d(9, 5, 9);
+  test_conv1d(1, 12, 3);
+  test_conv1d(1, 12, 1);
+  test_conv1d(10, 12, 20);
+}
+
+
 
 void test_conv2d_context(
     const at::IntArrayRef input_shape,
@@ -6373,20 +6472,17 @@ TEST_F(VulkanAPITest, slice_batch_success) {
   slice_tests(dim2sizes);
 }
 
+TEST_F(VulkanAPITest, slice_zero_sized) {
+  // When start == end
+  slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
+  // When start > end
+  slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
+}
+
 TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   // Act: slice step must be positive
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
-  }, ::c10::Error);
-
-  // Act: Vulkan doesn't support zero-sized slice (when start=end)
-  EXPECT_THROW({
-    slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
-  }, ::c10::Error);
-
-  // Act: Vulkan doesn't support zero-sized slice (when start > end)
-  EXPECT_THROW({
-    slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
   }, ::c10::Error);
 }
 
