@@ -1894,6 +1894,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = src_tensor
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -1937,6 +1938,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = 0
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -3215,6 +3217,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     opts = ScatterOptions()
     opts.rootRank = src
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
