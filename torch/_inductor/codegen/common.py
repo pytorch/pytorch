@@ -349,10 +349,6 @@ class PythonPrinter(ExprPrinter):
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
-        if div == -1:
-            return f"{self.paren(self.doprint(x * -1))}"
-        elif div == 1:
-            return f"{self.paren(self.doprint(x))}"
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"

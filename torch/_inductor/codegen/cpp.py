@@ -322,8 +322,6 @@ class CppPrinter(ExprPrinter):
         x, div = expr.args
         if div == -1:
             return f"{self.paren(self.doprint(x * -1))}"
-        elif div == 1:
-            return f"{self.paren(self.doprint(x))}"
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:

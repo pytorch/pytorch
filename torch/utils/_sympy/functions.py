@@ -66,6 +66,8 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_real and divisor == 1:
             return sympy.floor(base)
+        if divisor == -1:
+            return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
         if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
