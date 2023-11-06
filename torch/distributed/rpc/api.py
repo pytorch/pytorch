@@ -527,7 +527,9 @@ for method_name, method in inspect.getmembers(PyRRef):
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
-    Make a remote call to run ``func`` on worker ``to`` and return an :class:`~torch.distributed.rpc.RRef` to the result value immediately.
+    Make a remote call to run ``func`` on worker ``to``.
+
+    Return an :class:`~torch.distributed.rpc.RRef` to the result value immediately.
 
     Worker ``to`` will be the owner of the returned
     :class:`~torch.distributed.rpc.RRef`, and the worker calling ``remote`` is

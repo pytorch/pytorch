@@ -42,7 +42,9 @@ def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     r"""
-    Backend options for :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from :class:`~torch.distributed.rpc.RpcBackendOptions`.
+    Backend options for :class:`~torch.distributed.rpc.TensorPipeAgent`.
+
+    Derived from :class:`~torch.distributed.rpc.RpcBackendOptions`.
 
     Args:
         num_worker_threads (int, optional): The number of threads in the
