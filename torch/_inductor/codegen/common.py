@@ -25,7 +25,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges, bound_sympy
 
 from .. import config, metrics
 from ..utils import (
@@ -989,9 +989,35 @@ class Kernel(CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
+                    expr = getattr(parent_handler, name)(*args, **kwargs)
+
+                    # # We can narrow the bounds of the variable by parsing expr
+                    # # to SymPy
+                    # if isinstance(expr, str):
+                    #     # not everything can be parsed by SymPy. Is there a
+                    #     # better way to do this?
+                    #     try:
+                    #         sympy_expr = sympy.simplify(expr)
+                    #     except sympy.SympifyError:
+                    #         pass
+                    #     else:
+                    #         symbols_map = {str(s): s for s in sympy_expr.free_symbols}
+                    #         ranges = {}
+                    #         for arg in args:
+                    #             if isinstance(arg, CSEVariable):
+                    #                 symbol = symbols_map.get(arg.name)
+                    #                 bounds = arg.bounds
+                    #             elif isinstance(arg, sympy.Symbol):
+                    #                 symbol = symbols_map.get(str(arg))
+                    #                 bounds = ValueRanges.unknown()
+                    #             ranges[symbol] = bounds
+                    #         print(sympy_expr)
+                    #         buf_bounds = bound_sympy(sympy_expr, ranges)
+                    #         print(buf_bounds)
+
                     csevar = self.cse.generate(
                         self.compute,
-                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
+                        expr,
                         bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
@@ -1019,6 +1045,9 @@ class Kernel(CodeGen):
                             new_bounds = new_bounds | pos
 
                     stm = ops.add(var, self.rename_indexing(size))
+                    # ops.add don't propagate the bounds
+                    stm.value.bounds = new_bounds
+
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:
                         lt = ops.lt(var, "0")
