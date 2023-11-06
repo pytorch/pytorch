@@ -81,7 +81,7 @@ class TestParsePrevTests(HeuristicsTestMixin):
         return_value={"test2", "test4"},
     )
     @mock.patch(
-        "tools.testing.target_determination.heuristics.correlated_with_historical_failures._get_file_rating_tests",
+        "tools.testing.target_determination.heuristics.correlated_with_historical_failures.get_correlated_tests",
         return_value=["test1"],
     )
     def test_get_reordered_tests(self, *args: Any) -> None:
@@ -164,6 +164,36 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             expected_high_tests=expected_high_relevance,
             expected_probable_tests=expected_probable_relevance,
             expected_unranked_tests=expected_unranked_relevance,
+        )
+
+    def test_downgrading_file_test(self) -> None:
+        tests = ["test1", "test2", "test3", "test4"]
+
+        heuristic1 = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test2", "test3"],
+        )
+
+        heuristic2 = TestPrioritizations(
+            tests_being_ranked=tests,
+            no_relevance=["test2"],
+        )
+
+        expected_prioritizations = TestPrioritizations(
+            tests_being_ranked=tests,
+            probable_relevance=["test3"],
+            unranked_relevance=["test1", "test4"],
+            no_relevance=["test2"],
+        )
+
+        aggregator = AggregatedHeuristics(unranked_tests=tests)
+        aggregator.add_heuristic_results(HEURISTICS[0], heuristic1)
+        aggregator.add_heuristic_results(HEURISTICS[1], heuristic2)
+
+        aggregated_pris = aggregator.get_aggregated_priorities()
+
+        self.assertHeuristicsMatch(
+            aggregated_pris, expected_prioritizations=expected_prioritizations
         )
 
     def test_merging_file_heuristic_after_class_heuristic_with_different_probabilities(

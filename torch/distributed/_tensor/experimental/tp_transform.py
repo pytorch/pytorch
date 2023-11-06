@@ -262,6 +262,9 @@ def _partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         node_sharding = node.meta["sharding"]
         if node.op == "placeholder":
             out_spec = node_sharding.output_spec
+            local_val = _partition_val(node.meta["val"], out_spec)
+            # update node value
+            node.meta["val"] = local_val
         elif node.op == "call_function":
             out_spec = node_sharding.output_spec
             # check if there's misaligned sharding, insert reshard if there is
@@ -278,7 +281,9 @@ def _partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     _insert_reshard_gm(
                         gm, node, input_arg, input_arg_spec, desired_spec
                     )
-
+            # convert output val to its local component
+            output_val = node.meta["val"]
+            node.meta["val"] = _partition_val(output_val, out_spec)
         elif node.op == "output":
             for input_arg in node.all_input_nodes:
                 # input args of output should be Replicate, otherwise redistribution is needed.
@@ -292,7 +297,6 @@ def _partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                     desired_spec.placements = (Replicate(),)
                     if arg_spec != desired_spec:
                         _insert_reshard_gm(gm, node, arg, arg_spec, desired_spec)
-
         else:
             raise RuntimeError(f"op code {node} not supported")
 
@@ -321,7 +325,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
                 local_shard = placement._split_tensor(
-                    local_shard, num_chunks, with_padding=False, contiguous=False
+                    local_shard, num_chunks, with_padding=False, contiguous=True
                 )[0][my_coord_on_mesh_dim]
         return local_shard
     elif isinstance(val, (list, tuple)):

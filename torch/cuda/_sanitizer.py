@@ -23,8 +23,8 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
 
 
 DEFAULT_STREAM_ID = 0
@@ -509,7 +509,7 @@ class ArgumentHandler:
     ) -> None:
         for argument, value in zip_arguments(schema, args, kwargs):
             is_write = argument.alias_info is not None and argument.alias_info.is_write
-            tree_map(
+            pytree.tree_map_(
                 functools.partial(
                     self._handle_argument, is_write=is_write, name=argument.name
                 ),
@@ -517,7 +517,7 @@ class ArgumentHandler:
             )
 
     def parse_outputs(self, outputs: Any) -> None:
-        tree_map(
+        pytree.tree_map_(
             functools.partial(self._handle_argument, is_write=True, is_output=True),
             outputs,
         )
