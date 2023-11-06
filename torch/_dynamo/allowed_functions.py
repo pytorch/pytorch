@@ -171,23 +171,12 @@ def _allowed_function_ids() -> Dict[int, str]:
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
             "torch.optim.",
-            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
-            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
             "torch._inductor.",
             "torch._C.inductor.",
             "torch.fx.",
-            "torch.distributed.fsdp.",
-            "torch.distributed._tensor.",
-            # Inline through the ActivationWrapper in
-            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
-            # nn module calls torch.utils.checkpoint internally. If Dynamo does
-            # not trace this, AOT Autograd will try to trace this and can cause
-            # issues observed in
-            # https://github.com/pytorch/pytorch/issues/108269
-            "torch.distributed.algorithms.",
             "torch._C._autograd",
             "torch._C._cudart",
             "torch._C._distributed_autograd",
@@ -198,7 +187,6 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch._C._nvtx",
             "torch._C._lazy",
             "torch._C._profiler",
-            # "torch._C._special",
             "torch.__config__",
             "torch._custom_op",
             "torch._dispatch",
@@ -218,10 +206,7 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch._vmap_internals",
             "torch.ao",
             "torch.distributed",
-            # "torch.distributed.c10d_logger",
-            # "torch.distributed.distributed_c10d",
-            # "torch.distributed.rpc",
-            # "torch.distributed.utils",
+            "torch.export",
             "torch.hub",
             "torch.jit",
             "torch.masked.maskedtensor",
@@ -235,7 +220,6 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch.package",
             "torch.profiler",
             "torch.serialization",
-            # "torch.signal",
             "torch.storage",
             "torch.utils",
         ]
@@ -293,19 +277,19 @@ def _allowed_function_ids() -> Dict[int, str]:
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     # torch_in_graph_functions.add(record_heuristic_in_graph_function(obj, name, module))
-                    try:
-                        if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-                            obj = obj.__wrapped__
-                    except Exception:
-                        pass
+                    # try:
+                    #     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                    #         obj = obj.__wrapped__
+                    # except Exception:
+                    #     pass
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     # torch_in_graph_functions.add(record_heuristic_in_graph_function(obj, name, module))
-                    try:
-                        if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-                            obj = obj.__wrapped__
-                    except Exception:
-                        pass
+                    # try:
+                    #     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                    #         obj = obj.__wrapped__
+                    # except Exception:
+                    #     pass
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -444,52 +428,52 @@ def is_allowed(obj) -> bool:
     )
 
 
-def is_in_graph_function(obj) -> bool:
-    # print("--->>>  ", len(torch_in_graph_functions))
-    # s = {item for item in torch_in_graph_functions if item is not None}
-    # for x in sorted(s):
-    #     if x is not None:
-    #         print(x)
-    if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-        obj = obj.__wrapped__
-    if is_user_defined_allowed(obj):
-        return True
-    if isinstance(
-        obj,
-        (
-            types.FunctionType,
-            types.MethodType,
-            types.BuiltinFunctionType,
-            types.MethodDescriptorType,
-            types.WrapperDescriptorType,
-        ),
-    ):
-        return is_allowed(obj)
-    return isinstance(
-        obj,
-        (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
-    )
+# def is_in_graph_function(obj) -> bool:
+#     # print("--->>>  ", len(torch_in_graph_functions))
+#     # s = {item for item in torch_in_graph_functions if item is not None}
+#     # for x in sorted(s):
+#     #     if x is not None:
+#     #         print(x)
+#     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+#         obj = obj.__wrapped__
+#     if is_user_defined_allowed(obj):
+#         return True
+#     if isinstance(
+#         obj,
+#         (
+#             types.FunctionType,
+#             types.MethodType,
+#             types.BuiltinFunctionType,
+#             types.MethodDescriptorType,
+#             types.WrapperDescriptorType,
+#         ),
+#     ):
+#         return is_allowed(obj)
+#     return isinstance(
+#         obj,
+#         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
+#     )
 
 
-def record_heuristic_in_graph_function(obj, name, module):
-    try:
-        if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-            obj = obj.__wrapped__
-    except Exception:
-        pass
-    if isinstance(
-        obj,
-        (
-            types.FunctionType,
-            types.MethodType,
-            types.BuiltinFunctionType,
-            types.MethodDescriptorType,
-            types.WrapperDescriptorType,
-        ),
-    ):
-        return f"{module.__name__}.{name}"
-    else:
-        return None
+# def record_heuristic_in_graph_function(obj, name, module):
+#     try:
+#         if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+#             obj = obj.__wrapped__
+#     except Exception:
+#         pass
+#     if isinstance(
+#         obj,
+#         (
+#             types.FunctionType,
+#             types.MethodType,
+#             types.BuiltinFunctionType,
+#             types.MethodDescriptorType,
+#             types.WrapperDescriptorType,
+#         ),
+#     ):
+#         return f"{module.__name__}.{name}"
+#     else:
+#         return None
 
 
 def is_user_defined_allowed(obj) -> bool:
