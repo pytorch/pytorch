@@ -1176,9 +1176,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   while (true) {
     auto heartbeat = heartbeat_;
-    LOG(INFO) << " Heartbeat before comparison " << heartbeat << heartbeatTimeoutInSec_;
     if (heartbeat > heartBeatCounter) {
-      LOG(INFO) << " Heartbeat increased to " << heartbeat;
       heartBeatCounter = heartbeat;
       // Sleep for enough time so that heartBeat will at least increase.
       std::this_thread::sleep_for(std::chrono::milliseconds(
