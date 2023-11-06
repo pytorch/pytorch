@@ -3455,6 +3455,7 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_uint8(self):
         def fn(x):
             batch_shape = x.shape[:1]
             out = torch.cat([x.new_zeros(1).expand(batch_shape + (1,)), x], dim=-1)
