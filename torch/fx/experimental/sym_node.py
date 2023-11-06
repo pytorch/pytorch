@@ -141,10 +141,10 @@ class SymNode:
         return self._hint
 
     def maybe_as_int(self):
-        if self.expr.is_number:
-            return int(self.expr)
-        else:
+        if self.expr.free_symbols:
             return None
+        else:
+            return int(self.expr)
 
     def is_int(self):
         return self.pytype is int
