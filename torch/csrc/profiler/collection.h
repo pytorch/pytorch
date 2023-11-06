@@ -56,6 +56,9 @@ struct TORCH_API RawTensorMetadataBase {
 struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata() = default;
   RawTensorMetadata(const RawTensorMetadata&) = default;
+  RawTensorMetadata(RawTensorMetadata&&) noexcept = default;
+  RawTensorMetadata& operator=(const RawTensorMetadata&) = default;
+  RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
   // Wrap `weak_self_` in `c10::optional` and split device into components to
