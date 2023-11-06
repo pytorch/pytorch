@@ -132,10 +132,9 @@ class ShardingPropagator:
                 )
             output_spec.tensor_meta = output_tensor_meta
         elif isinstance(output_spec, (tuple, list)):
-            if not isinstance(
-                output_tensor_meta,
-                (tuple, list) or len(output_spec) != len(output_tensor_meta),
-            ):
+            if not isinstance(output_tensor_meta, (tuple, list)) or len(
+                output_spec
+            ) != len(output_tensor_meta):
                 raise ValueError(
                     f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the "
                     f"number of op outputs {_length(output_tensor_meta)}."
