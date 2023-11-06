@@ -1132,13 +1132,6 @@ def run_functionalized_fw_and_collect_metadata(
             if mutates_storage_metadata:
                 mutates_data = False
 
-            if mutates_data or mutates_metadata:
-                # Only track requires_grad info on *mutated* inputs,
-                # because they show up in the autograd.Function.forward as outputs
-                input_requires_grad_info.append(
-                    isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
-                )
-
             input_info.append(InputAliasInfo(
                 is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
