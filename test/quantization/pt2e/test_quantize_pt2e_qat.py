@@ -691,8 +691,8 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         (dq_axis, dq_qmin, dq_qmax, dq_dtype) = weight_dq.args[3:]
         self.assertEqual(q_axis, 0)
         self.assertEqual(dq_axis, 0)
-        self.assertEqual(q_qmin, -(2**31))
-        self.assertEqual(dq_qmin, -(2**31))
+        self.assertEqual(q_qmin, 0)
+        self.assertEqual(dq_qmin, 0)
         self.assertEqual(q_qmax, 2**31 - 1)
         self.assertEqual(dq_qmax, 2**31 - 1)
         self.assertEqual(q_dtype, torch.int32)
@@ -736,8 +736,9 @@ class ConvBnInt32WeightQuantizer(Quantizer):
         )
         weight_qspec = QuantizationSpec(
             dtype=torch.int32,
-            quant_min=-(2**31),
+            quant_min=0,
             quant_max=2**31 - 1,
+
             qscheme=torch.per_channel_affine,
             observer_or_fake_quant_ctr=FusedMovingAvgObsFakeQuantize.with_args(
                 observer=MovingAveragePerChannelMinMaxObserver,
