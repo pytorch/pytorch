@@ -464,7 +464,9 @@ class TensorVariable(VariableTracker):
             and len(args) == 0
             and isinstance(self.device, torch.device)
         ):
-            tensortype = next(k for k, v in tensortype_to_dtype.items() if self.dtype in v)
+            tensortype = next(
+                k for k, v in tensortype_to_dtype.items() if self.dtype in v
+            )
             if self.device.type == "cuda":
                 constant_result = ConstantVariable.create(
                     f"torch.cuda.{tensortype.__name__}", **options
