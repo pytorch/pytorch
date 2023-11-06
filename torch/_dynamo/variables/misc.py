@@ -406,7 +406,10 @@ class AutogradFunctionVariable(VariableTracker):
                 tx, args, kwargs
             )
 
-            bwd_args = [ctx, speculated_fwd_result]
+            if isinstance(speculated_fwd_result, variables.TupleVariable):
+                bwd_args = [ctx, *speculated_fwd_result.items]
+            else:
+                bwd_args = [ctx, speculated_fwd_result]
             safe_or_raise_always_restore(
                 tx,
                 graph_checkpoint,
@@ -567,9 +570,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         for arg in args:
-            # as_proxy can return constant values or other non proxy values
-            if isinstance(arg.as_proxy(), torch.fx.Proxy):
-                arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None, **options)
 
@@ -984,6 +984,14 @@ class NumpyVariable(VariableTracker):
                     f"Can't find numpy function {self.value} in torch._numpy. "
                     " Please file an issue to request support for this function."
                 )
+
+            if (
+                func.__module__ == "torch._numpy.random"
+                and config.use_numpy_random_stream
+            ):
+                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
+                msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
+                unimplemented(msg)
 
             # TODO(larryliu0820): currently assuming all numpy.* functions are returning a ndarray that can be
             #  wrapped by NumpyNdarrayVariable which is wrong!
