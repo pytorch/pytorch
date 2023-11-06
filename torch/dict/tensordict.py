@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import numbers
 import os
 from collections import defaultdict
@@ -49,6 +50,7 @@ from .utils import (
     _set_item,
     _set_max_batch_size,
     _shape,
+    _STRDTYPE2DTYPE,
     _StringOnlyDict,
     _sub_index,
     _unravel_key_to_tuple,
@@ -705,14 +707,23 @@ class TensorDict(TensorDictBase):
         ]
 
     def memmap_like(self, prefix: str | None = None) -> T:
+        def save_metadata(data: TensorDictBase, filepath, metadata=None):
+            if metadata is None:
+                metadata = {}
+            metadata.update(
+                {
+                    "shape": list(data.shape),
+                    "device": str(data.device),
+                }
+            )
+            with open(filepath, "w") as json_metadata:
+                json.dump(metadata, json_metadata)
+
         if prefix is not None:
             prefix = Path(prefix)
             if not prefix.exists():
                 os.makedirs(prefix, exist_ok=True)
-            torch.save(
-                {"batch_size": self.batch_size, "device": self.device},
-                prefix / "meta.pt",
-            )
+            metadata = {}
         if not self.keys():
             raise Exception(
                 "memmap_like() must be called when the TensorDict is (partially) "
@@ -737,16 +748,18 @@ class TensorDict(TensorDictBase):
                         inplace=False,
                         validated=True,
                     )
-                    torch.save(
-                        {"batch_size": value.batch_size, "device": value.device},
-                        prefix / key / "meta.pt",
-                    )
                 else:
                     tensordict._set_str(
                         key, value.memmap_like(), inplace=False, validated=True
                     )
                 continue
             else:
+                if prefix is not None:
+                    metadata[key] = {
+                        "dtype": str(value.dtype),
+                        "shape": value.shape,
+                        "device": str(value.device),
+                    }
                 tensordict._set_str(
                     key,
                     empty_like_memmap(
@@ -758,17 +771,10 @@ class TensorDict(TensorDictBase):
                     inplace=False,
                     validated=True,
                 )
-            if prefix is not None:
-                torch.save(
-                    {
-                        "shape": value.shape,
-                        "device": value.device,
-                        "dtype": value.dtype,
-                    },
-                    prefix / f"{key}.meta.pt",
-                )
         tensordict._is_memmap = True
         tensordict.lock_()
+        if prefix is not None:
+            save_metadata(self, prefix=prefix, metadata=metadata)
         return tensordict
 
     def masked_select(self, mask: Tensor) -> T:
@@ -1363,14 +1369,23 @@ class TensorDict(TensorDictBase):
         prefix: str | None = None,
         copy_existing: bool = False,
     ) -> T:
+        def save_metadata(data: TensorDictBase, filepath, metadata=None):
+            if metadata is None:
+                metadata = {}
+            metadata.update(
+                {
+                    "shape": list(data.shape),
+                    "device": str(data.device),
+                }
+            )
+            with open(filepath, "w") as json_metadata:
+                json.dump(metadata, json_metadata)
+
         if prefix is not None:
             prefix = Path(prefix)
             if not prefix.exists():
                 os.makedirs(prefix, exist_ok=True)
-            torch.save(
-                {"batch_size": self.batch_size, "device": self.device},
-                prefix / "meta.pt",
-            )
+            metadata = {}
         if self.is_shared() and self.device.type == "cpu":
             raise RuntimeError(
                 "memmap and shared memory are mutually exclusive features."
@@ -1387,10 +1402,6 @@ class TensorDict(TensorDictBase):
                     self._tensordict[key] = value.memmap_(
                         prefix=prefix / key, copy_existing=copy_existing
                     )
-                    torch.save(
-                        {"batch_size": value.batch_size, "device": value.device},
-                        prefix / key / "meta.pt",
-                    )
                 else:
                     self._tensordict[key] = value.memmap_()
                 continue
@@ -1403,16 +1414,19 @@ class TensorDict(TensorDictBase):
                     else None,
                     copy_existing=copy_existing,
                 )
+                if prefix is not None:
+                    metadata[key] = {
+                        "device": str(value.device),
+                        "shape": list(value.shape),
+                        "dtype": str(value.dtype),
+                    }
 
-            if prefix is not None:
-                torch.save(
-                    {
-                        "shape": value.shape,
-                        "device": value.device,
-                        "dtype": value.dtype,
-                    },
-                    prefix / f"{key}.meta.pt",
-                )
+        if prefix is not None:
+            save_metadata(
+                self,
+                prefix / "meta.json",
+                metadata=metadata,
+            )
         self._is_memmap = True
         self.lock_()
         return self
@@ -1420,44 +1434,59 @@ class TensorDict(TensorDictBase):
     @classmethod
     def load_memmap(cls, prefix: str) -> T:
         prefix = Path(prefix)
-        metadata = torch.load(prefix / "meta.pt")
-        out = cls({}, batch_size=metadata["batch_size"], device=metadata["device"])
 
-        for path in prefix.glob("**/*meta.pt"):
-            key = path.parts[len(prefix.parts) :]
-            if path.name == "meta.pt":
-                if path == prefix / "meta.pt":
-                    # skip prefix / "meta.pt" as we've already read it
-                    continue
-                key = key[:-1]  # drop "meta.pt" from key
-                metadata = torch.load(path)
-                if key in out.keys(include_nested=True):
-                    out.get(key).batch_size = metadata["batch_size"]
-                    device = metadata["device"]
-                    if device is not None:
-                        out.set(key, out.get(key).to(device))
+        def load_metadata(filepath):
+            with open(filepath, "r") as json_metadata:
+                metadata = json.load(json_metadata)
+                if metadata["device"] == "None":
+                    metadata["device"] = None
                 else:
-                    out.set(
-                        key,
-                        cls(
-                            {},
-                            batch_size=metadata["batch_size"],
-                            device=metadata["device"],
-                        ),
-                    )
-            else:
-                leaf, *_ = key[-1].rsplit(".", 2)  # remove .meta.pt suffix
-                key = (*key[:-1], leaf)
-                metadata = torch.load(path)
-                out.set(
-                    key,
-                    from_filename(
-                        dtype=metadata["dtype"],
-                        shape=metadata["shape"],
-                        filename=str(path.parent / f"{leaf}.memmap"),
-                    ),
-                )
+                    metadata["device"] = torch.device(metadata["device"])
+                metadata["shape"] = torch.Size(metadata["shape"])
+                # if 'dtype' in metadata:
+                #     metadata.dtype = to
+            return metadata
 
+        metadata = load_metadata(prefix / "meta.json")
+        out = cls({}, batch_size=metadata.pop("shape"), device=metadata.pop("device"))
+
+        for key, entry_metadata in metadata:
+            out.set(
+                key,
+                from_filename(
+                    dtype=_STRDTYPE2DTYPE[entry_metadata["dtype"]],
+                    shape=torch.Size(entry_metadata["shape"]),
+                    filename=str(prefix / f"{key}.memmap"),
+                    device=str(entry_metadata["device"]),
+                ),
+            )
+        # iterate over folders and load them
+        for path in prefix.iterdir():
+            if path.is_dir():
+                key = path.parts[len(prefix.parts) :]
+                out.set(key, TensorDict.load_memmap(path))
+        return out
+        # for path in prefix.glob("**/*meta.json"):
+        #     key = path.parts[len(prefix.parts) :]
+        #     if path == prefix / "meta.json":
+        #         # skip prefix / "meta.json" as we've already read it
+        #         continue
+        #     key = key[:-1]  # drop "meta.json" from key
+        #     metadata = load_metadata(path)
+        #     if key in out.keys(include_nested=True):
+        #         out.get(key).batch_size = metadata["shape"]
+        #         device = metadata["device"]
+        #         if device is not None:
+        #             out.set(key, out.get(key).to(device))
+        #     else:
+        #         out.set(
+        #             key,
+        #             cls(
+        #                 {},
+        #                 batch_size=metadata["shape"],
+        #                 device=metadata["device"],
+        #             ),
+        #         )
         return out
 
     def to(self, *args, **kwargs: Any) -> T:

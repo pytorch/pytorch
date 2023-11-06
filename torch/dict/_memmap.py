@@ -21,12 +21,14 @@ def empty_like(
     layout: Optional[_layout] = None,
     device: Optional[Union[_device, str, None]] = None,
     pin_memory: Optional[_bool] = False,
-    requires_grad: Optional[_bool] = False,
+    requires_grad: Optional[_bool] = None,
     filename: Optional[str] = None,
 ) -> Tensor:
     shape = input.shape
     if dtype is None:
         dtype = input.dtype
+    if requires_grad is None:
+        requires_grad = input.requires_grad
     if device is not None:
         device = torch.device(device)
         if device.type != "cpu":
@@ -176,10 +178,13 @@ def from_tensor(tensor, *, filename=None, copy_existing=False):
             f"({tensor.untyped_storage().filename}). "
             f"To copy the tensor onto the new location, pass copy_existing=True."
         )
-    return empty_like(tensor, filename=filename).copy_(tensor)
+    return empty_like(tensor, filename=filename).copy_(tensor, non_blocking=True)
 
 
-def from_filename(*, dtype, shape, filename):
-    return torch.from_file(dtype=dtype, size=shape.numel(), filename=filename).view(
+def from_filename(*, dtype, shape, filename, device=torch.device("cpu")):
+    result = torch.from_file(dtype=dtype, size=shape.numel(), filename=filename).view(
         shape
     )
+    if device != torch.device("cpu"):
+        return result.to(device=device, non_blocking=True)
+    return result

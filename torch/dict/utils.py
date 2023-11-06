@@ -30,6 +30,29 @@ from torch.nn.parameter import _ParameterMeta
 
 T = TypeVar("T", bound="TensorDictBase")
 
+_STRDTYPE2DTYPE = {
+    str(dtype): dtype
+    for dtype in (
+        torch.float32,
+        torch.float64,
+        torch.float16,
+        torch.bfloat16,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.bool,
+        torch.quint8,
+        torch.qint8,
+        torch.qint32,
+        torch.quint4x2,
+    )
+}
+
 IndexType = Union[None, int, slice, str, Tensor, List[Any], Tuple[Any, ...]]
 DeviceType = Union[torch.device, str, int]
 NestedKey = Union[str, Tuple[str, ...]]
