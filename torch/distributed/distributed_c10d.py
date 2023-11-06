@@ -35,7 +35,7 @@ from torch._C._distributed_c10d import (
     get_debug_level,
     Work
 )
-from .constants import default_pg_timeout, default_pg_nccl_timeout
+from .constants import default_pg_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 DistStoreError = torch._C._DistStoreError
@@ -598,20 +598,6 @@ class GroupMember(metaclass=_WorldMeta):
     NON_GROUP_MEMBER = -100
 
 
-def _get_default_timeout(backend: Backend) -> timedelta:
-    # see note on nccl vs other backend timeout (constants.py)
-    if backend == Backend.NCCL:
-        assert isinstance(default_pg_nccl_timeout, timedelta), "no NCCL default timeout, is NCCL support compiled?"
-        return default_pg_nccl_timeout
-    else:
-        return default_pg_timeout
-
-def _check_valid_timeout(timeout: Any) -> None:
-    if not isinstance(timeout, timedelta):
-        raise TypeError(
-            f"Expected timeout argument to be of type datetime.timedelta, got {timeout}"
-        )
-
 # Default process group state
 _default_pg_init_method = None
 
@@ -1045,7 +1031,7 @@ _exception_logger
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
-    timeout: Optional[timedelta] = None,
+    timeout: timedelta = default_pg_timeout,
     world_size: int = -1,
     rank: int = -1,
     store: Optional[Store] = None,
@@ -1091,14 +1077,26 @@ def init_process_group(
                                 to exchange connection/address information.
                                 Mutually exclusive with ``init_method``.
         timeout (timedelta, optional): Timeout for operations executed against
-            the process group. Default value is 10 minutes for NCCL and 30 minutes for other backends.
-            This is the duration after which collectives will be aborted asynchronously and the process will crash.
-            When ``NCCL_ASYNC_ERROR_HANDLING`` is set, this is the duration after which collectives will be aborted
-            asynchronously and the process will crash.
-            This is done since CUDA execution is async and it is no longer safe to continue executing user code since
-            failed async NCCL operations might result in subsequent CUDA operations running on corrupted data.
-            When NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
-
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
+            For ``ucc``, blocking wait is supported similar to NCCL. However,
+            async error handling is done differently since with UCC we have
+            progress thread and not watch-dog thread.
         group_name (str, optional, deprecated): Group name. This argument is ignored
         pg_options (ProcessGroupOptions, optional): process group options
             specifying what additional options need to be passed in during
@@ -1124,6 +1122,11 @@ def init_process_group(
     global _backend
     global _default_pg_init_method
 
+    if not isinstance(timeout, timedelta):
+        raise TypeError(
+            "Expected timeout argument to be of type datetime.timedelta"
+        )
+
     if GroupMember.WORLD is not None:
         raise ValueError("trying to initialize the default process group twice!")
 
@@ -1141,11 +1144,6 @@ def init_process_group(
         backend = Backend(backend)
     else:
         backend = Backend("undefined")
-
-    if timeout is None:
-        timeout = _get_default_timeout(backend)
-
-    _check_valid_timeout(timeout)
 
     """
     Group name is not visible to users unless they access
@@ -1224,7 +1222,7 @@ def _new_process_group_helper(
     store,
     group_name,
     pg_options=None,
-    timeout=None,
+    timeout=default_pg_timeout,
     pg_tag=None
 ):
     """
@@ -1244,8 +1242,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
-    _check_valid_timeout(timeout)
+    if not isinstance(timeout, timedelta):
+        raise TypeError(
+            "Expected timeout argument to be of type datetime.timedelta"
+        )
 
     if pg_tag not in [None, ""]:
         # creating with the same tag and rank set results in the same underlying PG
@@ -3809,16 +3809,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
         raise ValueError("monitored_barrier is only implemented for GLOO backend.")
 
     if timeout is None:
-        timeout = _get_default_timeout(get_backend(group))
-    elif isinstance(timeout, float):
-        # TODO(whc) aparently some existing test case for monitored_barrier passes in a timeout in float format?
-        warnings.warn(
-            "Please specify timeout arg as a timedelta. "
-            f"Converting current value of {timeout} assuming it represents seconds",
-        )
-        timeout = timedelta(seconds=timeout)
-
-    _check_valid_timeout(timeout)
+        timeout = default_pg_timeout
 
     group_to_use = _get_default_group() if group is None else group
     return group_to_use.monitored_barrier(timeout, wait_all_ranks=wait_all_ranks)
@@ -3832,8 +3823,6 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
-    # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
-
     # Create a separate prefix store for the helper process group.
     prefix = f"{PG_WRAPPER_STORE_PREFIX}:{store_prefix}"
     store = PrefixStore(prefix, store)
@@ -3863,7 +3852,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
 
 
 @_time_logger
-def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local_synchronization=False):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Create a new distributed group.
 
@@ -3886,7 +3875,24 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
     Args:
         ranks (list[int]): List of ranks of group members. If ``None``, will be
             set to all ranks. Default is ``None``.
-        timeout (timedelta, optional): see `init_process_group` for details and default value.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
             By default uses the same backend as the global group. This field
@@ -3922,7 +3928,7 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
 
 def _new_group_with_tag(
     ranks=None,
-    timeout=None,
+    timeout=default_pg_timeout,
     backend=None,
     pg_options=None,
     pg_tag=None,
@@ -3941,19 +3947,11 @@ def _new_group_with_tag(
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
 
-
     # Default to the same backend as the global process group
     # if the backend is not specified.
     if not backend:
         backend = default_backend
     backend = Backend(backend)
-
-    # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
-    # which may just pass their timeout value (or None)
-    if timeout is None:
-        timeout = _get_default_timeout(backend)
-    _check_valid_timeout(timeout)
-
     if use_local_synchronization:
         # MPI backend doesn't have have a way for us to perform a partial sync
         if backend == Backend.MPI:
@@ -4035,7 +4033,7 @@ def _new_group_with_tag(
 def new_subgroups(
     group_size=None,
     group=None,
-    timeout=None,
+    timeout=default_pg_timeout,
     backend=None,
     pg_options=None,
 ):
@@ -4076,7 +4074,24 @@ def new_subgroups(
             the default subgroup size is equal to the number of devices on each machine,
             based on the assumption that each machine has exactly the same
             number of devices. Default is ``None``.
-        timeout (timedelta, optional): see `init_process_group` for details and default value.
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
         backend (str or Backend, optional): The backend to use. Depending on
             build-time configurations, valid values are ``gloo`` and ``nccl``.
             By default uses the same backend as the global group. This field
@@ -4151,7 +4166,7 @@ def new_subgroups(
 
 def new_subgroups_by_enumeration(
     ranks_per_subgroup_list,
-    timeout=None,
+    timeout=default_pg_timeout,
     backend=None,
     pg_options=None,
 ):
@@ -4180,8 +4195,25 @@ def new_subgroups_by_enumeration(
     Args:
         ranks_per_subgroup_list (list[list[int]]): A nested list of ranks of
             group members.
-        timeout (timedelta, optional): see `init_process_group` for details and default value.
-        backend (str or Backend, optional): The backend to use. Depending on
+        timeout (timedelta, optional): Timeout for operations executed against
+            the process group. Default value equals 30 minutes.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            or ``NCCL_ASYNC_ERROR_HANDLING`` is set to 1. When
+            ``NCCL_BLOCKING_WAIT`` is set, this is the duration for which the
+            process will block and wait for collectives to complete before
+            throwing an exception. When ``NCCL_ASYNC_ERROR_HANDLING`` is set,
+            this is the duration after which collectives will be aborted
+            asynchronously and the process will crash. ``NCCL_BLOCKING_WAIT``
+            will provide errors to the user which can be caught and handled,
+            but due to its blocking nature, it has a performance overhead. On
+            the other hand, ``NCCL_ASYNC_ERROR_HANDLING`` has very little
+            performance overhead, but crashes the process on errors. This is
+            done since CUDA execution is async and it is no longer safe to
+            continue executing user code since failed async NCCL operations
+            might result in subsequent CUDA operations running on corrupted
+            data. Only one of these two environment variables should be set.
+         backend (str or Backend, optional): The backend to use. Depending on
              build-time configurations, valid values are ``gloo`` and ``nccl``.
              By default uses the same backend as the global group. This field
              should be given as a lowercase string (e.g., ``"gloo"``), which can
