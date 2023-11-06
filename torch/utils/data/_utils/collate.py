@@ -95,9 +95,9 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
     Args:
         batch: a single batch to be collated
         collate_fn_map: Optional dictionary mapping from element type to the corresponding collate function.
-        If the element type isn't present in this dictionary,
-        this function will go through each key of the dictionary in the insertion order to
-        invoke the corresponding collate function if the element type is a subclass of the key.
+            If the element type isn't present in this dictionary,
+            this function will go through each key of the dictionary in the insertion order to
+            invoke the corresponding collate function if the element type is a subclass of the key.
 
     Examples:
         >>> def collate_tensor_fn(batch, *, collate_fn_map):
