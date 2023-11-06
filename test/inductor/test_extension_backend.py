@@ -26,7 +26,7 @@ from torch._inductor.codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
 
 try:
     try:
@@ -52,6 +52,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(TestCase):
     module = None
 
@@ -129,7 +130,7 @@ class ExtensionBackendTests(TestCase):
 
         metrics.reset()
         opt_fn = torch.compile()(fn)
-        code = run_and_get_cpp_code(opt_fn, x, y, z)
+        _, code = run_and_get_cpp_code(opt_fn, x, y, z)
         FileCheck().check("void kernel").check("loadu").check("extension_device").run(
             code
         )
@@ -142,5 +143,6 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    # cpp_extension doesn't work in fbcode right now
+    if HAS_CPU and not IS_MACOS and not IS_FBCODE:
         run_tests(needs="filelock")

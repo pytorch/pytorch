@@ -1,6 +1,6 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, xfail_inherited_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import unittest
 import warnings
@@ -10,9 +10,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db, skip, xfail, skipOps
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
-from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -748,9 +747,6 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
     tracing_mode = "fake"
 
 
-@xfail_inherited_tests([
-    "test_make_fx_overloads",
-])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
 
@@ -934,8 +930,8 @@ class TestSymbolicTracing(TestCase):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(0), torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, x_1, y_1):
-    sym_size = torch.ops.aten.sym_size(y_1, 0);  y_1 = None
-    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size]);  x_1 = sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(y_1, 0);  y_1 = None
+    resize_ = torch.ops.aten.resize_.default(x_1, [sym_size_int]);  x_1 = sym_size_int = None
     return None""")
 
 
@@ -962,6 +958,16 @@ def forward(self, x_1, y_1):
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
+
+    def test_non_symint_size_spec(self):
+        # this isn't really a proxy tensor test, but it's the most convenient
+        # way to get a fake tensor with symbolic sizes
+        def f(x):
+            torch._C._non_sym_sizes(x)
+            return x + 1
+
+        x = torch.randn(2, 3)
+        make_fx(f, tracing_mode="symbolic")(x)
 
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
@@ -991,6 +997,19 @@ def forward(self, x_1, y_1):
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
     index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select"""  # noqa: B950
+        )
+
+    def test_arange_unbacked_output_size(self):
+        def f(x):
+            return torch.arange(0, x)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    arange = torch.ops.aten.arange.start(0, _local_scalar_dense, device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    return arange"""  # noqa: B950
         )
 
     def test_adv_index_batch(self):
@@ -1046,8 +1065,8 @@ def forward(self, a_1, b_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
-    mul = sym_size * 2;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
+    mul = sym_size_int * 2;  sym_size_int = None
     empty = torch.ops.aten.empty.memory_format([mul], device = device(type='cpu'), pin_memory = False);  mul = None
     return empty""")
 
@@ -1106,8 +1125,8 @@ def forward(self, a_1):
         self.assertExpectedInline(
             r, """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size_int, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size_int = None
     select = torch.ops.aten.select.int(x_1, 0, 0)
     copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
     return x_1"""  # noqa: B950
@@ -1152,21 +1171,21 @@ def forward(self, crop_camera_1, mask_1):
     select = torch.ops.aten.select.int(eye, 0, 0)
     select_1 = torch.ops.aten.select.int(select, 0, 0);  select = None
     copy_ = torch.ops.aten.copy_.default(select_1, lift_fresh_copy);  select_1 = lift_fresh_copy = None
-    sym_size = torch.ops.aten.sym_size(index, 0)
-    expand = torch.ops.aten.expand.default(eye, [sym_size, 3, 3])
-    view = torch.ops.aten.view.default(expand, [sym_size, 3, 3]);  expand = None
-    sym_size_1 = torch.ops.aten.sym_size(crop_camera_1, 1)
-    sym_size_2 = torch.ops.aten.sym_size(crop_camera_1, 2)
-    expand_1 = torch.ops.aten.expand.default(index, [sym_size, sym_size_1, sym_size_2]);  index = None
-    view_1 = torch.ops.aten.view.default(expand_1, [sym_size, sym_size_1, sym_size_2]);  expand_1 = sym_size_1 = sym_size_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(index, 0)
+    expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
+    view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(crop_camera_1, 1)
+    sym_size_int_2 = torch.ops.aten.sym_size.int(crop_camera_1, 2)
+    expand_1 = torch.ops.aten.expand.default(index, [sym_size_int, sym_size_int_1, sym_size_int_2]);  index = None
+    view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
-    view_2 = torch.ops.aten.view.default(bmm, [sym_size, 3, 3]);  bmm = None
-    mul = sym_size * 3
+    view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
+    mul = sym_size_int * 3
     view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
-    view_4 = torch.ops.aten.view.default(mm, [sym_size, 3, 3]);  mm = sym_size = None
+    view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
-    return None""")
+    return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
         def f(x, m):
@@ -1187,7 +1206,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            constrain_as_value(x.shape[0], min=1)
+            torch._constrain_as_value(x.shape[0], min=1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
@@ -1228,18 +1247,69 @@ def forward(self, images_1, handedness_1, valid_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(2)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
-    neg = -sym_size;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0);  a_1 = None
+    neg = -sym_size_int;  sym_size_int = None
     add = neg + 10;  neg = None
     empty = torch.ops.aten.empty.memory_format([add], device = device(type='cpu'), pin_memory = False);  add = None
     return empty""")
+
+    def test_unbacked_unification(self):
+        def f(x, y):
+            z = torch.zeros(x.item())
+            return z + y
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
+    return add""")  # noqa: B950
+
+    def test_unbacked_unify_guard(self):
+        def f(x, y):
+            z = torch.zeros(x.item())
+            torch._check(z.size(0) == y.size(0))  # refines i0 = s0
+            if z.size(0) == 4:
+                return y * 2
+            else:
+                return y + 2
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
+    return add""")  # noqa: B950
+
+    def test_unbacked_unify_guard_transitivity(self):
+        def f(x1, x2, y):
+            z1 = torch.zeros(x1.item())
+            z2 = torch.zeros(x2.item())
+            torch._check(z1.size(0) == z2.size(0))  # refines i0 = i1
+            torch._check(z2.size(0) == y.size(0))  # refines i0 = s0
+            if z1.size(0) == 4:
+                return y * 2
+            else:
+                return y + 2
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10)).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, x1_1, x2_1, y_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
+    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
+    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
+    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
+    return add""")  # noqa: B950
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
-                constrain_as_size(s)
+                torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
@@ -1291,8 +1361,8 @@ def forward(self, lengths_1, values_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
-    pow_1 = sym_size ** 0.5;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
+    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
@@ -1304,15 +1374,15 @@ def forward(self, a_1):
         r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
-    div = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
+    div = torch.ops.aten.div.Tensor(a_1, sym_size_int);  a_1 = sym_size_int = None
     return div""")
 
         r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
-    sym_size = torch.ops.aten.sym_size(a_1, 0)
-    sym_float = torch.sym_float(sym_size);  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
     return div""")
 
@@ -1386,7 +1456,7 @@ def forward(self, a_1):
         def f(x, offset, as_sym_float=False):
             x0 = x.size()[0]
             if as_sym_float:
-                x0 = sym_float(x0)
+                x0 = torch.sym_float(x0)
             return torch.add(x0, offset)
 
         fx_g = make_fx(f, tracing_mode="symbolic")(torch.rand(2, 3), 2.0, False)
@@ -1600,25 +1670,18 @@ symbolic_tensor_failures = {
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('combinations', ''),
-    xfail('diff', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
-    xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2) must be tupl...
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...

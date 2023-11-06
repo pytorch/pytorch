@@ -55,6 +55,7 @@ Creation Ops
     asarray
     as_tensor
     as_strided
+    from_file
     from_numpy
     from_dlpack
     frombuffer
@@ -132,6 +133,7 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     unsqueeze
     vsplit
     vstack
@@ -705,6 +707,7 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    sym_ite
 
 Export Path
 -------------

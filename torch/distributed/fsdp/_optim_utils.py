@@ -24,7 +24,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -344,11 +344,10 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = _get_pg_default_device(group)
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
-        tensor = state.to(device)
+        tensor = state.to(fsdp_state.compute_device)
     else:
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
@@ -358,7 +357,9 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
+        tensor = torch.zeros(
+            state.shape, dtype=state.dtype, device=fsdp_state.compute_device
+        )
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -1155,6 +1156,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
+    # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
@@ -1334,7 +1336,7 @@ def _convert_all_state_info(
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
-) -> Tuple[torch.dtype, Dict[str, List[Optional[torch.Tensor]]]]:
+) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
@@ -1350,11 +1352,11 @@ def _convert_all_state_info(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
+        dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
         # states on each rank.
         for state_name in all_tensor_states:
             numels = []
-            dtype: Optional[torch.dtype] = None
             _empty_ranks: Set[int] = set()
             for rank, object_state in enumerate(state_info):
                 numels.append(0)
@@ -1375,6 +1377,11 @@ def _convert_all_state_info(
                     None for _ in fsdp_param_info.param_indices
                 ]
             local_state = input_states[fqn].get(state_name, None)
+            # N.B. We need to move the state to compute_device. The reason is
+            # not yet clear and we need to figure out why the state may be on a
+            # different device.
+            if local_state is not None:
+                local_state = local_state.to(fsdp_param_info.state.compute_device)
             state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
         # Restoring the scalar and non-tensor states. If the corresponding
@@ -1398,7 +1405,6 @@ def _convert_all_state_info(
                 ), f"Different ranks have different values for {name}."
                 gathered_state[name] = scalar_tensor_value
 
-    assert dtype is not None  # typing purpose
     return dtype, state_buffers
 
 
@@ -1423,9 +1429,27 @@ def _unflatten_orig_param_states(
     fsdp_state = fsdp_param_info.state
     for fqn, gathered_state in output_states.items():
         value = gathered_state[state_name]
-
         param_idx = fsdp_param_info.param_indices[fqn]
-        value = value.reshape(flat_param._shapes[param_idx])
+
+        # TODO: This solution is not general and only apply to PTD TP solution.
+        if isinstance(value, DTensor):
+            placement = value.placements[0]
+            # If gathered state is a DTensor and its TP placement is not Replicate(), we need to
+            # gather the tensor on its TP dimension before chunking them into DTensor again.
+            if placement != Replicate():
+                placement_dim = placement.dim  # type: ignore[attr-defined]
+                value_local = value.redistribute(placements=(Replicate(),))
+                reshape_size = list(flat_param._shapes[param_idx])
+                reshape_size[placement_dim] *= 2
+                reshape_size = torch.Size(reshape_size)
+                value = value.reshape(reshape_size)
+            # If gathered state is a replicate DTensor, we directly reshape it.
+            else:
+                value = value.reshape(flat_param._shapes[param_idx])
+        else:
+            # If gathered state is a tensor, we directly reshape it into unflatten state.
+            value = value.reshape(flat_param._shapes[param_idx])
+
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
             if getattr(osd_config, "_use_dtensor", False):
@@ -1476,6 +1500,9 @@ def _allgather_orig_param_states(
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states
     )
+
+    if len(state_buffers) == 0:
+        return output_states
 
     has_state_params: List[bool] = [
         True if fqn in output_states else False
