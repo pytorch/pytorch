@@ -2601,7 +2601,7 @@ class ShapeEnv:
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(expr.free_symbols) == 1 and not is_trivial:
-                    symbol = list(expr.free_symbols)[0]
+                    symbol = next(iter(expr.free_symbols))
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
@@ -3114,7 +3114,7 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
         if expr.has(Mod):
-            mod_expr = tuple(expr.atoms(Mod))[0]
+            mod_expr = next(iter(expr.atoms(Mod)))
             try:
                 r = try_solve(expr, mod_expr, floordiv_inequality=False)
                 if r is not None and r[1] == 0:

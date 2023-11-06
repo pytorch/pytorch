@@ -200,5 +200,5 @@ def get_function_event(function_events, partial_event_name):
     function_events: function_events returned by the profiler.
     event_name (str): partial key that the event was profiled with.
     """
-    event = [event for event in function_events if partial_event_name in event.name][0]
+    event = next(event for event in function_events if partial_event_name in event.name)
     return event

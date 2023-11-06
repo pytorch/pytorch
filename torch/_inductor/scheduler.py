@@ -1315,7 +1315,7 @@ class Scheduler:
         def dep_closure(node_name):
             reachable_names = {node_name}
             node = self.name_to_node[node_name]
-            write_dep = list(node.read_writes.writes)[0]
+            write_dep = next(iter(node.read_writes.writes))
             for read_dep in node.read_writes.reads:
                 if (
                     read_dep.name in self.name_to_node
