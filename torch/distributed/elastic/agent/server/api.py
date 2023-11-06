@@ -230,7 +230,7 @@ class WorkerState(str, Enum):
 
     @staticmethod
     def is_running(state: "WorkerState") -> bool:
-        """Return the state or the Worker.
+        """Return the state of the Worker.
 
         Returns:
              True if the worker state represents workers still running
@@ -321,7 +321,7 @@ class _RoleInstanceInfo:
 @dataclass
 class RunResult:
     """
-    Return results by the worker executions.
+    Return results of the worker executions.
 
     Run results follow an "all-or-nothing" policy where the run is successful if and
     only if ALL local workers managed by this agent complete successfully.
