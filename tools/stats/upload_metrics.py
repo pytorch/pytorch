@@ -167,7 +167,8 @@ def emit_metric(
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
-    def _helper(o):
+    # Attempt to recurse
+    def _helper(o: Any) -> Any:
         if isinstance(o, float):
             return Decimal(str(o))
         if isinstance(o, list):
@@ -176,4 +177,4 @@ def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
             return {_helper(k): _helper(v) for k, v in o.items()}
         return o
 
-    return _helper(data)
+    return {k: _helper(v) for k, v in data.items()}
