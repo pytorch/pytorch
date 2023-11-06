@@ -3,6 +3,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
+from torch.distributed._composable_state import _State
 
 from torch.nn.parallel import DistributedDataParallel
 
@@ -11,59 +12,31 @@ from .contract import _get_registry, contract
 _ROOT_MODULE_PREFIX = ""
 
 
-@contract()
-def replicate(
-    module: nn.Module,  # NOTE: contract now supports single module only
-    ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
-    **kwargs,
-) -> nn.Module:
-    r"""Replicates a module
-
-    Args:
-        module (torch.nn.Module): module to replicate
-
-    Example::
-        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
-        >>> module = nn.Linear(3, 3)
-        >>> replicate(module)
-    """
-    torch._C._log_api_usage_once("torch.distributed.replicate")
-    if "device_id" in kwargs:
-        if not isinstance(kwargs["device_id"], (int, torch.device)):
-            raise RuntimeError(
-                f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}"
-            )
-    _ReplicateState(ignored_modules=ignored_modules).mark_module(module, **kwargs)
-    return module
-
-
-def _is_fully_sharded(module: nn.Module) -> bool:
-    r"""Check if module is marked with fully_shard."""
-    return "fully_shard" in _get_registry(module)
-
-
-class _ReplicateState:
-    def __init__(self, ignored_modules: Optional[Iterable[torch.nn.Module]]) -> None:
+class _ReplicateState(_State):
+    def __init__(self) -> None:
+        super().__init__()
         self.module: Optional[nn.Module] = None
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()
         self.kwargs: dict = {}
-        self.ignored_modules: Set[torch.nn.Module] = (
-            set(ignored_modules) if ignored_modules is not None else set()
-        )
-        self.ignored_params: Set[torch.nn.Parameter] = {
-            p for m in self.ignored_modules for p in m.parameters()
-        }
+        self.ignored_modules: Set[torch.nn.Module] = set()
+        self.ignored_params: Set[torch.nn.Parameter] = set()
         # Only used for testing
         self._param_names: List[str] = []
 
-    def mark_module(self, module: nn.Module, **kwargs) -> None:
+    def mark_module(
+        self,
+        module: nn.Module,
+        ignored_modules: Optional[Iterable[torch.nn.Module]],
+        **kwargs,
+    ) -> None:
         if _is_fully_sharded(module):
             raise AssertionError(
                 "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
             )
         self.module = module
-        replicate.state(module)._params_collected = False
+        self.ignored_modules = set(ignored_modules) if ignored_modules else set()
+        self.ignored_params = {p for m in self.ignored_modules for p in m.parameters()}
         module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
         # TODO(@yhcharles): fix type error
         module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
@@ -125,9 +98,7 @@ class _ReplicateState:
     def forward_pre_hook(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        self.init_helper()
-        args, kwargs = self._ddp._pre_forward(*args, **kwargs)
-        return args, kwargs
+        return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
         self,
@@ -136,3 +107,36 @@ class _ReplicateState:
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
+
+
+@contract(state_cls=_ReplicateState)
+def replicate(
+    module: nn.Module,  # NOTE: contract now supports single module only
+    ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
+    **kwargs,
+) -> nn.Module:
+    r"""Replicates a module
+
+    Args:
+        module (torch.nn.Module): module to replicate
+
+    Example::
+        >>> # xdoctest: +REQUIRES(module:torch._C._distributed_c10d)
+        >>> module = nn.Linear(3, 3)
+        >>> replicate(module)
+    """
+    torch._C._log_api_usage_once("torch.distributed.replicate")
+    if "device_id" in kwargs:
+        if not isinstance(kwargs["device_id"], (int, torch.device)):
+            raise RuntimeError(
+                f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}"
+            )
+
+    replicate.state(module).mark_module(module, ignored_modules, **kwargs)
+    replicate.state(module).init_helper()
+    return module
+
+
+def _is_fully_sharded(module: nn.Module) -> bool:
+    r"""Check if module is marked with fully_shard."""
+    return "fully_shard" in _get_registry(module)
