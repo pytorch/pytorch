@@ -26,7 +26,7 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
     when the files edited by current PR were modified.
     """
 
-    def __init__(self, **kwargs: Dict[str, Any]):
+    def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
     def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
