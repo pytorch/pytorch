@@ -5,7 +5,7 @@ namespace c10 {
 
 namespace detail {
 
-C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input) {
+C10_API C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input) {
   constexpr float e5m2fnuz_lut[256] = {
       0.0f,
       7.62939453125e-06f,
