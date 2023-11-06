@@ -11563,6 +11563,19 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
+    # Ref: https://github.com/pytorch/pytorch/issue/108345
+    @onlyCUDA
+    @largeTensorTest("20GB", "cpu")
+    @largeTensorTest("20GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_64bit(self, device, reduction):
+        labels = torch.zeros(190, 50, dtype=torch.long, device=device)
+        logits = torch.ones(190, 229000, 50, dtype=torch.float, device=device)
+        loss = torch.nn.functional.cross_entropy(logits, labels)
+        loss_cpu = torch.nn.functional.cross_entropy(logits.cpu(), labels.cpu())
+        print(logits.numel(), labels.numel(), loss.numel())
+        self.assertTrue(torch.allclose(loss_cpu, loss.cpu(), rtol=1e-4, atol=1e-4))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
@@ -12738,6 +12751,21 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_norm_(p1, max_norm, norm_type=norm_type, foreach=foreach)
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
+
+    # reference issue: https://github.com/pytorch/pytorch/issues/111484
+    @onlyCUDA
+    @largeTensorTest("30GB", "cuda")
+    def test_softmax_forward_64bit_indexing(self, device):
+        batch_size = 70
+        seq_len = 2048
+        vocab_size = 50000
+
+        shift_labels = torch.zeros(batch_size, seq_len - 1, dtype=torch.long, device=device)
+        logits = torch.ones(batch_size, seq_len - 1, vocab_size, dtype=torch.float16, device=device)
+        loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
+        nll = loss_fct(logits.permute(0, 2, 1), shift_labels).float()
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float16, rtol=None, atol=None)
+        self.assertEqual(nll, torch.ones_like(nll) * torch.log(torch.tensor(vocab_size)), rtol=rtol, atol=atol)
 
     @onlyCUDA
     @largeTensorTest("20GB", "cuda")
