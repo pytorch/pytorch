@@ -1,8 +1,7 @@
 #include <torch/csrc/autograd/input_metadata.h>
 
 // TODO: we may be able to move some imports from input_metadata.h to here, but
-// it seems that function.h seems to transitively depend on some of them, so
-// leaving input_metadata.h's imports as-is for now.
+// it seems that function.h transitively depends on some of them.
 
 namespace torch {
 namespace autograd {
