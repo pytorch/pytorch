@@ -1123,10 +1123,10 @@ def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         tensors.
 
     Example:
-        >>> a = np.array([0, 1, 2, 3], dtype=np.uint8)
-        >>> b = np.array([1, 0, 3, 2], dtype=np.uint8)
+        >>> a = torch.tensor([0, 1, 2, 3])
+        >>> b = torch.tensor([1, 0, 3, 2])
         >>> bitwise_or(a, b)
-        array([1, 1, 3, 3], dtype=uint8)
+        tensor([1, 1, 3, 3])
     """
     return prims.bitwise_or(a, b)
 
@@ -1152,10 +1152,10 @@ def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         `a` and `b`.
 
     Example:
-        >>> a = np.array([10, 20, 30])
-        >>> b = np.array([1, 2, 3])
+        >>> a = torch.tensor([10, 20, 30])
+        >>> b = torch.tensor([1, 2, 3])
         >>> bitwise_right_shift(a, b)
-        array([5, 5, 3])
+        tensor([5, 5, 3])
     """
     return prims.shift_right_arithmetic(a, b)
 
@@ -1181,10 +1181,10 @@ def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         the input tensors.
 
     Example:
-        >>> a = np.array([9, 8, 7], dtype=np.int32)
-        >>> b = np.array([1, 2, 3], dtype=np.int32)
+        >>> a = torch.tensor([9, 8, 7])
+        >>> b = torch.tensor([1, 2, 3])
         >>> bitwise_xor(a, b)
-        array([8, 10, 4], dtype=int32)
+        tensor([8, 10, 4])
     """
     return prims.bitwise_xor(a, b)
 
