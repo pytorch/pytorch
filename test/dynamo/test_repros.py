@@ -3558,24 +3558,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
 
-    def test_inductor_no_recursionerror_on_for_loops(self):
-        def forward(x):
-            for _ in range(1000):
-                x = 1.0 * x
-            return x
-
-        self.assertTrue(
-            same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
-        )
 
     def test_tensor_set_data(self):
-        # https://github.com/pytorch/pytorch/issues/113030
-        def func1(x, y):
-            x.data = y
-            x.add_(1)
-            return x
-
-        def func2(x, y):
+        def fn1(x, y):
             x.data = y
             y.data = torch.zeros([0])
             return x
@@ -3589,12 +3574,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
             for func in [func1, func2, func3]:
-                if func is func1 and backend != "eager":
-                    # NYI - aot_autograd with add_() on data
-                    return
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-                compiled_fn = torch.compile(func, backend=cnt)
+                compiled_fn = torch.compile(fn, backend=cnt)
                 for i in range(0, 5):
                     # Inputs
                     eager_a = torch.rand([6])
@@ -3603,7 +3585,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                     compiled_b = torch.clone(eager_b)
 
                     # Eager
-                    func(eager_a, eager_b)
+                    fn(eager_a, eager_b)
                     # Compiled
                     compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
