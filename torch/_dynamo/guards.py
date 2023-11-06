@@ -929,7 +929,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
