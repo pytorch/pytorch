@@ -13,23 +13,32 @@ JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 # Simplifying assumption: we assume that the batch dim is always the left-most
 # dim, and the ragged dim is always the second dim.
-def _wrap_jagged_dim(ndim, dim, op_name, allow_ragged=False):
+def _outer_to_inner_dim(ndim, dim):
+    assert dim >= 0 and dim < ndim
+    return 0 if dim < 2 else dim - 1
+
+
+def _wrap_jagged_dim(ndim, dim, op_name):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    # Technically we can also map 0 -> 0, but we can add it later if we need it
-    if wrapped < 2 and not (allow_ragged and wrapped == 1):
+    if wrapped < 2:
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
-    return wrapped - 1
+    return _outer_to_inner_dim(ndim, wrapped)
 
 
 def _wrap_jagged_dims(ndim, dims, op_name):
     # ex: (2, 3, 4) -> (1, 2, 3)
     # ex: (0, 1, 4) -> (0, 3)
-    zero_in_dims = 0 in dims
-    one_in_dims = 1 in dims
+    from torch._prims_common import canonicalize_dims
+
+    wrapped_dims = [canonicalize_dims(ndim, d) for d in dims]
+    # This logic needs to be done after we canonicalize dims but before we
+    # map to inner dims so we can print a nicer error message.
+    zero_in_dims = 0 in wrapped_dims
+    one_in_dims = 1 in wrapped_dims
     if zero_in_dims ^ one_in_dims:
         apply, not_apply = ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
         raise RuntimeError(
@@ -38,7 +47,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
         )
     return (
         tuple(
-            _wrap_jagged_dim(ndim, d, op_name, allow_ragged=True)
+            _outer_to_inner_dim(ndim, d, op_name)
             for d in dims
             if d != 0
         ),
