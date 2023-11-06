@@ -146,6 +146,9 @@ def random_nt_from_similar(other, dims=None):
 
 
 class NestedTestCase(TestCase):
+    # Suppress errors is enabled by default in the test suite. We disable
+    # suppress errors in particular for NestedTensors to ensure that dynamo
+    # graph breaks cleanly.
     def tearDown(self):
         self._exit_stack.close()
         super(NestedTestCase, self).tearDown()
