@@ -154,6 +154,10 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
+        if not is_symbolic(val):
+            # This allow applies to the jagged layout NestedTensor case as
+            # singleton ints are not symbolic
+            return set()
         return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
