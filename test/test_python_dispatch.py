@@ -2096,9 +2096,9 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         fx_g = make_fx(trace_fn, tracing_mode="symbolic")(x)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, x_1):
-    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 1);  x_1 = None
-    return ((sym_size_int, sym_size_int_1), (sym_size_int, sym_size_int_1))""")
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    sym_size_1 = torch.ops.aten.sym_size(x_1, 1);  x_1 = None
+    return ((sym_size, sym_size_1), (sym_size, sym_size_1))""")
 
     def test_data_ptr_respects_numel_slow_path(self):
         data = torch.randn(6, 2)
