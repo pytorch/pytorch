@@ -35,4 +35,5 @@ print_specializations = False
 inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 from torch.utils._config_module import install_config_module
+
 install_config_module(sys.modules[__name__])
