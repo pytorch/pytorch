@@ -3084,7 +3084,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.values().device, device)
         self.assertEqual(nt.offsets().device, device)
         self.assertEqual(nt.shape[0], batch_size)
-        self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
+        self.assertTrue(isinstance(nt.shape[1], (int, torch.SymInt)))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
     @torch._dynamo.config.patch(suppress_errors=True)

@@ -819,7 +819,10 @@ class SymNodeVariable(VariableTracker):
         self.sym_num = sym_num
 
     def python_type(self):
-        return type(self.sym_num)
+        if isinstance(self.sym_num, SymTypes):
+            return self.sym_num.node.pytype
+        else:
+            return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
         super().unpack_var_sequence(tx)
