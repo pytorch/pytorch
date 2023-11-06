@@ -332,10 +332,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and input_node.node.has_aliasing()
+                            isinstance(input_node.node, ir.FallbackKernel)
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -1356,6 +1354,7 @@ class Scheduler:
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
+            assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
