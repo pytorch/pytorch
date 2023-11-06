@@ -1160,7 +1160,6 @@ class BuiltinVariable(VariableTracker):
     ):
         from .distributed import PlacementVariable
 
-        print("SETATTR", obj, tx.output.side_effects.is_attribute_mutation(obj))
         if isinstance(
             obj,
             (
