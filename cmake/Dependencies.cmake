@@ -432,9 +432,9 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
   # ---[ Caffe2 uses cpuinfo library in the thread pool
-  # ---[ But it doesn't support s390x/powerpc and thus not used on s390x/powerpc
+  # ---[ But it doesn't support s390x and thus not used on s390x
   if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
     add_library(cpuinfo SHARED IMPORTED)
     find_library(CPUINFO_LIBRARY cpuinfo)

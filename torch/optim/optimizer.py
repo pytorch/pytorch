@@ -169,8 +169,8 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
             performance, so leave it False if you don't intend to run autograd
             through this instance (default: False)"""
 
-_maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
-            params, instead of minimizing (default: False)"""
+_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
+            objective, instead of minimizing (default: False)"""
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:

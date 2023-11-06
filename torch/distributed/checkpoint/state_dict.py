@@ -354,11 +354,6 @@ def _get_model_state_dict(
             fqns = _get_fqns(model, key)
             for fqn in fqns:
                 state_dict.pop(fqn)
-
-    for key, p in list(state_dict.items()):
-        if p.is_meta:
-            state_dict.pop(key)
-
     return state_dict
 
 
