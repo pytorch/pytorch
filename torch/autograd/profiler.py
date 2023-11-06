@@ -624,7 +624,7 @@ class record_function(_ContextDecorator):
             torch.ops.profiler._record_function_exit(record)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
-        """Used for profiling async calls that return a future.
+        """Use for profiling async calls that return a future.
 
         Calling this function will extend recording beyond this scope, until the future is
         satisfied. It is useful for profiling the end to end time of asynchronous calls.
