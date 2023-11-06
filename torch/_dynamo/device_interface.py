@@ -158,7 +158,7 @@ class CudaInterface(DeviceInterface):
     _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
-    get_raw_stream = staticmethod(get_cuda_stream) # type: ignore[arg-type]
+    get_raw_stream = staticmethod(get_cuda_stream)  # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod

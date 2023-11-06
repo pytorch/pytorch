@@ -47,11 +47,10 @@ from typing import (
     ValuesView,
 )
 
-np: Optional[types.ModuleType] = None
 try:
     import numpy as np
 except ModuleNotFoundError:
-    pass
+    np = None  # type: ignore[assignment]
 
 try:
     import torch._logging
