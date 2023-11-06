@@ -1076,8 +1076,6 @@ def init_process_group(
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value is 10 minutes for NCCL and 30 minutes for other backends.
             This is the duration after which collectives will be aborted asynchronously and the process will crash.
-            When ``NCCL_ASYNC_ERROR_HANDLING`` is set, this is the duration after which collectives will be aborted
-            asynchronously and the process will crash.
             This is done since CUDA execution is async and it is no longer safe to continue executing user code since
             failed async NCCL operations might result in subsequent CUDA operations running on corrupted data.
             When NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
