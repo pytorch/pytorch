@@ -45,8 +45,8 @@ def install_config_module(module):
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, Any] = dict()
-    default: Dict[str, Any] = dict()
+    config = dict()
+    default = dict()
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
@@ -115,8 +115,6 @@ class ConfigModule(ModuleType):
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
-    _is_dirty: bool
-    _hash_digest: bytes
 
     def __init__(self):
         raise NotImplementedError(
@@ -179,8 +177,10 @@ class ConfigModule(ModuleType):
 
     def to_dict(self):
         warnings.warn(
-            "config.to_dict() has been deprecated. It may no longer change the underlying config."
-            " use config.shallow_copy_dict() or config.get_config_copy() instead",
+            (
+                "config.to_dict() has been deprecated. It may no longer change the underlying config.",
+                "use config.shallow_copy_dict() or config.get_config_copy() instead",
+            ),
             DeprecationWarning,
         )
         return self.shallow_copy_dict()
@@ -227,7 +227,7 @@ class ConfigModule(ModuleType):
             changes = kwargs
             assert arg2 is None
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
-        prior: Dict[str, Any] = {}
+        prior = {}
         config = self
         dirty = False
 
@@ -257,16 +257,10 @@ class ContextDecorator(contextlib.ContextDecorator):
     `unittest.TestCase`
     """
 
-    def __enter__(self):
-        raise NotImplementedError("NYI")
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        raise NotImplementedError("NYI")
-
     def __call__(self, func):
         if isinstance(func, type) and issubclass(func, unittest.TestCase):
 
-            class _TestCase(func):  # type: ignore[valid-type, misc]
+            class _TestCase(func):
                 @classmethod
                 def setUpClass(cls):
                     self.__enter__()
