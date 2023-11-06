@@ -4255,11 +4255,7 @@ class FallbackKernel(ExternKernelAlloc):
         ]
 
     def is_legacy_abi_kernel(self):
-        legacy_kernels = [
-            "_scaled_dot_product_flash_attention",
-            "repeat_interleave_Tensor",
-        ]
-        return any(s in str(self.kernel) for s in legacy_kernels)
+        return "_scaled_dot_product_flash_attention" in str(self.kernel)
 
     def get_arg_default_value(self, pos):
         assert hasattr(

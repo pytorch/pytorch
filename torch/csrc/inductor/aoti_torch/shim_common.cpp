@@ -48,6 +48,12 @@ c10::optional<T> pointer_to_optional(T* ptr) {
   return ptr ? c10::make_optional(*ptr) : c10::nullopt;
 }
 
+// Handles implicit conversions.
+template <class T, class U>
+c10::optional<T> pointer_to_optional(U* ptr) {
+  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
+}
+
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -318,7 +324,7 @@ AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,
     AtenTensorHandle scale_result,
-    bool use_fast_accum,
+    int8_t use_fast_accum,
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -333,10 +339,11 @@ AOTITorchError aoti_torch__scaled_mm(
         *self_tensor,
         *mat2_tensor,
         pointer_to_optional(bias_tensor),
-        pointer_to_optional(reinterpret_cast<c10::ScalarType*>(out_dtype)),
+        pointer_to_optional<c10::ScalarType>(out_dtype),
         pointer_to_optional(scale_a_tensor),
         pointer_to_optional(scale_b_tensor),
-        pointer_to_optional(scale_result_tensor));
+        pointer_to_optional(scale_result_tensor),
+        use_fast_accum);
     at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
     *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
     at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
@@ -431,12 +438,12 @@ AOTITorchError aoti_torch_nonzero(
 
 AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
-    int64_t output_size,
+    int64_t* output_size,
     AtenTensorHandle* out) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* repeats_tensor = tensor_handle_to_tensor_pointer(repeats);
-    at::Tensor out_tensor =
-        at::_ops::repeat_interleave_Tensor::call(*repeats_tensor, output_size);
+    at::Tensor out_tensor = at::_ops::repeat_interleave_Tensor::call(
+        *repeats_tensor, pointer_to_optional<c10::SymInt>(output_size));
     at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
     *out = tensor_pointer_to_tensor_handle(out_tensor_ptr);
   });

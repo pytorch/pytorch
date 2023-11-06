@@ -204,7 +204,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_mm(
     AtenTensorHandle scale_a,
     AtenTensorHandle scale_b,
     AtenTensorHandle scale_result,
-    bool use_fast_accum,
+    int8_t use_fast_accum,
     AtenTensorHandle* ret0,
     AtenTensorHandle* ret1);
 
@@ -252,7 +252,7 @@ aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle repeats,
-    int64_t output_size,
+    int64_t* output_size,
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
