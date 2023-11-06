@@ -31,6 +31,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
+from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
@@ -538,14 +539,10 @@ class VariableBuilder:
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
-            old_source = self.source
-            self.source = new_source
-            return CollectiveFunctionRewriteVariable(
-                new_fn,
-                orig_fn=value,
-                orig_source=old_source,
-                source=new_source,
+            return CollectiveFunctionRewriteVariable.create(
+                self.tx,
+                value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
@@ -1080,23 +1077,6 @@ class VariableBuilder:
         if is_duplicate_tensor:
             return self.tx.output.input_source_to_var[source]
 
-        # We have accessed the SAME tensor from a different source.  In some
-        # situations, it doesn't matter if you have the same tensor identity
-        # or not, but we are unable to do this fine-grained tracking.  So
-        # instead we just say, if x is y, then to successfully reuse this
-        # compiled tensor again, you must have x is y again.  Negative
-        # aliases, that is, that x is not y, are IMPLICITLY checked as part of
-        # the code cache matching process, you don't need to explicitly
-        # generate a guard for it (nor would you want to, you need O(n^2)
-        # pairwise 'is not' tests to do it.)
-        if value in self.tx.output.real_value_tensor_positive_aliases:
-            stored_value = self.tx.output.real_value_tensor_positive_aliases[value]
-            # TODO(voz): Decently common pattern, refactor at some point.
-            dup_guard = self._make_dupe_guard(stored_value)
-            if dup_guard:
-                stored_value = stored_value.add_guards(self.make_guards(dup_guard))
-            return stored_value
-
         # By this point, we should have deduplicated all tensors
         self.assert_not_wrapped_by_this_graph(value)
 
@@ -1132,6 +1112,13 @@ class VariableBuilder:
             )
         )
 
+        if (
+            isinstance(value, torch.Tensor)
+            and value.is_nested
+            and not isinstance(value, NestedTensor)
+        ):
+            unimplemented("torch.compile does not support strided NestedTensor")
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1165,8 +1152,16 @@ class VariableBuilder:
 
         from torch._numpy import _util
 
+        readonly = not value.flags.writeable
+        if readonly:
+            value.flags.writeable = True
+
         try:
             tensor_value = _util._try_convert_to_tensor(value)
+            if readonly:
+                from torch._prims_common import clone_preserve_strides
+
+                tensor_value = clone_preserve_strides(tensor_value)
         except NotImplementedError as e:
             # failed to convert to tensor, graph break
             unimplemented(str(e))
@@ -1284,7 +1279,7 @@ class VariableBuilder:
             else:
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
-                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
+                guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH)}
                 options = {"guards": guards}
             else:
                 options = {}
