@@ -28,10 +28,10 @@
 #define BF16_SWITCH(COND, ...)               \
   [&] {                                      \
     if (COND) {                              \
-      using T = device_gemm_trait::BFloat16; \
+      using elem_type = device_gemm_trait::BFloat16; \
       return __VA_ARGS__();                  \
     } else {                                 \
-      using T = device_gemm_trait::Float16;  \
+      using elem_type = device_gemm_trait::Float16;  \
       return __VA_ARGS__();                  \
     }                                        \
   }()
