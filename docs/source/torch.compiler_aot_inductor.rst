@@ -27,9 +27,8 @@ invoke ``aot_compile`` to transform the model into a shared library.
 
 .. note::
 
-   To execute the following code, it's essential to have a CUDA-enabled device on your machine.
-   In such a case, the script will compile the model code into a shared library that is optimized
-   for CPU execution.
+   If you have a CUDA-enabled device on your machine, the following code will compile the model
+   into a shared library for CUDA execution. Otherwise, the compiled artifact will execute on CPU.
 
 .. code-block:: python
 
@@ -82,11 +81,12 @@ previous step, enabling us to conduct model predictions directly within a C++ en
 
 .. note::
 
-    Once more, it's imperative to have a CUDA-enabled device to execute the subsequent code.
+    The following code snippet assumes your system has a CUDA-enabled device and your model was
+    compiled to run on CUDA as shown previously.
     In the absence of a GPU, it's necessary to make these adjustments in order to run it on a CPU:
-    1. Modify ``aoti_model_runner_cuda.h`` to ``aoti_model_runner.h``.
-    2. Change ``AOTIModelRunnerCuda`` to ``AOTIModelRunner``.
-    3. Eliminate ``.to(at::kCUDA)`` from the initialization of input tensors.
+    1. Modify ``aoti_model_runner_cuda.h`` to ``aoti_model_runner.h``
+    2. Change ``AOTIModelRunnerCuda`` to ``AOTIModelRunner``
+    3. Change ``at::kCUDA`` to ``at::kCPU``
 
 .. code-block:: cpp
 
