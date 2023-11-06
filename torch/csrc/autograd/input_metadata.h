@@ -98,7 +98,8 @@ struct TORCH_API InputMetadata {
 
  private:
   at::Tensor shape_as_tensor() const;
-  void check_nestedness_same(const at::Tensor& grad) const;
+  bool is_nestedness_same(const at::Tensor& grad) const;
+  bool maybe_expandable_to(const at::Tensor& grad) const;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::TensorOptions options_;

@@ -16,6 +16,14 @@ MetadataShape compute_variant_shape(const at::Tensor& input) {
   return MetadataShape{std::in_place_type<SymIntSmallVec>, input.sym_sizes()};
 }
 
+bool is_python_dispatch(const at::Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->is_python_dispatch();
+}
+
+bool is_cpp_nested_tensor(const at::Tensor& tensor) {
+  return tensor.is_nested() && !is_python_dispatch(tensor);
+}
+
 } // namespace
 
 InputMetadata::InputMetadata(
@@ -36,7 +44,7 @@ InputMetadata::InputMetadata(const at::Tensor& t)
     : InputMetadata(
           t.options(),
           compute_variant_shape(t),
-          t.unsafeGetTensorImpl()->is_python_dispatch(),
+          is_python_dispatch(t),
           t.is_nested()) {}
 
 at::Tensor InputMetadata::zeros_like() const {
@@ -46,7 +54,9 @@ at::Tensor InputMetadata::zeros_like() const {
 }
 
 bool InputMetadata::is_same_shape(const at::Tensor& grad) const {
-  check_nestedness_same(grad);
+  if (!is_nestedness_same(grad)) {
+    return false;
+  }
   if (is_cpp_nested_tensor()) {
     return grad._nested_tensor_size().is_same_size(shape_as_tensor());
   }
@@ -54,19 +64,15 @@ bool InputMetadata::is_same_shape(const at::Tensor& grad) const {
 }
 
 bool InputMetadata::is_expandable_to_shape(const at::Tensor& grad) const {
-  // Currently NestedTensors are not expandable. If this support is added then
-  // updates to reduce_grad will be needed
-  check_nestedness_same(grad);
-  return grad.is_nested()
-      ? false
-      : at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
+  if (!maybe_expandable_to(grad)) {
+    return false;
+  }
+  return at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
 }
 
 at::Tensor InputMetadata::reduce_grad(at::Tensor& grad) const {
-  // Currently reduce_grad is only called if is_expandable_to_shape returns
-  // true For nested tensors this always returns False, so this check
-  // shouldn't fail
-  TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_)
+  // reduce_grad should only be called if is_expandable_to_shape returns true.
+  TORCH_INTERNAL_ASSERT(maybe_expandable_to(grad));
   return at::sum_to(std::move(grad), shape_as_dim_vector());
 }
 
@@ -75,7 +81,7 @@ std::stringstream InputMetadata::incompatible_shape_error_message(
     const at::Tensor& grad) const {
   std::stringstream ss{};
   ss << "invalid gradient at index " << index << " - got ";
-  if (grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
+  if (::torch::autograd::is_cpp_nested_tensor(grad)) {
     ss << grad._nested_tensor_size();
   } else {
     ss << grad.sym_sizes();
@@ -106,20 +112,33 @@ SymIntSmallVec& InputMetadata::mutable_shape_as_dim_vector() {
   return std::get<SymIntSmallVec>(shape_);
 }
 
-void InputMetadata::check_nestedness_same(const at::Tensor& grad) const {
-  bool grad_is_subclass = grad.unsafeGetTensorImpl()->is_python_dispatch();
-  bool grad_is_nested = grad.is_nested();
-  bool grad_is_cpp_nested = grad_is_nested && !grad_is_subclass;
-  TORCH_CHECK(
-      grad_is_cpp_nested == is_cpp_nested_tensor() &&
-          grad_is_nested == is_nested_,
-      "grad and the input wrt the gradient that is being computed for need to be "
-      "either both nested or both non-nested tensors. Also note that nested "
-      "tensors with different layouts do not compose currently.");
+bool InputMetadata::is_nestedness_same(const at::Tensor& grad) const {
+  return (
+      grad.is_nested() == is_nested_ &&
+      ::torch::autograd::is_cpp_nested_tensor(grad) == is_cpp_nested_tensor());
 }
 
 at::Tensor InputMetadata::shape_as_tensor() const {
   return std::get<at::Tensor>(shape_);
+}
+
+bool InputMetadata::maybe_expandable_to(const at::Tensor& grad) const {
+  // This is the initial step to determine whether or not the tensor represented
+  // by input_metadata is expandable to grad based on is-nestedness information
+  // alone. If this function returns true, then is_expandable_to_shape will be
+  // called. We support the following 3 types of expansion:
+  bool grad_is_nested = grad.is_nested();
+  if (!is_nested_ && !grad_is_nested) {
+    // Normal case (no NestedTensors are involved)
+    // (1) plain Tensor -> plain Tensor
+    return true;
+  } else {
+    // (2) python NT -> python NT
+    // (3) plain Tensor -> python NT
+    return (
+        grad_is_nested && is_python_dispatch(grad) &&
+        (!is_nested_ || is_tensor_subclass_));
+  }
 }
 
 } // namespace autograd
