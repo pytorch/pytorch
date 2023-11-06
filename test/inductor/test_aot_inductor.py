@@ -1012,8 +1012,9 @@ class AOTInductorTestsTemplate:
     @requires_cuda()
     @skipIfRocm
     @common_utils.parametrize("grid_type", [1, 2, 3])
+    @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_basic(self, grid_type, dynamic):
+    def test_triton_kernel_basic(self, grid_type, num_dims, dynamic):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
@@ -1043,8 +1044,9 @@ class AOTInductorTestsTemplate:
                 add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
                 return output
 
-        a = torch.randn(10, 10, device=self.device)
-        b = torch.randn(10, 10, device=self.device)
+        dims = [10] * num_dims
+        a = torch.randn(*dims, device=self.device)
+        b = torch.randn(*dims, device=self.device)
         constraints = []
         if dynamic:
             constraints = [
