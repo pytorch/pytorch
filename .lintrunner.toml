@@ -203,7 +203,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/scheduler.py',
 ]
 command = [
     'python3',
@@ -268,7 +267,6 @@ exclude_patterns = [
     '**/cuda/*pp',
     'third_party/**/*',
     'torch/csrc/api/**',
-    'torch/csrc/autograd/functions/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
     'torch/csrc/cuda/**',
@@ -1181,6 +1179,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
