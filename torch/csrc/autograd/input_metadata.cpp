@@ -9,8 +9,7 @@ namespace autograd {
 namespace {
 
 MetadataShape compute_variant_shape(const at::Tensor& input) {
-  if (input.is_nested() &&
-    !input.unsafeGetTensorImpl()->is_python_dispatch()) {
+  if (input.is_nested() && !input.unsafeGetTensorImpl()->is_python_dispatch()) {
     auto nested_size = input._nested_tensor_size();
     return MetadataShape{std::in_place_type<at::Tensor>, nested_size};
   }
@@ -74,7 +73,7 @@ at::Tensor InputMetadata::reduce_grad(at::Tensor& grad) const {
 std::stringstream InputMetadata::incompatible_shape_error_message(
     const size_t index,
     const at::Tensor& grad) const {
-  std::stringstream ss;
+  std::stringstream ss{};
   ss << "invalid gradient at index " << index << " - got ";
   if (grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
     ss << grad._nested_tensor_size();
@@ -91,6 +90,7 @@ std::stringstream InputMetadata::incompatible_shape_error_message(
 }
 
 bool InputMetadata::is_cpp_nested_tensor() const {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool ret = std::holds_alternative<at::Tensor>(shape_);
   TORCH_INTERNAL_ASSERT(ret == (is_nested_ && !is_tensor_subclass_))
   return ret;
