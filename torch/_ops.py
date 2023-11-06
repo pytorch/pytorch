@@ -231,7 +231,6 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_global_higher_order_ops = {}
 _higher_order_ops = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
@@ -245,25 +244,19 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 
 
 class HigherOrderOperator(OperatorBase):
-    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
-    # (True) torch.ops.{name}
-    # (False) torch.ops.higher_order.{name}
+    # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
     # If you're creating a new HigherOrderOperator, please do not change the
     # default. Adding operators to the global torch.ops namespace is a bad
     # practice due to name collisions.
-    def __init__(self, name, *, _deprecated_global_ns=False):
+    def __init__(self, name):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        if _deprecated_global_ns:
-            _global_higher_order_ops[name] = self
-            self._ns = None
-        else:
-            _higher_order_ops[name] = self
-            self._ns = "higher_order"
+        _higher_order_ops[name] = self
+        self._ns = "higher_order"
 
         # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
         # torch._ops.higher_order.
@@ -376,10 +369,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -823,6 +813,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)
@@ -867,9 +861,6 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self._global_higher_order_op_namespace = _PyOpNamespace(
-            "torch.ops", _global_higher_order_ops
-        )
         self._higher_order_op_namespace = _PyOpNamespace(
             "torch.ops.higher_order", _higher_order_ops
         )
@@ -877,8 +868,6 @@ class _Ops(types.ModuleType):
 
     def __getattr__(self, name):
         # Check if the name is a HigherOrderOperator
-        if name in self._global_higher_order_op_namespace._ops:
-            return getattr(self._global_higher_order_op_namespace, name)
         if name == "higher_order":
             return self._higher_order_op_namespace
 

@@ -3,6 +3,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
@@ -799,6 +800,26 @@ This class does not support ``__members__`` property.)");
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
+
+  // TODO(yifu): _{register, resolve}_process_group currently only work for
+  // c10d_functional. Later, we'll unify the name -> group mapping across
+  // Python and C++, and spanning both functional and non-functional
+  // collectives.
+  module.def(
+      "_register_process_group",
+      [](const std::string& group_name,
+         c10::intrusive_ptr<::c10d::ProcessGroup> group) {
+        ::c10d::register_process_group(group_name, group);
+      },
+      py::arg("group_name"),
+      py::arg("group"));
+
+  module.def(
+      "_resolve_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::resolve_process_group(group_name);
+      },
+      py::arg("group_name"));
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -1772,7 +1793,15 @@ Arguments:
           .def_property_readonly(
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
-              "(Gets this process group name. It's cluster unique)");
+              "(Gets this process group name. It's cluster unique)")
+          .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
+            return torch::jit::toPyObject(c10::IValue(std::move(self)));
+          })
+          .def_static("unbox", [](py::object obj) {
+              auto typePtr = torch::getCustomClass("__torch__.torch.classes.c10d.ProcessGroup");
+              auto ivalue = torch::jit::toIValue(obj, typePtr);
+              return ivalue.toCustomClass<::c10d::ProcessGroup>();
+          });
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
@@ -2491,7 +2520,18 @@ Example::
               .. warning ::
                   This API only works for NCCL backend for now and must set
                   NCCL_ENABLE_TIMING environment variable.
-            )");
+            )")
+      .def(
+          "boxed",
+          [](c10::intrusive_ptr<::c10d::Work> self) {
+            return torch::jit::toPyObject(c10::IValue(self));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.Work");
+        auto ivalue = torch::jit::toIValue(obj, typePtr);
+        return ivalue.toCustomClass<::c10d::Work>();
+      });
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())

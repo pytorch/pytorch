@@ -1,6 +1,7 @@
 import functools
 
 import torch
+
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
 from torch.fx.operator_schemas import normalize_function
@@ -96,6 +97,7 @@ def register_func(tables, aten_ops, schema_str):
 
             for table in tables:
                 table[aten_op] = get_inner(aten_op)
+        return func
 
     return wrapper
 
@@ -281,15 +283,18 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
 def is_contiguous_general(func, *args, **kwargs):
+    from torch._prims_common import is_contiguous_for_memory_format
+
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
-
-    from torch._prims_common import is_contiguous
-
-    return is_contiguous(inp, **new_kwargs)
+    new_kwargs["memory_format"] = new_kwargs.get(
+        "memory_format", torch.contiguous_format
+    )
+    if new_kwargs["memory_format"] == torch.preserve_format:
+        return True
+    return is_contiguous_for_memory_format(inp, **new_kwargs)
 
 
 register_jagged_func(
@@ -363,6 +368,38 @@ register_jagged_func(
 )(jagged_unary_pointwise)
 
 
+@register_jagged_func(
+    torch.ops.aten.native_dropout.default, "self: jt, float: any, train: any?"
+)
+def native_dropout_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    out1, out2 = func(inp._values, **new_kwargs)
+    return (
+        NestedTensor(out1, **extract_kwargs(inp)),
+        NestedTensor(out2, **extract_kwargs(inp)),
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.native_dropout_backward.default,
+    "grad_output: jt, mask: jt, scale: any",
+)
+def native_dropout_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    grad_output = new_kwargs.pop("grad_output")
+    mask = new_kwargs.pop("mask")
+    return NestedTensor(
+        func(grad_output._values, mask._values, **new_kwargs),
+        **extract_kwargs(grad_output),
+    )
+
+
 @register_jagged_func(torch.ops.aten.prod.dim_int, "self: jt, dim: any, keepdim: any?")
 def prod_dim_int(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -378,6 +415,31 @@ def prod_dim_int(func, *args, **kwargs):
     new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
 
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
+
+
+@register_jagged_func(
+    torch.ops.aten.split_with_sizes.default, "self: jt, split_sizes: any, dim: any"
+)
+def split_with_sizes_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    values = inp._values
+
+    # hack to split on the last dim
+    dim = new_kwargs["dim"]
+    if dim != -1:
+        raise RuntimeError(
+            "split_with_sizes(): only supported for NestedTensor on dim = -1 for now"
+        )
+
+    split_sizes = new_kwargs["split_sizes"]
+    return [
+        NestedTensor(values=x, **extract_kwargs(inp))
+        for x in torch.split(values, split_sizes, -1)
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
@@ -673,4 +735,22 @@ def stack_default(func, *args, **kwargs):
 
     return NestedTensor(
         func([t._values for t in tensors], **new_kwargs), **extract_kwargs(tensors[0])
+    )
+
+
+@register_jagged_func(
+    torch.ops.aten.embedding.default,
+    "weight: t, indices: jt, padding_idx: any?, scale_grad_by_freq: any?, sparse: any?",
+)
+def embedding_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    # guaranteed this is non-empty if we got here
+    indices = new_kwargs.pop("indices")
+    weight = new_kwargs.pop("weight")
+
+    return NestedTensor(
+        func(weight, indices._values, **new_kwargs), **extract_kwargs(indices)
     )
