@@ -331,9 +331,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -370,8 +371,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -412,8 +413,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=None") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -444,8 +445,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("all_to_all_single") \
-                .run(code)
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=None") \
+                .run(code)  # noqa: B950
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -481,7 +482,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: Make sure we are not unneccessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = pool") \
+            .check("buf0 = empty(") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
@@ -515,13 +516,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: Make sure we are not unneccessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         FileCheck() \
+            .check("buf1 = buf0; del buf0  # reuse") \
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("buf1 = _wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("buf4 = pool") \
+            .check("buf4 = empty") \
             .check("return (buf1, buf4") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
@@ -552,10 +554,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: Make sure we are not unneccessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = pool") \
-            .check("buf4 = pool") \
+            .check("buf0 = empty(") \
+            .check("buf4 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf4") \
             .check_not("copy_(") \
+            .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
@@ -794,11 +797,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: Make sure we are not unneccessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = pool") \
-            .check("buf5 = pool") \
+            .check("buf0 = empty(") \
+            .check("buf5 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = pool") \
-            .check("buf2 = pool") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
@@ -807,13 +810,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("buf1 = _wait_tensor(buf1)") \
             .check("buf4 = buf1") \
+            .check("buf6 = buf0; del buf0  # reuse") \
             .check("buf2 = _wait_tensor(buf2)") \
             .check("buf7 = buf2") \
             .check("return (buf1, buf5, buf6, buf2") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct), f"{out} vs {correct}"
+        assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._inductor.config.triton, "descriptive_names", False)
@@ -840,11 +844,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unneccessary copy is made.
         FileCheck() \
-            .check("buf0 = pool") \
-            .check("buf5 = pool") \
+            .check("buf0 = empty(") \
+            .check("buf5 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = pool") \
-            .check("buf2 = pool") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
@@ -852,6 +856,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("buf1 = _wait_tensor(buf1)") \
             .check("buf4 = buf1") \
+            .check("buf6 = buf0; del buf0  # reuse") \
             .check("buf2 = _wait_tensor(buf2)") \
             .check("buf7 = buf2") \
             .check("return (buf1, buf5, buf6, buf2") \

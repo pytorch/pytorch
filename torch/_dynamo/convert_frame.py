@@ -57,7 +57,7 @@ from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
-from .symbolic_convert import InstructionTranslator
+from .symbolic_convert import InstructionTranslator, SpeculationLog
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -122,7 +122,7 @@ def fx_forward_from_src_skip_result(*args, **kwargs):
     return result
 
 
-def wrap_convert_context(fn):
+def preserve_global_state(fn):
     """
     Context manager to:
         1) Save/restore torch.is_grad_enabled() state
@@ -135,6 +135,7 @@ def wrap_convert_context(fn):
     def _fn(*args, **kwargs):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+        prior_inference_mode = torch.is_inference_mode_enabled()
         prior_deterministic = torch.are_deterministic_algorithms_enabled()
         prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
         py_rng_state = random.getstate()
@@ -149,6 +150,7 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
+            torch.torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
             torch.use_deterministic_algorithms(
                 prior_deterministic, warn_only=prior_warn_only
             )
@@ -303,7 +305,11 @@ def convert_frame_assert(
         ):
             return None
         if code.co_name == "<genexpr>" and code.co_filename.endswith(
-            ("transformers/file_utils.py", "transformers/utils/generic.py")
+            (
+                "transformers/file_utils.py",
+                "transformers/utils/generic.py",
+                "diffusers/utils/outputs.py",
+            )
         ):
             # not needed, but cleans up torchbench error stats
             return None
@@ -421,7 +427,7 @@ def convert_frame_assert(
         return convert_frame_assert(backend, one_graph, export, export_constraints)
 
     _convert_frame_assert._clone_with_backend = _clone_with_backend  # type: ignore[attr-defined]
-    return wrap_convert_context(_convert_frame_assert)
+    return _convert_frame_assert
 
 
 def maybe_cprofile(func):
@@ -474,9 +480,12 @@ def _compile(
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_reason: Optional[str] = None
+    speculation_log = SpeculationLog()
 
+    @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
             code,
@@ -490,17 +499,23 @@ def _compile(
             export_constraints,
             mutated_closure_cell_contents,
             frame_state=frame_state,
+            speculation_log=speculation_log,
         )
 
         try:
             with tracing(tracer.output.tracing_context):
                 tracer.run()
-        except (exc.RestartAnalysis, exc.SkipFrame):
+        except exc.UnspecializeRestartAnalysis:
+            speculation_log.clear()
+            raise
+        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
             if translation_validation_enabled():
                 bisect(tracer.output.shape_env)
             raise
+        finally:
+            tracer.output.call_cleanup_hooks()
 
         output = tracer.output
         assert output is not None
@@ -648,6 +663,7 @@ def _compile(
                 backend_compile_time = frame_phase_timing[frame_key].get(
                     "backend_compile", None
                 )
+                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
             else:
                 guard_count = None
                 graph_op_count = None
@@ -655,6 +671,7 @@ def _compile(
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
+                non_compliant_ops = set({})
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -669,6 +686,7 @@ def _compile(
                 entire_frame_compile_time,
                 backend_compile_time,
                 fail_reason,
+                non_compliant_ops,
             )
             log_compilation_event(metrics)
 

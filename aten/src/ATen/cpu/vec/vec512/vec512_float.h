@@ -238,7 +238,7 @@ public:
     return Vectorized<float>(Sleef_fmodf16(values, q));
   }
   Vectorized<float> log() const {
-    return Vectorized<float>(Sleef_logf16_u35(values));
+    return Vectorized<float>(Sleef_logf16_u10(values));
   }
   Vectorized<float> log2() const {
     return Vectorized<float>(Sleef_log2f16_u10(values));

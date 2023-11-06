@@ -17,13 +17,8 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -39,7 +34,15 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    Pointwise,
+    Reduction,
+    StorageBox,
+    TensorBox,
+)
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -333,30 +336,6 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
-
-        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
-        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
-        # for more details.
-        #
-        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
-        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
-        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
-        #
-        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
-        #
-        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
-        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
-        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
-        # bringing perf gains.
-        for n in gm.graph.nodes:
-            if n.target in (
-                torch.ops.aten._scaled_dot_product_flash_attention.default,
-                torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            ):
-                log.debug(
-                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
-                )
-                return False
 
         return True
 
@@ -853,6 +832,15 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
+            # Realize if a Pointwise has too much stuff to be inlined.
+            # As this may cause RecursionError during Inductor's evaluation.
+            if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+                curr = result.data.data
+                if isinstance(curr, Pointwise):
+                    # Use inner fn as a rough proxy. Good enough.
+                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                        result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct

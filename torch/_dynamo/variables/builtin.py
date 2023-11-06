@@ -34,17 +34,15 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
-    specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
-from .constant import ConstantVariable, EnumVariable
+from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
-from .dicts import ConstDictVariable
+from .dicts import ConstDictVariable, SetVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
-    SetVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -452,25 +450,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def unwrap_unspec_args_kwargs(args, kwargs):
-        unwrapped_args = []
-        unwrapped_kwargs = {}
-        for x in args:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_args.append(x.raw_value)
-            else:
-                unwrapped_args.append(x.as_python_constant())
-        for k, v in kwargs:
-            if isinstance(
-                x,
-                (variables.UnspecializedPythonVariable,),
-            ):
-                unwrapped_kwargs.update({k: v.raw_value})
-            else:
-                unwrapped_kwargs.update({k: v.as_python_constant()})
-        return unwrapped_args, unwrapped_kwargs
+        return [x.as_python_constant() for x in args], {
+            k: v.as_python_constant() for k, v in kwargs.items()
+        }
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -493,7 +475,6 @@ class BuiltinVariable(VariableTracker):
             args[0], variables.TensorVariable
         ):
             tensor_args = False
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
 
         if (
             self.can_insert_in_graph()
@@ -644,7 +625,6 @@ class BuiltinVariable(VariableTracker):
                 exc.remove_from_stats()
 
         if has_constant_handler:
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return variables.ConstantVariable.create(
                 self.as_python_constant()(
@@ -788,7 +768,6 @@ class BuiltinVariable(VariableTracker):
 
     def call_range(self, tx, *args):
         if self.unspec_python_args(*args) or self.constant_args(*args):
-            args, _ = specialize_args_kwargs(tx, args, {})
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
             args = [
@@ -821,7 +800,17 @@ class BuiltinVariable(VariableTracker):
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
-        cls = variables.BaseListVariable.cls_for(self.fn)
+
+        if isinstance(obj, variables.IteratorVariable):
+            # For non-list iterators, we will guard on vars that
+            # determine the control flow
+            return obj
+
+        # TODO This should probably be treated as a dict, or dicts should also be treated here
+        if self.fn == set:
+            cls = SetVariable
+        else:
+            cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
             if cls is SetVariable:
                 return cls(
@@ -858,30 +847,6 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_iter_tuple_list
     call_set = _call_iter_tuple_list
 
-    @staticmethod
-    def is_supported_call_dict_arg(tx, arg):
-        return (
-            arg is None
-            or isinstance(arg, ConstDictVariable)
-            or (
-                isinstance(
-                    arg,
-                    (
-                        ListVariable,
-                        TupleVariable,
-                        ListIteratorVariable,
-                    ),
-                )
-                and all(
-                    isinstance(x, (ListVariable, TupleVariable))
-                    and isinstance(
-                        x.unpack_var_sequence(tx)[0], (ConstantVariable, EnumVariable)
-                    )
-                    for x in arg.unpack_var_sequence(tx)
-                )
-            )
-        )
-
     def call_callable(self, tx, arg):
         from .functions import BaseUserFunctionVariable
 
@@ -890,35 +855,6 @@ class BuiltinVariable(VariableTracker):
         ):
             return variables.ConstantVariable.create(True).add_options(arg)
 
-    @staticmethod
-    def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None or isinstance(arg, dict):
-            return ConstDictVariable(
-                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        elif isinstance(arg, variables.ConstDictVariable):
-            return arg.clone(
-                user_cls=user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        elif isinstance(
-            arg,
-            (
-                ListVariable,
-                TupleVariable,
-                ListIteratorVariable,
-            ),
-        ):
-            items = user_cls()
-            for x in arg.unpack_var_sequence(tx):
-                k = x.unpack_var_sequence(tx)[0].as_python_constant()
-                v = x.unpack_var_sequence(tx)[1]
-                items.update({k: v})
-            return ConstDictVariable(
-                items, user_cls, mutable_local=MutableLocal()
-            ).add_options(options)
-        else:
-            raise AssertionError("call_dict_helper with illegal arg")
-
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
             return args[1]
@@ -926,20 +862,38 @@ class BuiltinVariable(VariableTracker):
         unimplemented(f"unsupported args to builtin cast(): {args} {kwargs}")
 
     def call_dict(self, tx, *args, **kwargs):
-        if not (args or kwargs):
-            return self.call_dict_helper(tx, dict, None)
-        elif (
-            not kwargs
-            and len(args) == 1
-            and self.is_supported_call_dict_arg(tx, args[0])
-        ):
-            return self.call_dict_helper(tx, dict, args[0])
+        return BuiltinVariable.call_custom_dict(tx, dict, *args, **kwargs)
+
+    @staticmethod
+    def call_custom_dict(tx, user_cls, *args, **kwargs):
+        if not kwargs:
+            if not args:
+                args = ({},)
+            assert len(args) == 1
+            arg = args[0]
+            if isinstance(arg, dict):
+                return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
+            elif isinstance(arg, variables.ConstDictVariable):
+                return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+            elif isinstance(
+                arg,
+                (
+                    ListVariable,
+                    TupleVariable,
+                    ListIteratorVariable,
+                ),
+            ):
+                items = user_cls()
+                for x in arg.unpack_var_sequence(tx):
+                    k, v = x.unpack_var_sequence(tx)
+                    k = ConstDictVariable.get_key(k)
+                    items.update({k: v})
+                return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
             return variables.ConstDictVariable(
-                dict(kwargs), user_cls=dict, mutable_local=MutableLocal()
+                dict(kwargs), user_cls=user_cls, mutable_local=MutableLocal()
             )
-        else:
-            unimplemented(f"dict(): {args} {kwargs}")
+        unimplemented(f"dict(): {args} {kwargs}")
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
@@ -972,8 +926,6 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
 
     def call_getitem(self, tx, *args, **kwargs):
-        if self.unspec_python_args(*args, **kwargs):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
@@ -1019,9 +971,10 @@ class BuiltinVariable(VariableTracker):
         return variables.SuperVariable(a, b)
 
     def call_next(self, tx, arg):
-        if isinstance(arg, variables.ListIteratorVariable):
-            val, next_iter = arg.next_variables()
-            tx.replace_all(arg, next_iter)
+        if isinstance(
+            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
+        ):
+            val, next_iter = arg.next_variables(tx)
             return val
         elif isinstance(arg, variables.BaseListVariable):
             return arg.items[0].add_options(self, arg)
@@ -1079,6 +1032,7 @@ class BuiltinVariable(VariableTracker):
     def call_getattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
     ):
+        from .. import trace_rules
         from . import (
             ConstantVariable,
             GetAttrVariable,
@@ -1174,6 +1128,8 @@ class BuiltinVariable(VariableTracker):
             if is_utils_checkpoint(member):
                 options["source"] = source
                 return build_checkpoint_variable(**options)
+            elif trace_rules.lookup(member) is not None:
+                return trace_rules.lookup(member)(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):

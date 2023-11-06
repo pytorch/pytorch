@@ -4,6 +4,7 @@ import collections
 import contextlib
 import enum
 import functools
+import getpass
 import inspect
 import itertools
 import logging
@@ -102,7 +103,11 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     filtered_events = EventList(
-        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+        [
+            event
+            for event in p.events()
+            if event.device_type == DeviceType.CUDA and event.name != "Context Sync"
+        ]
     )
     if len(filtered_events) % n_repeat != 0:
         raise RuntimeError(
@@ -554,7 +559,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
             return sympy_symbol(key)
         return key
 
-    return expr.xreplace(
+    return sympy.sympify(expr).xreplace(
         {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
     )
 
@@ -605,6 +610,15 @@ instance_descriptor = collections.namedtuple(
     ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
     defaults=[tuple(), tuple(), tuple(), tuple()],
 )
+
+
+@functools.lru_cache(None)
+def cache_dir() -> str:
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
 
 
 @contextlib.contextmanager
@@ -1278,6 +1292,10 @@ def aot_inductor_launcher(so_path: str, device: str):
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
             }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
+            }}
         """
     elif device == "cpu":
         return f"""
@@ -1287,6 +1305,10 @@ def aot_inductor_launcher(so_path: str, device: str):
 
             std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
                 return runner.run(input_tensors);
+            }}
+
+            std::vector<const char*> get_call_spec() {{
+                return runner.get_call_spec();
             }}
         """
     else:

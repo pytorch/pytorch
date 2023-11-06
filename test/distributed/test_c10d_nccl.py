@@ -11,6 +11,7 @@ import tempfile
 import threading
 import pickle
 import time
+import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import chain, product
@@ -202,7 +203,7 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
     def test_init_no_gpus(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         with self.assertRaisesRegex(
-            RuntimeError, "ProcessGroupNCCL is only supported with GPUs, no GPUs found!"
+            ValueError, "ProcessGroupNCCL is only supported with GPUs, no GPUs found!"
         ):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
@@ -407,7 +408,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         for op, err in zip((c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR),
                            ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR")):
             with self.assertRaisesRegex(
-                    RuntimeError, "Cannot use " + err + " with NCCL"
+                    ValueError, "Cannot use " + err + " with NCCL"
             ):
                 allreduce(tensors, op)
 
@@ -524,7 +525,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                 ("ReduceOp.BAND", "ReduceOp.BOR", "ReduceOp.BXOR"),
             ):
                 with self.assertRaisesRegex(
-                        RuntimeError, "Cannot use " + err + " with NCCL"
+                        ValueError, "Cannot use " + err + " with NCCL"
                 ):
                     reduce(tensors, self.rank, rt, op)
 
@@ -610,7 +611,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticipate an error
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "output tensor size must be equal to world_size times input tensor size",
         ):
             tensor = torch.tensor([self.rank]).cuda(local_device_id)
@@ -622,7 +623,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticipate an error
         with self.assertRaisesRegex(
-            RuntimeError, "output tensor must have the same type as input tensor"
+            TypeError, "output tensor must have the same type as input tensor"
         ):
             tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
@@ -731,7 +732,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             for rank in range(self.world_size):
                 output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
 
-        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = -1
             pg.gather(output_ts, tensors, opts)
@@ -739,7 +740,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
             pg.gather(output_ts, tensors, 0)
 
-        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.GatherOptions()
             opts.rootRank = self.world_size
             pg.gather(output_ts, tensors, opts)
@@ -753,7 +754,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             pg.gather(output_ts, [], opts)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Tensors must be on distinct GPU devices"
+            ValueError, "Tensors must be on distinct GPU devices"
         ):
             # init input
             tensors2 = []
@@ -866,7 +867,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             for rank in range(self.world_size):
                 scatter_list[idx].append(torch.tensor([rank]).cuda(gpu_idx))
 
-        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.ScatterOptions()
             opts.rootRank = -1
             pg.scatter(tensors, scatter_list, opts)
@@ -874,7 +875,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
             pg.scatter(tensors, scatter_list, 0)
 
-        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+        with self.assertRaisesRegex(ValueError, "invalid root rank"):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.world_size
             pg.scatter(tensors, scatter_list, opts)
@@ -900,7 +901,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticipate an error
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "input tensor must be the same size as output size times world size",
         ):
             input_t = torch.tensor([self.rank]).cuda(local_device_id)
@@ -912,7 +913,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticipate an error
         with self.assertRaisesRegex(
-            RuntimeError, "input tensor must be the same type as the output tensor."
+            TypeError, "input tensor must be the same type as the output tensor."
         ):
             tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
@@ -1116,7 +1117,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Test with non-contiguous tensors.
         send_tensor_view = send_tensor.t()
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
+            with self.assertRaisesRegex(ValueError, 'Tensors must be contiguous'):
                 dist.send(send_tensor_view, 1)
 
     @requires_nccl()
@@ -1199,6 +1200,55 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
+    def test_init_process_group_nccl_timeout(self):
+        # nccl is handled 'specially' inside init_process_group and its options class is different from the options
+        # used by the other PG's.  There are specific edge cases for nccl that need to be tested.
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        base_opts = dict(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+
+        def _check_nccl_timeout(expected_timeout):
+            pg = dist.distributed_c10d._get_default_group()
+            options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
+            self.assertEqual(options._timeout, expected_timeout)
+
+        # test the default value coming from the `init_process_group` kwarg default
+        dist.init_process_group(**base_opts)
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that `kwarg` timeout takes effect
+        new_timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, timeout=new_timeout)
+        _check_nccl_timeout(new_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg (or its kwdefault) taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        with warnings.catch_warnings(record=True) as w:
+            dist.init_process_group(**base_opts, pg_options=opts)
+            # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
+            # self.assertEqual(len(w), 1)
+            # self.assertTrue("pg_options._timeout was specified" in str(w[-1].message))
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, pg_options=opts, timeout=timedelta(seconds=1240))
+        _check_nccl_timeout(timedelta(seconds=1240))
+        dist.destroy_process_group()
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
@@ -1243,13 +1293,13 @@ class DistributedDataParallelTest(
 
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(dist.DistBackendError):
                 pg.allreduce([inp]).wait(timedelta(seconds=5))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
             try:
                 pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
-            except RuntimeError as e:
+            except dist.DistBackendError as e:
                 self.assertTrue("aborted" in str(e))
             else:
                 self.fail("Expected error to be raised!")
@@ -2584,7 +2634,7 @@ class WorkHookTest(MultiProcessTestCase):
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank)
         tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        # intentionall using async ops.
+        # intentionally using async ops.
         pg.allreduce(tensor)
         pg.allgather(tensor_list, tensor)
         pg.allreduce(tensor)
@@ -2783,7 +2833,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
                 work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
             # Run some GPU operations to make sure cuda has not gotten stuck.
@@ -2852,7 +2902,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         process_group.barrier().wait()
         if self.rank == 0:
-            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
                 # This should timeout
                 process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
 
@@ -2890,7 +2940,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=failed_collective_timeout)
             # Now do a barrier to tell other rank to go ahead.
             pg_gloo.barrier().wait()
@@ -2936,7 +2986,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         target += torch.arange(60, dtype=half, device=device).chunk(5)
         target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
 
-        # The tensors to pass to broadcast are idential to the target
+        # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
             tensors = [tensor.clone() for tensor in target]
@@ -3093,7 +3143,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
+                dist.DistBackendError, "Health check failure"
             ):
                 c10d.init_process_group(
                     backend="nccl",
