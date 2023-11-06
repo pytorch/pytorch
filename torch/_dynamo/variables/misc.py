@@ -422,7 +422,10 @@ class AutogradFunctionVariable(VariableTracker):
                 fwd_bwd_tracer=None,
             ).call_function(tx, args, kwargs)
 
-        source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        if self.source:
+            source = AttrSource(AttrSource(self.source, "__class__"), "forward")
+        else:
+            source = None
         fn = self.fn_cls.forward
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
