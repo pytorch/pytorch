@@ -71,9 +71,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
         # Step 2: Find the all the buffers that were mutated and update them
         if node.op == "output":
             user_output_nodes = []
-            # In the case that the same node is returned multiple times,
-            # node.all_input_nodes will only iterate that node once
-            for return_node in pytree.tree_flatten(node.args)[0]:
+            for return_node in node.all_input_nodes:
                 return_node_name = return_node.name
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
