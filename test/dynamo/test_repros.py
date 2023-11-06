@@ -1564,6 +1564,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(a, a1)
             self.assertEqual(b, b1)
+            self.assertEqual(cnt.frame_count, 2)  # graph breaks
 
     def test_tensor_untracked_setattr_data_graph_breaks(self):
         # https://github.com/pytorch/pytorch/issues/113030
@@ -1588,8 +1589,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(x):
             y = torch.tensor([0])
-            x.data = y  # If we setattr to untracked tensor, it aliases a new tensor.
+            # If we setattr to untracked tensor, it aliases a new tensor.
             # we need to start tracking y even though it is created in graph
+            x.data = y
             x.add_(1)
             return x, y
 
