@@ -610,8 +610,7 @@ class VariableBuilder:
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
         ):
-            # TODO(jansel): I think this can be TYPE_MATCH
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return NullContextVariable(source=self.source)
         elif KeyedJaggedTensorVariable.is_matching_object(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -839,12 +838,10 @@ class VariableBuilder:
             )
             for k in ("start", "stop", "step")
         ]
+        self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
             return SliceVariable(items)
         else:
-            # TODO(jansel): I think this can be TYPE_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(items)
 
     def wrap_module(self, value: torch.nn.Module):
