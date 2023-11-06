@@ -1,18 +1,21 @@
 # Owner(s): ["oncall: distributed"]
-
 import functools
+import io
+from copy import deepcopy
 from typing import Any
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate
+from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate, Shard
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
@@ -25,7 +28,11 @@ from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -50,6 +57,25 @@ class SimpleModel(torch.nn.Module):
         x = F.relu(self.net2(x))
         x = F.relu(self.net3(x))
         return x
+
+    def get_input(self):
+        return torch.rand(4, 5, device="cuda")
+
+
+class SimpleModelUneven(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Sequential(nn.Linear(5, 10), nn.ReLU())
+        self.net2 = nn.Sequential(nn.Linear(10, 15), nn.ReLU())
+        self.net3 = nn.Linear(15, 30)
+        self.net4 = nn.Sequential(nn.ReLU(), nn.Linear(30, 5))
+
+    def forward(self, x):
+        return self.net4(self.net3(self.net2(self.net1(x))))
+
+    def get_input(self):
+        return torch.rand(4, 5, device="cuda")
 
 
 def _wrap_module(
@@ -298,7 +324,7 @@ class Test2dParallelIntegration(DTensorTestBase):
         )
 
 
-class TestNew2dParallelIntegration(DTensorTestBase):
+class TestNew2dParallelTraining(DTensorTestBase):
     # TODO: this is duplicate code from above, but once we remove the enable_2d_with_fsdp(),
     # we will remove the above test class Test2dParallelIntegration.
     def _compare_params(self, m1, m2):
@@ -315,6 +341,19 @@ class TestNew2dParallelIntegration(DTensorTestBase):
                     if type(p2) is DT:
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_raise_invalid_tp_composition(self):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Found TP device_mesh on the \d dimension of its parent mesh"
+        ):
+            mesh_2d = init_device_mesh(
+                self.device_type, (2, self.world_size // 2), mesh_dim_names=("tp", "dp")
+            )
+            model_2d = parallelize_module(
+                SimpleModel().cuda(), mesh_2d["tp"], PairwiseParallel()
+            )
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -402,5 +441,208 @@ class TestNew2dParallelIntegration(DTensorTestBase):
         self._test_2d_e2e_training(recompute_activation=True)
 
 
+# TODO: update all state dict unit tests to use distributed.checkpoint.state_dict,
+# and consolidate all the state_dict test in test.distributed.checkpoint.
+class TestNew2dParallelStateDict(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @parametrize("is_even_sharded_model", [True, False])
+    def test_2d_state_dict(self, is_even_sharded_model):
+        simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
+
+        # Create a model without wrapper
+        torch.manual_seed(0)
+        no_wrap_model = simple_model().cuda(self.rank)
+        no_wrap_state_dict = no_wrap_model.state_dict()
+
+        # Create a model and sharded it with 2D FSDP + TP
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        model_2d = parallelize_module(
+            simple_model().cuda(), tp_mesh, PairwiseParallel()
+        )
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=dp_mesh,
+            use_orig_params=True
+        )
+
+        FSDP.set_state_dict_type(
+            model_2d,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+        state_dict_2d = model_2d.state_dict()
+
+        for no_wrap_items, two_d_items in zip(
+            no_wrap_state_dict.items(), state_dict_2d.items()
+        ):
+            no_wrap_k, no_wrap_v = no_wrap_items
+            two_d_k, two_d_v = two_d_items
+
+            self.assertEqual(no_wrap_k, two_d_k)
+
+            # check if all value in 2D state_dict are DTensor
+            self.assertTrue(isinstance(two_d_v, DT))
+            self.assertEqual(len(two_d_v.placements), 2)
+            # the outer dimension is the FSDP dimension and the placement is always Shard(0)
+            self.assertEqual(two_d_v.placements[0], Shard(0))
+            self.assertEqual(two_d_v.device_mesh, mesh_2d)
+
+            # check if the parameter value is the same between 2D model and the model without wrapper
+            all_gather_two_d_v = two_d_v.redistribute(
+                mesh_2d, (Replicate(), Replicate())
+            )
+            self.assertEqual(
+                torch.allclose(no_wrap_v, all_gather_two_d_v.to_local()), True
+            )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @parametrize("is_even_sharded_model", [True, False])
+    def test_2d_load_state_dict(self, is_even_sharded_model):
+        simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
+
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        model_2d = parallelize_module(
+            simple_model().cuda(), tp_mesh, PairwiseParallel()
+        )
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=dp_mesh,
+            use_orig_params=True
+        )
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+
+        FSDP.set_state_dict_type(
+            model_2d,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+        checkpoint = io.BytesIO()
+        torch.save(model_2d.state_dict(), checkpoint)
+        # Deepcopy to save current state_dict to compare with the state_dict loaded back below.
+        ref_state_dict = deepcopy(model_2d.state_dict())
+
+        # Update the parameters so model.state_dict() will be different from ref_dtensor_sd.
+        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        optim_2d.step()
+
+        # Load ref_state_dict back.
+        checkpoint.seek(0)
+        load_ref_state_dict = torch.load(checkpoint)
+        model_2d.load_state_dict(load_ref_state_dict)
+        new_state_dict = model_2d.state_dict()
+
+        # Check whether new_state_dict is the same as ref_state_dict.
+        for (k1, v1), (k2, v2) in zip(ref_state_dict.items(), new_state_dict.items()):
+            # check whether fqn are the same
+            self.assertEqual(k1, k2)
+
+            self.assertEqual(type(v1), DT)
+            self.assertEqual(type(v2), DT)
+            # check whether DTensor are the same
+            # TODO: 2D DTensor comparison is not supported at the time, so we are comparing the spec and the local tensor for now.
+            # TODO: Update it to compare the two DTensors once 2D DTensor comparison is supported.
+            self.assertEqual(v1.to_local(), v2.to_local())
+            self.assertEqual(v1.device_mesh, v2.device_mesh)
+            self.assertEqual(v1.placements, v2.placements)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @parametrize("is_even_sharded_model", [True, False])
+    def test_2d_optim_state_dict(self, is_even_sharded_model):
+        simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
+
+        # Create a model without wrapper
+        torch.manual_seed(0)
+        no_wrap_model = simple_model().cuda(self.rank)
+        no_wrap_state_dict = no_wrap_model.state_dict()
+        no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
+        no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
+        no_wrap_optim.step()
+        _, no_wrap_osd = get_state_dict(
+            no_wrap_model, optimizers=no_wrap_optim, optim_only=True
+        )
+
+        # Create a model and sharded it with 2D FSDP + TP
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        model_2d = parallelize_module(
+            simple_model().cuda(), mesh_2d["tp"], PairwiseParallel()
+        )
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=mesh_2d["dp"],
+            use_orig_params=True
+        )
+        FSDP.set_state_dict_type(
+            model_2d,
+            StateDictType.SHARDED_STATE_DICT,
+        )
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        optim_2d.step()
+        _, optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
+        ref_optim_2d_osd = deepcopy(optim_2d_osd)
+
+        no_wrap_osd_states = no_wrap_osd["state"]
+        optim_2d_osd_states = optim_2d_osd["state"]
+
+        self.assertEqual(len(no_wrap_osd_states), len(optim_2d_osd_states))
+        self.assertEqual(no_wrap_osd_states.keys(), optim_2d_osd_states.keys())
+        for fqn, states in no_wrap_osd_states.items():
+            dist_states = optim_2d_osd_states.get(fqn)
+
+            for state_name, state in states.items():
+                dist_state = dist_states.get(state_name)
+                # If a state  is DTensor, we all gather it in both DP and TP dimension to
+                # compare with no_wrap state.
+                if isinstance(dist_state, DT):
+                    dist_state = (
+                        dist_state.cuda()
+                        .redistribute(placements=(Replicate(), Replicate()))
+                        .to_local()
+                    )
+                self.assertTrue(isinstance(dist_state, torch.Tensor))
+                self.assertTrue(torch.allclose(state, dist_state))
+
+        # Update the parameters 2d optim states will be different from ref_optim_state_dict.
+        model_2d(model_2d.get_input().cuda(self.rank)).sum().backward()
+        optim_2d.step()
+
+        set_state_dict(model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd)
+        _, new_optim_2d_osd = get_state_dict(model_2d, optimizers=optim_2d)
+
+        ref_optim_2d_osd_states = ref_optim_2d_osd["state"]
+        new_optim_2d_osd_states = optim_2d_osd["state"]
+
+        # Compare the new optim state dict after load with the reference one
+        self.assertEqual(len(ref_optim_2d_osd_states), len(new_optim_2d_osd_states))
+        self.assertEqual(ref_optim_2d_osd_states.keys(), new_optim_2d_osd_states.keys())
+        for fqn, states in ref_optim_2d_osd_states.items():
+            new_states = new_optim_2d_osd_states.get(fqn)
+
+            for state_name, state in states.items():
+                new_state = new_states.get(state_name)
+
+                if isinstance(new_state, DT):
+                    self.assertEqual(new_state.placements, state.placements)
+                    self.assertEqual(new_state.device_mesh, state.device_mesh)
+                    self.assertTrue(torch.allclose(new_state.to_local(), state.to_local()))
+                else:
+                    self.assertEqual(new_state, state)
+
+
+instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
     run_tests()

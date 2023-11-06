@@ -4,6 +4,8 @@ import torch
 from .throughput_benchmark import ThroughputBenchmark
 from .cpp_backtrace import get_cpp_backtrace
 from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
+from . import deterministic
+from . import collect_env
 
 def set_module(obj, mod):
     """

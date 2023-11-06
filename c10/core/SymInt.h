@@ -126,7 +126,8 @@ class C10_API SymInt {
     if (auto r = maybe_as_int()) {
       return *r;
     }
-    TORCH_CHECK(false, "expected int but got ", *this);
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+        false, "when unpacking SymInt, expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
@@ -150,7 +151,7 @@ class C10_API SymInt {
   // if the SymInt in question is an unbacked SymInt (or, potentially in the
   // future, if it contains unbacked SymInts), we will also treat the
   // unbacked SymInt as statically testing >= 2 (which will prevent us from
-  // choking on, e.g., contiguity chekcs.)
+  // choking on, e.g., contiguity checks.)
   bool expect_size(const char* file, int64_t line) const;
 
   // Distinguish actual symbolic values from constants stored on the heap

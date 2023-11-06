@@ -7,7 +7,6 @@
 #include <torch/custom_class.h>
 #include <torch/custom_class_detail.h>
 
-#include <atomic>
 #include <unordered_map>
 
 namespace c10 {

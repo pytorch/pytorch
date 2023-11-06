@@ -154,16 +154,19 @@ struct TraceEntry {
   };
   TraceEntry(
       Action action,
+      int device,
       int64_t addr,
       size_t size,
       cudaStream_t stream,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
+        device_(device),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
         size_(size) {}
   Action action_;
+  int device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
@@ -198,6 +201,8 @@ using OutOfMemoryObserver = std::function<void(
     int64_t allocated,
     int64_t device_total,
     int64_t device_free)>;
+
+using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
 class CUDAAllocator : public Allocator {
  public:
@@ -247,11 +252,19 @@ class CUDAAllocator : public Allocator {
       RecordContext when) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
+  // Attached AllocatorTraceTracker callbacks will be called while the
+  // per-device allocator lock is held. Any additional locks taken from within
+  // the callback must be proven to always have the lock order that never
+  // triggers a deadlock. In particular, Python's GIL may be held when
+  // calling the allocator so it is unsafe to try to acquire the GIL in this
+  // callback.
+  virtual void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) = 0;
+
   virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
 
   // memory not allocated from cudaMalloc cannot be copied
   // across devices using cudaMemcpyAsync if peer to peer access is disabled.
-  // instead it requres cudaMemcpyAsyncPeer
+  // instead it requires cudaMemcpyAsyncPeer
   //  with P2P Enabled, all combinations work
   //  with P2P Disabled:
   //                       cudaMalloc cudaMallocAsync/cuMemMap
@@ -388,6 +401,10 @@ inline bool checkPoolLiveAllocations(
 
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   return get()->attachOutOfMemoryObserver(observer);
+}
+
+inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+  return get()->attachAllocatorTraceTracker(tracker);
 }
 
 inline void releasePool(int device, MempoolId_t mempool_id) {
