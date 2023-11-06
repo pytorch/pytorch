@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict
 from sympy import Expr
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
@@ -25,7 +24,9 @@ class BoundVars:
     def __init__(self, loop_body: LoopBody) -> None:
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
+            k: ValueRanges(0, v - 1)
+            if (isinstance(v, int) or v.is_number)
+            else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -67,9 +68,18 @@ class BoundVars:
                 subblock = self.loop_body.subblocks[key]
                 # The result within the lambda will reference to the final
                 # set of modules at the end of the for-loop as it stores a reference to it
-                result[key] = lambda mask, value: self.masked_subblock(
-                    subblock, self._bounds, mask, value, result
-                )
+
+                # bind subblock in a function because python lambdas close over by reference
+                # moving the lambda out of make_fn would close over the reference to subblock,
+                # so all lambdas would have the same subblock reference that is the final
+                # subblock in the loop
+                def make_fn(subblock):
+                    return lambda mask, value: self.masked_subblock(
+                        subblock, self._bounds, mask, value, result
+                    )
+
+                result[key] = make_fn(subblock)
+
             else:
                 assert "set_indirect" in key
                 idx = int(key[len("set_indirect") :])

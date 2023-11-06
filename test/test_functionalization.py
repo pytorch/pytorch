@@ -8,11 +8,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode, dispatch_functionalize
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map_only, tree_flatten
+from torch.utils._pytree import tree_map_only
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils import _pytree as pytree
 
 import unittest
 
@@ -41,8 +42,8 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool, skip_input_mutatio
                 out = f(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs, _ = tree_flatten(inputs)
-            flat_inputs_functional, _ = tree_flatten(inputs_functional)
+            flat_inputs = pytree.tree_leaves(inputs)
+            flat_inputs_functional = pytree.tree_leaves(inputs_functional)
 
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
@@ -91,9 +92,9 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            flat_inpts, _ = tree_flatten(inpts)
-            flat_clones1, _ = tree_flatten(clones1)
-            flat_clones3, _ = tree_flatten(clones3)
+            flat_inpts = pytree.tree_leaves(inpts)
+            flat_clones1 = pytree.tree_leaves(clones1)
+            flat_clones3 = pytree.tree_leaves(clones3)
             for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
                 self.assertEqual(inpt, input_clone)  # input mutations should still occur
                 self.assertEqual(inpt, input_clone3)
@@ -1639,7 +1640,35 @@ def forward(self, arg0_1):
     return add""")
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    def test_python_functionalization_lift_fresh_storage(self):
+        unlifted = torch.tensor([0.0])
 
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with maybe_disable, FunctionalTensorMode():
+            lifted = torch.ops.aten.lift_fresh.default(unlifted)
+
+        self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
+
+    def test_python_functionalization_lift_fresh(self):
+        def f(x):
+            tmp = torch.tensor([0.0])
+            return tmp + x
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    add = torch.ops.aten.add.Tensor(lift_fresh_copy, arg0_1);  lift_fresh_copy = arg0_1 = None
+    return add""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
 @xfail_inherited_tests([
     "test_as_strided",

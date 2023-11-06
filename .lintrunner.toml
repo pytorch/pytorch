@@ -178,10 +178,21 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
+    'torch/_dynamo/allowed_functions.py',
+    'torch/_dynamo/bytecode_transformation.py',
+    'torch/_dynamo/codegen.py',
+    'torch/_dynamo/compiled_autograd.py',
     'torch/_dynamo/eval_frame.py',
+    'torch/_dynamo/exc.py',
+    'torch/_dynamo/funcname_cache.py',
+    'torch/_dynamo/hooks.py',
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/replay_record.py',
+    'torch/_dynamo/resume_execution.py',
     'torch/_dynamo/symbolic_convert.py',
+    'torch/_dynamo/testing.py',
     'torch/_dynamo/types.py',
+    'torch/_dynamo/test_minifier_common.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
     'torch/_dynamo/side_effects.py',
@@ -197,7 +208,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/scheduler.py',
 ]
 command = [
     'python3',
@@ -249,6 +259,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
     'torch/csrc/**/*.cpp',
 ]
@@ -260,9 +271,9 @@ exclude_patterns = [
     '**/*pb.h',
     '**/*CUDA*',
     '**/cuda/*pp',
+    'aten/src/ATen/core/TensorImpl_test.cpp',
     'third_party/**/*',
     'torch/csrc/api/**',
-    'torch/csrc/autograd/functions/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
     'torch/csrc/cuda/**',
@@ -1175,6 +1186,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
@@ -1560,7 +1572,6 @@ exclude_patterns = [
     'test/test_pruning_op.py',
     'test/test_public_bindings.py',
     'test/test_python_dispatch.py',
-    'test/test_pytree.py',
     'test/test_quantization.py',
     'test/test_reductions.py',
     'test/test_scatter_gather_ops.py',
@@ -1684,7 +1695,6 @@ exclude_patterns = [
     'torch/_functorch/partitioners.py',
     'torch/_functorch/pyfunctorch.py',
     'torch/_functorch/python_key.py',
-    'torch/_functorch/pytree_hacks.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/utils.py',
     'torch/_functorch/vmap.py',
@@ -2441,7 +2451,6 @@ exclude_patterns = [
     'torch/utils/_freeze.py',
     'torch/utils/_mode_utils.py',
     'torch/utils/_python_dispatch.py',
-    'torch/utils/_pytree.py',
     'torch/utils/_stats.py',
     'torch/utils/_sympy/__init__.py',
     'torch/utils/_sympy/functions.py',
@@ -2658,7 +2667,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.1',
+    'ruff==0.1.4',
 ]
 is_formatter = true
 
