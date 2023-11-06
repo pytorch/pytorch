@@ -6,7 +6,7 @@ torchrec_dlrm,infra_error,0
 
 
 
-BERT_pytorch,pass,10
+BERT_pytorch,pass,8
 
 
 
@@ -202,4 +202,4 @@ vgg16,pass,8
 
 
 
-yolov3,pass,12
+yolov3,pass,10

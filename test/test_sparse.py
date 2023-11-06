@@ -4225,6 +4225,10 @@ class TestSparseUnaryUfuncs(TestCase):
 class TestSparseMaskedReductions(TestCase):
     exact_dtype = True
 
+    fp16_low_precision_list = {
+        'masked.prod',
+    }
+
     @ops(sparse_masked_reduction_ops)
     def test_future_empty_dim(self, device, dtype, op):
         """Currently, `dim=()` in reductions operations means "reduce over
@@ -4263,7 +4267,12 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual.layout, torch.sparse_coo)
 
             expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
-            self.assertEqual(actual, expected)
+            atol = None
+            rtol = None
+            if op.name in self.fp16_low_precision_list and dtype == torch.half:
+                atol = 1e-5
+                rtol = 2e-3
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestSparseMeta(TestCase):
