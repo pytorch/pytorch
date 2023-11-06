@@ -266,7 +266,6 @@ class SideEffects:
         self,
     ):
         obj = object()
-        breakpoint()
         variable = variables.NewCellVariable(
             mutable_local=AttributeMutationNew(None, None),
         )
@@ -275,7 +274,6 @@ class SideEffects:
         return variable
 
     def track_cell_existing(self, source: Source, item: Any):
-        breakpoint()
         variable = variables.NewCellVariable(
             mutable_local=AttributeMutationExisting(source),
         )
@@ -284,7 +282,6 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: Any):
-        breakpoint()
         variable = variables.NewGlobalVariable(
             mutable_local=AttributeMutationExisting(source),
         )
