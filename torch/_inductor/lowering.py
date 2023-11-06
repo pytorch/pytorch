@@ -5028,12 +5028,30 @@ def sym_constrain_range(a, min, max):
 
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
-    return a.get_size()[dim]
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        assert isinstance(val, int)
+        assert a.get_size()[dim] == val
+        return sympy.sympify(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
-    return a.get_stride()[dim]
+    val = V.graph.current_node.meta["val"]
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        assert isinstance(val, int)
+        # NB: we don't propagate stride information on computed buffers
+        # because in general inductor is allowed to change how it decides
+        # what buffers will be, so we ALWAYS use val here.  This case
+        # should be rare but could occur if we traced sym_stride into a
+        # graph but then realized that the stride was static during
+        # inductor (it is insufficient to spec during Dynamo tracing, as
+        # the AOTAutograd retrace would then eliminate the sym_stride call
+        return sympy.sympify(val)
 
 
 @register_lowering(aten.sym_numel)
