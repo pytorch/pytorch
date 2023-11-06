@@ -546,7 +546,7 @@ else:
         "ValidationException", "BisectValidationException",
     ]
 
-from torch.fx.experimental import _config as config
+from torch._dynamo import config
 
 def translation_validation_enabled() -> bool:
     # Checks everytime this function is called, in case the Dynamo
@@ -603,7 +603,7 @@ class BisectValidationException(TorchDynamoException):
     def __init__(self, validation_exc, expr, failed_action, traced_node):
         self.msg = f"translation validation failed when {failed_action}: {expr}"
         self.details = f"""\
-Failure ocurred while running node:
+Failure occurred while running node:
     {traced_node.format_node()}
 
 {validation_exc.details}"""
@@ -684,7 +684,7 @@ def bisect(shape_env):
         log.info("translation validation succeeded: no errors found.")
         return
 
-    if not shape_env.should_record_events or config.translation_validation_no_bisect:
+    if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
         # Bisection is off.
         # Return the last ValidationException we got.
         raise last_exception

@@ -46,7 +46,7 @@ ignore = [
     "G101", "G201", "G202",
     # these ignores are from RUFF perf; please fix!
     "PERF203", "PERF4",
-    "PYI001", # these ignores are from PYI; please fix!
+    # these ignores are from PYI; please fix!
     "PYI019",
     "PYI024",
     "PYI036",
@@ -77,6 +77,7 @@ select = [
     "UP",
     "PERF",
     "PGH004",
+    "PIE794",
     "PIE807",
     "PIE810",
     "PLE",

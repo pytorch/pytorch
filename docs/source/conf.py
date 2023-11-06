@@ -965,7 +965,6 @@ coverage_ignore_functions = [
     "guard_scalar",
     "has_hint",
     "has_symbolic_sizes_strides",
-    "has_free_symbols",
     "hint_int",
     "is_channels_last_contiguous_2d",
     "is_channels_last_contiguous_3d",
