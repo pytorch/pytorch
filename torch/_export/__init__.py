@@ -74,7 +74,7 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
 )
 from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
-from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
+from .passes.replace_sym_size_ops_pass import _replace_sym_size_ops_pass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -804,11 +804,13 @@ def _export(
     }
 
     if len(preserve_module_call_signature) > 0:
-        res = CollectTracepointsPass(module_call_signatures)(gm)
+        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
         assert res is not None
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
+    _replace_sym_size_ops_pass(gm)
     exported_program = ExportedProgram(
         gm,
         gm.graph,
@@ -826,9 +828,8 @@ def _export(
         exported_program = exported_program._transform(
             _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
         )
-    exported_program = lift_constant_tensor_pass(exported_program)
 
-    return exported_program._transform(_ReplaceSymSizeOpPass())
+    return exported_program
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
@@ -954,10 +955,6 @@ def aot_compile(
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
     gm = _export_to_torch_ir(f, args, kwargs, constraints)
-
-    from torch._export.passes.fake_tensor_prop import FakeTensorProp
-    FakeTensorProp(gm).run()
-
     flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():
