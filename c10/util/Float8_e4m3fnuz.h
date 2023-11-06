@@ -60,7 +60,7 @@ namespace detail {
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-C10_HOST_DEVICE float fp8e4m3fnuz_to_fp32_value(uint8_t input);
+C10_API C10_HOST_DEVICE float fp8e4m3fnuz_to_fp32_value(uint8_t input);
 
 /*
  * Convert a 32-bit floating-point number in IEEE single-precision format to a
