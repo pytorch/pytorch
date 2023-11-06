@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
 
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor
 
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
@@ -495,7 +495,7 @@ dtensor_fails = {
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)
-    # which triggered the orignal function run failures with input
+    # which triggered the original function run failures with input
     # generation becomes wrong, we skip them for now but should enable later.
     # TODO: need to clean this list and remove all cases
     skip("argwhere"),
@@ -621,11 +621,7 @@ class TestDTensorOps(DTensorOpTestBase):
         rs = concat_res_if_necessary(func, rs)
 
         def to_replicate(e: object) -> object:
-            return (
-                e.redistribute(self.mesh, self.mesh.ndim * [Replicate()])
-                if isinstance(e, DTensor)
-                else e
-            )
+            return e.full_tensor() if isinstance(e, DTensor) else e
 
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
@@ -647,7 +643,7 @@ class TestDTensorOps(DTensorOpTestBase):
                         # errors
                         dtensor_rs = func(*dtensor_args, **dtensor_kwargs)
 
-                        # we need to skip tests containing tensors of zero elmeents for now.
+                        # we need to skip tests containing tensors of zero elements for now.
                         # see issue: https://github.com/pytorch/tau/issues/470
                         # TODO remove this once issue above fixed.
                         flat_args = pytree.tree_leaves(dtensor_rs)

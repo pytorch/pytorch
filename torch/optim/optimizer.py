@@ -125,6 +125,12 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
     )
     return fused, foreach
 
+def _view_as_real(params, *state_and_grads):
+    for i, p in enumerate(params):
+        if torch.is_complex(p):
+            params[i] = torch.view_as_real(params[i])
+            for s in state_and_grads:
+                s[i] = torch.view_as_real(s[i])
 
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
@@ -163,8 +169,8 @@ _differentiable_doc = r"""differentiable (bool, optional): whether autograd shou
             performance, so leave it False if you don't intend to run autograd
             through this instance (default: False)"""
 
-_maximize_doc = r"""maximize (bool, optional): maximize the params based on the
-            objective, instead of minimizing (default: False)"""
+_maximize_doc = r"""maximize (bool, optional): maximize the objective with respect to the
+            params, instead of minimizing (default: False)"""
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
