@@ -221,6 +221,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
 
+// This function will create a new tensor object and its pointer is returned
+// through *ret. The caller is responsible for wrapping the tensor pointer
+// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// when going out of scope.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
