@@ -733,8 +733,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
+  // Mutex to Guard monitorWakeUpCV_
+  std::mutex monitorMutex_;
+
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
+
+  // Condition Variable for monitor thread to wake up early
+  std::condition_variable monitorWakeUpCV_;
 
   // Vector to Store WorkNCCL pointers
   std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;

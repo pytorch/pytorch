@@ -1131,6 +1131,7 @@ void ProcessGroupNCCL::shutdown() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
+  monitorWakeUpCV_.notify_one();
 
   std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
   abort(abortReason);
@@ -1141,6 +1142,7 @@ void ProcessGroupNCCL::shutdown() {
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
+  monitorWakeUpCV_.notify_one();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclHeartbeatMonitorThread_.joinable()) {
@@ -1175,15 +1177,21 @@ void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   while (true) {
-    auto heartbeat = heartbeat_;
-    if (heartbeat > heartBeatCounter) {
-      heartBeatCounter = heartbeat;
-      // Sleep for enough time so that heartBeat will at least increase.
-      std::this_thread::sleep_for(std::chrono::milliseconds(
-          kWatchdogThreadSleepMillis * heartbeatTimeoutInSec_));
+    std::unique_lock<std::mutex> lock(monitorMutex_);
+    if (monitorWakeUpCV_.wait_for(
+            lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
+              return terminateProcessGroup_.load();
+            })) {
+      // If monitorWakeUpCV_ gets notified, we early return.
+      return;
     } else {
-      // No heartbeat increase detected and timeout.
-      break;
+      auto heartbeat = heartbeat_;
+      if (heartbeat > heartBeatCounter) {
+        heartBeatCounter = heartbeat;
+      } else {
+        // No heartbeat increase detected and timeout.
+        break;
+      }
     }
   }
 
