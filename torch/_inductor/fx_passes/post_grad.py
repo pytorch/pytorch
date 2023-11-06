@@ -90,7 +90,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     stable_topological_sort(gm.graph)
 
     fake_tensor_updater.incremental_update()
-
     # Keep this last, since it introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_scatters(gm.graph)
@@ -627,9 +626,9 @@ InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
 def reinplace_scatters(graph):
     """
-    Reinplaces scatter operations.
-    If there are no uses of a view of the mutated arg after the current node,
-    it is possible to inplace the op.
+    Reinplaces scatter operations in easy cases where the node being mutated
+    is only used by the scatter (users == 1), and the node being mutated
+    shares storage with no other nodes.
 
     Also handles input mutations when there is a corresponding copy node.
     """
@@ -637,9 +636,7 @@ def reinplace_scatters(graph):
     copy_args_to_copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
-    node_order: Dict[Any, int] = {}
-    for i, node in enumerate(reversed(graph.nodes)):
-        node_order[node] = len(graph.nodes) - i - 1
+    for node in reversed(graph.nodes):
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
             dst = node.args[0]
@@ -656,36 +653,33 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def any_use_of_views_after_node(node, shared_view_nodes, copy_node):
-        node_loc = node_order[node]
-        for view in shared_view_nodes:
-            for user in view.users:
-                # Skip all users before node
-                if node_order[user] <= node_loc:
-                    continue
-                # Skip over the copy_ epilogue node that could get reinplaced
-                if copy_node == user:
-                    continue
-                return True
-        return False
-
     def can_inplace(node, mutated_arg):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if any(view.op == "placeholder" for view in shared_view_nodes):
+        if mutated_arg.op == "placeholder":
             if not (
                 copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
             ):
                 return False
 
-            if any_use_of_views_after_node(node, shared_view_nodes, copy_node):
+            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
+                return False
+
+            # Check for any uses other than current node and copy_ epilogue
+            if len(mutated_arg.users) > 2:
                 return False
 
             graph.erase_node(copy_node)
             return True
         else:
-            return not any_use_of_views_after_node(node, shared_view_nodes, None)
+            # NB: This condition could be relaxed if none of the aliases
+            # are used after this mutation op. But that's trickier.
+            if len(shared_view_nodes) > 1:  # Arg aliases another node
+                return False
+            if len(mutated_arg.users) > 1:  # Arg used somewhere else
+                return False
+            return True
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
