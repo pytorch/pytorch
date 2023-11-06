@@ -43,12 +43,7 @@ set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are reques
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.4+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.4)
-  message(FATAL "GCC-9.4 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
-endif()
-
-if(LINUX)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   include(cmake/CheckAbi.cmake)
   string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   string(APPEND CMAKE_CUDA_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
@@ -827,7 +822,7 @@ endif()
 include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
   list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
 endif()
@@ -856,18 +851,25 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
+  endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
+  endif()
+  if(NOT CMAKE_COMPILER_IS_GNUCXX OR GCC_VERSION VERSION_GREATER_EQUAL 9.2)
+    # Prior to GCC 9.2, this warning misfires when a method is
+    # labeled "final".
+    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
+    append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
