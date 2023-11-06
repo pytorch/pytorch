@@ -257,7 +257,7 @@ class TensorFeeder : public BlobFeederBase {
       const DeviceOption& option,
       PyArrayObject* original_array,
       Blob* blob,
-      bool in_place) override {
+      bool in_place) {
     if (in_place) {
       FeedTensor(
           option,
