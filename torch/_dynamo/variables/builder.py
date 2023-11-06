@@ -42,7 +42,7 @@ from ..allowed_functions import (
     is_user_defined_allowed,
 )
 
-from ..device_interface import device_interfaces
+from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, make_dupe_guard
 from ..side_effects import SideEffects
@@ -1572,7 +1572,8 @@ def wrap_fx_proxy_cls(
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, _StreamBase)
     ) or proxy.node.target in [
-        interface_elem.current_stream for interface_elem in device_interfaces.values()
+        device_interface.current_stream
+        for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
@@ -1581,7 +1582,8 @@ def wrap_fx_proxy_cls(
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [
-        interface_elem.Event for interface_elem in device_interfaces.values()
+        device_interface.Event
+        for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
         return EventVariable(proxy, example_value, **options)
