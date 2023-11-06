@@ -2002,20 +2002,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import(self):
-        try:
-            from . import utils as _  # noqa: F401
 
-            def fn(x):
-                from .utils import tensor_for_import_testing
+        def fn(x):
+            from utils import tensor_for_import_testing
 
-                return x * 2 * tensor_for_import_testing
-
-        except ImportError:
-
-            def fn(x):
-                from utils import tensor_for_import_testing
-
-                return x * 2 * tensor_for_import_testing
+            return x * 2 * tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -2025,20 +2016,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import_no_modulename(self):
-        try:
-            from . import utils as _  # noqa: F401
 
-            def fn(x):
-                from . import utils
 
-                return x * 2 * utils.tensor_for_import_testing
+        def fn(x):
+            import utils
 
-        except ImportError:
-
-            def fn(x):
-                import utils
-
-                return x * 2 * utils.tensor_for_import_testing
+            return x * 2 * utils.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)

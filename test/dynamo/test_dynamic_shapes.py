@@ -6,28 +6,15 @@ from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_utils import TEST_Z3
 
-try:
-    from . import (
-        test_aot_autograd,
-        test_ctx_manager,
-        test_export,
-        test_functions,
-        test_higher_order_ops,
-        test_misc,
-        test_modules,
-        test_repros,
-        test_subgraphs,
-    )
-except ImportError:
-    import test_aot_autograd
-    import test_ctx_manager
-    import test_export
-    import test_functions
-    import test_higher_order_ops
-    import test_misc
-    import test_modules
-    import test_repros
-    import test_subgraphs
+import test_aot_autograd
+import test_ctx_manager
+import test_export
+import test_functions
+import test_higher_order_ops
+import test_misc
+import test_modules
+import test_repros
+import test_subgraphs
 
 
 test_classes = {}

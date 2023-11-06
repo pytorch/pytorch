@@ -16,24 +16,14 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
 try:
-    try:
-        from . import (
-            test_cpu_repro,
-            test_foreach,
-            test_mkldnn_pattern_matcher,
-            test_pattern_matcher,
-            test_select_algorithm,
-            test_torchinductor,
-            test_torchinductor_dynamic_shapes,
-        )
-    except ImportError:
-        import test_cpu_repro
-        import test_foreach
-        import test_mkldnn_pattern_matcher
-        import test_pattern_matcher
-        import test_select_algorithm
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+
+    import test_cpu_repro
+    import test_foreach
+    import test_mkldnn_pattern_matcher
+    import test_pattern_matcher
+    import test_select_algorithm
+    import test_torchinductor
+    import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

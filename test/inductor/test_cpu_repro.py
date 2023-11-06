@@ -38,10 +38,7 @@ from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
+    import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

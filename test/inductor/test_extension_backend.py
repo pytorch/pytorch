@@ -29,10 +29,7 @@ from torch._inductor.codegen.common import (
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
 
 try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
+    import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

@@ -16,6 +16,7 @@ import time
 from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+import modulefinder
 
 import pkg_resources
 
@@ -1646,11 +1647,100 @@ def check_pip_packages() -> None:
             )
             sys.exit(1)
 
+_DEP_MODULES_CACHE = {}
+EXCLUDE_SUBMODULES = []
+def get_dep_modules(test):
+    # Cache results in case of repitition
+    if test in _DEP_MODULES_CACHE:
+        return _DEP_MODULES_CACHE[test]
+    print(test)
+
+    try:
+
+        test_location = test
+        finder = modulefinder.ModuleFinder(
+            # Ideally exclude all third party modules, to speed up calculation.
+            excludes=[
+                'scipy',
+                'numpy',
+                'numba',
+                'multiprocessing',
+                'sklearn',
+                'setuptools',
+                'hypothesis',
+                'llvmlite',
+                'joblib',
+                'email',
+                'importlib',
+                'unittest',
+                'urllib',
+                'json',
+                'collections',
+                # Modules below are excluded because they are hitting https://bugs.python.org/issue40350
+                # Trigger AttributeError: 'NoneType' object has no attribute 'is_package'
+                'mpl_toolkits',
+                'google',
+                'onnx',
+                # Triggers RecursionError
+                'mypy',
+                "sympy",
+                "dateutil",
+                "PIL",
+                "distutils",
+                "matplotlib",
+                "networkx",
+                "_pytest",
+                "future",
+            ] + EXCLUDE_SUBMODULES,
+        )
+        # HACK: some platforms default to ascii, so we can't just run_script :(
+        with open(test_location, 'r', encoding='utf-8') as fp:
+            finder.load_module('__main__', fp, test_location, ('', 'r', 1))
+        s = {}
+        for k,m in finder.modules.items():
+            t = {
+                "name": str(m.__name__),
+                "file": str(m.__file__),
+                "path": str(m.__path__),
+                "code": str(m.__code__),
+            }
+            s[str(k)] = t
+        _DEP_MODULES_CACHE[test] = s
+        # for t in s.values():
+        #     fiule = t['file']
+        #     if fiule is None:
+        #         continue
+        #     if not fiule.startswith("/data/users/csl/pytorch"):
+        #         continue
+        #     fiule = fiule[len("/data/users/csl/pytorch/"):]
+        #     get_dep_modules(fiule)
+        # return
+    except Exception as e:
+        print(e)
+        _DEP_MODULES_CACHE[test] = None
+        return
+
+def log_test_reason(file_type, filename, test, options):
+    if options.verbose:
+        print_to_stderr(
+            'Determination found {} file {} -- running {}'.format(
+                file_type,
+                filename,
+                test,
+            )
+        )
+
+
+def determine_target(test):
+    get_dep_modules(test)
+
 
 def main():
     check_pip_packages()
 
     options = parse_args()
+    installed_packages = [i.key for i in pkg_resources.working_set if i.key != "torch"]
+    EXCLUDE_SUBMODULES.extend(installed_packages)
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)
@@ -1659,6 +1749,10 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
+    for test in selected_tests:
+        determine_target(f"test/{test.replace('.', '/')}.py")
+    print("_DEP_MODULES_CACHE print:" + json.dumps(_DEP_MODULES_CACHE))
+    exit(0)
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])

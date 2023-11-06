@@ -5,10 +5,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 
-try:
-    from . import utils
-except ImportError:
-    import utils
+import utils
 
 
 class Pair:  # noqa: B903

@@ -30,10 +30,7 @@ try:
     except ImportError:
         raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor
+    import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
