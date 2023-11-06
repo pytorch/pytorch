@@ -27,8 +27,9 @@ invoke ``aot_compile`` to transform the model into a shared library.
 
 .. note::
 
-   If you have a CUDA-enabled device on your machine, the following code will compile the model
-   into a shared library for CUDA execution. Otherwise, the compiled artifact will execute on CPU.
+   If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
+   the following code will compile the model into a shared library for CUDA execution.
+   Otherwise, the compiled artifact will run on CPU.
 
 .. code-block:: python
 
