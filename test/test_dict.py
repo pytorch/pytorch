@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import math
 
 import os
@@ -487,7 +489,7 @@ class TestTensorDicts(TestCase):
         with self.assertRaisesRegex(
             KeyError,
             expected_regex=re.escape(
-                "Unflattening key(s) in tensordict will override existing unflattened key"
+                "Unflattening key(s) in tensordict will override an existing for unflattened key"
             ),
         ):
             td1.unflatten_keys(separator)
@@ -495,7 +497,7 @@ class TestTensorDicts(TestCase):
         with self.assertRaisesRegex(
             KeyError,
             expected_regex=re.escape(
-                "Unflattening key(s) in tensordict will override existing unflattened key"
+                "Unflattening key(s) in tensordict will override an existing for unflattened key"
             ),
         ):
             td2.unflatten_keys(separator)
@@ -503,7 +505,7 @@ class TestTensorDicts(TestCase):
         with self.assertRaisesRegex(
             KeyError,
             expected_regex=re.escape(
-                "Unflattening key(s) in tensordict will override existing unflattened key"
+                "Unflattening key(s) in tensordict will override an existing for unflattened key"
             ),
         ):
             td3.unflatten_keys(separator)
@@ -511,7 +513,7 @@ class TestTensorDicts(TestCase):
         with self.assertRaisesRegex(
             KeyError,
             expected_regex=re.escape(
-                "Unflattening key(s) in tensordict will override existing unflattened key"
+                "Unflattening key(s) in tensordict will override an existing for unflattened key"
             ),
         ):
             td4.unflatten_keys(separator)
@@ -519,7 +521,7 @@ class TestTensorDicts(TestCase):
         with self.assertRaisesRegex(
             KeyError,
             expected_regex=re.escape(
-                "Unflattening key(s) in tensordict will override existing unflattened key"
+                "Unflattening key(s) in tensordict will override an existing for unflattened key"
             ),
         ):
             td5.unflatten_keys(separator)
@@ -2377,10 +2379,12 @@ class TestTensorDicts(TestCase):
             else:
                 td.memmap_(os.path.join(tmp_path, "tensordict"))
 
-            assert os.path.exists(os.path.join(tmp_path, "tensordict", "meta.pt"))
-            metadata = torch.load(os.path.join(tmp_path, "tensordict", "meta.pt"))
-            assert metadata["batch_size"] == td.batch_size
-            assert metadata["device"] == td.device
+            assert os.path.exists(os.path.join(tmp_path, "tensordict", "meta.json"))
+            with open(os.path.join(tmp_path, "tensordict", "meta.json"), 'r') as file:
+                metadata = json.load(file)
+            assert td.batch_size == torch.Size(metadata["shape"])
+            device = torch.device(metadata["device"]) if metadata["device"] != "None" else None
+            assert td.device == device, (td.device, device)
 
             td2 = td.__class__.load_memmap(os.path.join(tmp_path, "tensordict"))
             assert (td == td2).all()

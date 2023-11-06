@@ -1800,12 +1800,13 @@ class TensorDictBase(MutableMapping):
         return self
 
     def _create_nested_str(self, key):
-        self._set_str(key, self.select(), inplace=False, validated=True)
+        out = self.empty()
+        self._set_str(key, out, inplace=False, validated=True)
+        return out
 
     def _create_nested_tuple(self, key):
-        self._create_nested_str(key[0])
+        td = self._create_nested_str(key[0])
         if len(key) > 1:
-            td = self._get_str(key[0], NO_DEFAULT)
             td._create_nested_tuple(key[1:])
 
     def copy_(self, tensordict: T) -> T:
@@ -3302,11 +3303,17 @@ class TensorDictBase(MutableMapping):
 
         """
         if not inplace:
-            return self.clone().unflatten_keys(separator=separator, inplace=True)
+            return self.copy().unflatten_keys(separator=separator, inplace=True)
         else:
             for key in list(self.keys()):
                 if separator in key:
-                    self.rename_key_(key, tuple(key.split(separator)))
+                    new_key = tuple(key.split(separator))
+                    try:
+                        self.rename_key_(key, new_key, safe=True)
+                    except KeyError:
+                        raise KeyError(
+                            f"Unflattening key(s) in tensordict will override an existing for unflattened key {new_key}."
+                        )
             return self
 
     @abc.abstractmethod

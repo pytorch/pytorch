@@ -1200,12 +1200,11 @@ class TensorDict(TensorDictBase):
             return self._set_str(key[0], value, inplace=inplace, validated=validated)
         td = self._get_str(key[0], None)
         if td is None:
-            self._create_nested_str(key[0])
-            td = self._get_str(key[0], NO_DEFAULT)
+            td = self._create_nested_str(key[0])
             inplace = False
         elif not _is_tensor_collection(td.__class__):
-            raise RuntimeError(
-                f"The entry {key[0]} is already present in " f"tensordict {self}."
+            raise KeyError(
+                f"The entry {key[0]} is already present in tensordict {self}."
             )
         td._set_tuple(key[1:], value, inplace=inplace, validated=validated)
         return self
@@ -1450,7 +1449,7 @@ class TensorDict(TensorDictBase):
         metadata = load_metadata(prefix / "meta.json")
         out = cls({}, batch_size=metadata.pop("shape"), device=metadata.pop("device"))
 
-        for key, entry_metadata in metadata:
+        for key, entry_metadata in metadata.items():
             out.set(
                 key,
                 from_filename(
@@ -1465,28 +1464,6 @@ class TensorDict(TensorDictBase):
             if path.is_dir():
                 key = path.parts[len(prefix.parts) :]
                 out.set(key, TensorDict.load_memmap(path))
-        return out
-        # for path in prefix.glob("**/*meta.json"):
-        #     key = path.parts[len(prefix.parts) :]
-        #     if path == prefix / "meta.json":
-        #         # skip prefix / "meta.json" as we've already read it
-        #         continue
-        #     key = key[:-1]  # drop "meta.json" from key
-        #     metadata = load_metadata(path)
-        #     if key in out.keys(include_nested=True):
-        #         out.get(key).batch_size = metadata["shape"]
-        #         device = metadata["device"]
-        #         if device is not None:
-        #             out.set(key, out.get(key).to(device))
-        #     else:
-        #         out.set(
-        #             key,
-        #             cls(
-        #                 {},
-        #                 batch_size=metadata["shape"],
-        #                 device=metadata["device"],
-        #             ),
-        #         )
         return out
 
     def to(self, *args, **kwargs: Any) -> T:
