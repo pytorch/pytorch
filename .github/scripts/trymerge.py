@@ -30,6 +30,7 @@ from github_utils import (
     gh_fetch_url,
     gh_post_commit_comment,
     gh_post_pr_comment,
+    gh_update_pr_state,
     GitHubComment,
 )
 
@@ -61,6 +62,7 @@ class JobCheckState(NamedTuple):
     classification: Optional[str]
     job_id: Optional[int]
     title: Optional[str]
+    summary: Optional[str]
 
 
 JobNameToStateDict = Dict[str, JobCheckState]
@@ -118,6 +120,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           detailsUrl
           databaseId
           title
+          summary
         }
         pageInfo {
           endCursor
@@ -309,6 +312,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     detailsUrl
                     databaseId
                     title
+                    summary
                   }
                   pageInfo {
                     endCursor
@@ -433,6 +437,7 @@ MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
 REMOTE_MAIN_BRANCH = "origin/main"
+DRCI_CHECKRUN_NAME = "Dr.CI"
 INTERNAL_CHANGES_CHECKRUN_NAME = "Meta Internal-Only Changes Check"
 HAS_NO_CONNECTED_DIFF_TITLE = (
     "There is no internal Diff connected, this can be merged now"
@@ -546,6 +551,7 @@ def add_workflow_conclusions(
                             classification=None,
                             job_id=checkrun_node["databaseId"],
                             title=checkrun_node["title"],
+                            summary=checkrun_node["summary"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -576,6 +582,7 @@ def add_workflow_conclusions(
                 classification=None,
                 job_id=None,
                 title=None,
+                summary=None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -901,6 +908,7 @@ class GitHubPR:
                     classification=None,
                     job_id=None,
                     title=None,
+                    summary=None,
                 )
 
         return self.conclusions
@@ -1615,9 +1623,26 @@ def get_classifications(
     ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
     # Get the failure classification from Dr.CI, which is the source of truth
-    # going forward
+    # going forward. It's preferable to try calling Dr.CI API directly first
+    # to get the latest results as well as update Dr.CI PR comment
     drci_classifications = get_drci_classifications(pr_num=pr_num, project=project)
-    print(f"From Dr.CI: {json.dumps(drci_classifications)}")
+    print(f"From Dr.CI API: {json.dumps(drci_classifications)}")
+
+    # NB: if the latest results from Dr.CI is not available, i.e. when calling from
+    # SandCastle, we fallback to any results we can find on Dr.CI check run summary
+    if (
+        not drci_classifications
+        and DRCI_CHECKRUN_NAME in checks
+        and checks[DRCI_CHECKRUN_NAME]
+        and checks[DRCI_CHECKRUN_NAME].summary
+    ):
+        drci_summary = checks[DRCI_CHECKRUN_NAME].summary
+        try:
+            print(f"From Dr.CI checkrun summary: {drci_summary}")
+            drci_classifications = json.loads(str(drci_summary))
+        except json.JSONDecodeError as error:
+            warn("Invalid Dr.CI checkrun summary")
+            drci_classifications = {}
 
     checks_with_classifications = checks.copy()
     for name, check in checks.items():
@@ -1632,6 +1657,7 @@ def get_classifications(
                 "UNSTABLE",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
@@ -1645,12 +1671,19 @@ def get_classifications(
                 "BROKEN_TRUNK",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
         elif is_flaky(name, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
-                check.name, check.url, check.status, "FLAKY", check.job_id, check.title
+                check.name,
+                check.url,
+                check.status,
+                "FLAKY",
+                check.job_id,
+                check.title,
+                check.summary,
             )
             continue
 
@@ -1665,6 +1698,7 @@ def get_classifications(
                 "INVALID_CANCEL",
                 check.job_id,
                 check.title,
+                check.summary,
             )
             continue
 
@@ -1676,6 +1710,7 @@ def get_classifications(
                 "IGNORE_CURRENT_CHECK",
                 check.job_id,
                 check.title,
+                check.summary,
             )
 
     return checks_with_classifications
@@ -1769,6 +1804,7 @@ def try_revert(
     if not dry_run:
         pr.add_numbered_label("reverted")
         gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
+        gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:

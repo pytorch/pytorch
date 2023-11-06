@@ -259,6 +259,9 @@ TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
+// Returns operators in the order which OpOverloadPacket resolves them.
+TORCH_API std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(
+    Symbol name);
 
 // given a operator with an overload name, find the specific operator related to
 // it, may return nullptr if no operator exists.

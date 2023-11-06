@@ -89,8 +89,10 @@ def _gather_state_dict(
                 value = value.to(value.device_mesh.device_type)
             # FSDP all_gather: [Shard(0)] -> [Replicate()]
             # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
-            placements = list(copy.deepcopy(value.placements))
-            placements[-1] = Replicate()
+            # 2D FSDP + TP all_gather:
+            # - [Shard(0), Shard(n)] -> [Replicate(), Replicate()]
+            # - [Shard(0), Replicate()] -> [Replicate(), Replicate()]
+            placements = [Replicate() for _ in value.placements]
             value = value.redistribute(
                 device_mesh=value.device_mesh,
                 placements=placements,

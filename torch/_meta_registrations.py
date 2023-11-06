@@ -30,11 +30,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
-from torch.fx.experimental.symbolic_shapes import (
-    _constrain_range_for_size,
-    constrain_range,
-)
-from torch.utils._pytree import tree_map
+from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -49,7 +45,7 @@ def register_meta(op):
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
-        tree_map(register, op)
+        pytree.tree_map_(register, op)
         return fn
 
     return wrapper
@@ -522,6 +518,9 @@ def make_dep_token(
 
 @register_meta(aten.sym_constrain_range.default)
 def sym_constrain_range(size, min=None, max=None):
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import constrain_range
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
     constrain_range(size, min=min, max=max)
@@ -535,6 +534,9 @@ def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
 
 @register_meta(aten.sym_constrain_range_for_size.default)
 def sym_constrain_range_for_size(size, min=None, max=None):
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
     _constrain_range_for_size(size, min=min, max=max)
@@ -5273,8 +5275,8 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 @register_meta(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     grad_output: Tensor,
-    output_size: Sequence[Union[int, torch.types.SymInt]],
-    input_size: Sequence[Union[int, torch.types.SymInt]],
+    output_size: Sequence[Union[int, torch.SymInt]],
+    input_size: Sequence[Union[int, torch.SymInt]],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ):

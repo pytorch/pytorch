@@ -76,10 +76,30 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
 
 
+def grid_fn_code(name, configs, grids):
+    assert len(grids) == len(configs)
+    fn_name = f"grid_wrapper_for_{name}"
+    grid_fn_str = f"def {fn_name}(meta):"
+    for grid, config in zip(grids, configs):
+        guards = [f"meta['{name}'] == {val}" for name, val in config.kwargs.items()]
+        guards = " and ".join(guards)
+        grid_fn_str += f"\n\tif {guards}: return {grid}"
+    return fn_name, grid_fn_str
+
+
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
 def triton_kernel_wrapper_mutation_dense(*, kernel_idx, grid, kwargs):
     kernel = kernel_side_table.get_kernel(kernel_idx)
-    kernel[grid](**kwargs)
+
+    if len(grid) == 1:
+        grid_fn = grid[0]
+    else:
+        fn_name, code = grid_fn_code(kernel.fn.__name__, kernel.configs, grid)
+        namespace: Dict[str, Any] = {}
+        exec(code, namespace)
+        grid_fn = namespace[fn_name]
+
+    kernel[grid_fn](**kwargs)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
@@ -88,11 +108,10 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(mode, *, kernel_idx, grid, k
         return None
 
 
-def trace_triton_kernel_wrapper(proxy_mode, func_overload, *, kernel_idx, grid, kwargs):
+def trace_triton_kernel_wrapper(proxy_mode, func_overload, node_args):
     with disable_proxy_modes_tracing():
-        out = func_overload(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
+        out = func_overload(**node_args)
 
-    node_args = {"kernel_idx": kernel_idx, "grid": grid, "kwargs": kwargs}
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -112,9 +131,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
         trace_triton_kernel_wrapper(
             mode,
             triton_kernel_wrapper_mutation,
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=kwargs,
+            {"kernel_idx": kernel_idx, "grid": grid, "kwargs": kwargs},
         )
     else:
         triton_kernel_wrapper_mutation(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
@@ -125,9 +142,17 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    # TODO(oulgen): We can be smarter here and iterate through the triton kernel
+    # to find which tensors are actually being mutated
+    tensors_to_clone = [
+        key for key, value in unwrapped_kwargs.items() if isinstance(value, Tensor)
+    ]
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx, grid=grid, kwargs=unwrapped_kwargs
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kwargs=unwrapped_kwargs,
+            tensors_to_clone=tensors_to_clone,
         )
 
     assert unwrapped_outputs.keys() == kwargs.keys()
@@ -149,13 +174,15 @@ def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
 
 
 @triton_kernel_wrapper_functional.py_impl(DispatchKey.CompositeExplicitAutograd)
-def triton_kernel_wrapper_functional_dense(*, kernel_idx, grid, kwargs):
+def triton_kernel_wrapper_functional_dense(
+    *, kernel_idx, grid, kwargs, tensors_to_clone
+):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
     # (inductor should always optimize them away).
     # Requires https://github.com/pytorch/pytorch/issues/109240
     kwargs = {
-        key: (clone_preserve_strides(val) if isinstance(val, Tensor) else val)
+        key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
         for key, val in kwargs.items()
     }
     triton_kernel_wrapper_mutation(kernel_idx=kernel_idx, grid=grid, kwargs=kwargs)
@@ -164,7 +191,7 @@ def triton_kernel_wrapper_functional_dense(*, kernel_idx, grid, kwargs):
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
 def triton_kernel_wrapper_functional_fake_tensor_mode(
-    mode, *, kernel_idx, grid, kwargs
+    mode, *, kernel_idx, grid, kwargs, tensors_to_clone
 ):
     # TODO(oulgen): For performance reasons, we want to ensure that these
     # `clone_preserve_strides` calls are never executed at runtime
@@ -172,35 +199,46 @@ def triton_kernel_wrapper_functional_fake_tensor_mode(
     # Requires https://github.com/pytorch/pytorch/issues/109240
     with mode:
         return {
-            key: (clone_preserve_strides(val) if isinstance(val, Tensor) else val)
+            key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
             for key, val in kwargs.items()
         }
 
 
 @triton_kernel_wrapper_functional.py_impl(ProxyTorchDispatchMode)
 def triton_kernel_wrapper_functional_proxy_torch_dispatch_mode(
-    mode, *, kernel_idx, grid, kwargs
+    mode, *, kernel_idx, grid, kwargs, tensors_to_clone
 ):
     if mode.enable_tracing:
         return trace_triton_kernel_wrapper(
             mode,
             triton_kernel_wrapper_functional,
-            kernel_idx=kernel_idx,
-            grid=grid,
-            kwargs=kwargs,
+            {
+                "kernel_idx": kernel_idx,
+                "grid": grid,
+                "kwargs": kwargs,
+                "tensors_to_clone": tensors_to_clone,
+            },
         )
     else:
         return triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx, grid=grid, kwargs=kwargs
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kwargs=kwargs,
+            tensors_to_clone=tensors_to_clone,
         )
 
 
 @triton_kernel_wrapper_functional.py_functionalize_impl
-def triton_kernel_wrapper_functional_functionalize(ctx, kernel_idx, grid, kwargs):
+def triton_kernel_wrapper_functional_functionalize(
+    ctx, kernel_idx, grid, kwargs, tensors_to_clone
+):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
     with ctx.redispatch_to_next():
         outputs = triton_kernel_wrapper_functional(
-            kernel_idx=kernel_idx, grid=grid, kwargs=unwrapped_kwargs
+            kernel_idx=kernel_idx,
+            grid=grid,
+            kwargs=unwrapped_kwargs,
+            tensors_to_clone=tensors_to_clone,
         )
         return ctx.wrap_tensors(outputs)
 
