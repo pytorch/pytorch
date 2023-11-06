@@ -246,7 +246,10 @@ class ExprPrinterTests(TorchTestCase):
                 self.assertEqual(cexpr(expr), "(-1L)*s1")
             else:
                 self.assertEqual(pexpr(expr), "(s1 // (-1))")
-                self.assertEqual(cexpr(expr), "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))")
+                self.assertEqual(
+                    cexpr(expr),
+                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>((-1L)))",
+                )
 
     def test_print_Min_Max(self):
         cases = (
