@@ -33,7 +33,7 @@ jobs:
   linux-focal-rocm5_7-py3_8-test:
     name: linux-focal-rocm5.7-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_7-build
+    needs: linux-focal-rocm5_7-py3_8-build
     with:
       build-environment: linux-focal-rocm5.7-py3.8
       docker-image: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.docker-image }}
