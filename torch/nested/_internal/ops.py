@@ -47,7 +47,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
         )
     return (
         tuple(
-            _outer_to_inner_dim(ndim, d, op_name)
+            _outer_to_inner_dim(ndim, d)
             for d in dims
             if d != 0
         ),
