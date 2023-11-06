@@ -2,83 +2,83 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,8
+torchrec_dlrm,pass,13
 
 
 
-BERT_pytorch,pass,8
+BERT_pytorch,pass,13
 
 
 
-LearningToPaint,pass,8
+LearningToPaint,pass,13
 
 
 
-Super_SloMo,pass,8
+Super_SloMo,pass,13
 
 
 
-alexnet,pass,8
+alexnet,pass,13
 
 
 
-basic_gnn_edgecnn,pass,23
+basic_gnn_edgecnn,pass,31
 
 
 
-basic_gnn_gcn,pass,14
+basic_gnn_gcn,pass,20
 
 
 
-basic_gnn_gin,pass,8
+basic_gnn_gin,pass,13
 
 
 
-basic_gnn_sage,pass,8
+basic_gnn_sage,pass,13
 
 
 
-dcgan,pass,8
+dcgan,pass,13
 
 
 
-dlrm,pass,8
+dlrm,pass,13
 
 
 
-drq,pass,7
+drq,pass,12
 
 
 
-fastNLP_Bert,pass,12
+fastNLP_Bert,pass,18
 
 
 
-functorch_dp_cifar10,pass,8
+functorch_dp_cifar10,pass,13
 
 
 
-functorch_maml_omniglot,pass,8
+functorch_maml_omniglot,pass,13
 
 
 
-hf_Albert,pass,7
+hf_Albert,pass,12
 
 
 
-hf_Bart,pass,7
+hf_Bart,pass,12
 
 
 
-hf_DistilBert,pass,7
+hf_DistilBert,pass,12
 
 
 
-hf_GPT2,pass,7
+hf_GPT2,pass,12
 
 
 
-hf_Reformer,pass,27
+hf_Reformer,pass,35
 
 
 
@@ -86,91 +86,91 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_Whisper,pass,7
+hf_Whisper,pass,12
 
 
 
-lennard_jones,pass,8
+lennard_jones,pass,13
 
 
 
-maml_omniglot,pass,8
+maml_omniglot,pass,13
 
 
 
-mnasnet1_0,pass,8
+mnasnet1_0,pass,13
 
 
 
-mobilenet_v2,pass,8
+mobilenet_v2,pass,13
 
 
 
-moco,pass,19
+moco,pass,25
 
 
 
-nanogpt,pass,8
+nanogpt,pass,13
 
 
 
-nvidia_deeprecommender,pass,8
+nvidia_deeprecommender,pass,13
 
 
 
-phlippe_densenet,pass,8
+phlippe_densenet,pass,13
 
 
 
-phlippe_resnet,pass,8
+phlippe_resnet,pass,13
 
 
 
-pytorch_CycleGAN_and_pix2pix,pass,8
+pytorch_CycleGAN_and_pix2pix,pass,13
 
 
 
-pytorch_stargan,pass,8
+pytorch_stargan,pass,13
 
 
 
-pytorch_unet,pass,8
+pytorch_unet,pass,13
 
 
 
-resnet152,pass,8
+resnet152,pass,13
 
 
 
-resnet18,pass,8
+resnet18,pass,13
 
 
 
-resnet50,pass,8
+resnet50,pass,13
 
 
 
-resnext50_32x4d,pass,8
+resnext50_32x4d,pass,13
 
 
 
-shufflenet_v2_x1_0,pass,8
+shufflenet_v2_x1_0,pass,13
 
 
 
-soft_actor_critic,pass,7
+soft_actor_critic,pass,12
 
 
 
-speech_transformer,pass,18
+speech_transformer,pass,24
 
 
 
-squeezenet1_1,pass,8
+squeezenet1_1,pass,13
 
 
 
-stable_diffusion_text_encoder,pass,7
+stable_diffusion_text_encoder,pass,12
 
 
 
@@ -178,19 +178,19 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-timm_efficientnet,pass,8
+timm_efficientnet,pass,13
 
 
 
-timm_regnet,pass,8
+timm_regnet,pass,13
 
 
 
-timm_resnest,pass,8
+timm_resnest,pass,13
 
 
 
-timm_vision_transformer,pass,8
+timm_vision_transformer,pass,13
 
 
 
@@ -198,20 +198,20 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 
-timm_vovnet,pass,8
+timm_vovnet,pass,13
 
 
 
-tts_angular,pass,10
+tts_angular,pass,16
 
 
 
-vgg16,pass,8
+vgg16,pass,13
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_accuracy,43
 
 
 
-yolov3,pass,10
+yolov3,pass,16
