@@ -1043,6 +1043,7 @@ class TestAutogradFunction(TestCase):
         grad(f)(y, x)
         grad(grad(f))(y, x)
 
+    @skipIfTorchDynamo("Debugging")
     @parametrize("inner_requires_grad", [True, False])
     @parametrize("save_for", ["jvp", "vjp"])
     @parametrize("save_tensors", ["input", "output", "neither"])
@@ -3090,6 +3091,7 @@ class TestComposability(TestCase):
             warnings.simplefilter("error")
             new_api(torch.sin)
 
+    @skipIfTorchDynamo("Debugging")
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
         y = grad(grad(torch.sin))(x)
