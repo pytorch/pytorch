@@ -5,10 +5,17 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
+
 #ifndef IDEEP_PREREQ
+// Please find definitions of version numbers in ideep.hpp
+#if defined(IDEEP_VERSION_MAJOR) && defined(IDEEP_VERSION_MINOR) && \
+  defined(IDEEP_VERSION_PATCH) && defined(IDEEP_VERSION_REVISION)
 #define IDEEP_PREREQ(major, minor, patch, revision) \
-  (((IDEEP_VERSION_MAJOR << 32) + (IDEEP_VERSION_MINOR << 16) + (IDEEP_VERSION_PATCH << 8) + (DNNL_VERSION_PATCH)) \
-    >= ((major << 32) + (minor << 16) + (patch << 8) + (revision)))
+  (((IDEEP_VERSION_MAJOR << 32) + (IDEEP_VERSION_MINOR << 16) + (IDEEP_VERSION_PATCH << 8) + \
+  (IDEEP_VERSION_REVISION)) >= ((major << 32) + (minor << 16) + (patch << 8) + (revision)))
+#else
+#define IDEEP_PREREQ(major, minor, patch, revision) 0
+#endif
 #endif
 
 namespace at { namespace native {
