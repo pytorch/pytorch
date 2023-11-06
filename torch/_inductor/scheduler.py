@@ -332,10 +332,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and input_node.node.has_aliasing()
+                            isinstance(input_node.node, ir.FallbackKernel)
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -1169,12 +1167,21 @@ class Scheduler:
             str, BaseSchedulerNode
         ] = dict()  # set in fuse_nods()
 
-        # we handle mutation by renaming modified versions of the same
+        # mutation_real_name: Maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_real_name = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        self.mutation_real_name = {}
+
+        # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
         #                   (changed once per mutation)
-        self.mutation_real_name = {}
-        # mutation_real_name: maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_renames = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_renames = {}
 
         self.compute_dependencies()
@@ -1347,6 +1354,7 @@ class Scheduler:
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
+            assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer

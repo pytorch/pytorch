@@ -28,8 +28,9 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
+
 from types import MethodWrapperType
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 
 try:
     import numpy as np
@@ -557,6 +558,7 @@ class CompilationMetrics:
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
+    non_compliant_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -836,27 +838,23 @@ def is_safe_constant(v):
     )
 
 
-def guard_if_dyn(arg):
-    from .variables import ConstantVariable, SymNodeVariable
-
-    if isinstance(arg, SymNodeVariable):
-        # This is because SymNodeVariable intentionally doesn't define
-        # as_python_constant to avoid shunting down some codepaths
-        # that expect consts.   In this case, we know we definitely
-        # want to specialize though.
-        return arg.evaluate_expr()
-    elif isinstance(arg, ConstantVariable):
-        return arg.as_python_constant()
-
-    return arg
-
-
 def specialize_symnode(arg):
     from .variables import ConstantVariable, SymNodeVariable
 
     # Guard and specialize
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
+
+    return arg
+
+
+def guard_if_dyn(arg):
+    from .variables import ConstantVariable
+
+    arg = specialize_symnode(arg)
+
+    if isinstance(arg, ConstantVariable):
+        return arg.as_python_constant()
 
     return arg
 
