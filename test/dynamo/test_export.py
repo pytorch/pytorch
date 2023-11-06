@@ -3294,7 +3294,6 @@ class GraphModule(torch.nn.Module):
 """
         true_guard_code = [
             "cast_symbool_to_symint_guardless(L['pred']) == 1",
-            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
         ]
         false_guard_code = [
             "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
