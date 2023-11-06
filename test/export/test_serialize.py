@@ -425,7 +425,7 @@ class TestDeserialize(TestCase):
         lib = Library("_export", "FRAGMENT")
         lib.define(
             "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
-            torch.Tag.pt2_compliant_tag)
+            tags=torch.Tag.pt2_compliant_tag)
 
         def _test_tensor_tensor_list_output(x, y):
             return y, [x]
