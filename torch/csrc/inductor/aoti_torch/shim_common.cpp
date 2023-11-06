@@ -48,7 +48,6 @@ c10::optional<T> pointer_to_optional(T* ptr) {
   return ptr ? c10::make_optional(*ptr) : c10::nullopt;
 }
 
-// Handles implicit conversions.
 template <class T, class U>
 c10::optional<T> pointer_to_optional(U* ptr) {
   return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
