@@ -1034,7 +1034,7 @@ def cat(inputs, dim=0):
         # code gen with uint8 data type directly.
         for input in inputs:
             input.realize()
-        if all(len(input.layout.size) == 4 for input in inputs):
+        if all(len(input.get_size()) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat.default)(inputs, dim)
 
@@ -3559,7 +3559,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and l.free_symbols
+            if isinstance(l, sympy.Expr) and not l.is_number
             else l
         )
         bounds_precomp.append((l_precomp, h))
