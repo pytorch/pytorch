@@ -323,7 +323,9 @@ def generate_function(
             )
         }
     }
-    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(
