@@ -230,6 +230,7 @@ def export__RC__(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
+    preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     API for exporting with dynamic shape specifications instead of constraints.
@@ -249,7 +250,13 @@ def export__RC__(
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
     constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-    return _export(f, args, kwargs, constraints=constraints)
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints=constraints,
+        preserve_module_call_signature=preserve_module_call_signature
+    )
 
 
 def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
@@ -770,7 +777,7 @@ def _export(
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
         inputs=[make_argument_spec(node) for node in gm.graph.nodes if node.op == "placeholder"],
-        outputs=[make_argument_spec(node) for node in pytree.tree_flatten(next(iter(reversed(gm.graph.nodes))).args)[0]],
+        outputs=[make_argument_spec(node) for node in pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)],
     )
     export_graph_signature = ExportGraphSignature(input_specs=input_specs, output_specs=output_specs)
 
@@ -940,7 +947,7 @@ def aot_compile(
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
     gm = _export_to_torch_ir(f, args, kwargs, constraints)
-    flat_example_inputs, _ = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
+    flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
