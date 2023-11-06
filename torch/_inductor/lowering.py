@@ -3559,7 +3559,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and l.free_symbols
+            if isinstance(l, sympy.Expr) and not l.is_number
             else l
         )
         bounds_precomp.append((l_precomp, h))
