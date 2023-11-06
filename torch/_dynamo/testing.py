@@ -249,16 +249,6 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
-    if expected_ops is None:
-        expected = CompileCounter()
-        try:
-            gm = torch.fx.symbolic_trace(fn)
-            expected(gm)  # type: ignore[call-arg] # FIXME: https://github.com/pytorch/pytorch/issues/112230
-            print("\nfx.symbolic_trace graph:")
-            gm.graph.print_tabular()
-            expected_ops = expected.op_count
-        except Exception:
-            pass  # Silently ignore FX errors (not our issue)
 
     args1 = [torch.randn(10, 10) for _ in range(nargs)]
     args2 = [torch.randn(10, 10) for _ in range(nargs)]
