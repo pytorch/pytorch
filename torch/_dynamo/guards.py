@@ -928,7 +928,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
@@ -1256,36 +1256,28 @@ def get_guard_fail_reason(
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
-    reasons: List[str] = []
+    reason = ""
     for part in guard_fn.code_parts:
         global_scope = dict(guard_fn.global_scope)
         global_scope["__compile_source__"] = part
         with report_compile_source_on_error():
-            fail_reason: Union[bool, str] = False
-            try:
-                fail_reason = eval(part, global_scope, scope)
-            except Exception:
-                # evaluating after the first failure can cause
-                # errors, e.g. if the check len(L['args']) > 0 fails,
-                # a subsequent check on L['args'][0] will error.
-                pass
+            fail_reason = eval(part, global_scope, scope)
         # Only ___check_tensors knows how to return a fancy fail reason;
         # for everything else we just report the code that failed
 
         if isinstance(fail_reason, bool) and not fail_reason:
-            fail_reason = part
-        if isinstance(fail_reason, str):
-            reasons.append(fail_reason)
-            if not config.report_all_guard_failures:
-                break
+            reason = part
+            break
+        elif isinstance(fail_reason, str):
+            reason = fail_reason
+            break
 
-    reason_str = "\n".join(reasons)
-    guard_failures[orig_code_map[code]].append(reason_str)
+    guard_failures[orig_code_map[code]].append(reason)
 
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
-                GuardFail(reason_str or "unknown reason", orig_code_map[code])
+                GuardFail(reason or "unknown reason", orig_code_map[code])
             )
     except Exception as e:
         log.error(
@@ -1293,7 +1285,7 @@ def get_guard_fail_reason(
             exc_info=True,
         )
 
-    return reason_str
+    return reason
 
 
 def get_and_maybe_log_recompilation_reason(
@@ -1317,26 +1309,22 @@ def get_and_maybe_log_recompilation_reason(
 
     code = frame.f_code
 
-    if is_guard_failure_reporting_enabled() and recompiles_log.isEnabledFor(
-        logging.DEBUG
-    ):
-        if config.report_all_guard_failures:
-            failures = "\n".join(reasons)
-        else:
-            failures = reasons[-1]
-        guard_failure_details = f"triggered by the following guard failure(s):\n{textwrap.indent(failures, '- ')}"
-    else:
-        guard_failure_details = "set env var TORCH_LOGS='recompiles' to debug further"
-    message = (
-        f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
-        f"{textwrap.indent(guard_failure_details, '    ')}"
+    do_recompiles_log = (
+        is_guard_failure_reporting_enabled()
+        and recompiles_log.isEnabledFor(logging.DEBUG)
     )
 
-    if recompiles_log.isEnabledFor(logging.DEBUG):
-        recompiles_log.debug(message, stack_info=True)
-
-    if config.error_on_recompile:
-        raise exc.RecompileError(message)
+    if do_recompiles_log or config.error_on_recompile:
+        failures = "\n".join(reasons)
+        guard_failure_details = f"triggered by the following guard failure(s):\n{textwrap.indent(failures, '- ')}"
+        message = (
+            f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
+            f"{textwrap.indent(guard_failure_details, '    ')}"
+        )
+        if do_recompiles_log:
+            recompiles_log.debug(message, stack_info=True)
+        if config.error_on_recompile:
+            raise exc.RecompileError(message)
 
     return reasons
 

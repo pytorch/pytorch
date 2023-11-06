@@ -458,10 +458,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """\
-L['a'] is L['b']
-L['a'] is L['c']
-L['a'] is L['d']""",
+            """L['a'] is L['b']""",
         )
 
         torch._dynamo.reset()
@@ -517,10 +514,7 @@ L['a'] is L['d']""",
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """\
-L['a'] is L['b']
-L['a'] is L['c']
-L['a'] is L['d']""",
+            """L['a'] is L['b']""",
         )
 
     @patch("torch._functorch.config.debug_assert", True)
@@ -558,10 +552,7 @@ L['a'] is L['d']""",
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """\
-L['a'] is L['b']
-L['a'] is L['c']
-L['a'] is L['d']""",
+            """L['a'] is L['b']""",
         )
 
         torch._dynamo.reset()
@@ -613,10 +604,7 @@ L['a'] is L['d']""",
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """\
-L['a'] is L['b']
-L['a'] is L['c']
-L['a'] is L['d']""",
+            """L['a'] is L['b']""",
         )
 
         torch._dynamo.reset()
@@ -665,10 +653,7 @@ L['a'] is L['d']""",
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(
             failure_reason,
-            """\
-L['a'] is L['b']
-L['a'] is L['c']
-L['a'] is L['d']""",
+            """L['a'] is L['b']""",
         )
 
         torch._dynamo.reset()
@@ -987,6 +972,7 @@ SeqNr|OrigAten|SrcFn
             torch.set_grad_enabled(True)
             y = f_compiled(x)
             self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
             self.assertEqual(y_ref, y)
 
             self.assertIsNone(y_ref[0].grad_fn)

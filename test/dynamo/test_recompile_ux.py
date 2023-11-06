@@ -202,6 +202,34 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
         )
 
+    @torch._dynamo.config.patch("cache_size_limit", 32)
+    def test_multiple_guard_fails(self):
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure[0])
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch._dynamo.optimize(
+            backend="eager", guard_fail_fn=guard_fail_fn, dynamic=False
+        )(f)
+
+        for i in range(5):
+            failure_reasons.clear()
+            opt_f(torch.randn(8 + i))
+
+        failure_str = "\n".join(failure_reasons)
+        self.assertExpectedInline(
+            failure_str,
+            """\
+tensor 'L['x']' size mismatch at index 0. expected 11, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 10, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
+        )
+
 
 # TODO(jansel): these pass with pytest, but not with pytorch CI
 # if __name__ == "__main__":
