@@ -196,9 +196,7 @@ class TestAggregatedHeuristics(HeuristicsTestMixin):
             aggregated_pris, expected_prioritizations=expected_prioritizations
         )
 
-    def test_merging_file_heuristic_after_class_heuristic(
-        self,
-    ) -> None:
+    def test_merging_file_heuristic_after_class_heuristic(self) -> None:
         tests = ["test1", "test2", "test3", "test4", "test5"]
         heuristic1 = TestPrioritizations(
             tests_being_ranked=tests,
