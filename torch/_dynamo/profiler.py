@@ -161,6 +161,7 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
 
     def _wrapped(*args):
         from torch.fx.experimental.symbolic_shapes import free_symbols
+
         nonlocal output_shapes
         with torch.profiler.record_function("TORCHDYNAMO"):
             # TODO: The assert here is a bit imprecise: if there are free
