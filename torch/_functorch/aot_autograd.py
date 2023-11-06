@@ -2993,7 +2993,7 @@ fw_metadata={str(fw_metadata)}
         args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             args, fw_metadata.input_info, is_inference=is_inference
         )
-        assert synthetic_base_info is not None
+        assert synthetic_base_info is not None, breakpoint()
         aliased_args_w_metadata_mutations = [args[i] for i in aliased_arg_idx_with_metadata_mutations]
         args.clear()
         outs = compiled_fn(args_with_synthetic_bases)
