@@ -1865,6 +1865,29 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @skipIfRocm
+    def test_triton_kernel_None_arg(self):
+        @triton.jit
+        def pass_kernel(
+            out_ptr,
+            dummy_None,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pass
+
+        @torch.compile
+        def call_triton(output):
+            n_elements = output.numel()
+            grid = (n_elements,)
+            pass_kernel[grid](output, None, n_elements, BLOCK_SIZE=16)
+            return output
+
+        output = torch.randn(5, device="cuda")
+        # Make sure this does not crash
+        call_triton(output)
+
+    @requires_cuda()
+    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
