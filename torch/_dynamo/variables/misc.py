@@ -440,7 +440,8 @@ class AutogradFunctionVariable(VariableTracker):
             )
 
     def call_function(self, tx, args, kwargs):
-        return AutogradFunctionVariable(self.fn_cls)
+        # TODO(jansel): BUG! the source here seems wrong, I believe it should just be None
+        return AutogradFunctionVariable(self.fn_cls, source=self.source)
 
     def call_method(
         self,

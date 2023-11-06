@@ -382,7 +382,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
-                return build_checkpoint_variable().call_function(
+                # TODO(jansel): BUG? passing self.source here is a bit suss, expect None to be better
+                return build_checkpoint_variable(source=self.source).call_function(
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchVariable(self.value.func).call_function(
