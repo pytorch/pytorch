@@ -26,7 +26,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,pass,7
+basic_gnn_gcn,pass,6
 
 
 
@@ -38,7 +38,7 @@ basic_gnn_sage,pass,0
 
 
 
-cm3leon_generate,pass,5
+cm3leon_generate,pass,4
 
 
 
@@ -50,11 +50,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,6
+doctr_det_predictor,pass,5
 
 
 
-doctr_reco_predictor,pass,5
+doctr_reco_predictor,pass,4
 
 
 
@@ -62,7 +62,7 @@ drq,pass,0
 
 
 
-fastNLP_Bert,pass,5
+fastNLP_Bert,pass,4
 
 
 
@@ -90,7 +90,7 @@ hf_GPT2,pass,0
 
 
 
-hf_Reformer,pass,6
+hf_Reformer,pass,5
 
 
 
@@ -126,7 +126,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,12
+moco,pass,11
 
 
 
@@ -222,7 +222,7 @@ timm_vovnet,pass,0
 
 
 
-tts_angular,pass,3
+tts_angular,pass,2
 
 
 
