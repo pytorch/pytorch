@@ -3301,45 +3301,13 @@ class TensorDictBase(MutableMapping):
             >>> model.load_state_dict(dict(model_state_dict.flatten_keys(".")))
 
         """
-        to_unflatten = defaultdict(list)
-        for key in self.keys():
-            if separator in key[1:-1]:
-                split_key = key.split(separator)
-                to_unflatten[split_key[0]].append((key, separator.join(split_key[1:])))
-
         if not inplace:
-            out = self.empty()
-            for key, value in self.items():
-                if separator not in key[1:-1]:
-                    out._set_str(key, value, validated=True, inplace=False)
+            return self.clone().unflatten_keys(separator=separator, inplace=True)
         else:
-            out = self
-
-        keys = set(out.keys())
-        for key, list_of_keys in to_unflatten.items():
-            # if the key is present and either (1) it is not a tensor collection or (2) it is but it's not empty, then we raise an error.
-            if key in keys and (
-                not is_tensor_collection(out.get(key)) or not out.get(key).is_empty()
-            ):
-                raise KeyError(
-                    "Unflattening key(s) in tensordict will override existing unflattened key"
-                )
-
-            tensordict = self.empty()
-            if key in self.keys():
-                tensordict.update(self[key])
-            for old_key, new_key in list_of_keys:
-                value = self.get(old_key)
-                tensordict[new_key] = value
-                if inplace:
-                    del self[old_key]
-            out._set_str(
-                key,
-                tensordict.unflatten_keys(separator=separator),
-                inplace=False,
-                validated=True,
-            )
-        return out
+            for key in list(self.keys()):
+                if separator in key:
+                    self.rename_key_(key, tuple(key.split(separator)))
+            return self
 
     @abc.abstractmethod
     def _index_tensordict(self, index: IndexType) -> T:

@@ -8,8 +8,6 @@ from multiprocessing import util
 from multiprocessing.context import reduction
 from typing import Optional, Union
 
-import numpy as np
-
 import torch
 from torch import memory_format, Tensor
 from torch.types import _bool, _device, _dtype, _layout

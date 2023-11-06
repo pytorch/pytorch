@@ -204,20 +204,28 @@ class TensorDict(TensorDictBase):
                     self.set(key, value)
 
     @staticmethod
-    def from_module(module, as_module: bool = False, lock: bool = True):
-        td_struct = {k: {} for k in dict(module.named_modules()).keys()}
-        del td_struct[""]
-        td_struct = TensorDict(td_struct, []).unflatten_keys(".")
-        td_params = TensorDict(dict(module.named_parameters()), []).unflatten_keys(".")
-        td_buffers = TensorDict(dict(module.named_buffers()), []).unflatten_keys(".")
-        td = td_struct.update(td_params).update(td_buffers)
-        if lock:
-            td.lock_()
+    def from_module(
+        module: "torch.nn.Module", as_module: bool = False, lock: bool = True
+    ):
+        td_struct = TensorDict({}, [])
+        for key, param in module.named_parameters(recurse=False):
+            td_struct._set_str(key, param, validated=True, inplace=False)
+        for key, param in module.named_buffers(recurse=False):
+            td_struct._set_str(key, param, validated=True, inplace=False)
+        for key, mod in module.named_children():
+            td_struct._set_str(
+                key,
+                TensorDict.from_module(mod, as_module=False, lock=False),
+                validated=True,
+                inplace=False,
+            )
         if as_module:
             from .params import TensorDictParams
 
-            return TensorDictParams(td, no_convert=True)
-        return td
+            return TensorDictParams(td_struct, no_convert=True)
+        if lock:
+            td_struct.lock_()
+        return td_struct
 
     def to_module(self, module, return_swap: bool = False, swap_dest=None):
         # we use __dict__ directly to avoid the getattr/setattr overhead whenever we can
