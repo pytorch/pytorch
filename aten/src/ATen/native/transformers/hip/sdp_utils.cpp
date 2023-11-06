@@ -51,7 +51,7 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   return default_order;
 }
 
-bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
+bool use_tensor_cores(sdp_params const& params, hipDeviceProp_t* dprops, bool is_half) {
   if (dprops->major >= 8) {
     return true;
   }

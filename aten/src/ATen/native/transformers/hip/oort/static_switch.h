@@ -25,7 +25,7 @@
     }                                           \
   }()
 
-#define BF16_SWITCH(COND, ...)               \
+#define FP16_SWITCH(COND, ...)               \
   [&] {                                      \
     if (COND) {                              \
       using elem_type = device_gemm_trait::BFloat16; \
