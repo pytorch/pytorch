@@ -1273,9 +1273,6 @@ def _shape_env_from_inputs(inputs: List[torch.Tensor]):
 def output_node(gm: torch.fx.GraphModule):
     """Get the output node from an FX graph"""
     last_node = next(iter(reversed(gm.graph.nodes)))
-    if last_node.op != "output":
-        node_list = list(gm.graph.nodes)
-        breakpoint()
     assert last_node.op == "output"
     return last_node
 

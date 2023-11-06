@@ -87,10 +87,8 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        self_args_list = list(self.self_args())
-        args = list(args)
-        ret = tx.inline_user_function_return(
-            self, self_args_list + args, kwargs
+        return tx.inline_user_function_return(
+            self, list(self.self_args()) + list(args), kwargs
         )
         return ret
 

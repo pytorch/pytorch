@@ -364,7 +364,6 @@ def check_verbose(obj, allow_torch=False):
         obj = obj.__code__
     else:
         filename = getfile(obj)
-
     if obj in get_func_inlinelist():
         return SkipResult(
             False,

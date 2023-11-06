@@ -359,51 +359,6 @@ class LazyScheduler:
 
 """
 TODO: graph with only in-place op doesn't have its output node, why?
-
-(Pdb) gm_after_split_children_list
-[GraphModule(), GraphModule(), GraphModule(), GraphModule()]
-(Pdb) gm_after_split_children_list[0]
-GraphModule()
-(Pdb) gm_after_split_children_list[0].graph
-<torch.fx.graph.Graph object at 0x7f14a79ddd90>
-(Pdb) str(gm_after_split_children_list[0].graph)
-graph():
-    %x : torch.Tensor [num_users=1] = placeholder[target=x]
-    %l__self___buf : [num_users=1] = placeholder[target=l__self___buf]
-    %l_y_ : torch.Tensor [num_users=1] = placeholder[target=l_y_]
-    %relu_ : [num_users=0] = call_method[target=relu_](args = (%x,), kwargs = {})
-    %relu__1 : [num_users=0] = call_method[target=relu_](args = (%l__self___buf,), kwargs = {})
-    %chunk : [num_users=2] = call_function[target=torch.chunk](args = (%l_y_, 2), kwargs = {})
-    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%chunk, 0), kwargs = {})
-    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%chunk, 1), kwargs = {})
-    %cat : [num_users=1] = call_function[target=torch.cat](args = ((%getitem, %getitem_1),), kwargs = {})
-    return cat
-(Pdb) str(gm_after_split_children_list[1].graph)
-graph():
-    %y : [num_users=1] = placeholder[target=y]
-    %relu_ : [num_users=0] = call_method[target=relu_](args = (%y,), kwargs = {})
-(Pdb) str(gm_after_split_children_list[2].graph)
-graph():
-    %x : torch.Tensor [num_users=1] = placeholder[target=x]
-    %y : [num_users=1] = placeholder[target=y]
-    %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
-    return add'
-(Pdb) str(gm_after_split_children_list[3].graph)
-graph():
-    %z : [num_users=1] = placeholder[target=z]
-    %relu_ : [num_users=0] = call_method[target=relu_](args = (%z,), kwargs = {})
-(Pdb)
-
-(Pdb) str(gm_after_split.code)
-def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-    l_x_ = L_x_
-    l__self___buf = self.L__self___buf
-    l_y_ = L_y_
-    submod_1 = self.submod_1(l_x_, l__self___buf, l_y_);  l__self___buf = l_y_ = None
-    submod_2 = self.submod_2(submod_1)
-    submod_3 = self.submod_3(l_x_, submod_1);  l_x_ = None
-    submod_4 = self.submod_4(submod_3)
-    return (submod_1, submod_3)
 """
 
 
