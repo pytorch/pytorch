@@ -700,6 +700,7 @@ def mps_ops_modifier(ops):
 
         # Unsupported dtypes
         'dot': [torch.int64],
+        'histc': [torch.float16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
@@ -793,6 +794,8 @@ def mps_ops_modifier(ops):
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
+        # float output for float16 input on MPS
+        'logit': [torch.float16],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -1404,19 +1407,18 @@ class TestMPS(TestCaseMPS):
 
     def test_fill(self):
 
-        def helper(val, shape):
-            tensor = torch.zeros(shape, device='mps')
+        def helper(val, shape, dtype):
+            tensor = torch.zeros(shape, device='mps', dtype=dtype)
             tensor_mps = tensor.fill_(val)
-            tensor_mps = torch.tanh(tensor_mps)
 
-            tensor_0 = torch.zeros(shape, device='cpu')
+            tensor_0 = torch.zeros(shape, device='cpu', dtype=dtype)
             tensor_cpu = tensor_0.fill_(val)
-            tensor_cpu = torch.tanh(tensor_cpu)
 
             self.assertEqual(tensor_mps, tensor_cpu)
 
-        helper(0, [1024])
-        helper(0.2, [2, 3])
+        helper(0, [1024], torch.float32)
+        helper(0.2, [2, 3], torch.float32)
+        helper(0.2 + 0.5j, [2, 3], torch.complex64)
 
     def test_fill_storage_offset(self):
         shape = [2, 10]
@@ -10940,6 +10942,7 @@ class TestConsistency(TestCaseMPS):
         'masked.softmin',
         'nn.functional.kl_div',
         'nn.functional.softmin',
+        'cross', 'linalg.cross',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -11103,8 +11106,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 

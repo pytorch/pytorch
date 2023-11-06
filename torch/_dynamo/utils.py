@@ -879,16 +879,6 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-def specialize_args_kwargs(tx, args, kwargs):
-    specialized_args = []
-    specialized_kwargs = {}
-    for x in args:
-        specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs.items():
-        specialized_kwargs.update({k: v.as_specialized(tx)})
-    return specialized_args, specialized_kwargs
-
-
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
 tuple_iterator = type(iter(tuple()))
@@ -1397,6 +1387,21 @@ def extract_fake_example_value(node, required=True):
         return None
 
 
+def ensure_graph_fake(e, tx):
+    assert maybe_get_fake_mode(e) is tx.fake_mode
+    return e
+
+
+def get_fake_values_from_nodes(tx, nodes):
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
+    )
+
+
 def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     Run the computation represented by `node` using fake tensors and return the result.
@@ -1420,16 +1425,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    def ensure_graph_fake(e):
-        assert maybe_get_fake_mode(e) is tx.fake_mode
-        return e
-
-    def visit(n: torch.fx.Node):
-        return n.meta["example_value"]
-
-    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map_only(torch.Tensor, ensure_graph_fake, args)
-    kwargs = tree_map_only(torch.Tensor, ensure_graph_fake, kwargs)
+    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1493,7 +1489,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(torch.Tensor, ensure_graph_fake, ret_val)
+        _ = tree_map_only(
+            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+        )
     return ret_val
 
 
