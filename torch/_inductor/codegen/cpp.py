@@ -452,7 +452,7 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {b}"
 
     @staticmethod
-    def div(a, b):
+    def truediv(a, b):
         return f"{a} / {b}"
 
     @staticmethod
@@ -2059,7 +2059,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if len(index.free_symbols) == 0:
+            if index.is_number:
                 self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
@@ -2275,7 +2275,7 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size, add_asserts=True):
+            def indirect_indexing(index_var, size, check=True):
                 return sympy_symbol(str(index_var))
 
             @staticmethod
@@ -2661,6 +2661,7 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:

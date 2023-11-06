@@ -50,6 +50,10 @@ e = torch.nn.Linear(10, 10)
 flag = True
 
 
+class CustomDictSubclass(collections.OrderedDict):
+    pass
+
+
 clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
 
 
@@ -443,6 +447,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_ordered_dict_kwargs(x):
         z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
+    def test_custom_dict_kwargs(x):
+        z = CustomDictSubclass(sample=torch.ones(10))
         return z
 
     @make_test
@@ -1426,6 +1435,40 @@ if HAS_TRITON:
         output = x + y
         tl.store(out_ptr + offsets, output, mask=mask)
 
+    @triton.autotune(
+        configs=[
+            triton.Config(
+                {"BLOCK_SIZE_X": 128, "BLOCK_SIZE_Y": 128}, num_stages=3, num_warps=8
+            ),
+            triton.Config(
+                {"BLOCK_SIZE_X": 64, "BLOCK_SIZE_Y": 64}, num_stages=3, num_warps=8
+            ),
+        ],
+        key=[],
+    )
+    @triton.jit
+    def add_kernel_2d_autotuned(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        x_elements,
+        y_elements,
+        BLOCK_SIZE_X: "tl.constexpr",
+        BLOCK_SIZE_Y: "tl.constexpr",
+    ):
+        xoffset = tl.program_id(0) * BLOCK_SIZE_X
+        xindex = xoffset + tl.arange(0, BLOCK_SIZE_X)[:, None]
+        xmask = xindex < x_elements
+        yoffset = tl.program_id(1) * BLOCK_SIZE_Y
+        yindex = yoffset + tl.arange(0, BLOCK_SIZE_Y)[None, :]
+        ymask = yindex < y_elements
+        x1 = xindex
+        y0 = yindex
+        tmp0 = tl.load(in_ptr0 + (x1 + (x_elements * y0)), xmask & ymask)
+        tmp1 = tl.load(in_ptr0 + (y0 + (y_elements * x1)), xmask & ymask)
+        tmp2 = tmp0 + tmp1
+        tl.store(out_ptr + (x1 + (x_elements * y0)), tmp2, xmask & ymask)
+
     @triton.jit
     def mul2_kernel(
         in_ptr0,
@@ -1619,7 +1662,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
         triton_kernel_wrapper_mutation(
             kernel_idx=add_kernel_id,
-            grid=grid,
+            grid=[grid],
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -1636,7 +1679,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         output = torch.zeros_like(t1)
         out_dict = triton_kernel_wrapper_functional(
             kernel_idx=add_kernel_id,
-            grid=grid,
+            grid=[grid],
             kwargs={
                 "in_ptr0": t1,
                 "in_ptr1": t2,
@@ -1668,7 +1711,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         def f(x, output):
             out = triton_kernel_wrapper_functional(
                 kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
-                grid=(x.numel(),),
+                grid=[(x.numel(),)],
                 kwargs={
                     "in_ptr0": x,
                     "out_ptr": output,
@@ -1699,7 +1742,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             gm.code.strip(),
             """\
 def forward(self, x_1, output_1):
-    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = (5,), kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
+    triton_kernel_wrapper_functional_proxy = torch._higher_order_ops.triton_kernel_wrap.triton_kernel_wrapper_functional(kernel_idx = 0, grid = [(5,)], kwargs = {'in_ptr0': x_1, 'out_ptr': output_1, 'n_elements': 5, 'BLOCK_SIZE': 16}, tensors_to_clone = ['in_ptr0', 'out_ptr']);  x_1 = output_1 = None
     getitem = triton_kernel_wrapper_functional_proxy['in_ptr0']
     getitem_1 = triton_kernel_wrapper_functional_proxy['out_ptr']
     getitem_2 = triton_kernel_wrapper_functional_proxy['n_elements']
@@ -1742,7 +1785,7 @@ def forward(self, x_1, output_1):
             with FunctionalTensorMode():
                 triton_kernel_wrapper_mutation(
                     kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
-                    grid=(x_func.numel(),),
+                    grid=[(x_func.numel(),)],
                     kwargs={
                         "ptr": x_func,
                         "n_elements": x_func.numel(),
@@ -1762,7 +1805,7 @@ def forward(self, x_1, output_1):
                 x_func.mul_(2)
                 triton_kernel_wrapper_mutation(
                     kernel_idx=kernel_side_table.add_kernel(mul2_inplace_kernel),
-                    grid=(x_func.numel(),),
+                    grid=[(x_func.numel(),)],
                     kwargs={
                         "ptr": x_func,
                         "n_elements": x_func.numel(),
@@ -1776,8 +1819,9 @@ def forward(self, x_1, output_1):
 
     @requires_cuda()
     @requires_triton()
+    @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_with_views(self, backend):
+    def test_triton_kernel_with_views(self, dynamic, backend):
         def call_triton_take_view(x: torch.Tensor):
             output = torch.zeros_like(x)
             n_elements = output.numel()
@@ -1796,13 +1840,13 @@ def forward(self, x_1, output_1):
         t_view = t.view(16)
 
         compiled_func = torch.compile(
-            call_triton_take_view, backend=backend, fullgraph=True
+            call_triton_take_view, backend=backend, fullgraph=True, dynamic=dynamic
         )
         self.assertEqual(2 * t_view, compiled_func(t_view))
         self.assertEqual(2 * t, compiled_func(t_view).view(4, 4))
 
         compiled_func = torch.compile(
-            call_triton_return_view, backend=backend, fullgraph=True
+            call_triton_return_view, backend=backend, fullgraph=True, dynamic=dynamic
         )
         self.assertEqual(2 * t_view, compiled_func(t).view(16))
         self.assertEqual(2 * t, compiled_func(t))
@@ -1859,8 +1903,9 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("dynamic", [False, True])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
-    def test_triton_kernel_no_clones(self, grad):
+    def test_triton_kernel_no_clones(self, grad, dynamic):
         from torch._inductor.utils import run_and_get_code
 
         def call_triton_add(
@@ -1870,19 +1915,77 @@ def forward(self, x_1, output_1):
             output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
 
+            tmp = torch.add(x, 1)
             grid = (x.numel(),)
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            add_kernel.run(x, y, output, n_elements, grid=grid, BLOCK_SIZE=16)
 
-            return output
+            return output, tmp
 
         t1 = torch.rand(5, device="cuda", requires_grad=grad)
         t2 = torch.rand(5, device="cuda", requires_grad=grad)
 
         torch_add = t1 + t2
-        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        (test, _), codes = run_and_get_code(
+            torch.compile(call_triton_add, dynamic=dynamic), t1, t2
+        )
         self.assertEqual(torch_add, test)
-        self.assertTrue("aten.copy" not in code)
-        self.assertTrue("aten.clone" not in code)
+        self.assertTrue("aten.copy" not in codes[0])
+        self.assertTrue("aten.clone" not in codes[0])
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
+    def test_triton_kernel_caching(self):
+        from torch._inductor.utils import run_and_get_code
+
+        def add_in_loop(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        def call_triton_add(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            for i in range(4):
+                x = add_in_loop(x, y)
+            return x
+
+        t1 = torch.ones(5, device="cuda")
+        t2 = torch.ones(5, device="cuda")
+
+        test, (code,) = run_and_get_code(torch.compile(call_triton_add), t1, t2)
+        self.assertEqual(test, torch.tensor([5.0, 5.0, 5.0, 5.0, 5.0], device="cuda"))
+        # Enable after fixing
+        # self.assertTrue("add_kernel_autotuned_1.run" not in code)
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
+    def test_triton_kernel_dependancies(self):
+        def call_triton(
+            x: torch.Tensor,
+            y: torch.Tensor,
+        ):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            output2 = torch.zeros_like(output)
+            add_kernel_autotuned[grid](output, y, output2, n_elements)
+            output3 = torch.add(output2, 1)
+            return output3
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+        torch_result = call_triton(t1, t2)
+        compiled_result = torch.compile(call_triton)(t1, t2)
+        self.assertEqual(torch_result, compiled_result)
 
     @requires_cuda()
     @requires_triton()
@@ -2015,28 +2118,84 @@ def forward(self, x_1, output_1):
     @requires_triton()
     @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_autotune(self, grad, backend):
+    @common_utils.parametrize("grid_type", [1, 2, 3])
+    def test_triton_kernel_autotune(self, grad, dynamic, backend, grid_type):
         def call_triton(x: torch.Tensor, y: torch.Tensor):
             output = torch.zeros_like(x, requires_grad=grad)
             n_elements = output.numel()
-            grid = (n_elements,)
+
+            def grid_fn(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            if grid_type == 1:
+                grid = (n_elements,)
+            elif grid_type == 2:
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            elif grid_type == 3:
+                grid = grid_fn
+
             add_kernel_autotuned[grid](x, y, output, n_elements)
             return output
 
-        t1 = torch.rand(5, device="cuda", requires_grad=grad)
-        t2 = torch.rand(5, device="cuda", requires_grad=grad)
+        t1 = torch.rand(256, device="cuda", requires_grad=grad)
+        t2 = torch.rand(256, device="cuda", requires_grad=grad)
 
-        torch_add = t1 + t2
-        compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
+        torch_add = call_triton(t1, t2)
+        compiled_func = torch.compile(
+            call_triton, backend=backend, fullgraph=True, dynamic=dynamic
+        )
         self.assertEqual(compiled_func(t1, t2), torch_add)
 
     @requires_cuda()
     @requires_triton()
+    @skipIfRocm
     @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("dynamic", [False, True])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("grid_type", [1, 2, 3])
+    def test_triton_kernel_2d_autotune(self, grad, dynamic, backend, grid_type):
+        def call_triton(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x, requires_grad=grad)
+            x_elements = output.size()[0]
+            y_elements = output.size()[1]
+
+            def grid_fn(meta):
+                return (
+                    triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                )
+
+            if grid_type == 1:
+                grid = (x_elements, y_elements)
+            elif grid_type == 2:
+                grid = lambda meta: (
+                    triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                    triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                )
+            elif grid_type == 3:
+                grid = grid_fn
+
+            add_kernel_2d_autotuned[grid](x, y, output, x_elements, y_elements)
+            return output
+
+        t1 = torch.rand((512, 256), device="cuda", requires_grad=grad)
+        t2 = torch.rand((512, 256), device="cuda", requires_grad=grad)
+
+        torch_result = call_triton(t1, t2)
+        compiled_func = torch.compile(
+            call_triton, backend=backend, fullgraph=True, dynamic=dynamic
+        )
+        self.assertEqual(compiled_func(t1, t2), torch_result)
+
+    @requires_cuda()
+    @requires_triton()
+    @common_utils.parametrize("grad", [False, True])
+    @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @patch.object(torch._inductor.config, "implicit_fallbacks", False)
-    def test_triton_kernel_native(self, grad, backend):
+    def test_triton_kernel_native(self, grad, dynamic, backend):
         def call_triton_add(
             x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
         ):
@@ -2071,7 +2230,9 @@ def forward(self, x_1, output_1):
         self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
 
         # With Dynamo
-        compiled_func = torch.compile(call_triton_add, backend=backend, fullgraph=True)
+        compiled_func = torch.compile(
+            call_triton_add, backend=backend, fullgraph=True, dynamic=dynamic
+        )
         # With simple kernel
         self.assertEqual(compiled_func(t1, t2, 0), torch_add)
         # With lambda kernel

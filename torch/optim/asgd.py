@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -77,8 +77,10 @@ class ASGD(Optimizer):
                 s["mu"] = torch.tensor(float(s["mu"]))
 
     def _init_group(self, group, params_with_grad, grads, mus, axs, etas, state_steps):
+        has_complex = False
         for p in group["params"]:
             if p.grad is not None:
+                has_complex |= torch.is_complex(p)
                 params_with_grad.append(p)
                 if p.grad.is_sparse:
                     raise RuntimeError("ASGD does not support sparse gradients")
@@ -98,6 +100,7 @@ class ASGD(Optimizer):
                 axs.append(state["ax"])
                 etas.append(state["eta"])
                 state_steps.append(state["step"])
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -120,7 +123,7 @@ class ASGD(Optimizer):
             etas = []
             state_steps = []
 
-            self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
+            has_complex = self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
 
             asgd(
                 params_with_grad,
@@ -138,6 +141,7 @@ class ASGD(Optimizer):
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
                 capturable=group["capturable"],
+                has_complex=has_complex,
             )
 
         return loss
@@ -180,6 +184,7 @@ def asgd(
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,
+    has_complex: bool = False,
     *,
     lambd: float,
     lr: float,
@@ -220,6 +225,7 @@ def asgd(
         maximize=maximize,
         differentiable=differentiable,
         capturable=capturable,
+        has_complex=has_complex,
     )
 
 
@@ -239,6 +245,7 @@ def _single_tensor_asgd(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
     for i, param in enumerate(params):
         grad = grads[i]
@@ -295,6 +302,7 @@ def _multi_tensor_asgd(
     maximize: bool,
     differentiable: bool,
     capturable: bool,
+    has_complex: bool,
 ):
 
     if len(params) == 0:
@@ -309,11 +317,8 @@ def _multi_tensor_asgd(
             grouped_grads = torch._foreach_neg(grouped_grads)
 
         grouped_grads = list(grouped_grads)
-        for i in range(len(grouped_params)):
-            if torch.is_complex(grouped_params[i]):
-                grouped_params[i] = torch.view_as_real(grouped_params[i])
-                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
-                grouped_axs[i] = torch.view_as_real(grouped_axs[i])
+        if has_complex:
+            _view_as_real(grouped_params, grouped_grads, grouped_axs)
 
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
