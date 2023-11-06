@@ -389,7 +389,11 @@ PyTorchStreamReader::getRecordMultiReaders(const std::string& name,
   }
   loaderThreads.clear();
 
-  auto total_read_n = std::reduce(readSizes.begin(),readSizes.end());
+  size_t total_read_n = 0;
+  for (auto& r : readSizes){
+    total_read_n += r;
+  }
+
   TORCH_CHECK(
       n == total_read_n,
       "Multi reader total read size ",
