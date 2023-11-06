@@ -5026,12 +5026,12 @@ def sym_constrain_range(a, min, max):
     return a
 
 
-@register_lowering(aten.sym_size)
+@register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
 
-@register_lowering(aten.sym_stride)
+@register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     return a.get_stride()[dim]
 
