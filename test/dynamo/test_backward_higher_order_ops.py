@@ -127,19 +127,17 @@ class _multiply_invoke(torch.nn.Module):
             self.assertEqual(x.grad, grad_out * grad_out)
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_0_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor, L_inputs_1_ : torch.Tensor, L_inputs_2_ : torch.Tensor):
         getitem = L_inputs_0_
+        getitem_1 = L_inputs_1_
+        getitem_2 = L_inputs_2_
 
-        new_empty_strided = torch.ops.aten.new_empty_strided.default(getitem, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-
-        copy_ = torch.ops.aten.copy_.default(new_empty_strided, getitem);  new_empty_strided = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem);  getitem_1 = None
 
         call_hook = getitem * getitem;  getitem = None
 
-        new_empty_strided_1 = torch.ops.aten.new_empty_strided.default(call_hook, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-
-        copy__1 = torch.ops.aten.copy_.default(new_empty_strided_1, call_hook);  new_empty_strided_1 = call_hook = None
-        return (copy_, copy__1)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, call_hook);  getitem_2 = call_hook = None
+        return ()
 """
             self.assertExpectedInline(actual, expected)
 
@@ -191,23 +189,23 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
             self.assertEqual(x.grad, grad_out + grad_out)
-            expected = """\
+            self.assertExpectedInline(
+                actual,
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_inputs_0_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor, L_inputs_1_ : torch.Tensor, L_inputs_2_ : torch.Tensor):
         getitem = L_inputs_0_
+        getitem_1 = L_inputs_1_
+        getitem_2 = L_inputs_2_
 
-        new_empty_strided = torch.ops.aten.new_empty_strided.default(getitem, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-
-        copy_ = torch.ops.aten.copy_.default(new_empty_strided, getitem);  new_empty_strided = None
+        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem);  getitem_1 = None
 
         call_hook = getitem * getitem;  getitem = None
 
-        new_empty_strided_1 = torch.ops.aten.new_empty_strided.default(call_hook, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-
-        copy__1 = torch.ops.aten.copy_.default(new_empty_strided_1, call_hook);  new_empty_strided_1 = call_hook = None
-        return (copy_, copy__1)
-"""
-            self.assertExpectedInline(actual, expected)
+        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, call_hook);  getitem_2 = call_hook = None
+        return ()
+""",
+            )
 
             out = fn(x, y)
             out.backward(grad_out)
@@ -249,3 +247,9 @@ class GraphModule(torch.nn.Module):
                     out.backward(grad_out)
 
             graph = None
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

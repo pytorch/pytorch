@@ -1,13 +1,15 @@
 import tokenize
 
-cache = {}
+from typing import Dict, List, Optional
+
+cache: Dict[str, Dict[int, str]] = {}
 
 
-def clearcache():
+def clearcache() -> None:
     cache.clear()
 
 
-def _add_file(filename):
+def _add_file(filename: str) -> None:
     try:
         with open(filename) as f:
             tokens = list(tokenize.generate_tokens(f.readline))
@@ -17,11 +19,11 @@ def _add_file(filename):
 
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
-    result = {}
+    result: Dict[int, str] = {}
     # current full funcname, e.g. xxx.yyy.zzz
     cur_name = ""
     cur_indent = 0
-    significant_indents = []
+    significant_indents: List[int] = []
 
     for i, token in enumerate(tokens):
         if token.type == tokenize.INDENT:
@@ -49,7 +51,7 @@ def _add_file(filename):
     cache[filename] = result
 
 
-def get_funcname(filename, lineno):
+def get_funcname(filename: str, lineno: int) -> Optional[str]:
     if filename not in cache:
         _add_file(filename)
     return cache[filename].get(lineno, None)

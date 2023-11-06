@@ -1913,9 +1913,12 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_with_none_tensor_state(self):
-        def _run_test(use_orig_params):
+        def _run_test(use_orig_params, optimizer_has_tensor_state):
             model = FSDP(TestDummyModel().cuda(), use_orig_params=use_orig_params)
-            optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            optimizer_cls = (
+                torch.optim.Adam if optimizer_has_tensor_state else torch.optim.SGD
+            )
+            optim = optimizer_cls(model.parameters(), lr=1e-2)
 
             def step():
                 loss = model(model.get_input())
@@ -1935,7 +1938,13 @@ class TestFSDPOptimState(FSDPTest):
                 self.assertEqual(state["value1"], 2.74)
                 self.assertEqual(state["value2"], None)
 
-        self.run_subtests({"use_orig_params": [False, True]}, _run_test)
+        self.run_subtests(
+            {
+                "use_orig_params": [False, True],
+                "optimizer_has_tensor_state": [False, True],
+            },
+            _run_test,
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_with_no_shard(self):

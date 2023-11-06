@@ -189,6 +189,24 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
+        def f(a, b, c):
+            return torch.cat((a + 1, b + 2, c + 3)) + 10
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+        def f(a, b, c, d, e):
+            return torch.cat((a + 1, b + 2, c + 3, d + 4, e + 5)) + 10
+
+        inp = [T(10, 10) for _ in range(5)]
+        self.assertExpectedInline(count_numel(f, *inp), """2000""")
+
+        def f(a, b):
+            return torch.cat([a.sum(dim=0), b.sum(dim=0)]) + 10
+
+        inp = [T(10, 10, 10), T(10, 10, 10)]
+        self.assertExpectedInline(count_numel(f, *inp), """2600""")
+
     def test_index(self):
         def f(a, b):
             return a[b]
@@ -342,6 +360,75 @@ class FusionTests(TestCase):
 
         inp = (T(10, 10), T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """500""")
+
+    def test_reduction_pointwise_multi_level_reduction(self):
+        hidden_size = 4096
+
+        def f(x, scale, amax_keep_dim):
+            x = torch.nn.functional.layer_norm(
+                x.to(dtype=torch.float),
+                [hidden_size],
+                weight=None,
+                bias=None,
+                eps=1e-05,
+            )
+            amax = torch.amax(torch.abs(x), keepdim=amax_keep_dim)
+            x_scaled = x * scale
+            y = torch.nn.functional.sigmoid(x_scaled)
+            return (y, amax)
+
+        inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
+
+        # 3 kernels:
+        # kernel 1: (input = X, scale, output = LN_pointwise(X), welford_reduction(X) * 2)
+        # kernel 2: (input = X, welford_reduction(X) * 2, output = first-level amax (split-reduction))
+        # kernel 3: (input = first-level amax, output = final amax)
+        # scale (1) + X (4*2048*hidden_size) * 3 + welford_reduction (4*2048) * 4 + amax (num_splits * 2 + 1)
+        # num_splits depends on SM architectures.
+        expected_amax_keep_dim_numel = 1 + 4 * 2048 * hidden_size * 3 + 4 * 2048 * 4 + 1
+        self.assertGreaterAlmostEqual(
+            count_numel(f, *inp, True), str(expected_amax_keep_dim_numel)
+        )
+
+        # 2 kernels:
+        # kernel 1: (input = X, scale, output = LN_pointwise(X), first-level amax (split-reduction))
+        # kernel 2: (input = first-level amax, output = final amax)
+        # scale (1) + X (4*2048*hidden_size) * 2 + amax (4 * 2048 * 2 + 1)
+        expected_amax_no_keep_dim_numel = (
+            1 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
+        )
+        self.assertExpectedInline(
+            count_numel(f, *inp, False), str(expected_amax_no_keep_dim_numel)
+        )
+
+    def test_pointwise_multi_level_reduction(self):
+        # TODO: this can be optimized by having the first pointwise kernel leveraging block sizes
+        # of the first-level reduction kernel.
+        hidden_size = 4096
+
+        def f(x, scale, amax_keep_dim):
+            x = x * 1.1
+            amax = torch.amax(torch.abs(x), keepdim=amax_keep_dim)
+            x_scaled = x * scale
+            y = torch.nn.functional.sigmoid(x_scaled)
+            return (y, amax)
+
+        inp = (T(4, 2048, hidden_size, dtype=torch.float), T(1, dtype=torch.float))
+
+        compiled_f = torch.compile(f)
+        compiled_f(*inp, True)
+
+        # 3 kernels:
+        # kernel 1: (input = X, scale, output = pointwise(X))
+        # kernel 2: (input = X, output = first-level amax)
+        # kernel 3: (input = first-level amax, output = final amax)
+        # scale (1) + X (4*2048*hidden_size) * 3 + amax (num_splits * 2 + 1)
+        # num_splits depends on SM architectures.
+        expected_numel = 1 + 4 * 2048 * hidden_size * 3 + 1
+        actual_numel_amax_keep_dim = count_numel(f, *inp, True)
+        actual_numel_amax_no_keep_dim = count_numel(f, *inp, False)
+        self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
+        self.assertGreaterAlmostEqual(actual_numel_amax_keep_dim, str(expected_numel))
 
 
 class SchedulerFusionTests(TestCase):
@@ -585,6 +672,20 @@ class InplacingTests(TestCase):
         inp = (T(10), TI(2, mx=5))
         self.assertExpectedInline(count_numel(f, *inp), """26""")
 
+        def f(a, b):
+            out = aten.index_put(a, (b,), torch.tensor(1.0))
+            return a.copy_(out)
+
+        inp = (T(10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """6""")
+
+        def f(a, b):
+            out = aten._unsafe_index_put(a, (b,), torch.tensor(1.0))
+            return a.copy_(out)
+
+        inp = (T(10), TI(2, mx=5))
+        self.assertExpectedInline(count_numel(f, *inp), """6""")
+
     def test_inplace_scatter_noop_view(self):
         def f(a, b):
             a[:, b] = 1
@@ -633,6 +734,17 @@ class WouldBeNiceIfItWorked:
 
         inp = (T(10, 1, 8), T(1, 10, 8))
         self.assertExpectedInline(count_numel(f, *inp), """170""")
+
+    # We need more sophisticated decisions for inplacing
+    # This tests randperm + scatter pattern match as well as inplacing
+    def test_inplace_randperm_scatter(self):
+        def scaled_index_add(x, y, scale_y):
+            index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
+            out = x.index_add_(dim=0, source=y * scale_y, index=index)
+            return out
+
+        inp = (T(10, 10), T(5, 10), T(10))
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """240""")
 
 
 if __name__ == "__main__":

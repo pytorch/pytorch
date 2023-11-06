@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import abc
+
 import argparse
 import collections
 import contextlib
@@ -13,7 +15,6 @@ import itertools
 import logging
 import os
 import pathlib
-import random
 import shutil
 import signal
 import subprocess
@@ -30,6 +31,7 @@ from typing import (
     Mapping,
     NamedTuple,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -53,7 +55,12 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
+from torch._dynamo.testing import (
+    dummy_fx_compile,
+    format_speedup,
+    reset_rng_state,
+    same,
+)
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -61,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -552,14 +559,17 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     # NOTE(angelayi): For huggingface benchmark, some example outputs are
     # formatted as a dataclass which pytree cannot consume. So we want
     # to register the pytree implementation here
-    example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+    example_outputs_flat = pytree.tree_leaves(example_outputs)
     output_dataclass_types = [
         type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
     ]
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -709,7 +719,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, args.devices[0]
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -959,8 +971,13 @@ def speedup_experiment_onnx(
         return onnxrt_model_iter_fn
 
     def create_onnx_fn(onnx_model: OnnxModelFromTorchScript, pt_inputs):
+        # NOTE: Making perf comparison fair by moving out the i/o adapting part.
+        # 1. Pre-adapt `pt_inputs` to `onnx_inputs` here.
+        # 2. Drop `onnx_outputs` to `pt_outputs` adapting. Output comparison is not part of perf measurement.
+        onnx_inputs = onnx_model.adapt_pt_inputs_to_onnx(pt_inputs)
+
         def onnxrt_model_iter_fn(model, inputs, collect_outputs=True):
-            return onnx_model.run(pt_inputs)
+            return onnx_model.run_with_onnx_inputs(onnx_inputs)
 
         return onnxrt_model_iter_fn
 
@@ -1153,7 +1170,7 @@ class AOTInductorModelCache:
     cache = dict()
 
     @classmethod
-    def load(cls, model, example_inputs):
+    def load(cls, model, example_inputs, device):
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
@@ -1161,28 +1178,18 @@ class AOTInductorModelCache:
             example_outputs = model(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path, exported = torch._export.aot_compile(
-                model, example_args, example_kwargs
-            )
+            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher],
-                functions=["run"],
-                extra_ldflags=[so_path],
-                with_cuda=True,
+                cpp_sources=[aot_inductor_launcher(so_path, device)],
+                functions=["run", "get_call_spec"],
+                with_cuda=(device == "cuda"),
             )
 
-            value = {
-                "module": module,
-                "exported": exported,
-            }
-            cls.cache[key] = value
+            cls.cache[key] = module
 
-        return (
-            cls.cache[key]["module"],
-            cls.cache[key]["exported"],
-        )
+        return cls.cache[key]
 
 
 def export(model, example_inputs):
@@ -1199,16 +1206,20 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs):
-    module, exported = AOTInductorModelCache.load(model, example_inputs)
+def export_aot_inductor(model, example_inputs, device):
+    module = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = module.get_call_spec()
+    in_spec = pytree.treespec_loads(call_spec[0])
+    out_spec = pytree.treespec_loads(call_spec[1])
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            (example_args, example_kwargs), exported.call_spec.in_spec
+
+        flat_inputs = fx_pytree.tree_flatten_spec(
+            (example_args, example_kwargs), in_spec
         )
-        output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
+        flat_outputs = module.run(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
 
@@ -1243,85 +1254,66 @@ def download_retry_decorator(download_fn):
                     )
                     time.sleep(wait)
                 else:
-                    raise RuntimeError(
+                    raise RuntimeError(  # noqa: TRY200
                         f"Failed to load model '{args}' with following error(s): {str(e)}."
                     )
 
     return wrapper
 
 
-class OnnxModelFromTorchScript:
-    """TorchScript based onnx export. `torch.onnx.export`
-
-    TODO(bowbao):
-    * large model export failed.
-          Onnx Model is larger than 2GB, but exporter makes decision based pt model size, which is
-          smaller than 2GB.
-    * OOM on slightly larger model.
-          Both pt model and ort inference session are on gpu. Attempt has been made to move ORT to
-          cuda:1, however ORT perf drop significantly.
-          For now running everything with batch_size 1 set in launch script.
-    """
-
-    TORCH_TO_NUMPY_DTYPE = {
-        torch.float16: np.float16,
-        torch.float32: np.float32,
-        torch.float64: np.float64,
-        torch.uint8: np.uint8,
-        torch.int8: np.int8,
-        torch.int16: np.int16,
-        torch.int32: np.int32,
-        torch.int64: np.longlong,
-        torch.bool: np.bool_,
-    }
+class OnnxModel(abc.ABC):
+    _COMPILER_NAME: str
 
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        assert not dynamic_shapes, "NYI dynamic shapes for OnnxModelFromTorchScript"
-        self.model_path = self._generate_onnx_model_path(output_directory)
-        self._export(
-            model,
-            example_inputs,
-            self.model_path,
-            opset_version=17,
-            do_constant_folding=False,
-            verbose=False,
-        )
-        self.onnx_session = self._init_ort_session(self.model_path)
-
-    def _generate_onnx_model_path(
-        self, output_directory: str, onnx_model_folder_name: str = "bench_onnx_models"
-    ) -> str:
         # Hack to get model name.
         from torch._functorch import aot_autograd
 
         model_name = aot_autograd.model_name
-        model_path = pathlib.Path(output_directory, onnx_model_folder_name, model_name)
+        self.model_dir = self._generate_onnx_model_directory(
+            output_directory, self._COMPILER_NAME, model_name
+        )
+        self.model_path = str(
+            self.model_dir / f"{model_name}_{self._COMPILER_NAME}.onnx"
+        )
+
+    @classmethod
+    def _generate_onnx_model_directory(
+        cls, output_directory: str, compiler_name: str, model_name: str
+    ) -> pathlib.Path:
+        model_path = pathlib.Path(
+            output_directory,
+            ".onnx_models",
+            model_name,
+            compiler_name,
+        )
         if model_path.exists() and model_path.is_dir():
             shutil.rmtree(model_path)
         model_path.mkdir(parents=True, exist_ok=True)
-        return str(model_path / "model.onnx")
+        return model_path
 
-    def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
-        # Hack for huggingface models (kwargs only).
-        if isinstance(example_inputs, dict):
+    @abc.abstractmethod
+    def format_pt_inputs(self, pt_inputs: Any) -> Sequence[torch.Tensor]:
+        ...
 
-            class WrapperModel(torch.nn.Module):
-                def __init__(self, model, keys):
-                    super().__init__()
-                    self.model = model
-                    self.keys = keys
+    @abc.abstractmethod
+    def format_pt_outputs(self, pt_outputs: Any) -> Sequence[torch.Tensor]:
+        ...
 
-                def forward(self, *args):
-                    return self.model(**dict(zip(self.keys, args)))
+    def adapt_pt_inputs_to_onnx(self, pt_inputs) -> Mapping[str, np.ndarray]:
+        pt_inputs = self.format_pt_inputs(pt_inputs)
+        return {
+            ort_input.name: pt_input.cpu().numpy()
+            for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
+        }
 
-            model = WrapperModel(model, list(example_inputs.keys()))
-
-        torch.onnx.export(
-            model,
-            self.format_pt_inputs(example_inputs),
-            output_path,
-            **kwargs,
-        )
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[np.ndarray]) -> Any:
+        pt_outputs = [
+            torch.from_numpy(onnx_output).to(current_device)
+            for onnx_output in onnx_outputs
+        ]
+        if len(pt_outputs) == 1:
+            return pt_outputs[0]
+        return pt_outputs
 
     def _init_ort_session(self, model_path: str):
         import onnxruntime
@@ -1351,40 +1343,6 @@ class OnnxModelFromTorchScript:
     def cpu(self) -> Self:
         self.onnx_session.set_providers(["CPUExecutionProvider"])
         return self
-
-    def format_pt_inputs(self, pt_inputs):
-        # NOTE(bowbao): For huggingface benchmark, pt_inputs are formatted as dictionary,
-        # and consumed like `model(**pt_inputs)`.
-        # For other benchmarks, pt_inputs are formatted as tuple and consumed
-        # like `model(*pt_inputs)`.
-        if isinstance(pt_inputs, dict):
-            pt_inputs = list(pt_inputs.values())
-        if isinstance(pt_inputs, torch.Tensor):
-            pt_inputs = (pt_inputs,)
-        return tuple(arg.contiguous() for arg in pt_inputs)
-
-    def format_pt_outputs(self, pt_outputs):
-        if isinstance(pt_outputs, torch.Tensor):
-            pt_outputs = (pt_outputs,)
-
-        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
-
-        # Hack for huggingface model outputs
-        try:
-            from transformers import modeling_outputs
-        except ImportError:
-            pass
-        else:
-
-            def _to_tuple(x):
-                if isinstance(x, modeling_outputs.ModelOutput):
-                    return x.to_tuple()
-                return x
-
-            pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
-            pt_outputs, _ = pytree.tree_flatten(pt_outputs)
-
-        return pt_outputs
 
     def create_outputs(self, *example_outputs):
         return tuple(torch.empty_like(x) for x in example_outputs)
@@ -1429,34 +1387,151 @@ class OnnxModelFromTorchScript:
         self.onnx_session.run_with_iobinding(iobinding)
         return outputs
 
+    def run_with_onnx_inputs(self, onnx_inputs):
+        return self.onnx_session.run(None, onnx_inputs)
+
+    @classmethod
+    def save_tensor_data(cls, numpy_tensor, output_path):
+        from onnx import numpy_helper
+
+        proto_tensor = numpy_helper.from_array(numpy_tensor)
+        with open(output_path, "wb") as f:
+            f.write(proto_tensor.SerializeToString())
+
+    def run_and_serialize_inputs_outputs(self, pt_inputs):
+        onnx_inputs = self.adapt_pt_inputs_to_onnx(pt_inputs)
+        onnx_outputs = self.run_with_onnx_inputs(onnx_inputs)
+
+        test_data_dir = self.model_dir / "test_data_set_0"
+        test_data_dir.mkdir(parents=True, exist_ok=True)
+
+        for i, onnx_input in enumerate(onnx_inputs.values()):
+            self.save_tensor_data(onnx_input, str(test_data_dir / f"input_{i}.pb"))
+        for i, onnx_output in enumerate(onnx_outputs):
+            self.save_tensor_data(onnx_output, str(test_data_dir / f"output_{i}.pb"))
+
+        return self.adapt_onnx_outputs_to_pt(onnx_outputs)
+
     def run(self, pt_inputs):
         # NOTE: For CUDA performance testing, use `run_with_iobinding` to exclude memory
         # copying overhead for inputs/outputs between cpu and gpu.
         # Otherwise perf number is inaccurate.
-        pt_inputs = self.format_pt_inputs(pt_inputs)
-        onnx_inputs = {
-            ort_input.name: pt_input.cpu().numpy()
-            for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
-        }
-        ort_outputs = self.onnx_session.run(None, onnx_inputs)
-        pt_outputs = [
-            torch.from_numpy(ort_output).to(current_device)
-            for ort_output in ort_outputs
-        ]
-        if len(pt_outputs) == 1:
-            return pt_outputs[0]
+        onnx_inputs = self.adapt_pt_inputs_to_onnx(pt_inputs)
+        onnx_outputs = self.run_with_onnx_inputs(onnx_inputs)
+        return self.adapt_onnx_outputs_to_pt(onnx_outputs)
+
+
+class OnnxModelFromTorchScript(OnnxModel):
+    """TorchScript based onnx export. `torch.onnx.export`
+
+    TODO(bowbao):
+    * large model export failed.
+          Onnx Model is larger than 2GB, but exporter makes decision based pt model size, which is
+          smaller than 2GB.
+    * OOM on slightly larger model.
+          Both pt model and ort inference session are on gpu. Attempt has been made to move ORT to
+          cuda:1, however ORT perf drop significantly.
+          For now running everything with batch_size 1 set in launch script.
+    """
+
+    TORCH_TO_NUMPY_DTYPE = {
+        torch.float16: np.float16,
+        torch.float32: np.float32,
+        torch.float64: np.float64,
+        torch.uint8: np.uint8,
+        torch.int8: np.int8,
+        torch.int16: np.int16,
+        torch.int32: np.int32,
+        torch.int64: np.longlong,
+        torch.bool: np.bool_,
+    }
+
+    _COMPILER_NAME = "torchscript"
+
+    def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
+        if dynamic_shapes:
+            raise NotImplementedError("NYI dynamic shapes for OnnxModelFromTorchScript")
+        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
+        self._export(
+            model,
+            example_inputs,
+            self.model_path,
+            opset_version=17,
+            do_constant_folding=False,
+            verbose=False,
+        )
+        self.onnx_session = self._init_ort_session(self.model_path)
+
+    def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
+        # Hack for huggingface models (kwargs only).
+        if isinstance(example_inputs, dict):
+
+            class WrapperModel(torch.nn.Module):
+                def __init__(self, model, keys):
+                    super().__init__()
+                    self.model = model
+                    self.keys = keys
+
+                def forward(self, *args):
+                    return self.model(**dict(zip(self.keys, args)))
+
+            model = WrapperModel(model, list(example_inputs.keys()))
+
+        torch.onnx.export(
+            model,
+            self.format_pt_inputs(example_inputs),
+            output_path,
+            **kwargs,
+        )
+
+    def format_pt_inputs(self, pt_inputs):
+        # NOTE(bowbao): For huggingface benchmark, pt_inputs are formatted as dictionary,
+        # and consumed like `model(**pt_inputs)`.
+        # For other benchmarks, pt_inputs are formatted as tuple and consumed
+        # like `model(*pt_inputs)`.
+        if isinstance(pt_inputs, dict):
+            pt_inputs = list(pt_inputs.values())
+        if isinstance(pt_inputs, torch.Tensor):
+            pt_inputs = (pt_inputs,)
+        return tuple(arg.contiguous() for arg in pt_inputs)
+
+    def format_pt_outputs(self, pt_outputs):
+        if isinstance(pt_outputs, torch.Tensor):
+            pt_outputs = (pt_outputs,)
+
+        pt_outputs = pytree.tree_leaves(pt_outputs)
+
+        # Hack for huggingface model outputs
+        try:
+            from transformers import modeling_outputs
+        except ImportError:
+            pass
+        else:
+
+            def _to_tuple(x):
+                if isinstance(x, modeling_outputs.ModelOutput):
+                    return x.to_tuple()
+                return x
+
+            pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
+            pt_outputs = pytree.tree_leaves(pt_outputs)
+
         return pt_outputs
 
 
-class OnnxModelFromDynamo(OnnxModelFromTorchScript):
+class OnnxModelFromDynamo(OnnxModel):
     """Dynamo and Fx based export. `torch.onnx.dynamo_export`."""
 
+    _COMPILER_NAME = "dynamo"
+
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
-        self.model_path = self._generate_onnx_model_path(
-            output_directory, "bench_dynamo_onnx_model"
-        )
+        super().__init__(output_directory, model, example_inputs, dynamic_shapes)
         self._dynamic_shapes = dynamic_shapes
         self._export_output = self._export(model, example_inputs, self.model_path)
+        # Clear the model proto to save memory.
+        # The model proto is saved to disk and no longer needed from `export_output`.
+        # `export_output` is kept for i/o adapter usage.
+        self._export_output.model_proto.Clear()
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(
@@ -1477,6 +1552,35 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
 
     def format_pt_outputs(self, pt_outputs):
         return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+
+
+class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
+    """Dynamo and Fx based export, with AOT inline post export. `torch.onnx.dynamo_export`."""
+
+    _COMPILER_NAME = "dynamo_aot_inline"
+
+    def _export(
+        self, model, example_inputs, output_path: str
+    ) -> torch.onnx.ExportOutput:
+        example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
+        options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
+        export_output = torch.onnx.dynamo_export(
+            model, *example_args, **example_kwargs, export_options=options
+        )
+        # Apply AOT inline post export.
+        # Requires onnx >= 1.15
+        import onnx
+        import onnx.inliner
+
+        # Workaround for inliner not supporting with models larger than 2GB.
+        # Save model to disk first separating out external data,
+        # and load back without external data for inliner to work on.
+        model_proto = export_output.model_proto
+        onnx.save_model(model_proto, output_path, save_as_external_data=True)
+        model_proto = onnx.load(output_path, load_external_data=False)
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        onnx.save_model(model_proto, output_path)
+        return export_output
 
 
 class _OnnxPatch:
@@ -1530,7 +1634,7 @@ class _OnnxPatch:
             )
 
         # Flatten nested tuple of tensors, i.e. past_key_values
-        correct_result = pytree.tree_flatten(correct_result)[0]
+        correct_result = pytree.tree_leaves(correct_result)
         # Hack to put results from different runs on same device.
         # This is needed for ONNX CPU fallback benchmark, where PyTorch eager is run on GPU.
         # Assuming outputs from a single run are always on same device!
@@ -1539,12 +1643,12 @@ class _OnnxPatch:
             x == devices[0] for x in devices
         ), "All tensors must be on same device!"
         device = devices[0]
-        new_result = pytree.tree_flatten(new_result)[0]
+        new_result = pytree.tree_leaves(new_result)
         new_result = pytree.tree_map(
             lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x,
             new_result,
         )
-        fp64_outputs = pytree.tree_flatten(fp64_outputs)[0]
+        fp64_outputs = pytree.tree_leaves(fp64_outputs)
 
         return correct_result, new_result, fp64_outputs
 
@@ -1632,6 +1736,7 @@ def optimize_onnx_ctx(
     #   2. Create iobinding for ORT.
     #   3. Run ORT for n iterations.
     onnx_model: Optional[OnnxModelFromTorchScript] = None
+    test_data_dumped = False
 
     def run_n_iterations_onnx(model, inputs, n=2):
         from torch.onnx._internal import exporter
@@ -1657,7 +1762,14 @@ def optimize_onnx_ctx(
 
             for _ in range(n):
                 try:
-                    outputs = onnx_model.run(inputs)
+                    nonlocal test_data_dumped
+                    if not test_data_dumped:
+                        # Serializes inputs and outputs to .pb files for further offline analysis.
+                        # Due to this, this function is not and should not be used for perf measurement.
+                        outputs = onnx_model.run_and_serialize_inputs_outputs(inputs)
+                        test_data_dumped = True
+                    else:
+                        outputs = onnx_model.run(inputs)
                 except Exception as e:
                     err_msg = str(e)
                     oom_msgs = (
@@ -1794,14 +1906,6 @@ def cast_to_fp64(model, inputs):
 
 def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
-
-
-def reset_rng_state(use_xla=False):
-    torch.manual_seed(1337)
-    random.seed(1337)
-    np.random.seed(1337)
-    if use_xla:
-        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
@@ -2103,6 +2207,38 @@ class BenchmarkRunner:
         )
         return start, end
 
+    def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
+        from diffusers.models.transformer_2d import Transformer2DModel
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
+        from torchbenchmark.models.nanogpt.model import Block
+        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
+        from transformers.models.t5.modeling_t5 import T5Block
+        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        # handcrafted wrap policy
+        MODEL_FSDP_WRAP = {
+            "stable_diffusion_unet": (Transformer2DModel,),
+            "hf_T5": (T5Block,),
+            "hf_T5_base": (T5Block,),
+            "hf_T5_large": (T5Block,),
+            "hf_Whisper": (WhisperEncoderLayer,),
+            "llama_v2_7b_16h": (LlamaDecoderLayer,),
+            "nanogpt": (Block,),
+        }
+
+        if model_name not in MODEL_FSDP_WRAP:
+            # default to using wrap policy based on module size
+            return functools.partial(
+                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
+            )
+
+        return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
+
     def deepcopy_and_maybe_ddp(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
@@ -2121,8 +2257,6 @@ class BenchmarkRunner:
                 MixedPrecision,
             )
 
-            from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-
             if self.args.float16:
                 dtype = torch.float16
             elif self.args.bfloat16:
@@ -2138,10 +2272,6 @@ class BenchmarkRunner:
                 buffer_dtype=dtype,
             )
 
-            my_auto_wrap_policy = functools.partial(
-                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
-            )
-
             model = FSDP(
                 model,
                 use_orig_params=True,
@@ -2150,7 +2280,7 @@ class BenchmarkRunner:
                 else None,
                 mixed_precision=mp_policy,
                 limit_all_gathers=True,
-                auto_wrap_policy=my_auto_wrap_policy,
+                auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
             if torch._inductor.config.triton.cudagraphs:
                 log.warning("Disabling cudagraphs for FSDP compatibility")
@@ -2198,40 +2328,44 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-        # Collect the fp64 reference outputs to be used later for accuracy checking.
-        fp64_outputs = None
-        try:
-            model_fp64, inputs_fp64 = cast_to_fp64(
-                self.deepcopy_and_maybe_ddp(model),
-                clone_inputs(example_inputs),
-            )
-            self.init_optimizer(name, current_device, model_fp64.parameters())
-            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            fp64_outputs = tree_map(
-                lambda x: x.to(torch.float64)
-                if isinstance(x, torch.Tensor) and x.is_floating_point()
-                else x,
-                fp64_outputs,
-            )
-        except Exception:
-            log.warning(
-                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                name,
-            )
-            self.args.cosine = True
-            fp64_outputs = None
-
-        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
-            self.args.training, current_device, name
-        )
-
-        # Cast the model to float16/float32 as necessary
-        model, example_inputs = self.maybe_cast(model, example_inputs)
-        accuracy_status = "pass"
-
         with self.pick_grad(name, self.args.training):
+            # Collect the fp64 reference outputs to be used later for accuracy checking.
+            fp64_outputs = None
+            model_fp64 = None
+            try:
+                model_fp64, inputs_fp64 = cast_to_fp64(
+                    self.deepcopy_and_maybe_ddp(model),
+                    clone_inputs(example_inputs),
+                )
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
+                    if isinstance(x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    fp64_outputs,
+                )
+            except Exception:
+                log.warning(
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    name,
+                )
+                self.args.cosine = True
+                fp64_outputs = None
+            finally:
+                del model_fp64
+
+            tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+                self.args.training, current_device, name
+            )
+
+            # Cast the model to float16/float32 as necessary
+            model, example_inputs = self.maybe_cast(model, example_inputs)
+            accuracy_status = "pass"
+
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2246,9 +2380,12 @@ class BenchmarkRunner:
                 )
                 log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2262,6 +2399,8 @@ class BenchmarkRunner:
                     else "eager_2nd_run_fail"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2291,6 +2430,7 @@ class BenchmarkRunner:
             # Run with Dynamo
             reset_rng_state()
             torch._dynamo.reset()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2317,6 +2457,8 @@ class BenchmarkRunner:
                     else "fail_to_run"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
@@ -2333,6 +2475,9 @@ class BenchmarkRunner:
                 ) = _OnnxPatch.patch_non_tensor_outputs(
                     correct_result, new_result, fp64_outputs
                 )
+                # TODO: store correct_result into the dumped file for offline onnx model validation.
+                # The downside and potential problem, is that the output formats may be different.
+                # E.g., the output order might not match, None might be part of output, etc.
 
             try:
                 if not same(
@@ -2478,9 +2623,6 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
-        if not hasattr(model, name):
-            model.name = name
-
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2540,6 +2682,8 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
+            if not hasattr(model, name):
+                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -3110,6 +3254,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-inline",
+        "--dynamo_onnx_aot_inline",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
@@ -3455,6 +3605,18 @@ def run(runner, args, original_dir=None):
         experiment = functools.partial(speedup_experiment_onnx, OnnxModelFromDynamo)
         output_filename = "dynamo_onnx.csv"
         current_onnx_compiler = "dynamo"
+    elif args.dynamo_onnx_aot_inline:
+        optimize_ctx = functools.partial(
+            optimize_onnx_ctx,
+            args.output_directory or ".",
+            OnnxModelFromDynamoAotInline,
+            dynamic_shapes=args.dynamic_shapes,
+        )
+        experiment = functools.partial(
+            speedup_experiment_onnx, OnnxModelFromDynamoAotInline
+        )
+        output_filename = "dynamo_onnx_aot_inline.csv"
+        current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
         optimize_ctx = torch._dynamo.optimize("ts", nopython=args.nopython)
         experiment = speedup_experiment
@@ -3481,8 +3643,9 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
-            optimize_ctx = export_aot_inductor
+            optimize_ctx = functools.partial(
+                export_aot_inductor, device=args.devices[0]
+            )
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
@@ -3722,6 +3885,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

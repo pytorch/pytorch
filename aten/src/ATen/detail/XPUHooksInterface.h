@@ -67,13 +67,11 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual Generator getXPUGenerator(DeviceIndex device_index = -1) const {
-    (void)device_index; // Suppress unused variable warning
+  virtual Generator getXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 
-  virtual const Generator& getDefaultXPUGenerator(DeviceIndex device_index = -1) const {
-    (void)device_index; // Suppress unused variable warning
+  virtual const Generator& getDefaultXPUGenerator(C10_UNUSED DeviceIndex device_index = -1) const {
     TORCH_CHECK(false, "Cannot get default XPU generator without Intel Extension for Pytorch. ", XPU_HELP);
   }
 

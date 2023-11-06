@@ -1,6 +1,6 @@
 import dataclasses
 
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
 
@@ -25,6 +25,7 @@ def register_dataclass_as_pytree_node(
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
+    serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
@@ -49,7 +50,7 @@ def register_dataclass_as_pytree_node(
                 none_names.append(name)
         return flattened, (typ, flat_names, none_names)
 
-    def default_unflatten_fn(values: List[Any], context: Context) -> Any:
+    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
         typ, flat_names, none_names = context
         return typ(**dict(zip(flat_names, values)), **{k: None for k in none_names})
 
@@ -87,6 +88,7 @@ def register_dataclass_as_pytree_node(
         typ,
         flatten_fn,
         unflatten_fn,
+        serialized_type_name=serialized_type_name,
         to_dumpable_context=to_dumpable_context,
         from_dumpable_context=from_dumpable_context,
     )
