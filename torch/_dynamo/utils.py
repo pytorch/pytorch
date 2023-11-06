@@ -28,7 +28,7 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 
 try:
     import numpy as np
@@ -392,6 +392,14 @@ def identity(x):
     return x
 
 
+def hashable(x):
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+
+
 def nothing(*args, **kwargs):
     pass
 
@@ -548,6 +556,7 @@ class CompilationMetrics:
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
+    non_compliant_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -871,16 +880,6 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-def specialize_args_kwargs(tx, args, kwargs):
-    specialized_args = []
-    specialized_kwargs = {}
-    for x in args:
-        specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs.items():
-        specialized_kwargs.update({k: v.as_specialized(tx)})
-    return specialized_args, specialized_kwargs
-
-
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
 tuple_iterator = type(iter(tuple()))
@@ -911,6 +910,49 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
+def iter_contains(items, search, tx, options, check_tensor_identity=False):
+    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
+
+    if search.is_python_constant():
+        found = any(
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
+        )
+        return ConstantVariable.create(found, **options)
+
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, TensorVariable):
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
+    found = None
+    for x in items:
+        if must_check_tensor_id:
+            if isinstance(x, TensorVariable):
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
+        else:
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, found], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 def dict_param_key_ids(value):
@@ -1346,6 +1388,21 @@ def extract_fake_example_value(node, required=True):
         return None
 
 
+def ensure_graph_fake(e, tx):
+    assert maybe_get_fake_mode(e) is tx.fake_mode
+    return e
+
+
+def get_fake_values_from_nodes(tx, nodes):
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
+    )
+
+
 def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     Run the computation represented by `node` using fake tensors and return the result.
@@ -1369,16 +1426,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    def ensure_graph_fake(e):
-        assert maybe_get_fake_mode(e) is tx.fake_mode
-        return e
-
-    def visit(n: torch.fx.Node):
-        return n.meta["example_value"]
-
-    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map_only(torch.Tensor, ensure_graph_fake, args)
-    kwargs = tree_map_only(torch.Tensor, ensure_graph_fake, kwargs)
+    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1442,7 +1490,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(torch.Tensor, ensure_graph_fake, ret_val)
+        _ = tree_map_only(
+            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+        )
     return ret_val
 
 

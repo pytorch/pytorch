@@ -179,7 +179,15 @@ TestEnvironment.def_flag(
     env_var="SANDCASTLE",
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False)
-TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE", include_in_repro=False)
+
+_is_fbcode_default = (
+    hasattr(torch._utils_internal, "IS_FBSOURCE") and
+    torch._utils_internal.IS_FBSOURCE
+)
+
+TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
+                         default=_is_fbcode_default,
+                         include_in_repro=False)
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
@@ -1086,7 +1094,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
-IS_ARM64 = platform.machine() == 'arm64'
+IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1287,14 +1295,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -4607,11 +4615,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
+    for out in pytree.tree_leaves(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_flatten(inps)[0]:
+    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_leaves(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

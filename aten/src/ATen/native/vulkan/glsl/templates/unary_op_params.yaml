@@ -5,6 +5,8 @@ unary_op:
   parameter_values:
     - NAME: sqrt
       OPERATOR: sqrt(X)
+    - NAME: log
+      OPERATOR: log(X)
 
 unary_op_inplace:
   parameter_names_with_default_values:
@@ -13,3 +15,5 @@ unary_op_inplace:
   parameter_values:
     - NAME: sqrt_
       OPERATOR: sqrt(X)
+    - NAME: log_
+      OPERATOR: log(X)

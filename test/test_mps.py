@@ -164,7 +164,9 @@ def mps_ops_grad_modifier(ops):
         '__rpow__': [torch.float32],
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32],
+        'cumprod': [torch.float32, torch.float16],
+        # See https://github.com/pytorch/pytorch/issues/109166 for more information
+        'masked.cumprod': [torch.float16],
     }
 
     SKIPLIST_GRAD = {
@@ -415,7 +417,7 @@ def mps_ops_modifier(ops):
         'cdist': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # test blow pass on macOS 12 as it falls back to cpu
         # Argsort case using duplicate indices (undefined behaviour):
@@ -700,6 +702,7 @@ def mps_ops_modifier(ops):
 
         # Unsupported dtypes
         'dot': [torch.int64],
+        'histc': [torch.float16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
@@ -793,6 +796,8 @@ def mps_ops_modifier(ops):
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
+        # float output for float16 input on MPS
+        'logit': [torch.float16],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -1404,19 +1409,18 @@ class TestMPS(TestCaseMPS):
 
     def test_fill(self):
 
-        def helper(val, shape):
-            tensor = torch.zeros(shape, device='mps')
+        def helper(val, shape, dtype):
+            tensor = torch.zeros(shape, device='mps', dtype=dtype)
             tensor_mps = tensor.fill_(val)
-            tensor_mps = torch.tanh(tensor_mps)
 
-            tensor_0 = torch.zeros(shape, device='cpu')
+            tensor_0 = torch.zeros(shape, device='cpu', dtype=dtype)
             tensor_cpu = tensor_0.fill_(val)
-            tensor_cpu = torch.tanh(tensor_cpu)
 
             self.assertEqual(tensor_mps, tensor_cpu)
 
-        helper(0, [1024])
-        helper(0.2, [2, 3])
+        helper(0, [1024], torch.float32)
+        helper(0.2, [2, 3], torch.float32)
+        helper(0.2 + 0.5j, [2, 3], torch.complex64)
 
     def test_fill_storage_offset(self):
         shape = [2, 10]
@@ -10940,6 +10944,9 @@ class TestConsistency(TestCaseMPS):
         'masked.softmin',
         'nn.functional.kl_div',
         'nn.functional.softmin',
+        'cross', 'linalg.cross',
+        'prod', 'masked.prod',
+        'nextafter',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -11103,8 +11110,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
