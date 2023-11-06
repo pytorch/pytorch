@@ -295,6 +295,9 @@
 - name: any.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
   output_differentiability: [False]
 
+- name: any.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
+  output_differentiability: [False]
+
 - name: _is_all_true(Tensor self) -> Tensor
   self: non_differentiable
 
@@ -305,6 +308,9 @@
   output_differentiability: [False]
 
 - name: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
+  output_differentiability: [False]
+
+- name: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   output_differentiability: [False]
 
 - name: acosh(Tensor self) -> Tensor
