@@ -1,7 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import functools
-import unittest
 from unittest.mock import patch
 
 import functorch
@@ -15,36 +13,12 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TestCase as TorchTestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.utils._triton import has_triton
 
-HAS_TRITON = has_triton()
+# Defines all the kernels for tests
+from torch.testing._internal.triton_utils import HAS_CUDA
 
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
-
-if HAS_TRITON:
-    import triton
-    from triton import language as tl
-
-    # Define here so that multiple tests can take advantage of it
-    @triton.jit
-    def add_kernel(
-        in_ptr0,
-        in_ptr1,
-        out_ptr,
-        n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        y = tl.load(in_ptr1 + offsets, mask=mask)
-        output = x + y
-        tl.store(out_ptr + offsets, output, mask=mask)
-
+if HAS_CUDA:
+    from torch.testing._internal.triton_utils import add_kernel
 
 aten = torch.ops.aten
 
@@ -730,7 +704,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """42""")
 
     @requires_cuda()
-    @requires_triton()
     @skipIfRocm
     def test_inplace_triton_kernel_v1(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -744,7 +717,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     @requires_cuda()
-    @requires_triton()
     @skipIfRocm
     def test_inplace_triton_kernel_v2(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -759,7 +731,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda()
-    @requires_triton()
     @skipIfRocm
     def test_inplace_triton_kernel_v3(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -774,7 +745,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """90""")
 
     @requires_cuda()
-    @requires_triton()
     @skipIfRocm
     def test_inplace_triton_kernel_v4(self):
         def f(x: torch.Tensor, y: torch.Tensor):
@@ -790,7 +760,6 @@ class InplacingTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """60""")
 
     @requires_cuda()
-    @requires_triton()
     @skipIfRocm
     def test_inplace_triton_kernel_v5(self):
         def f(x: torch.Tensor, y: torch.Tensor):
