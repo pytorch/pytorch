@@ -120,7 +120,14 @@ CLOSURE_VARS = collections.OrderedDict(
         ("__load_module", lambda name: importlib.import_module(name)),
         ("utils_device", torch.utils._device),
         ("device", torch.device),
-        ("__as_tensor", torch.as_tensor),
+        (
+            "___from_numpy",
+            # If not numpy array, piggy back on e.g. tensor guards to check type
+            lambda a: torch.as_tensor(a)
+            if isinstance(a, (np.generic, np.ndarray))
+            else a,
+        ),
+        ("torch", torch),
     ]
 )
 
@@ -313,9 +320,7 @@ class GuardBuilder(GuardBuilderBase):
         if isinstance(guard.originating_source, TypeSource):
             # optional optimization to produce cleaner/faster guard code
             return self.TYPE_MATCH(
-                Guard(
-                    guard.originating_source.base, guard.source, GuardBuilder.TYPE_MATCH
-                )
+                Guard(guard.originating_source.base, GuardBuilder.TYPE_MATCH)
             )
 
         ref = self.arg_ref(guard)
@@ -406,12 +411,6 @@ class GuardBuilder(GuardBuilderBase):
                 val,
                 ok_types,
             ), t.__name__
-
-        if istype(val, (torch.device, torch.dtype)):
-            # TODO(jansel): is this slow? perhaps optimize it
-            code = [f"str({ref}) == {str(val)!r}"]
-            self._produce_guard_code(guard, code)
-            return
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):

@@ -21,6 +21,7 @@ __all__ = [
     "device_count",
     "Stream",
     "StreamContext",
+    "Event"
 ]
 
 _device_t = Union[_device, str, int, None]
@@ -55,6 +56,7 @@ class Stream:
     """
     N.B. This class only exists to facilitate device-agnostic code
     """
+
     def __init__(self, priority: int = -1):
         pass
 

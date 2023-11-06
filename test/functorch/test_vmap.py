@@ -59,7 +59,7 @@ from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils import _pytree as pytree
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -1252,7 +1252,7 @@ class TensorFactory:
 def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                check_view=False, check_propagates_grad=True):
     result = vmap(op, in_dims, out_dims)(*inputs)
-    are_nested, _ = tree_flatten(tree_map(lambda t: t.is_nested, result))
+    are_nested = [t.is_nested for t in pytree.tree_leaves(result)]
     reference_result = reference_vmap(op, inputs, in_dims, out_dims, return_nt=any(are_nested))
     self.assertEqual(result, reference_result)
     op_has_single_return = not isinstance(result, tuple)
@@ -3423,9 +3423,9 @@ class TestVmapOperatorsOpInfo(TestCase):
                     sample_input = error_input.sample_input
                     args = (sample_input.input,) + tuple(sample_input.args)
                     kwargs = sample_input.kwargs
-                    for args, in_dims, _ in generate_vmap_inputs(args, {}):
+                    for batched_args, in_dims, _ in generate_vmap_inputs(args, {}):
                         with self.assertRaises(Exception):
-                            vmap(op, in_dims)(*args, **kwargs)
+                            vmap(op, in_dims)(*batched_args, **kwargs)
 
             # Sample inputs check
             sample_inputs_op = {
@@ -3455,16 +3455,16 @@ class TestVmapOperatorsOpInfo(TestCase):
                     continue
                 kwargs = sample_input.kwargs
                 is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
-                for args, in_dims, _ in generate_vmap_inputs(
+                for batched_args, in_dims, _ in generate_vmap_inputs(
                         args, {}, is_batch_norm_and_training=is_batch_norm_and_training):
                     for func in aliases:
-                        self.vmap_outplace_test(func, args, kwargs, in_dims, check_shape_only, postprocess_fn)
+                        self.vmap_outplace_test(func, batched_args, kwargs, in_dims, check_shape_only, postprocess_fn)
                     if op.name in skip_inplace:
                         continue
                     if not is_valid_inplace_sample_input(sample_input, op, op.inplace_variant):
                         continue
                     for func in inplace_aliases:
-                        self.vmap_inplace_test(func, args, kwargs, in_dims, postprocess_fn)
+                        self.vmap_inplace_test(func, batched_args, kwargs, in_dims, postprocess_fn)
 
         if check_has_batch_rule:
             check_vmap_fallback(self, test, op)
@@ -3778,7 +3778,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'hypot',
             'igamma',
             'igammac',
-            'index_add',
             'index_copy',
             'lcm',
             'ldexp',
@@ -4195,11 +4194,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         gout = torch.randn(2, 2, device=device)
         args = (leaf, gout)
 
-        for args, in_dims, _, in generate_vmap_inputs(args, {}):
+        for batched_args, in_dims, _, in generate_vmap_inputs(args, {}):
             if in_dims[1] is None:
                 # triggers some composite compliance problem
                 continue
-            self.vmap_outplace_test(push_vjp, args, {}, in_dims)
+            self.vmap_outplace_test(push_vjp, batched_args, {}, in_dims)
 
     def test_advanced_indexing(self, device):
         def test(f, args):
