@@ -320,8 +320,6 @@ class CppPrinter(ExprPrinter):
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
-        if div == -1:
-            return f"{self.paren(self.doprint(x * -1))}"
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
