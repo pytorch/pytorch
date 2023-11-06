@@ -2538,20 +2538,10 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    return "pass_due_to_skip"
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    return "fail_to_run"
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                return "fail_to_run"
 
             def dump_max_mean_values(tol, ref, res):
                 if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
