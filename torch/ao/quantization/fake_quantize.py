@@ -134,6 +134,7 @@ class FakeQuantize(FakeQuantizeBase):
     * :attr:`observer_enabled` controls statistics collection on tensors
     * :attr:`dtype` specifies the quantized dtype that is being emulated with fake-quantization,
         allowable values are torch.qint8 and torch.quint8.
+        
     Args:
         observer (module): Module for observing statistics on input tensors and calculating scale
           and zero-point.
@@ -141,6 +142,7 @@ class FakeQuantize(FakeQuantizeBase):
     Attributes:
         activation_post_process (Module): User provided module that collects statistics on the input tensor and
           provides a method to calculate scale and zero-point.
+
     """
 
     scale: torch.Tensor
