@@ -2,47 +2,47 @@ name,accuracy,graph_breaks
 
 
 
-AlbertForMaskedLM,pass,10
+AlbertForMaskedLM,pass,6
 
 
 
-AllenaiLongformerBase,pass,15
+AllenaiLongformerBase,pass,10
 
 
 
-BartForCausalLM,pass,19
+BartForCausalLM,pass,14
 
 
 
-BartForConditionalGeneration,pass,31
+BartForConditionalGeneration,pass,26
 
 
 
-BertForMaskedLM,pass,10
+BertForMaskedLM,pass,6
 
 
 
-BertForQuestionAnswering,pass,10
+BertForQuestionAnswering,pass,6
 
 
 
-BlenderbotSmallForCausalLM,pass,19
+BlenderbotSmallForCausalLM,pass,14
 
 
 
-BlenderbotSmallForConditionalGeneration,pass,31
+BlenderbotSmallForConditionalGeneration,pass,26
 
 
 
-CamemBert,pass,10
+CamemBert,pass,6
 
 
 
-DebertaForMaskedLM,pass,10
+DebertaForMaskedLM,pass,6
 
 
 
-DebertaForQuestionAnswering,pass,10
+DebertaForQuestionAnswering,pass,6
 
 
 
@@ -54,124 +54,124 @@ DebertaV2ForQuestionAnswering,eager_1st_run_OOM,0
 
 
 
-DistilBertForMaskedLM,pass,10
+DistilBertForMaskedLM,pass,6
 
 
 
-DistilBertForQuestionAnswering,pass,10
+DistilBertForQuestionAnswering,pass,6
 
 
 
-DistillGPT2,pass,10
+DistillGPT2,pass,6
 
 
 
-ElectraForCausalLM,pass,10
+ElectraForCausalLM,pass,6
 
 
 
-ElectraForQuestionAnswering,pass,10
+ElectraForQuestionAnswering,pass,6
 
 
 
-GPT2ForSequenceClassification,pass,12
+GPT2ForSequenceClassification,pass,8
 
 
 
-GoogleFnet,pass,10
+GoogleFnet,pass,6
 
 
 
-LayoutLMForMaskedLM,pass,10
+LayoutLMForMaskedLM,pass,6
 
 
 
-LayoutLMForSequenceClassification,pass,12
+LayoutLMForSequenceClassification,pass,8
 
 
 
-M2M100ForConditionalGeneration,pass,10
+M2M100ForConditionalGeneration,pass,6
 
 
 
-MBartForCausalLM,pass,19
+MBartForCausalLM,pass,14
 
 
 
-MBartForConditionalGeneration,pass,31
+MBartForConditionalGeneration,pass,26
 
 
 
-MT5ForConditionalGeneration,pass,10
+MT5ForConditionalGeneration,pass,6
 
 
 
-MegatronBertForCausalLM,pass,10
+MegatronBertForCausalLM,pass,6
 
 
 
-MegatronBertForQuestionAnswering,pass,10
+MegatronBertForQuestionAnswering,pass,6
 
 
 
-MobileBertForMaskedLM,pass,7
+MobileBertForMaskedLM,pass,4
 
 
 
-MobileBertForQuestionAnswering,pass,7
+MobileBertForQuestionAnswering,pass,4
 
 
 
-OPTForCausalLM,pass,19
+OPTForCausalLM,pass,14
 
 
 
-PLBartForCausalLM,pass,19
+PLBartForCausalLM,pass,14
 
 
 
-PLBartForConditionalGeneration,pass,36
+PLBartForConditionalGeneration,pass,31
 
 
 
-PegasusForCausalLM,pass,19
+PegasusForCausalLM,pass,14
 
 
 
-PegasusForConditionalGeneration,pass,28
+PegasusForConditionalGeneration,pass,24
 
 
 
-RobertaForCausalLM,pass,10
+RobertaForCausalLM,pass,6
 
 
 
-RobertaForQuestionAnswering,pass,10
+RobertaForQuestionAnswering,pass,6
 
 
 
-Speech2Text2ForCausalLM,pass,19
+Speech2Text2ForCausalLM,pass,14
 
 
 
-T5ForConditionalGeneration,pass,10
+T5ForConditionalGeneration,pass,6
 
 
 
-T5Small,pass,10
+T5Small,pass,6
 
 
 
-TrOCRForCausalLM,pass,19
+TrOCRForCausalLM,pass,14
 
 
 
-XGLMForCausalLM,pass,19
+XGLMForCausalLM,pass,14
 
 
 
-XLNetLMHeadModel,pass,10
+XLNetLMHeadModel,pass,6
 
 
 
-YituTechConvBert,pass,10
+YituTechConvBert,pass,6

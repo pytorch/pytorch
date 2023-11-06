@@ -259,9 +259,6 @@ class TorchVariable(VariableTracker):
         except RuntimeError as e:
             assert "No such operator" in str(e), str(e)
             self_should_be_none = None
-        except AssertionError as e:
-            assert "Unknown attribute" in str(e), str(e)
-            self_should_be_none = None
 
         # assert "_ntuple.<locals>.parse" not in str(value)
 
@@ -548,8 +545,10 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        # TODO: These special cases shouldn't be necessary; we should
+        # generically support torch.ops that return int
         elif (
-            self.value is torch.ops.aten.sym_size
+            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -557,7 +556,7 @@ class TorchVariable(VariableTracker):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is torch.ops.aten.sym_stride
+            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)

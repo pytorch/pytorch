@@ -2148,16 +2148,19 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
-            self.symbolic_locals = {
-                k: variables.LazyVariableTracker.create(
-                    f_locals[k],
-                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+            self.symbolic_locals = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(
+                        self,
+                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    )(f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals
-            }
+            )
             if export:
-                # export gets confused if we never realize unused inputs
+                # export gets super confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = VariableTracker.apply(
                     lambda x: x.realize(), self.symbolic_locals

@@ -194,11 +194,6 @@ def speculate_subgraph(
         )
 
     try:
-        f, sub_args, sub_kwargs = VariableTracker.apply(
-            # ensure guards on args get installed in parent subgraph
-            lambda x: x.realize(),
-            (f, sub_args, sub_kwargs),
-        )
         with tx.output.subtracer(source_target, tracer) as subtracer:
             args = validate_args_and_maybe_create_graph_inputs(
                 sub_args, subtracer, tx, manually_set_subgraph_inputs
