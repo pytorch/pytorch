@@ -1190,7 +1190,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // In the timeout case and we will first dump the flight recorder
   // to std::out. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  dump_debugging_info();
+  if (parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0) {
+    // TODO: Find the right and proper way to dump the debug info.
+    // We cannot print out debugging info directly.
+    dump_debugging_info();
+  }
 
   // Create a error message reported from MonitorThread, so
   // we throw exception and make the whole process to be killed.

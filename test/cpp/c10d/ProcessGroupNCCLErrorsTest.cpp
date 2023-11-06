@@ -142,9 +142,9 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   bool set_timedout_error_;
 };
 
-class HangingProcessGroupNCCL : public c10d::ProcessGroupNCCL {
+class ProcessGroupNCCLNoHeartbeat : public c10d::ProcessGroupNCCL {
  public:
-  HangingProcessGroupNCCL(
+  ProcessGroupNCCLNoHeartbeat(
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
@@ -164,7 +164,7 @@ class HangingProcessGroupNCCL : public c10d::ProcessGroupNCCL {
  protected:
   void heartbeatMonitor() override {
     try {
-      ProcessGroupNCCL::heartbeatMonitor();
+      c10d::ProcessGroupNCCL::heartbeatMonitor();
     } catch (std::runtime_error& e) {
       hasMonitorThreadCaughtError_.store(true);
     }
@@ -269,36 +269,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
-TEST_F(ProcessGroupNCCLErrorsTest, testNCCLWatchdogNoHeartbeat) {
-  if (skipTest()) {
-    return;
-  }
-
-  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT, "3", 1) == 0);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
-  auto options = c10d::ProcessGroupNCCL::Options::create();
-  options->timeout = std::chrono::milliseconds(30000);
-  HangingProcessGroupNCCL pg(store_, 0, 1, options);
-
-  auto work = pg.allreduce(tensors_);
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-
-  work = pg.allreduce(tensors_);
-  {
-    // Now run all reduce with errors.
-    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
-    LOG(INFO) << "Lock watchdog thread.";
-    // Wait for a while before monitor thread throws exceptions.
-    std::this_thread::sleep_for(std::chrono::seconds(10));
-    // Check the monitoring thread launched and exception thrown.
-    EXPECT_TRUE(pg.getErrorCaughtFlag());
-  }
-  work->wait();
-  EXPECT_TRUE(work->isSuccess());
-}
-
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   if (skipTest()) {
     return;
@@ -326,4 +296,34 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
   EXPECT_FALSE(work->isSuccess());
 
   // Communicators might be aborted here, further operations would fail.
+}
+
+TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
+  if (skipTest()) {
+    return;
+  }
+
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT, "3", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->timeout = std::chrono::milliseconds(30000);
+  ProcessGroupNCCLNoHeartbeat pg(store_, 0, 1, options);
+
+  auto work = pg.allreduce(tensors_);
+  work->wait();
+  EXPECT_TRUE(work->isSuccess());
+
+  work = pg.allreduce(tensors_);
+  {
+    // Now run all reduce with errors.
+    std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
+    LOG(INFO) << "Lock watchdog thread.";
+    // Wait for a while before monitor thread throws exceptions.
+    std::this_thread::sleep_for(std::chrono::seconds(10));
+    // Check the monitoring thread launched and exception thrown.
+    EXPECT_TRUE(pg.getErrorCaughtFlag());
+  }
+  work->wait();
+  EXPECT_TRUE(work->isSuccess());
 }
