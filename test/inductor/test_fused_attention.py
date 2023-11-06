@@ -585,6 +585,52 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol=1e-2,
         )
 
+    @skipIfRocm
+    def _test_sdpa_rewriter_14(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            attn_mask = torch.ones(
+                query.size(1), key.size(1), dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            attn_mask = attn_mask.masked_fill(
+                torch.logical_not(attn_mask), -float("inf")
+            )
+            q = query.permute(0, 2, 1, 3)
+            k = key.permute(0, 2, 1, 3)
+            v = value.permute(0, 2, 1, 3)
+            return (
+                (torch.matmul(q, k.transpose(-2, -1)).div(3.0) + attn_mask)
+                .softmax(dim=-1)
+                .matmul(v)
+            )
+
+        self._check_common(dot_prod_attention, contains=False)
+
+    @skipIfRocm
+    def _test_sdpa_rewriter_15(self):
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            q = query.transpose(1, 2)
+            k = key.transpose(1, 2)
+            v = value.transpose(1, 2)
+            bs = q.size(0)
+            k_len = k.size(-2)
+            attn_mask = torch.ones(
+                bs, k_len, dtype=torch.bool, device=query.device
+            ).tril(diagonal=0)
+            q = q / 3.0
+            scores = torch.matmul(q, k.transpose(-2, -1))
+            attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+            scores = scores.masked_fill(attn_mask, -float("inf"))
+            weights = torch.nn.functional.softmax(scores, dim=-1)
+            return torch.matmul(weights, v)
+
+        self._check_common(dot_prod_attention, contains=False, check_train=False)
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -641,6 +687,12 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_13_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.half
         )
+        test_sdpa_rewriter_14_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
+        )
+        test_sdpa_rewriter_15_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
+        )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
         use_static_shapes = False
@@ -673,6 +725,12 @@ if HAS_CPU:
         test_sdpa_prev_15_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
         test_sdpa_rewriter_13_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
+        )
+        test_sdpa_rewriter_14_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
+        )
+        test_sdpa_rewriter_15_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

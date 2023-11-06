@@ -321,6 +321,69 @@ def _sfdp_replacement_13(query, key, value, dropout_p):
     ).squeeze(0)
 
 
+def _sfdp_pattern_14(query, key, value, attn_mask, inv_scale):
+    # for BertLarge
+    q = query.permute(0, 2, 1, 3)
+    k = key.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3)
+    a = (
+        (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask)
+        .softmax(dim=-1)
+        .matmul(v)
+    )
+    return a
+
+
+def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
+def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale, fill_value):
+    # for DistilBert
+    q = query.transpose(1, 2)
+    k = key.transpose(1, 2)
+    v = value.transpose(1, 2)
+    bs = q.size(0)
+    k_len = k.size(-2)
+    q = q.div(inv_scale)
+    scores = q @ k.transpose(-2, -1)
+    attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
+    return torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1) @ v
+
+
+def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale, fill_value):
+    counters["inductor"]["fuse_attention"] += 1
+    q = query.transpose(1, 2)
+    k = key.transpose(1, 2)
+    v = value.transpose(1, 2)
+    bs = q.size(0)
+    n_head = q.size(1)
+    q_len = q.size(-2)
+    k_len = k.size(-2)
+    # do attn_mask->logical_not() in aten.scaled_dot_product_attention
+    attn_mask = (
+        (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
+    )
+    return aten.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        attn_mask=attn_mask.to(dtype=torch.bool),
+        dropout_p=0.0,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -398,8 +461,13 @@ def _get_sfdp_patterns():
     g_inp = functools.partial(
         torch.empty, (2, 4, 8, 16), device=device, requires_grad=True
     )
+    # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
+    m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
+    # fill_value
+    f_inp = functools.partial(torch.tensor, -float("inf"), device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
@@ -414,7 +482,9 @@ def _get_sfdp_patterns():
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
+        m = functools.partial(m_inp, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
+        f = functools.partial(f_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
 
         for pattern, replacement, args, workaround, extra_check in [
@@ -508,6 +578,20 @@ def _get_sfdp_patterns():
                 [g_3d(), g_3d(), g_3d()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_14,
+                _sfdp_replacement_14,
+                [g(), g(), g(), m(), c()],
+                {},
+                _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_15,
+                _sfdp_replacement_15,
+                [g(), g(), g(), m(), c(), f()],
+                {},
+                _sfdp_scale_factor_check(aten.div.Tensor),
             ),
         ]:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
