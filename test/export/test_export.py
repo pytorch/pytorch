@@ -649,6 +649,16 @@ class TestExport(TestCase):
         roundtrip_spec = treespec_loads(treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
 
+    def test_changing_shapes(self):
+        def f(x, y):
+            return x + y
+
+        gm = capture_pre_autograd_graph(f, (torch.randn(3, 3), torch.randn(3, 3)))
+        ep = export(gm, (torch.randn(2, 3), torch.randn(2, 3)))
+        for node in ep.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.meta["val"].shape[0], 2)
+
     def test_pytree_register_nested_data_class(self):
 
         @dataclass

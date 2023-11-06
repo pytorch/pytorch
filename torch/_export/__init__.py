@@ -13,7 +13,7 @@ import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -388,35 +388,32 @@ def capture_pre_autograd_graph(
 
 
 def _convert_input_to_fake(gm, args, kwargs):
-    fake_inps: List[torch.Tensor] = []
-    fake_mode = FakeTensorMode(
-        allow_fallback_kernels=False,
-        allow_non_fake_inputs=True,
-        shape_env=ShapeEnv(
-            assume_static_by_default=True,
-        ),
-    )
+    fake_mode = detect_fake_mode([
+        node.meta.get("val")
+        for node in gm.graph.nodes
+        if node.op == "placeholder"
+    ])
 
-    for node in gm.graph.nodes:
-        if node.op == "placeholder" and "val" in node.meta:
-            fake_val = node.meta["val"]
-            if fake_val is not None and isinstance(fake_val, torch.Tensor):
-                fake_inps.append(fake_val)
+    if fake_mode is None:
+        fake_mode = FakeTensorMode(
+            allow_fallback_kernels=False,
+            allow_non_fake_inputs=True,
+            shape_env=ShapeEnv(
+                assume_static_by_default=True,
+            ),
+        )
 
-    if detected_fake_mode := detect_fake_mode(fake_inps):
-        fake_mode = detected_fake_mode
-
-    count = 0
-
-    def convert_to_fake(x):
-        nonlocal count
-        val = fake_inps[count]
-        count += 1
-        return val
+    def convert_to_fake(t):
+        with fake_mode:
+            return cast(
+                FakeTensor,
+                torch.empty_strided(
+                    t.size(), t.stride(), device=t.device, dtype=t.dtype,
+                )
+            )
 
     fake_args = pytree.tree_map_only(torch.Tensor, convert_to_fake, args)
-    # TODO properly use the cached fake tensor
-    fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
+    fake_kwargs = pytree.tree_map_only(torch.Tensor, convert_to_fake, kwargs)
     return fake_args, fake_kwargs, fake_mode
 
 
