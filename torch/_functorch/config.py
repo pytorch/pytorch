@@ -34,7 +34,7 @@ cse = True
 max_dist_from_bw = 3
 
 
-from torch.utils._config_module import install_config_module
+from .._dynamo.config_utils import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])
