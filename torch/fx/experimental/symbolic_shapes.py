@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, Iterable
 
 import torch
 import torch.fx
@@ -60,6 +60,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "has_free_symbols",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -151,30 +152,39 @@ def is_concrete_bool(a: Union[bool, SymBool]):
 def tensor_has_hints(t):
     return all(has_hint(s) for s in t.size())
 
-def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
-    if isinstance(val, (SymInt, SymFloat)):
-        if not is_symbolic(val):
-            # This allow applies to the jagged layout NestedTensor case as
-            # singleton ints are not symbolic
-            return set()
-        return val.node.expr.free_symbols
+def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Expr]:
+    if isinstance(val, SymTypes):
+        # This allow applies to the jagged layout NestedTensor case as
+        # singleton ints are not symbolic
+        if is_symbolic(val):
+            yield val.node.expr
     elif isinstance(val, sympy.Expr):
-        return val.free_symbols
+        yield val
     elif isinstance(val, (int, float, bool)):
-        return set()
+        pass
     elif isinstance(val, torch.Tensor):
-        return (
-            free_symbols(val.size()) |
-            free_symbols(val.stride()) |
-            free_symbols(val.storage_offset())
-        )
+        yield from _iterate_exprs(val.size())
+        yield from _iterate_exprs(val.stride())
+        yield from _iterate_exprs(val.storage_offset())
     elif isinstance(val, (tuple, list)):
-        r = set()
         for s in val:
-            r |= free_symbols(s)
-        return r
+            yield from _iterate_exprs(s)
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+
+def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+    itr = _iterate_exprs(val)
+    # we need at least 1 to call union, so we hand code the identity
+    try:
+        first_expr = next(itr)
+    except StopIteration:
+        return set()
+
+    return first_expr.free_symbols.union(*(e.free_symbols for e in itr))
+
+def has_free_symbols(val: Union[SymInt, torch.Tensor]) -> bool:
+    """Faster version of bool(free_symbols(val))"""
+    return not all(e.is_number for e in _iterate_exprs(val))
 
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x):
@@ -1022,12 +1032,12 @@ class DimConstraints:
         return False
 
     def add_equality(self, source, expr):
-        if expr.free_symbols:
-            # these will resolve to either specializations or dynamic equality constraints
-            self._symbolic_equivalences.append((source, expr))
-        else:
+        if expr.is_number:
             # specialization, right here
             self._static_results.add(f"{source.name()} == {expr}")
+        else:
+            # these will resolve to either specializations or dynamic equality constraints
+            self._symbolic_equivalences.append((source, expr))
 
     def reduce_congruences(self):
         reduced_congruences = {}
@@ -2432,16 +2442,16 @@ class ShapeEnv:
                     if isinstance(constraint, StrictMinMaxConstraint):
                         constraint_violated = True
                     elif isinstance(constraint, RelaxedUnspecConstraint):
-                        if s.free_symbols:
-                            # TODO: Maybe non-strict constraint shouldn't error
-                            # here?  Check what happens in practice
-                            constraint_violated = True
-                        else:
+                        if s.is_number:
                             i = int(s)
                             # Don't complain about 0/1 specialization, we
                             # expect to have to compile in this case anyway
                             if i not in (0, 1):
                                 constraint_violated = True
+                        else:
+                            # TODO: Maybe non-strict constraint shouldn't error
+                            # here?  Check what happens in practice
+                            constraint_violated = True
                     if constraint_violated:
                         def hint(s):
                             sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
@@ -2549,7 +2559,7 @@ class ShapeEnv:
                 # dynamo's check_tensor_fn does that (see guards.cpp).
                 # However, for non tensor sources, we still need to guard here.
                 if ignore_static and isinstance(source, TensorPropertySource):
-                    if len(expr.free_symbols) == 0:
+                    if expr.is_number:
                         self.log.debug("Skipping guard %s", f"{source_ref(source)} == {expr}")
                         continue
 
@@ -2600,7 +2610,7 @@ class ShapeEnv:
                 self._add_target_expr(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
-                if len(expr.free_symbols) == 1 and not is_trivial:
+                if not is_trivial and len(expr.free_symbols) == 1:
                     symbol = next(iter(expr.free_symbols))
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
@@ -2921,7 +2931,7 @@ class ShapeEnv:
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
         # TODO: when unbacked_only, can sometimes early return even when there
         # are still free symbols
-        if len(list(new_expr.free_symbols)) == 0:
+        if new_expr.is_number:
             return new_expr
 
         # Check if the range can solve it statically
@@ -2943,7 +2953,7 @@ class ShapeEnv:
         new_divisible = set()
         for k in self.divisible:
             res = self.replace(k)
-            if len(res.free_symbols) > 0:
+            if not res.is_number:
                 new_divisible.add(k)
 
         self.divisible = new_divisible
@@ -2994,7 +3004,7 @@ class ShapeEnv:
         your code is still valid for arbitrary shapes (such as optimization decisions)
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
-        if len(result_expr.free_symbols) != 0:
+        if not result_expr.is_number:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
@@ -3007,7 +3017,7 @@ class ShapeEnv:
     @lru_cache(256)
     def has_hint(self, expr: "sympy.Expr"):
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
-        return len(result_expr.free_symbols) == 0 or self._maybe_evaluate_static(result_expr) is not None
+        return result_expr.is_number or self._maybe_evaluate_static(result_expr) is not None
 
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
@@ -3267,7 +3277,7 @@ class ShapeEnv:
         tb = None
 
         try:
-            if len(orig_expr.free_symbols) == 0:
+            if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
                 # NB: don't test float as there may be precision issues
                 if isinstance(hint, (int, bool)):
@@ -3475,11 +3485,7 @@ class ShapeEnv:
             self._maybe_evaluate_static.cache_clear()
 
 def _is_int(expr):
-    if not isinstance(expr, SymInt):
-        return False
-    if len(expr.node.expr.free_symbols) > 0:
-        return False
-    return True
+    return isinstance(expr, SymInt) and expr.node.expr.is_number
 
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
