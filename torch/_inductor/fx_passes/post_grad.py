@@ -630,8 +630,14 @@ def reinplace_scatters(graph):
     Reinplaces scatter operations.
     If there are no uses of a view of the mutated arg after the current node,
     it is possible to inplace the op.
-
-    Also handles input mutations when there is a corresponding copy node.
+    This above algorithm could be justified by observing side effects. While
+    we traverse the graph in forwards direction, only latter nodes could view
+    side effects of the current node. If the current node is not used later as
+    well as no view of this node is used later in the graph, then it is safe to
+    inplace as there would be no way to observe the side effects.
+    This condition is slightly different for graph inputs where they can only
+    be inplaced if the above condition is true and there's a copy_ in the
+    epilogue that signals that the caller wants to observe the mutation.
     """
 
     copy_args_to_copy_nodes = {}
@@ -656,7 +662,7 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def any_use_of_views_after_node(node, shared_view_nodes, copy_node):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
         node_loc = node_order[node]
         for view in shared_view_nodes:
             for user in view.users:
@@ -679,13 +685,17 @@ def reinplace_scatters(graph):
             ):
                 return False
 
-            if any_use_of_views_after_node(node, shared_view_nodes, copy_node):
+            if any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=copy_node
+            ):
                 return False
 
             graph.erase_node(copy_node)
             return True
         else:
-            return not any_use_of_views_after_node(node, shared_view_nodes, None)
+            return not any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=None
+            )
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
