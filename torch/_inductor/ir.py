@@ -3609,14 +3609,17 @@ class ExternKernel(InputsKernel):
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
-            if self.kwargs:
+            if self.kwargs and not self.ordered_kwargs_for_cpp_kernel:
                 assert (
                     self.ordered_kwargs_for_cpp_kernel
                 ), "ordered_kwargs_for_cpp_kernel is missing"
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                if isinstance(v, sympy.Expr):
+                    kwargs.append(v)
+                else:
+                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -3782,7 +3785,7 @@ class ExternKernelAlloc(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def codegen(self, wrapper):
+    def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -3792,6 +3795,10 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
+        return kernel, configs
+
+    def codegen(self, wrapper):
+        kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
         new_name = wrapper.define_user_defined_triton_kernel(
@@ -3848,6 +3855,9 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+        kernel, _ = self.get_kernel_and_configs()
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
 
     @classmethod
     def create(cls, *, kernel_idx, grid, kernel_args):

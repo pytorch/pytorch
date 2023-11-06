@@ -16,16 +16,24 @@ from torch._inductor.exc import CppWrapperCodeGenError
 from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
+from torch.testing._internal import common_utils
 
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
+    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+
+# Defines all the kernels for tests
+from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
+
+if HAS_CUDA:
+    import triton
+    from torch.testing._internal.triton_utils import add_kernel
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -37,19 +45,9 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
+        from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
-        from test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
+        from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -1011,6 +1009,55 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    @requires_cuda()
+    @skipIfRocm
+    @common_utils.parametrize("grid_type", [1, 2, 3])
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_basic(self, grid_type, dynamic):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
+                y = y.clone()
+                output = torch.zeros_like(x)
+                n_elements = output.numel()
+
+                def grid_fn(meta):
+                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                if grid_type == 1:
+                    grid = (n_elements,)
+                elif grid_type == 2:
+                    grid = lambda meta: (  # noqa: E731
+                        triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                    )
+                else:
+                    grid = grid_fn
+
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                return output
+
+        a = torch.randn(10, 10, device=self.device)
+        b = torch.randn(10, 10, device=self.device)
+        constraints = []
+        if dynamic:
+            constraints = [
+                torch._export.dynamic_dim(a, 0) >= 1,
+                torch._export.dynamic_dim(a, 0) <= 10,
+                torch._export.dynamic_dim(b, 0) >= 1,
+                torch._export.dynamic_dim(b, 0) <= 10,
+            ]
+        self.check_model(Model(), (a, b), constraints=constraints)
+
+
+common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -1101,6 +1148,7 @@ copy_tests(
     AOTInductorTestNonABICompatibleCuda,
     "non_abi_compatible_cuda",
 )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
