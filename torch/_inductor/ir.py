@@ -2691,7 +2691,7 @@ class Buffer(IRNode):
         #    dynamic; it has i0 as one of the arguments.  We cannot tell this
         #    directly from MultiOutput, we have to look at the input buffer's
         #    uses to work this out.  No big deal.
-        if isinstance(self.layout, MultiOutputLayout):
+        if isinstance(self.layout, (NoneLayout, MultiOutputLayout)):
             return set()
 
         # This kernel defines all unbacked symbols... that it didn't get in as
@@ -3818,16 +3818,14 @@ class UserDefinedTritonKernel(ExternKernel):
         return {}
 
     def get_mutation_names(self):
-        return [t.get_name() for t in self.inputs]
+        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
         constant_args = []
-        device = None
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
-                device = v.get_device()
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
@@ -3835,7 +3833,9 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 constant_args.append(v)
                 kwargs[k] = v
-        assert device is not None
+
+        assert len(inputs) != 0
+        device = inputs[0].get_device()
 
         super().__init__(
             None,
@@ -3847,6 +3847,39 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+    @classmethod
+    def create(cls, *, kernel_idx, grid, kernel_args):
+        packed = UserDefinedTritonKernel(
+            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
+        )
+        for arg in kernel_args.values():
+            if isinstance(arg, TensorBox):
+                MutationOutput(arg.layout, arg, packed)
+
+    def get_alias_names(self):
+        return [i.get_name() for i in self.inputs]
+
+
+class MutationOutput(ExternKernel):
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def __init__(self, layout, input, parent):
+        super().__init__(None, layout, [input, parent], ())
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def is_no_op(self):
+        return True
+
+    def has_side_effects(self):
+        return True
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name()]
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -4278,11 +4311,15 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def has_aliasing(self):
+    def get_alias_names(self):
         # TODO - some fallbacks are still OpOverloadPackets
         if not isinstance(self.op_overload, torch._ops.OpOverload):
-            return False
-        return torch._inductor.utils.is_view(self.op_overload)
+            return []
+        if torch._inductor.utils.is_view(self.op_overload):
+            # TODO - use op._schema.arguments alias_info to figure out
+            # precise list
+            return [inp.get_name() for inp in self.inputs]
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -4458,9 +4495,6 @@ class ComplexView(ExternKernelAlloc):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return True
-
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
@@ -4559,11 +4593,13 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return any(
-            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
+    def get_alias_names(self):
+        return [
+            inp.get_name()
             for inp in self.inputs
-        )
+            if isinstance(inp, (FallbackKernel, ComplexView))
+            and len(inp.get_alias_names()) > 0
+        ]
 
 
 def _prepare_convolution_fusion_create(
@@ -5434,7 +5470,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
                 int64_t groups,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view attr,
                 torch::List<c10::optional<at::Scalar>> scalars,
                 c10::optional<c10::string_view> algorithm)"""
@@ -5458,7 +5494,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5478,7 +5514,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             groups,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5509,7 +5545,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5542,16 +5578,17 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWisePT2E(
             layout=kernel_layout,
@@ -5607,7 +5644,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
                 int64_t groups,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 c10::string_view binary_attr,
                 c10::optional<at::Scalar> alpha,
                 c10::optional<c10::string_view> attr,
@@ -5635,7 +5672,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -5659,7 +5696,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             groups,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -5696,7 +5733,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: "TensorBox",
         output_zero_point: "TensorBox",
-        fp32_output,
+        output_dtype,
         binary_attr,
         alpha,
         unary_attr,
@@ -5742,17 +5779,17 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        if fp32_output:
+        if output_dtype is not None:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if output_dtype is not None, the output buf should be dtype output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWiseBinaryPT2E(
             layout=kernel_layout,
@@ -5799,7 +5836,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 c10::optional<at::Tensor> bias,
                 double inv_output_scale,
                 int64_t output_zero_point,
-                bool fp32_output,
+                c10::optional<c10::ScalarType> output_dtype,
                 std::string post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
                 std::string post_op_algorithm)"""
@@ -5819,7 +5856,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5835,7 +5872,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             bias,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
@@ -5862,7 +5899,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         bias: "TensorBox",
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5882,16 +5919,17 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwisePT2E(
             layout=kernel_layout,
@@ -6804,28 +6842,6 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
 
 # TODO(yifu): replace the CollectiveKernel IR hierarchy with _CollectiveKernel.
 class _CollectiveKernel(FallbackKernel):
-    @classmethod
-    def make_fallback_kernel(cls, layout, kernel, inputs, *args, **kwargs):
-        with V.graph.fake_mode:
-            (
-                example_outputs,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                schema,
-            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
-        return (
-            cls(
-                layout,
-                kernel,
-                tensor_args,
-                non_tensor_args,
-                unflatten_args,
-                schema=schema,
-            ),
-            example_outputs,
-        )
-
     def should_allocate(self):
         return False
 
@@ -6855,42 +6871,29 @@ class _CollectiveKernel(FallbackKernel):
     # the constraints, we model collective -> wait_tensor as as two-step
     # mutation of the input buffers.
     @classmethod
-    def create_inplace_single(cls, kernel, inp: TensorBox, *args, **kwargs):
-        assert isinstance(inp, TensorBox)
-        inp.realize()
-        output, _ = cls.make_fallback_kernel(
-            MutationLayout(inp),
-            kernel,
-            inp,
-            *args,
-            **kwargs,
-        )
-        output.outputs = [output]
-        return output
+    def create_inplace(
+        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+    ) -> None:
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
 
-    @classmethod
-    def create_inplace_coalesced(cls, kernel, inputs: List[TensorBox], *args, **kwargs):
-        assert isinstance(inputs, list) and all(
-            isinstance(x, TensorBox) for x in inputs
-        )
-        for inp in inputs:
-            inp.realize()
-        packed, _ = cls.make_fallback_kernel(
-            MultiOutputLayout(inputs[0].get_device()),
+        packed = cls(
+            NoneLayout(tensor_args[0].get_device()),
             kernel,
-            inputs,
-            *args,
-            **kwargs,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            schema=schema,
         )
-        packed.outputs = [
-            MultiOutput(
-                MutationLayout(inp),
-                packed,
-                [(list, i)],
-            )
-            for i, inp in enumerate(inputs)
-        ]
-        return packed.outputs
+        pytree.tree_map(lambda x: MutationOutput(x.layout, x, packed), inputs)
 
     # NOTE: [Out-of-Place Collective Safety]
     # Between the initiation and completion of an out-of-place collective:
@@ -6915,8 +6918,9 @@ class _CollectiveKernel(FallbackKernel):
     # TODO(yifu): add a pre-grad pass to validate the correctness of collective
     # usage in the user program.
     @classmethod
-    def create_out_of_place_single(cls, kernel, inp: TensorBox, *args, **kwargs):
-        assert isinstance(inp, TensorBox)
+    def create_out_of_place(
+        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+    ):
         with V.graph.fake_mode:
             (
                 example_output,
@@ -6924,74 +6928,86 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
                 schema,
-            ) = cls.process_kernel(kernel, inp, *args, **kwargs)
-        assert isinstance(example_output, torch.Tensor)
-        output = cls(
-            cls.tensor_to_layout(example_output),
+            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        for tensor_arg in tensor_args:
+            tensor_arg.realize()
+
+        if isinstance(example_output, list):
+            device = cls.find_device(tensor_args, example_output)
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            )
+            packed.outputs = [
+                MultiOutput(
+                    cls.tensor_to_layout(tensor),
+                    packed,
+                    [(list, i)],
+                )
+                for i, tensor in enumerate(example_output)
+            ]
+            return packed.outputs
+        else:
+            packed = cls(
+                cls.tensor_to_layout(example_output),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema=schema,
+            )
+            packed.outputs = [packed]
+            return packed
+
+
+class _WaitKernel(_CollectiveKernel):
+    def get_volatile_reads(self):
+        inp = self.inputs[0]
+        if isinstance(inp, _CollectiveKernel):
+            # Out-of-place single-output
+            return [inp.inputs[0]]
+        elif isinstance(inp, MultiOutput):
+            # Out-of-place multi-output
+            coll = inp.inputs[0]
+            assert isinstance(coll, _CollectiveKernel)
+            _, idx = inp.indices[0]
+            return [coll.inputs[idx]]
+        else:
+            # In-place requires no additional deps handling for volatile
+            # reads since the inputs are mutated.
+            return []
+
+    @classmethod
+    def create_wait(cls, inp: TensorBox) -> None:
+        kernel = torch.ops._c10d_functional.wait_tensor.default
+        with V.graph.fake_mode:
+            (
+                example_output,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+                schema,
+            ) = cls.process_kernel(kernel, inp)
+        packed = cls(
+            NoneLayout(inp.get_device()),
             kernel,
             tensor_args,
             non_tensor_args,
             unflatten_args,
             schema=schema,
         )
-        output.outputs = [output]
-        return output
-
-    @classmethod
-    def create_out_of_place_coalesced(
-        cls, kernel, inputs: List[TensorBox], *args, **kwargs
-    ):
-        assert isinstance(inputs, list) and all(
-            isinstance(x, TensorBox) for x in inputs
-        )
-        packed, example_outputs = cls.make_fallback_kernel(
-            MultiOutputLayout(inputs[0].get_device()),
-            kernel,
-            inputs,
-            *args,
-            **kwargs,
-        )
-        packed.outputs = [
-            MultiOutput(
-                cls.tensor_to_layout(example_output),
-                packed,
-                [(list, i)],
-            )
-            for i, example_output in enumerate(example_outputs)
-        ]
-        return packed.outputs
-
-
-class _WaitKernel(_CollectiveKernel):
-    def get_volatile_read(self):
-        inp = self.inputs[0]
-        if isinstance(inp, _CollectiveKernel):
-            return inp.inputs[0]
-        elif isinstance(inp, MultiOutput) and isinstance(
-            inp.inputs[0], _CollectiveKernel
-        ):
-            _, idx = inp.indices[0]
-            return inp.inputs[0].inputs[idx]
-        else:
-            raise AssertionError(
-                f"wait_tensor's input must be a collective output. Got {inp}"
-            )
-
-    @classmethod
-    def create_wait(cls, inp: TensorBox):
-        output, _ = cls.make_fallback_kernel(
-            MutationLayout(inp),
-            torch.ops._c10d_functional.wait_tensor.default,
-            inp,
-        )
-        output.outputs = output
-        return output
+        MutationOutput(inp.layout, inp, packed)
 
     def get_read_writes(self):
         read_writes = super().get_read_writes()
         # See [Out-of-Place Collective Safety].
-        volatile_read = self.get_volatile_read()
-        read_writes.reads.add(dependencies.StarDep(volatile_read.get_name()))
+        volatile_reads = self.get_volatile_reads()
+        for vr in volatile_reads:
+            read_writes.reads.add(dependencies.StarDep(vr.get_name()))
         return read_writes
 
 

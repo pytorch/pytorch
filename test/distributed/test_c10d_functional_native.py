@@ -188,7 +188,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.eq(self.rank * i).all()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_inductor_all_reduce(self):
+    def test_inductor_all_reduce_single(self):
         torch._inductor.config.debug = True
         self._init_process_group()
 
@@ -208,14 +208,15 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         (
             FileCheck()
             .check("buf0 = empty(")
+            .check("buf5 = empty(")
             # Expect in-place with inductor allocated buf
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("buf2 = torch.ops._c10d_functional.wait_tensor.default(buf1")
-            # Expect no in-place with graph input
-            .check("buf3 = torch.ops._c10d_functional.all_reduce.default(arg0_1")
-            .check("buf4 = torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            # Expect no in-place with graph input (buf5 is a clone)
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf5")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
             # Expect no extra copy on return
-            .check("return (buf0, buf3, )")
+            .check("return (buf0, buf5, )")
             .run(code)
         )
         out = compiled(arg)
@@ -246,26 +247,26 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, args)
         (
             FileCheck()
-            # Expect in-place with inductor allocated buf
             .check("buf0 = empty(")
+            .check("buf5 = empty(")
             .check("buf1 = empty(")
+            .check("buf6 = empty(")
+            # Expect in-place with inductor allocated buf
             .check(
-                "buf2 = torch.ops._c10d_functional.all_reduce_coalesced_"
+                "torch.ops._c10d_functional.all_reduce_coalesced_"
                 ".default([buf0, buf1]"
             )
-            .check("buf3 = buf2[0]")
-            .check("buf4 = buf2[1]")
-            # Expect no in-place with graph input
+            # Expect no in-place with graph input (buf5, buf6 are clones)
             .check(
-                "buf5 = torch.ops._c10d_functional.all_reduce_coalesced"
-                ".default([arg0_1, arg1_1]"
+                "torch.ops._c10d_functional.all_reduce_coalesced_"
+                ".default([buf5, buf6]"
             )
-            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("buf9 = torch.ops._c10d_functional.wait_tensor.default(buf4")
-            .check("buf10 = torch.ops._c10d_functional.wait_tensor.default(buf6")
-            .check("buf11 = torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf6")
             # Expect no extra copy on return
-            .check("return (buf0, buf1, buf6, buf7, )")
+            .check("return (buf0, buf1, buf5, buf6, )")
             .run(code)
         )
         out = compiled(args)
@@ -295,16 +296,16 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             FileCheck()
             # Expect allocation
             .check("buf0 = empty(")
-            .check("buf1 = torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("buf2 = torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect allocation
-            .check("buf3 = empty(")
-            .check("extern_kernels.mm(arg0_1, buf2, out=buf3")
+            .check("buf5 = empty(")
+            .check("extern_kernels.mm(arg0_1, buf0, out=buf5")
             # Expect buf0 to be reused
-            .check("buf4 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf3, out=buf4")
+            .check("buf6 = buf0; del buf0  # reuse")
+            .check("extern_kernels.mm(arg0_1, buf5, out=buf6")
             # Expect no extra copy on return
-            .check("return (buf3, buf4, )")
+            .check("return (buf5, buf6, )")
             .run(code)
         )
         out = compiled(arg)
@@ -312,7 +313,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_inductor_all_gather_into_tensor(self):
+    def test_inductor_all_gather_into_tensor_single(self):
         torch._inductor.config.debug = True
         self._init_process_group()
 
@@ -331,7 +332,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             .check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1"
             )
-            .check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect no extra copy on return
             .check("return (buf0, )")
             .run(code)
@@ -355,6 +356,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        print(code)
         (
             FileCheck()
             .check(
@@ -365,10 +367,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             .check("buf2 = buf0[1]")
             .check("buf3 = buf0[2]")
             .check("buf4 = buf0[3]")
-            .check("buf5 = torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("buf6 = torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("buf7 = torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
             # Expect no extra copy on return
             .check("return (buf1, buf2, buf3, buf4, )")
             .run(code)
@@ -378,7 +380,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_inductor_reduce_scatter_tensor(self):
+    def test_inductor_reduce_scatter_tensor_single(self):
         torch._inductor.config.debug = True
         self._init_process_group()
 
@@ -397,7 +399,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             .check(
                 "buf0 = torch.ops._c10d_functional.reduce_scatter_tensor.default(arg0_1"
             )
-            .check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect no extra copy on return
             .check("return (buf0, )")
             .run(code)
@@ -431,10 +433,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             .check("buf2 = buf0[1]")
             .check("buf3 = buf0[2]")
             .check("buf4 = buf0[3]")
-            .check("buf5 = torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("buf6 = torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("buf7 = torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("buf8 = torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
             # Expect no extra copy on return
             .check("return (buf1, buf2, buf3, buf4, )")
             .run(code)
