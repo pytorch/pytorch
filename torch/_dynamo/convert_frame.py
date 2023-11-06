@@ -340,7 +340,7 @@ def convert_frame_assert(
             return None
 
         if is_generator(code):
-            unimplemented("generator")
+            unimplemented("generator", "U0001")
         if exceeds_cache_size_limit(cache_size):
 
             def format_func_info(code):
@@ -374,7 +374,7 @@ def convert_frame_assert(
                     format_func_info(code),
                     troubleshooting_url,
                 )
-            unimplemented("cache_size_limit reached")
+            unimplemented("cache_size_limit reached", "U0002")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -548,7 +548,7 @@ def _compile(
                     LazyString(format_traceback_short, e.__traceback__),
                 )
                 if attempt > 100:
-                    unimplemented("100+ RestartAnalysis() calls")
+                    unimplemented("100+ RestartAnalysis() calls", "U0003")
             except exc.SkipFrame as e:
                 log.debug(
                     "Skipping frame %s %s \

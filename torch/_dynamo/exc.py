@@ -1,5 +1,6 @@
 import os
 import textwrap
+import re
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import cast, NoReturn, Optional
@@ -85,10 +86,16 @@ class BackendCompilerFailed(TorchDynamoException):
 
 
 class Unsupported(TorchDynamoException):
-    def __init__(self, msg):
+    def __init__(self, msg, code):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
-        self.msg = msg
+        if code is not None:
+            assert re.match(r'^U\d{4}$', code)
+        self.code = code
+        if code is not None:
+            self.msg = f'{code}: msg'
+        else:
+            self.msg = msg
         self.category = None
         self.add_to_stats()
 
@@ -187,9 +194,9 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     raise unimplemented(msg) from e
 
 
-def unimplemented(msg: str) -> NoReturn:
+def unimplemented(msg: str, code: Optional[str] = None) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
-    raise Unsupported(msg)
+    raise Unsupported(msg, code)
 
 
 def warning(msg: str) -> None:
