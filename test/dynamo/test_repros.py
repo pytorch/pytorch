@@ -3595,33 +3595,39 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 4)
 
     def test_tensor_set_data(self):
-        def fn(x, y):
+        def fn1(x, y):
             x.data = y
             y.data = torch.zeros([0])
             return x
 
+        def fn2(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            for fn in [fn1, fn2]:
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-            compiled_fn = torch.compile(fn, backend=cnt)
-            for i in range(0, 5):
-                # Inputs
-                eager_a = torch.rand([6])
-                compiled_a = torch.clone(eager_a)
-                eager_b = torch.rand([6])
-                compiled_b = torch.clone(eager_b)
+                compiled_fn = torch.compile(fn, backend=cnt)
+                for i in range(0, 5):
+                    # Inputs
+                    eager_a = torch.rand([6])
+                    compiled_a = torch.clone(eager_a)
+                    eager_b = torch.rand([6])
+                    compiled_b = torch.clone(eager_b)
 
-                # Eager
-                fn(eager_a, eager_b)
-                # Compiled
-                compiled_fn(compiled_a, compiled_b)
-                self.assertEqual(eager_a, compiled_a)
-                self.assertEqual(eager_b, compiled_b)
+                    # Eager
+                    fn(eager_a, eager_b)
+                    # Compiled
+                    compiled_fn(compiled_a, compiled_b)
+                    self.assertEqual(eager_a, compiled_a)
+                    self.assertEqual(eager_b, compiled_b)
 
-            # Prove guarding works - we run the compiled_fn 5 times
-            # frame_count should stay at 1.
-            self.assertEqual(cnt.frame_count, 1)
+                # Prove guarding works - we run the compiled_fn 5 times
+                # frame_count should stay at 1.
+                self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
