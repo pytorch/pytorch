@@ -21,7 +21,6 @@ import pkg_resources
 
 import torch
 import torch.distributed as dist
-from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -1375,9 +1374,7 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and version.parse(
-        torch.version.cuda
-    ) >= version.parse("11.6"):
+    if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1736,6 +1733,16 @@ def main():
         TestBatch(
             "unranked_relevance",
             test_prioritizations.get_unranked_relevance_tests(),
+            True,
+        ),
+        TestBatch(
+            "unlikely_relevance",
+            test_prioritizations.get_unlikely_relevance_tests(),
+            True,
+        ),
+        TestBatch(
+            "none_relevance",
+            test_prioritizations.get_none_relevance_tests(),
             True,
         ),
     ]
