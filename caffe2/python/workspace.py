@@ -708,7 +708,7 @@ def _Workspace_feed_blob(ws, name, arr, device_option=None):
         arr = utils.Caffe2TensorToNumpyArray(arr)
     if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
         # Plain NumPy strings are weird, let's use objects instead
-        arr = arr.astype(np.object)
+        arr = arr.astype(object)
 
     if device_option is None:
         device_option = scope.CurrentDeviceScope()

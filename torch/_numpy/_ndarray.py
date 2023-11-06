@@ -344,6 +344,9 @@ class ndarray:
     def tolist(self):
         return self.tensor.tolist()
 
+    def __iter__(self):
+        return (ndarray(x) for x in self.tensor.__iter__())
+
     def __str__(self):
         return (
             str(self.tensor)
@@ -367,10 +370,10 @@ class ndarray:
     def __index__(self):
         try:
             return operator.index(self.tensor.item())
-        except Exception:
+        except Exception as exc:
             raise TypeError(
                 "only integer scalar arrays can be converted to a scalar index"
-            )
+            ) from exc
 
     def __bool__(self):
         return bool(self.tensor)
@@ -502,9 +505,14 @@ def array(obj, dtype=None, *, copy=True, order="K", subok=False, ndmin=0, like=N
     ):
         return obj
 
-    # lists of ndarrays: [1, [2, 3], ndarray(4)] convert to lists of lists
     if isinstance(obj, (list, tuple)):
-        obj = _tolist(obj)
+        if obj and all(isinstance(x, torch.Tensor) for x in obj):
+            # list of arrays: *under torch.Dynamo* these are FakeTensors
+            obj = torch.stack(obj)
+        else:
+            # XXX: remove tolist
+            # lists of ndarrays: [1, [2, 3], ndarray(4)] convert to lists of lists
+            obj = _tolist(obj)
 
     # is obj an ndarray already?
     if isinstance(obj, ndarray):

@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Unsqueeze_1"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -20,7 +20,7 @@ graph {
     input: "onnx::Unsqueeze_0"
     input: "onnx::Unsqueeze_1"
     output: "2"
-    name: "Unsqueeze_1"
+    name: "Unsqueeze_2"
     op_type: "Unsqueeze"
   }
   name: "main_graph"
