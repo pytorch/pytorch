@@ -37,7 +37,7 @@ class HistorialEditedFiles(HeuristicInterface):
 
         return test_rankings
 
-    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
+    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
         test_ratings = get_ratings_for_tests(
             ADDITIONAL_CI_FILES_FOLDER / TD_HEURISTIC_HISTORICAL_EDITED_FILES
         )

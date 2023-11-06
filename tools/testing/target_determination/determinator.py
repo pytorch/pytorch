@@ -29,8 +29,9 @@ def get_test_prioritizations(tests: List[str]) -> AggregatedHeuristics:
     return aggregated_results
 
 
-def get_experimental_ratings(tests: List[str]) -> Dict[str, Dict[str, float]]:
+def get_prediction_confidences(tests: List[str]) -> Dict[str, Dict[str, float]]:
+    # heuristic name -> test -> rating/confidence
     rankings: Dict[str, Dict[str, float]] = {}
     for heuristic in HEURISTICS:
-        rankings[heuristic.name] = heuristic.get_test_ratings(tests)
+        rankings[heuristic.name] = heuristic.get_prediction_confidence(tests)
     return rankings

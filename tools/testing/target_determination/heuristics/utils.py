@@ -45,6 +45,9 @@ def query_changed_files() -> List[str]:
 
 
 def normalize_ratings(ratings: Dict[str, float], max_value: float) -> Dict[str, float]:
+    # Takse the ratings, makes the max value into max_value, and proportionally
+    # distributes the rest of the ratings.
+    # Ex [1,2,3,4] and max_value 8 gets converted to [2,4,6,8]
     # Assumes all rankings are >= 0
     # Don't modify in place
     if len(ratings) == 0:

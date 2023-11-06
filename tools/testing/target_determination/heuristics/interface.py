@@ -460,7 +460,7 @@ class HeuristicInterface:
         return self.name
 
     @abstractmethod
-    def get_test_ratings(self, tests: List[str]) -> Dict[str, float]:
+    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
         """
         Like get_test_priorities, but instead returns a float ranking ranging
         from -1 to 1, where negative means skip, positive means run, 0 means no
