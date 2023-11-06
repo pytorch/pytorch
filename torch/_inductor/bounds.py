@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict
 from sympy import Expr
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
@@ -24,9 +25,7 @@ class BoundVars:
     def __init__(self, loop_body: LoopBody) -> None:
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges(0, v - 1)
-            if (isinstance(v, int) or v.is_number)
-            else bound_sympy(v)
+            k: ValueRanges(0, v - 1) if not free_symbols(v) else bound_sympy(v)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded

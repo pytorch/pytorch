@@ -959,6 +959,16 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    def test_non_symint_size_spec(self):
+        # this isn't really a proxy tensor test, but it's the most convenient
+        # way to get a fake tensor with symbolic sizes
+        def f(x):
+            torch._C._non_sym_sizes(x)
+            return x + 1
+
+        x = torch.randn(2, 3)
+        make_fx(f, tracing_mode="symbolic")(x)
+
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
         def f(y, x):
@@ -973,7 +983,6 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
-    @unittest.skip("Need to reenable")
     def test_repeat_interleave_unbacked_output_size(self):
         def f(x, y):
             s = x.sum().item()
@@ -1603,7 +1612,7 @@ L['a'].size()[0] < 20""")
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
-    @torch.fx.experimental._config.patch(translation_validation=True)
+    @torch._dynamo.config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
             assert t.shape[0] == 10
@@ -1663,20 +1672,16 @@ symbolic_tensor_failures = {
     xfail('combinations', ''),
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
