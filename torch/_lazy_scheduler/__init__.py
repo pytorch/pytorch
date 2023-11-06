@@ -56,6 +56,11 @@ class AsyncTensor(torch.Tensor):
     else:
       return self.async_repr()
 
+  # TODO: likely need to define __div__ etc. between Tensor and AsyncTensor
+
+  # def __add__(self, other):
+  #   TODO: between Tensor and AsyncTensor
+
   def __getattribute__(self, attr):
     if attr in dir(torch.Tensor):
       if self._handle is not None:
@@ -201,6 +206,8 @@ class LazyScheduler:
     self._recorded_execution_order = []
 
   def add_to_recorded_execution_order(self, segment):
+    if len(self._recorded_execution_order) > 0 and self._recorded_execution_order[-1] == segment:
+      return
     self._recorded_execution_order.append(segment)
 
   def is_expected_execution_order_for_named_segments(self, expected_execution_order_for_named_segments):
@@ -213,8 +220,17 @@ class LazyScheduler:
     known_segments = []
     print(f"gm.graph: {gm.graph}")
     for node in gm.graph.nodes:
-      # print(f"node: {node}")
-      # print(f"node.meta['segment']: {node.meta['segment']}")
+      # Look up the NN module method in the segment map
+      method = node.meta.get('nn_module_method', None)
+      if method is not None and method in Segment._func_to_segment_mapping:
+        segment = Segment._func_to_segment_mapping[method]
+      else:
+        # The logic here means that we don't have a single unnamed segment
+        # for all graphs in between the two named segments.
+        # This should not matter, because users should not care about unnamed segments in general.
+        segment = Segment.get_next_unnamed_segment()
+      node.meta['segment'] = segment
+
       if len(known_segments) == 0 or node.meta["segment"] != known_segments[-1]:
         known_segments.append(node.meta["segment"])
 
@@ -397,4 +413,8 @@ FAQ
 Q1: What happens if we have a user-defined segment deep down in a submodule?
 Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
 You can call this a "segment break".
+
+Q2: What if there are multiple calls to the same module instance's same function?
+Answer: we don't support it for now (we turn off the schedule in this case). In the future we could support it.
+Note that we do support calling the same module class' (but different instances') same function.
 """

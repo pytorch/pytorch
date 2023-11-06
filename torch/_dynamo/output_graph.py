@@ -1425,10 +1425,13 @@ class SubgraphTracer(fx.Tracer):
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
-        from torch._lazy_scheduler import Segment
-        if Segment._cur_segment is None:
-            Segment._cur_segment = Segment.get_next_unnamed_segment()
-        node.meta['segment'] = Segment._cur_segment
+        # Store the corresponding nn.Module instance bound method for this node
+        if len(self.output_graph._current_tx) > 0:
+            f_code = self.output_graph._current_tx[-1].f_code
+            if "orig_nnmodule" in code_context.get_context(f_code):
+                module = code_context.get_context(f_code)["orig_nnmodule"]
+                method_name = f_code.co_name
+                node.meta['nn_module_method'] = getattr(module, method_name)
         return node
 
     # Note: we did not override erase_node since

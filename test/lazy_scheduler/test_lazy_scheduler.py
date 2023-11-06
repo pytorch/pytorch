@@ -1,6 +1,7 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py
 
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test1
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_inplace_in_unnamed_NOT_WORKING
 """
 
@@ -55,6 +56,11 @@ class TestLazyScheduler(TestCase):
         k = x * y
         return k
 
+      def func_gb1(self, x, y):
+        s = x + y
+        print(s)
+        return s
+
       def forward(self, x, y):
         x, y = self.func1(x, y)
         y = y.relu()
@@ -62,6 +68,8 @@ class TestLazyScheduler(TestCase):
         z = z.relu()
         k = self.func3(x, y)  # we should be able to schedule this one before `func2`
         o = self.submod(x, y)  # we should be able to schedule this one before `func2`
+        # s = self.func_gb1(x, y)  # we should be able to schedule this one before `func2`
+        # return z + k + o + s
         return z + k + o
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -73,6 +81,7 @@ class TestLazyScheduler(TestCase):
     Segment._func_to_segment_mapping[m.func2] = "func2"
     Segment._func_to_segment_mapping[m.func3] = "func3"
     Segment._func_to_segment_mapping[m.submod.subfunc1] = "subfunc1"
+    # Segment._func_to_segment_mapping[m.func_gb1] = "func_gb1"
     m = m.to(device)
     x = torch.randn(4, 4, device=device)
     y = torch.randn(4, 4, device=device)
@@ -80,6 +89,7 @@ class TestLazyScheduler(TestCase):
     schedule = [
       "func1",
       "subfunc1",
+      # "func_gb1",
       "func3",
       "func2",
     ]
@@ -154,14 +164,19 @@ if __name__ == "__main__":
 
 
 """
-TODO: all tests:
+TODO: high-pri tests:
 - [Added in combined test] in-place ops within named segment
 - [Added in combined test] mix of named and unnamed segments (unnamed segment in-between named segments)
 - [Added in combined test] reordering named segments across unnamed segments (N1, U1, N2 becomes N2, U1, N1)
-- reordering named segments across multiple named segments
-- reordering named segments that are next to each other
 - graph break within named segment
 - graph break within unnamed segment
+- nested segments (not supported for now)
+- no recursive module method calls
+- TestModule_instance_a.func1 calling TestModule_instance_b.func1 (which is a named segment) is allowed
+
+Should already work, just need unit tests:
+- reordering named segments across multiple named segments
+- reordering named segments that are next to each other
 
 - only in-place ops within unnamed segment (this is buggy and doesn't work right now)
 """

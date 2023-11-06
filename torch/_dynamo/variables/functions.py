@@ -89,17 +89,9 @@ class BaseUserFunctionVariable(VariableTracker):
     ) -> "VariableTracker":
         self_args_list = list(self.self_args())
         args = list(args)
-        # Look up the NN module method in the segment map
-        from torch._lazy_scheduler import Segment
-        method = getattr(tx.output.get_submodule(self_args_list[0].module_key), self.get_function().__name__)
-        if method in Segment._func_to_segment_mapping:
-            Segment._cur_segment = Segment._func_to_segment_mapping[method]
-        print(f"Segment._cur_segment: {Segment._cur_segment}")
         ret = tx.inline_user_function_return(
             self, self_args_list + args, kwargs
         )
-        # Move to the next untagged segment
-        Segment._cur_segment = Segment.get_next_unnamed_segment()
         return ret
 
     def num_parameters(self):
