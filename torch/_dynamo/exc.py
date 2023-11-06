@@ -41,6 +41,14 @@ class RestartAnalysis(TorchDynamoException):
     pass
 
 
+class SpeculationRestartAnalysis(RestartAnalysis):
+    pass
+
+
+class UnspecializeRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 
