@@ -4,7 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
-#if !defined(__s390x__) && !defined(__powerpc__)
+#if !defined(__s390x__)
 #include <cpuinfo.h>
 #endif
 #include <cstdlib>
