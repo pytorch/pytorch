@@ -40,6 +40,16 @@ inplace_buffers = True
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
+# Enable pooled allocations for non-output tensors
+memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# How to organize memory under memory_planning=True:
+# - "none": do not try to pool storage, just reuse
+# - "intermediates": all non-outputs share storage, outputs each get unique storage
+# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
+# - "combined": a single pool for both intermediates and outputs
+memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
+
 # codegen benchmark harness
 benchmark_harness = True
 
@@ -484,7 +494,9 @@ class aot_inductor:
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
-    # If not specified, a temp directory will be created under the default caching path
+    # If not specified, a temp directory will be created under the default caching path.
+    # If the specified path contains something like "model.so", the sub-string will be used
+    # to name the generated library.
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
