@@ -29,7 +29,11 @@ def install_config_module(module):
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
         for key, value in list(source.__dict__.items()):
-            if key.startswith("__") or isinstance(value, (ModuleType, FunctionType)):
+            if (
+                key.startswith("__")
+                or isinstance(value, (ModuleType, FunctionType))
+                or value.__module__ == "typing"
+            ):
                 continue
 
             name = f"{prefix}{key}"
@@ -38,11 +42,7 @@ def install_config_module(module):
                 default[name] = value
                 if dest is module:
                     delattr(module, key)
-                continue
-
-            if value.__module__ == "typing":
-                continue
-            if isinstance(value, type):
+            elif isinstance(value, type):
                 assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
@@ -188,7 +188,7 @@ class ConfigModule(ModuleType):
     def to_dict(self) -> Dict[str, Any]:
         warnings.warn(
             (
-                "config.to_dict() has been deprecated. It may no longer change the underlying config."
+                "config.to_dict() has been deprecated. It may no longer change the underlying config. "
                 "use config.shallow_copy_dict() or config.get_config_copy() instead"
             ),
             DeprecationWarning,
