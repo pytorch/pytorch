@@ -38,7 +38,11 @@ using MetadataShape = std::variant<SymIntSmallVec, at::Tensor>;
  */
 struct TORCH_API InputMetadata {
   InputMetadata() = default;
-  InputMetadata(const at::TensorOptions& options, MetadataShape input_shape, bool is_tensor_subclass, bool is_nested);
+  InputMetadata(
+      const at::TensorOptions& options,
+      MetadataShape input_shape,
+      bool is_tensor_subclass,
+      bool is_nested);
   InputMetadata(const at::Tensor& t);
 
   const at::TensorOptions& options() const {

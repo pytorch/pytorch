@@ -46,11 +46,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
             " dimension is not supported for NestedTensor"
         )
     return (
-        tuple(
-            _outer_to_inner_dim(ndim, d)
-            for d in dims
-            if d != 0
-        ),
+        tuple(_outer_to_inner_dim(ndim, d) for d in dims if d != 0),
         zero_in_dims,
     )
 
