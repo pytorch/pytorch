@@ -84,6 +84,8 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {
