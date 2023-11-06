@@ -142,34 +142,42 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   bool set_timedout_error_;
 };
 
-class ProcessGroupNCCLWatchdogStuckKill : public c10d::ProcessGroupNCCL {
+class HangingProcessGroupNCCL : public c10d::ProcessGroupNCCL {
  public:
-  ProcessGroupNCCLWatchdogStuckKill(
+  HangingProcessGroupNCCL(
       const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCL(store, rank, size, opts) {
-    hasMonitorThreadLaunched_.store(false);
+    hasMonitorThreadCaughtError_.store(false);
   }
 
   std::mutex& getWatchdogMutex() {
     return workMetaListMutex_;
   }
 
-  bool getLaunchedFlag() {
-    return hasMonitorThreadLaunched_.load();
+  bool getErrorCaughtFlag() {
+    return hasMonitorThreadCaughtError_.load();
   }
 
  protected:
-  void ncclCommsMonitor() override {
+  void heartbeatMonitor() override {
     try {
-      ProcessGroupNCCL::ncclCommsMonitor();
+      ProcessGroupNCCL::heartbeatMonitor();
     } catch (std::runtime_error& e) {
-      hasMonitorThreadLaunched_.store(true);
+      hasMonitorThreadCaughtError_.store(true);
     }
   }
-  std::atomic<bool> hasMonitorThreadLaunched_;
+
+  // It's really hard to unit test std::abort. So we override it instead.
+  // Commented this override, we do see process aborted with core dump.
+  void terminateProcess(std::string errMsg) override {
+    monitorException_ = std::make_exception_ptr(std::runtime_error(errMsg));
+    std::rethrow_exception(monitorException_);
+  }
+
+  std::atomic<bool> hasMonitorThreadCaughtError_;
 };
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
@@ -189,6 +197,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
+    c10::initLogging();
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
     store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
@@ -260,16 +269,17 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   // Communicators might be aborted here, further operations would fail.
 }
 
-TEST_F(ProcessGroupNCCLErrorsTest, testNCCLWatchdogTimeout) {
+TEST_F(ProcessGroupNCCLErrorsTest, testNCCLWatchdogNoHeartbeat) {
   if (skipTest()) {
     return;
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT, "3", 1) == 0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(30000);
-  ProcessGroupNCCLWatchdogStuckKill pg(store_, 0, 1, options);
+  HangingProcessGroupNCCL pg(store_, 0, 1, options);
 
   auto work = pg.allreduce(tensors_);
   work->wait();
@@ -279,10 +289,11 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLWatchdogTimeout) {
   {
     // Now run all reduce with errors.
     std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
+    LOG(INFO) << "Lock watchdog thread.";
     // Wait for a while before monitor thread throws exceptions.
     std::this_thread::sleep_for(std::chrono::seconds(10));
     // Check the monitoring thread launched and exception thrown.
-    EXPECT_TRUE(pg.getLaunchedFlag());
+    EXPECT_TRUE(pg.getErrorCaughtFlag());
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());

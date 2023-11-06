@@ -48,6 +48,9 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
     "TORCH_NCCL_ENABLE_MONITORING";
 
+constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT =
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT";
+
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
@@ -636,9 +639,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
-  // so that when we get stuck in a collective or watchdog itself hangs,
+  // so that when we get stuck in some NCCL/CUDA calls,
   // we can dump the debugging information and abort the process.
-  virtual void ncclCommsMonitor();
+  virtual void heartbeatMonitor();
+
+  virtual void terminateProcess(std::string errMsg);
 
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -703,14 +708,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  std::atomic<int> heartbeat_;
+  uint64_t heartbeat_;
+
+  int heartbeatTimeoutInSec_;
 
   std::atomic<bool> monitorThreadEnabled_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info
   // and then kill the watchdog thread to avoid hang.
-  std::thread ncclCommMonitorThread_;
+  std::thread ncclHeartbeatMonitorThread_;
 
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
