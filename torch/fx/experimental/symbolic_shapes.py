@@ -153,6 +153,10 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
+        if not is_symbolic(val):
+            # This allow applies to the jagged layout NestedTensor case as
+            # singleton ints are not symbolic
+            return set()
         return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
@@ -2836,9 +2840,18 @@ class ShapeEnv:
         Tries to evaluate expr without introducing guards
 
         If unbacked_only == True, then we only do substitutions on
-        unbacked SymInts (leaving regular hinted integers alone).
+        unbacked SymInts (leaving regular hinted integers alone).  This could
+        result in an expression that still contains backed SymInts, which you
+        could then potentially guard on.
+
+        Use compute_hint == True if you are trying to compute a non-binding
+        hint for the particular hint values of backed SymInts, e.g., if
+        s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
         expr = self.simplify(expr)
+
+        if compute_hint:
+            expr = expr.xreplace(self.var_to_val)
 
         symbols = list(expr.free_symbols)
 
@@ -2974,7 +2987,7 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: "sympy.Expr"):
+    def size_hint(self, expr: "sympy.Expr", *, allow_none=False):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
@@ -2985,6 +2998,8 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
+            if allow_none:
+                return None
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3024,6 +3039,7 @@ class ShapeEnv:
             if a not in self.replacements or expr != self.replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), expr)
                 self.log.debug("SPECIALIZATION", stack_info=True)
+        log.info("set_replacement %s = %s", a, expr)
         self.replacements[a] = expr
 
         # When specializing 'a == expr', the equality should be also conveyed to
@@ -3070,7 +3086,8 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        # NB: prioritize unbacked symints for solving by ordering them last
+        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):
@@ -3081,7 +3098,19 @@ class ShapeEnv:
                 r = try_solve(expr, free[0], floordiv_inequality=False)
                 if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                     new_var = self._find(r[1])
-                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                    ok = False
+                    if self.is_unbacked_symint(free[0]):
+                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                        # s0 - i0 - i1.  Arguably this should be OK but the
+                        # runtime assert machinery is very delicate right now
+                        # so this causes things to fail e.g.,
+                        # test_split_unbacked_sizes
+                        ok = len(free_unbacked_symbols(new_var)) <= 1
+                    else:
+                        # Never substitute backed with unbacked
+                        ok = len(free_unbacked_symbols(new_var)) == 0
+                    if ok:
+                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3357,9 +3386,9 @@ class ShapeEnv:
 
         self._check_frozen(expr, sympy.true)
 
-        # TODO: eliminate symbols on equality tests
-        # (_maybe_guard_eq assumes everything is hinted so it doesn't work
-        # here)
+        # eliminate symbols on equality tests
+        if isinstance(expr, sympy.Eq):
+            self._maybe_guard_eq(expr, True)
 
         if not self._suppress_guards_tls():
             stack = CapturedTraceback.extract(skip=1)
