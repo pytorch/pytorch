@@ -56,6 +56,21 @@ class NullHandler:
     pass
 
 
+class NullKernelHandler(NullHandler):
+    """
+    We need access `V.kernel.removed_buffers` in DeferredLine class when there
+    is no kernel in the context. This happens when codegening the wrapper.
+    Initialize `removed_buffers` and `inplaced_to_remove` explicitly so we don't
+    need call 'getattr' with default value which is error prone to typo in
+    attribute name.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.removed_buffers = set()
+        self.inplaced_to_remove = set()
+
+
 def _arg_str(a) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
@@ -79,7 +94,7 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size, add_asserts=True) -> sympy.Symbol:
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -169,7 +184,7 @@ _ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _real_inputs = Virtualized("real_inputs", NullHandler)
 _fake_mode = Virtualized("fake_mode", NullHandler)
-_kernel = Virtualized("kernel", NullHandler)
+_kernel = Virtualized("kernel", NullKernelHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 _aot_compilation = Virtualized("aot_compilation", NullHandler)
@@ -254,10 +269,10 @@ class OpsWrapper:
         return OpsValue(x)
 
     @staticmethod
-    def indirect_indexing(index, size, add_asserts=True):
+    def indirect_indexing(index, size, check=True):
         # Returns a sympy value, not IR value
         index = OpsWrapper._unwrap(index)
-        return _ops.indirect_indexing(index, size, add_asserts)
+        return _ops.indirect_indexing(index, size, check)
 
 
 ops = OpsWrapper()
