@@ -1130,6 +1130,7 @@ def bitwise_or(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     """
     return prims.bitwise_or(a, b)
 
+
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1157,6 +1158,7 @@ def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         array([5, 5, 3])
     """
     return prims.shift_right_arithmetic(a, b)
+
 
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1197,7 +1199,10 @@ def copysign(
     """
     Copy the sign of the second input to the first input.
 
-    This function takes two inputs, `a` and `b`, and returns a tensor with the magnitude of `a` and the sign of `b`. If `b` is a scalar, it is converted to a tensor with the same dtype and device as `a`. If `a` and `b` are both tensors, they must be on the same device.
+    This function takes two inputs, `a` and `b`, and returns a tensor with the
+    magnitude of `a` and the sign of `b`. If `b` is a scalar, it is converted to a
+    tensor with the same dtype and device as `a`. If `a` and `b` are both tensors,
+    they must be on the same device.
 
     Args:
         a: A tensor or a scalar. The magnitude of the output is based on this input.
