@@ -1064,6 +1064,17 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
+    def test_stack_normalization_axis_kwarg(self):
+        def fn(x, y):
+            return torch.stack([x, y], axis=1)
+
+        x, y = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        expected = fn(x, y)
+        actual = torch.compile(fn)(x, y)
+
+        self.assertEqual(actual, expected)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA:
