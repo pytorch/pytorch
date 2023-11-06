@@ -342,7 +342,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
   // client's first query for validation
-  validate(); 
+  validate();
 
   if (opts.waitWorkers) {
     waitForWorkers();

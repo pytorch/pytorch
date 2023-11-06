@@ -100,8 +100,8 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
-  // miscellaneous sockets 
-  std::unordered_set<int> miscellaneousSockets_; 
+  // miscellaneous sockets
+  std::unordered_set<int> miscellaneousSockets_;
 
   Socket storeListenSocket_;
   std::vector<Socket> sockets_{};
@@ -577,7 +577,7 @@ void TCPStoreMasterDaemon::run() {
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
-      // all clients are miscellaneous before getting its validation query 
+      // all clients are miscellaneous before getting its validation query
       addMiscellaneousSocket(rawSocket);
     }
 
