@@ -152,14 +152,13 @@ class CudaInterface(DeviceInterface):
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
-    stream = staticmethod(torch.cuda.stream)
+    stream = staticmethod(torch.cuda.stream)  # type: ignore[assignment]
     current_stream = staticmethod(torch.cuda.current_stream)
-    set_stream = staticmethod(torch.cuda.set_stream)
-    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)
+    set_stream = staticmethod(torch.cuda.set_stream)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.cuda._set_stream_by_id)  # type: ignore[assignment]
     synchronize = staticmethod(torch.cuda.synchronize)
-    get_device_properties = staticmethod(torch.cuda.get_device_properties)
-    if get_cuda_stream is not None:
-        get_raw_stream = staticmethod(get_cuda_stream)
+    get_device_properties = staticmethod(torch.cuda.get_device_properties)  # type: ignore[assignment]
+    get_raw_stream = staticmethod(get_cuda_stream) # type: ignore[arg-type]
 
     # Can be mock patched by @patch decorator.
     @staticmethod
