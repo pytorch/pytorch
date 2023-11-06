@@ -2628,8 +2628,8 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(str(fw_output[0]), "sum_1")
         # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
         # rather than saving the sizes of the primals input for use in backward expand
-        self.assertEqual(str(fw_output[1]), "sym_size")
-        self.assertEqual(str(fw_output[2]), "sym_size_1")
+        self.assertEqual(str(fw_output[1]), "sym_size_int")
+        self.assertEqual(str(fw_output[2]), "sym_size_int_1")
 
         inp = [
             torch.randn(10, requires_grad=True),
