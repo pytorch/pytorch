@@ -883,10 +883,9 @@ class BuiltinVariable(VariableTracker):
                     ListIteratorVariable,
                 ),
             ):
-                items = {}
-                for x in arg.unpack_var_sequence(tx):
-                    k, v = x.unpack_var_sequence(tx)
-                    items.update({k: v})
+                items = dict(
+                    x.unpack_var_sequence(tx) for x in arg.unpack_var_sequence(tx)
+                )
                 return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
