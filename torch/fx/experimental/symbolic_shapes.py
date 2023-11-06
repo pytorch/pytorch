@@ -2517,11 +2517,6 @@ class ShapeEnv:
                         track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
                     track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
-        # fill in any missing sources
-        for var, sources in self.var_to_sources.items():
-            if var not in symbol_to_source:
-                symbol_to_source[var].extend(sources)
-
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
