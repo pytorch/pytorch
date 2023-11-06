@@ -21,51 +21,42 @@ class C10_API SymbolicShapeMeta {
   }
 
   void refresh_contiguous() {
-    if (strides_valid_) {
-      is_contiguous_ = true;
-      is_channels_last_contiguous_ = false;
-      is_channels_last_3d_contiguous_ = false;
-      is_channels_last_ = false;
-      is_channels_last_3d_ = false;
-      is_non_overlapping_and_dense_ = true;
-    } else {
-      switch (dim()) {
-        case 4: {
-          is_contiguous_ = compute_contiguous();
-          is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-          is_channels_last_3d_contiguous_ = false;
-          is_channels_last_ = compute_strides_like_channels_last_2d();
-          is_channels_last_3d_ = false;
-          is_non_overlapping_and_dense_ =
-              compute_is_non_overlapping_and_dense_dim4();
-          break;
-        }
-        case 5: {
-          is_contiguous_ = compute_contiguous();
-          is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-          is_channels_last_3d_contiguous_ =
-              compute_channels_last_contiguous_3d_dim5();
-          is_channels_last_ = compute_channels_last_2d_dim5();
-          is_channels_last_3d_ = compute_channels_last_3d_dim5();
-          is_non_overlapping_and_dense_ =
-              compute_is_non_overlapping_and_dense_dim5();
-          break;
-        }
-        default: {
-          // is_channels_last_ and is_channels_last_3d_ are suggested
-          // memory_format. Being channels_last_contiguous doesn't necessarily
-          // mean the tensor is strided like channels_last: for strides on
-          // channel dimension could suggest desired memory_layout, but it
-          // doesn't affect memory storage
-          is_contiguous_ = compute_contiguous();
-          is_channels_last_contiguous_ = false;
-          is_channels_last_3d_contiguous_ = false;
-          is_channels_last_ = false;
-          is_channels_last_3d_ = false;
-          is_non_overlapping_and_dense_ =
-              compute_is_non_overlapping_and_dense_anydim();
-          break;
-        }
+    switch (dim()) {
+      case 4: {
+        is_contiguous_ = compute_contiguous();
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ =
+            compute_is_non_overlapping_and_dense_dim4();
+        break;
+      }
+      case 5: {
+        is_contiguous_ = compute_contiguous();
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ =
+            compute_channels_last_contiguous_3d_dim5();
+        is_channels_last_ = compute_channels_last_2d_dim5();
+        is_channels_last_3d_ = compute_channels_last_3d_dim5();
+        is_non_overlapping_and_dense_ =
+            compute_is_non_overlapping_and_dense_dim5();
+        break;
+      }
+      default: {
+        // is_channels_last_ and is_channels_last_3d_ are suggested
+        // memory_format. Being channels_last_contiguous doesn't necessarily
+        // mean the tensor is strided like channels_last: for strides on
+        // channel dimension could suggest desired memory_layout, but it
+        // doesn't affect memory storage
+        is_contiguous_ = compute_contiguous();
+        is_channels_last_contiguous_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = false;
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ =
+            compute_is_non_overlapping_and_dense_anydim();
+        break;
       }
     }
   }
