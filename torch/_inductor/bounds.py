@@ -67,9 +67,18 @@ class BoundVars:
                 subblock = self.loop_body.subblocks[key]
                 # The result within the lambda will reference to the final
                 # set of modules at the end of the for-loop as it stores a reference to it
-                result[key] = lambda mask, value: self.masked_subblock(
-                    subblock, self._bounds, mask, value, result
-                )
+
+                # bind subblock in a function because python lambdas close over by reference
+                # moving the lambda out of make_fn would close over the reference to subblock,
+                # so all lambdas would have the same subblock reference that is the final
+                # subblock in the loop
+                def make_fn(subblock):
+                    return lambda mask, value: self.masked_subblock(
+                        subblock, self._bounds, mask, value, result
+                    )
+
+                result[key] = make_fn(subblock)
+
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]

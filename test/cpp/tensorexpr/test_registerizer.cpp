@@ -2284,8 +2284,8 @@ TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-// First statment in condition closes outer access, but can be registerized with
-// later statements.
+// First statement in condition closes outer access, but can be registerized
+// with later statements.
 TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2326,7 +2326,7 @@ TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
    * A[x] = A_2;
    */
 
-  // TODO: I suppose we could refactor with a conditional initializier?
+  // TODO: I suppose we could refactor with a conditional initializer?
 
   std::ostringstream oss;
   oss << *stmt;
@@ -3145,7 +3145,7 @@ TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-// Accesses are registerized inside two conditions, but the immeidate parent is
+// Accesses are registerized inside two conditions, but the immediate parent is
 // not a condition.
 TEST(Registerizer, RegisterizerTwoConditionalLoops) {
   BufHandle a("A", {1}, kInt);

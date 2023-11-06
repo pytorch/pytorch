@@ -86,7 +86,7 @@ class Match:
         if self.kwargs:
             for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
-                    raise FailedMatch(f"kwarg mismatch: {key}")
+                    raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
         self.nodes.extend(other.nodes)
         self.kwargs.update(other.kwargs)
@@ -124,7 +124,7 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         assert self.ctx
         if trace_fn is None:
-            trace_fn = inference_graph
+            trace_fn = fwd_only
         replacement = trace_fn(
             replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
         )
@@ -139,6 +139,12 @@ class Match:
 class FailedMatch(RuntimeError):
     def __init__(self, format_string, *args, **kwargs):
         self.format_string = format_string
+        # We want to construct error messages lazily instead of eagerly, as
+        # constructing them eagerly can significantly worsen compile times.
+        if len(format_string) > 200:
+            raise RuntimeError(
+                f"Format string too long - use lazy construction of strings instead. Format string is\n {format_string}"
+            )
         self.args = args
         self.kwargs = kwargs
 
@@ -402,17 +408,35 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
+        if not self._match_fns(node) or len(node.args) != len(self.args):
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users {}", self)
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
+        _args = node.args
+        _kwargs = node.kwargs
+        if len(_kwargs) < len(self.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+            else:
+                _args, _kwargs = normalized_args_and_kwargs
+                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
+                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+                else:
+                    return FailedMatch(
+                        "function_mismatch: node={}, pattern={}", node, self
+                    )
+        else:
+            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+
+        node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch("args_structure {} {}", node_spec, self_spec)
@@ -543,7 +567,7 @@ class ListOf(PatternExpr):
             pattern_to_node = child_ctx.filter_multi_user_patterns()
             if not child_match:
                 if not self.partial:
-                    return FailedMatch(f"list[{i}]: {child_match}")
+                    return FailedMatch("list[{}]: {}", i, child_match)
                 continue
             matched = True
             m.extend(child_match.bundle())
@@ -842,7 +866,7 @@ def register_replacement(
     replace_fn,
     example_inputs: Iterable[Any],
     trace_fn: Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-    pass_dict,
+    pass_dicts,
     extra_check=_return_true,
     scalar_workaround=(),
     exclusive_arg_names=(),
@@ -857,10 +881,11 @@ def register_replacement(
         search_fn: traced to give original pattern
         replace_fn: traced to give replacement graph
         example_inputs: example inputs for initial trace
-        trace_fn: inference_graph or training_graph
+        trace_fn: fwd_only or joint_fwd_bwd
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
+    argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
         """
@@ -869,17 +894,24 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
+        for name in argnames:
+            if name not in match.kwargs:
+                raise RuntimeError(
+                    f"Not all inputs to pattern found in match.kwargs. Perhaps one "
+                    f"of the inputs is unused? argnames={argnames}, match.kwargs={match.kwargs}"
+                )
+
         args = list(
             torch.fx.map_arg(
-                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
+                [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]  # type: ignore[has-type]
             )
         )
-        for i, grad in enumerate(requires_grad):
-            if isinstance(args[i], torch.Tensor):
-                if grad and is_integer_dtype(args[i].dtype):
-                    return False
+        with torch._dynamo.utils.detect_fake_mode(args):
+            for i, grad in enumerate(requires_grad):
+                if isinstance(args[i], torch.Tensor):
+                    if grad and is_integer_dtype(args[i].dtype):
+                        return False
 
-                with torch._dynamo.utils.detect_fake_mode(args):
                     args[i] = torch.empty_strided(
                         args[i].size(),
                         args[i].stride(),
@@ -887,30 +919,40 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-        specific_graph = trace_fn(search_fn, args)
-        specific_pattern = fx_to_pattern(
-            specific_graph, argnames=argnames, exclusive_arg_names=exclusive_arg_names
-        )
-        specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
-        if specific_pattern_match and extra_check(specific_pattern_match):
-            # trace the pattern using the shapes form the user program
-            match.replacement_graph = trace_fn(replace_fn, args)
-            return True
-        return False
+            specific_graph = trace_fn(search_fn, args)
+            specific_pattern = fx_to_pattern(
+                specific_graph,
+                argnames=argnames,
+                exclusive_arg_names=exclusive_arg_names,  # type: ignore[has-type]
+                scalar_workaround=scalar_workaround,
+            )
+            specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
+            if specific_pattern_match and extra_check(specific_pattern_match):
+                # trace the pattern using the shapes from the user program
+                match.replacement_graph = trace_fn(replace_fn, args)
+                return True
+            return False
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:
+        for name in argnames:  # type: ignore[has-type]
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
+            if f"tangents_{i}" not in kwargs:
+                break
             args.append(kwargs.pop(f"tangents_{i}"))
         assert not kwargs, f"leftover kwargs: {kwargs!r}"
         return args
 
+    if trace_fn is joint_fwd_bwd:
+        # If inference mode is enabled during compilation, assume that we don't
+        # want to match on any training graph patterns
+        if torch.is_inference_mode_enabled():
+            return False
+
     # TODO: Revisit the functionalize_rng_ops for lowmem dropout
     with functorch_config.patch(functionalize_rng_ops=False):
-        argnames = [*inspect.signature(search_fn).parameters.keys()]
-        requires_grad = [
+        requires_grad: List[bool] = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
         if search_fn_pattern is None:
@@ -932,7 +974,8 @@ def register_replacement(
             extra_check=check_fn,
             normalize_args=normalize_args,
         )
-        pattern.register(pass_dict)
+        pattern.register(pass_dicts)
+        return pattern.pattern
 
 
 @functorch_config.patch(functionalize_rng_ops=False)
@@ -940,7 +983,20 @@ def gen_pattern(
     search_fn, example_inputs, trace_fn, scalar_workaround=(), exclusive_arg_names=()
 ) -> PatternExpr:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
-    search_gm = trace_fn(search_fn, example_inputs)
+
+    if scalar_workaround == ():
+        scalar_workaround = {}
+    flat_inputs = []
+    input_idx = 0  # Positional arguments index
+
+    for argname in argnames:
+        if argname in scalar_workaround:
+            flat_inputs.append(scalar_workaround[argname])
+        else:
+            flat_inputs.append(example_inputs[input_idx])
+            input_idx += 1
+
+    search_gm = trace_fn(search_fn, flat_inputs)
     return fx_to_pattern(
         search_gm,
         ignore_types=(int, float, list, torch.device, torch.dtype),
@@ -1096,7 +1152,11 @@ def _not_implemented(*args, **kwargs) -> NoReturn:
 
 
 def fx_to_pattern(
-    gm, ignore_types=(), argnames=(), scalar_workaround=(), exclusive_arg_names=()
+    gm,
+    ignore_types=(),
+    argnames=(),
+    scalar_workaround=(),
+    exclusive_arg_names=(),
 ) -> PatternExpr:
     """
     Convert an FX graph into a PatternExpr.  This is useful for simple
@@ -1159,12 +1219,12 @@ def fx_to_pattern(
 
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
-        return MultiOutputPattern(pytree.tree_flatten(pattern)[0])
+        return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
 
 
 @torch.no_grad()
-def inference_graph(fn, args) -> torch.fx.GraphModule:
+def fwd_only(fn, args) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
@@ -1175,7 +1235,7 @@ def inference_graph(fn, args) -> torch.fx.GraphModule:
 
 
 @torch.enable_grad()
-def training_graph(fn, args) -> torch.fx.GraphModule:
+def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
     """Build a normalized training graph, for use with fx_to_pattern"""
     gm: Optional[torch.fx.GraphModule] = None
 
