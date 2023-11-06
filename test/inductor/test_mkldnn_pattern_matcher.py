@@ -1415,7 +1415,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             match_nodes = 12
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
-    def test_qconv2d_maxpool2d_linear_dynamic(self):
+    def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
         r"""
         This testcase will quantize a single Conv2d->Maxpool2d->Linear module
         with dynamic batch size input.
@@ -1444,11 +1444,12 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
         mod = M().eval()
         v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
-        include_ops = [
-            "torch.ops.onednn.qconv2d_pointwise",
-            "torch.ops.quantized.max_pool2d",
-            "torch.ops.onednn.qlinear_pointwise",
-        ]
+        if include_ops is None:
+            include_ops = [
+                "torch.ops.onednn.qconv2d_pointwise",
+                "torch.ops.quantized.max_pool2d",
+                "torch.ops.onednn.qlinear_pointwise",
+            ]
         exclude_ops = []
         self._test_code_common(
             mod,
