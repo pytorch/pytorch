@@ -4,7 +4,7 @@ import types
 
 import torch
 
-from .allowed_functions import is_user_defined_allowed
+from .allowed_functions import _disallowed_function_ids, is_user_defined_allowed
 
 from .utils import hashable
 
@@ -2717,9 +2717,11 @@ torch_name_rule_map = {**manual_torch_name_rule_map, **auto_torch_name_rule_map}
 def get_torch_obj_rule_map():
     d = dict()
     for k, v in torch_name_rule_map.items():
-        obj = load_object(k)
-        # assert obj not in d, breakpoint()
-        d[obj] = v
+        try:
+            obj = load_object(k)
+            d[obj] = v
+        except Exception:
+            pass
     return d
 
 
@@ -2759,6 +2761,8 @@ def is_tensor_method_or_op(obj):
 
 def lookup(obj):
     if not hashable(obj):
+        return None
+    if id(obj) in _disallowed_function_ids:
         return None
     rule = get_torch_obj_rule_map().get(obj, None)
     if rule is None and (is_user_defined_allowed(obj) or is_tensor_method_or_op(obj)):
