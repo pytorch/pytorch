@@ -3576,7 +3576,7 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return [V.graph.wrapper_code.val_to_arg_str(x) for x in self.constant_args]
+        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
