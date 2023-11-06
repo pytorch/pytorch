@@ -170,6 +170,20 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
+    def test_adaptive_max_pool3d_with_indices(self, device):
+        x = 5
+        y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
+
+        def fn(x, y):
+            return torch.nn.functional.adaptive_max_pool3d_with_indices(
+                output_size=x, input=y, return_indices=True
+            )
+
+        opt_f = self.compile_fn(fn)
+        r = fn(x, y)
+        opt_r = opt_f(x, y)
+        self.assertEqual(r, opt_r)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
