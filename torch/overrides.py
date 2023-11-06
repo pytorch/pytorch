@@ -178,8 +178,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.empty_permuted,
         torch.empty_strided,
         torch.empty_quantized,
-        torch.export.constrain_as_size,
-        torch.export.constrain_as_value,
         torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
@@ -223,6 +221,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_max,
         torch.sym_min,
         torch.sym_not,
+        torch.sym_ite,
         torch.sym_constrain_range,
         torch.sym_constrain_range_for_size,
         torch.tril_indices,
@@ -346,6 +345,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
         Tensor._view_func,
+        Tensor._view_func_unsafe,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
@@ -1153,6 +1153,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
+        torch.unravel_index: lambda indices, shape: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -1480,7 +1481,7 @@ def wrap_torch_function(dispatcher: Callable):
 
     return inner
 
-def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
+def _get_overloaded_args(relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1502,6 +1503,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
         Iterable of array-like arguments to check for __torch_function__
         methods.
 
+    get_type_fn : callable, optional
+        Function to call on each argument in relevant_args to get its type.
+
     Returns
     -------
     overloaded_args : list
@@ -1511,6 +1515,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    if get_type_fn is None:
+        get_type_fn = type
+
     # If torch function is not enabled, there are no overloaded types
     if not torch._C._is_torch_function_enabled():
         return []
@@ -1518,7 +1525,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
     for arg in relevant_args:
-        arg_type = type(arg)
+        arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
         # reasonable performance even with a long list of possibly overloaded
         # arguments.
@@ -1536,7 +1543,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
                 # This ensures "subclasses before superclasses".
                 index = len(overloaded_args)
                 for i, old_arg in enumerate(overloaded_args):
-                    if issubclass(arg_type, type(old_arg)):
+                    if issubclass(arg_type, get_type_fn(old_arg)):
                         index = i
                         break
                 overloaded_args.insert(index, arg)
@@ -1846,7 +1853,7 @@ def is_tensor_like(inp):
     >>> is_tensor_like(TensorLike())
     True
     """
-    return type(inp) is torch.Tensor or hasattr(type(inp), "__torch_function__")
+    return type(inp) is torch.Tensor or hasattr(inp, "__torch_function__")
 
 class TorchFunctionMode:
     """

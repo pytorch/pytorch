@@ -1,5 +1,4 @@
 import torch
-from torch._export.constraints import constrain_as_size
 
 from torch._export.db.case import export_case
 
@@ -19,5 +18,5 @@ def constrain_as_size_example(x):
     tensor.
     """
     a = x.item()
-    constrain_as_size(a, min=0, max=5)
+    torch._constrain_as_size(a, min=0, max=5)
     return torch.ones((a, 5))
