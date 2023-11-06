@@ -463,6 +463,13 @@ def _verify_params_across_processes(
     logger: Optional[Logger],
 ): ...
 def _make_nccl_premul_sum(factor: Union[float, List[Tensor]]) -> ReduceOp: ...
+def _register_process_group(
+    group_name: str,
+    process_group: ProcessGroup,
+) -> None: ...
+def _resolve_process_group(
+    group_name: str,
+) -> ProcessGroup: ...
 
 class Backend:
     def __init__(

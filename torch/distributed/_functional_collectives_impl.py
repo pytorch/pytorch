@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 import weakref
 import torch
@@ -87,6 +88,9 @@ def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
 
 def _register_tensor_wrapper(tensor) -> None:
+    if USE_NATIVE_C10D_FUNCTIONAL:
+        # Tensor storage -> work mapping is maintained in C++
+        return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.

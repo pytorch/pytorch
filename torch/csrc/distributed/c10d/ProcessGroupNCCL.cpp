@@ -784,6 +784,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
+  std::cout << "synchronizing streams" << std::endl;
   for (const auto i : c10::irange(devices_.size())) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
