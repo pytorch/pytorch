@@ -359,6 +359,15 @@ AOTITorchError aoti_torch_assign_tensors(
   });
 }
 
+AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    at::Tensor out_tensor = self_tensor->clone();
+    at::Tensor* out_tensor_ptr = new at::Tensor(std::move(out_tensor));
+    *ret = tensor_pointer_to_tensor_handle(out_tensor_ptr);
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
