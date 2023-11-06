@@ -585,14 +585,18 @@ class CUDAWarmupNode:
         existing_path_data_ptrs = {
             t.data_ptr() for t in self.path_live_weakrefs() if t()
         }
-        non_cudagraph_inps = set()
-        for t in itertools.chain(new_inputs, self.wrapped_function.constants):
-            if (
-                isinstance(t, torch.Tensor)
-                and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
-            ):
-                non_cudagraph_inps.add(t.untyped_storage().data_ptr())
-        del t
+
+        def get_non_cudagraph_inps():
+            non_cudagraph_inps = set()
+            for t in itertools.chain(new_inputs, self.wrapped_function.constants):
+                if (
+                    isinstance(t, torch.Tensor)
+                    and t.untyped_storage().data_ptr() not in existing_path_data_ptrs
+                ):
+                    non_cudagraph_inps.add(t.untyped_storage().data_ptr())
+            return non_cudagraph_inps
+
+        non_cudagraph_inps = get_non_cudagraph_inps()
 
         if config.triton.slow_path_cudagraph_asserts and not self.already_warm:
             refs = list(self.path_live_weakrefs())
