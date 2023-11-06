@@ -10,6 +10,7 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
+    "narrow",
 ]
 
 # Nested Tensor constructor functions
