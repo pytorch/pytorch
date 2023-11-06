@@ -144,7 +144,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
-Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f, const std::vector<at::Tag>& tags) & {
   c10::FunctionSchema schema = [&] {
     if (std::holds_alternative<c10::FunctionSchema>(name_or_schema)){
       return std::get<c10::FunctionSchema>(std::move(name_or_schema));
@@ -164,7 +164,7 @@ Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& na
   }();
   c10::OperatorName name("", "");  // Get the namespaced name for the impl call
   // First define the schema...
-  _def(std::move(schema), &name);
+  _def(std::move(schema), &name, tags);
   // Then register the implementation...
   auto dispatch_key = f.dispatch_key_.has_value() ? f.dispatch_key_ : dispatch_key_;
   registrars_.emplace_back(
