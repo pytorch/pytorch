@@ -112,13 +112,10 @@ def raggedness_matches(nt, size):
     return list(nt._size[:end]) == list(size[:end])
 
 
-def squeeze_leading_ones_get_extra(t, nt):
+def squeeze_leading_ones(t):
     # Note: [ Squeezing leading ones ]
     #
-    # Squeeze leading ones from t, and return the number of extra ones
-    # that need to be unsqueezed after relying on dense broadcasting
-    # Today, we would error if extra != 0 because NT does not yet support
-    # unsqueezing on the 0th dimension.
+    # Squeeze leading ones from t.
     #
     # We want:
     #   (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
@@ -132,15 +129,11 @@ def squeeze_leading_ones_get_extra(t, nt):
     #   (sum(*), ?, ?) -> (B, j0, ?, ?)
     #
     # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
-    # at step (4).
-    t_shape = t.shape
-    extra = 0
-    for s in t_shape:
-        if s == 1:
-            if t.dim() > nt.dim():
-                extra += 1
-            t = t.squeeze(0)
-    return t, extra
+    # at step (4) and we would need to update this function to record how
+    # many ones we unsqueezed.
+    while t.shape[0] == 1:
+        t = t.squeeze(0)
+    return t
 
 
 def register_func(tables, aten_ops, schema_str):
@@ -232,9 +225,9 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # ex: (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
     nt, t = (a, b) if a_is_nt else (b, a)
     # See Note: [ Squeezing leading ones ]
-    t_squeezed, extra = squeeze_leading_ones_get_extra(t, nt)
-    if extra != 0:
+    if t.dim() > nt.dim():
         raise NotImplementedError("NYI: broadcasting NT with T with larger dim")
+    t_squeezed = squeeze_leading_ones(t)
     if nt.dim() >= t_squeezed.dim() + 2:
         lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
         return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
