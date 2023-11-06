@@ -32,7 +32,7 @@ def install_config_module(module):
             if (
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
-                or value.__module__ == "typing"
+                or (hasattr(value, "__module__") and value.__module__ == "typing")
             ):
                 continue
 
