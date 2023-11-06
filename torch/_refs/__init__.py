@@ -1216,7 +1216,7 @@ def copysign(
 
     Example:
         >>> a = torch.tensor([1.0, -2.0, 3.0])
-        >>> b = torch.tensor([-1.0, 2.0, -3.0])
+        >>> b = torch.tensor([-100.0, 234.0, -398.0])
         >>> copysign(a, b)
         tensor([-1.0, 2.0, -3.0])
     """
