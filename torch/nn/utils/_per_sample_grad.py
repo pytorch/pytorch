@@ -3,18 +3,14 @@ import functools
 import torch
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
 
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
 def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", batch_first=True):
     r"""
-    call_for_per_sample_grads(module, batch_size=None, loss_reduction="sum", batch_first=True)
-    ``call_for_per_sample_grads`` returns a function that is invoked like the forward
-    function of ``module`` and will produce the same result. Then, when backward is invoked,
-    the parameters of ``module`` will have a ``grad_sample`` field populated with the per sample
-    gradients instead of the regular gradients
+    Return a forward function for a module, populating grad_sample with per sample gradients on backward invocation.
 
     Args:
         module: The ``nn.Module`` to get per sample gradients with respect to. All trainable
@@ -62,7 +58,7 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
             return og_tensor
 
     def compute_batch_size(*args, **kwargs):
-        args_and_kwargs = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
+        args_and_kwargs = pytree.arg_tree_leaves(*args, **kwargs)
         batch_size = None
         for arg in args_and_kwargs:
             if not isinstance(arg, torch.Tensor):

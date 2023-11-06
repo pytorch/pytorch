@@ -16,42 +16,6 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-# NVFuser runtime library
-libtorch_nvfuser_runtime_sources = [
-    "third_party/nvfuser/runtime/array.cu",
-    "third_party/nvfuser/runtime/array_rocm.cu",
-    "third_party/nvfuser/runtime/bf16_support.cu",
-    "third_party/nvfuser/runtime/bf16_support_rocm.cu",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/fp16_support.cu",
-    "third_party/nvfuser/runtime/fused_reduction.cu",
-    "third_party/nvfuser/runtime/fused_welford_helper.cu",
-    "third_party/nvfuser/runtime/fused_welford_impl.cu",
-    "third_party/nvfuser/runtime/grid_broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/grid_sync.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
-    "third_party/nvfuser/runtime/index_utils.cu",
-    "third_party/nvfuser/runtime/memory.cu",
-    "third_party/nvfuser/runtime/random_numbers.cu",
-    "third_party/nvfuser/runtime/swizzle.cu",
-    "third_party/nvfuser/runtime/tensor.cu",
-    "third_party/nvfuser/runtime/tensorcore.cu",
-    "third_party/nvfuser/runtime/tuple.cu",
-    "third_party/nvfuser/runtime/type_traits.cu",
-    "third_party/nvfuser/runtime/warp.cu",
-    "third_party/nvfuser/runtime/warp_rocm.cu",
-    "third_party/nvfuser/runtime/welford.cu",
-    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
-    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
-]
-
-libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
-
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -255,7 +219,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
-    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -521,7 +484,9 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
+    "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/GroupRegistry.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",

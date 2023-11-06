@@ -533,7 +533,7 @@ if(NOT MSVC)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
 endif()
 # Disable certain warnings for GCC-9.X
-if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+if(CMAKE_COMPILER_IS_GNUCXX)
   # See https://github.com/pytorch/pytorch/issues/38856
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
@@ -692,7 +692,7 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
-  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
+  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
   target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -936,8 +936,7 @@ if(USE_ROCM)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not
   if(USE_NCCL)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    target_link_libraries(torch_hip PRIVATE __caffe2_nccl fmt::fmt-header-only)
+    target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
@@ -965,6 +964,7 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUSPARSELT)
@@ -972,8 +972,7 @@ elseif(USE_CUDA)
       target_compile_definitions(torch_cuda PRIVATE USE_CUSPARSELT)
   endif()
   if(USE_NCCL)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl fmt::fmt-header-only)
+    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
   if(USE_UCC)
@@ -1261,21 +1260,21 @@ endif()
 if(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   # NB: Massive hack.  torch/csrc/jit/codegen/fuser/codegen.cpp includes
   # torch/csrc/jit/codegen/fuser/cuda/resource_strings.h which changes the
-  # strings depending on if you're __HIP_PLATFORM_HCC__ or not.
+  # strings depending on if you're __HIP_PLATFORM_AMD__ or not.
   # But that file is in torch_cpu!  So, against all odds, this macro
   # has to be set on torch_cpu too.  I also added it to torch for
   # better luck
   target_compile_definitions(torch_cpu PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   target_compile_definitions(torch PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   target_include_directories(torch_hip PRIVATE
     /opt/rocm/include

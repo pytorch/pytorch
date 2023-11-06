@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -22,11 +23,26 @@
     }                                 \
   } while (0)
 
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
-  if ((call) != AOTI_TORCH_SUCCESS) {                                      \
-    throw std::runtime_error(                                              \
-        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
-        std::to_string(__LINE__));                                         \
+#if defined(__GNUC__) || defined(__clang__)
+#define AOTI_NOINLINE __attribute__((noinline))
+#elif _MSC_VER
+#define AOTI_NOINLINE __declspec(noinline)
+#else
+#define AOTI_NOINLINE
+#endif
+
+AOTI_NOINLINE static void throw_exception(
+    const char* call,
+    const char* file,
+    int64_t line) {
+  std::stringstream ss;
+  ss << call << " API call failed at " << file << ", line " << line;
+  throw std::runtime_error(ss.str());
+}
+
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
+  if ((call) != AOTI_TORCH_SUCCESS) {           \
+    throw_exception(#call, __FILE__, __LINE__); \
   }
 
 using DeleterFnPtr = void (*)(void*);
@@ -231,8 +247,28 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
-  void update_constants_map(std::shared_ptr<ConstantMap>&& constants_map) {
-    constants_ = std::move(constants_map);
+  const char* get_in_spec() const {
+    return in_spec_.c_str();
+  }
+
+  const char* get_out_spec() const {
+    return out_spec_.c_str();
+  }
+
+  void update_constants_map(std::shared_ptr<ConstantMap> constants_map) {
+    constants_map_ = std::move(constants_map);
+    if (!constants_map_) {
+      return;
+    }
+    constants_.resize(constants_info_.size());
+    int idx = 0;
+    for (const auto& info : constants_info_) {
+      const auto it = constants_map_->find(info.name);
+      if (it != constants_map_->end()) {
+        constants_[idx] = it->second;
+      }
+      idx++;
+    }
   }
 
   /// Returns true if the model is complete.
@@ -285,8 +321,11 @@ class AOTInductorModelBase {
   std::vector<ParamInfo> inputs_info_;
   std::vector<ParamInfo> outputs_info_;
   std::vector<ConstInfo> constants_info_;
+  std::string in_spec_;
+  std::string out_spec_;
 
-  std::shared_ptr<ConstantMap> constants_;
+  std::shared_ptr<ConstantMap> constants_map_;
+  std::vector<AtenTensorHandle> constants_;
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
