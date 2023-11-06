@@ -1697,6 +1697,11 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_autogen_aten_ops_are_pt2_compliant(self):
+        for op in [torch.ops.aten._foreach_copy.default, torch.ops.aten.fill.Tensor_out]:
+            self.assertIn(torch.Tag.generated, op.tags)
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_resolve_packet(self):
         x = torch.randn(3)
         result = torch._C._jit_resolve_packet("aten::sum", x)
