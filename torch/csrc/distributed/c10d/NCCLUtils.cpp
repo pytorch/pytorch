@@ -48,6 +48,12 @@ std::string getNcclVersion() {
           version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
+#ifdef NCCL_SUFFIX
+      const auto ncclSuffix = std::string(NCCL_SUFFIX);
+      if (ncclSuffix.length()) {
+        versionString += "." + ncclSuffix;
+      }
+#endif
     }
   });
 
