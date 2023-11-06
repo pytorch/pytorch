@@ -19,6 +19,7 @@ from typing import (
     Optional,
     OrderedDict,
     Set,
+    Tuple,
     Union,
 )
 
@@ -33,6 +34,7 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._guards import (
     Checkpointable,
+    GlobalContextCheckpointState,
     Guard,
     GuardsCheckpointState,
     Source,
@@ -256,6 +258,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export_constraints = export_constraints
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.cleanup_hooks: List[Callable[[], Any]] = []
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -380,6 +383,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+    def add_cleanup_hook(self, fn: Callable[[], Any]):
+        self.cleanup_hooks.append(fn)
+
+    def call_cleanup_hooks(self):
+        for hook in reversed(self.cleanup_hooks):
+            hook()
+        self.cleanup_hooks.clear()
+
     @property
     def root_tracer(self):
         return self.tracers[0]
@@ -465,8 +476,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def nn_modules(self) -> Dict[str, torch.nn.Module]:
         return self.tracing_context.module_context.nn_modules
 
-    def save_global_state(self):
-        global_state = self.tracing_context.global_context.global_state
+    def save_global_state(self, out=None):
+        """
+        Saves to out if it is provided. Else saves to the tracing context's global_state.
+        """
+        global_state = (
+            out if out is not None else self.tracing_context.global_context.global_state
+        )
 
         global_state["torch_function_enabled"] = (
             self.set_torch_function_state,
@@ -964,6 +980,24 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         )
         return graph_sizes_str
 
+    @contextlib.contextmanager
+    def restore_global_state(self):
+        """
+        Momentarily restores the global state to what it was prior to tracing the current output
+        """
+        prior_global_state = self.tracing_context.global_context.copy_graphstate()
+        current_global_state: Dict[str, Tuple[Any, bool]] = {}
+        self.save_global_state(out=current_global_state)
+        try:
+            # Set to state prior to tracing the graph
+            self.tracing_context.global_context.restore_graphstate(prior_global_state)
+            yield
+        finally:
+            # Reset to state at the current time (e.g. before calling the user compiler)
+            self.tracing_context.global_context.restore_graphstate(
+                GlobalContextCheckpointState(current_global_state)
+            )
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -1002,7 +1036,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-        compiled_fn = self.call_user_compiler(gm)
+        self.call_cleanup_hooks()
+        with self.restore_global_state():
+            compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -1488,9 +1524,6 @@ class SubgraphTracer(fx.Tracer):
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Node):
                     continue
-                # Special case for autograd.Function tracing
-                if "saved_tensor_marked" in arg.meta:
-                    continue
                 assert (
                     arg.graph == self.graph
                 ), "create_node using arg not from this SubgraphTracer"
@@ -1603,9 +1636,6 @@ class SubgraphTracer(fx.Tracer):
         if not isinstance(arg, torch.fx.Proxy):
             return arg
         elif arg.tracer == self:
-            return arg
-        # Special case for autograd.Function tracing
-        elif "saved_tensor_marked" in arg.node.meta:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
 
