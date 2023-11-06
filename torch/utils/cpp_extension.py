@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore[attr-defined]
+import packaging.version
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -404,6 +404,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
     cuda_str_version = cuda_version.group(1)
     cuda_ver = packaging.version.parse(cuda_str_version)
+    if torch.version.cuda is None:
+        return
+
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
@@ -1014,8 +1017,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     You can override the default behavior using `TORCH_CUDA_ARCH_LIST` to explicitly specify which
     CCs you want the extension to support:
 
-    TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
-    TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
+    ``TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py``
+    ``TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py``
 
     The +PTX option causes extension kernel binaries to include PTX instructions for the specified
     CC. PTX is an intermediate representation that allows kernels to runtime-compile for any CC >=
@@ -2345,8 +2348,7 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = packaging.version.parse('11.0')
-        has_cuda_version = torch.version.cuda is not None
-        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+        if torch.version.cuda is not None and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
