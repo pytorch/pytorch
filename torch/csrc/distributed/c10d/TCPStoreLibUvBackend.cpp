@@ -1080,7 +1080,8 @@ void LibUVStoreDaemon::stop() {
   }
 }
 
-bool LibUVStoreDaemon::isMiscellaneousClient(c10::intrusive_ptr<UvHandle> client) {
+bool LibUVStoreDaemon::isMiscellaneousClient(
+    c10::intrusive_ptr<UvHandle> client) {
   if (miscellaneousClients_.find(client) != miscellaneousClients_.end()) {
     miscellaneousClients_.erase(client);
     return true;

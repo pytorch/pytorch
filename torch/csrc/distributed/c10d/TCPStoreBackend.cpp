@@ -263,7 +263,8 @@ void TCPStoreMasterDaemon::query(int socket) {
       validateHandler(socket);
     } else {
       // real miscellaneous client: the first msg is not VALIDATE
-      TORCH_CHECK(false, "Miscellaneous client without VALIDATE query is detected");
+      TORCH_CHECK(
+          false, "Miscellaneous client without VALIDATE query is detected");
     }
   } else if (qt == QueryType::SET) {
     setHandler(socket);
@@ -326,7 +327,9 @@ void TCPStoreMasterDaemon::validateHandler(int socket) {
   uint32_t validateNumber;
   tcputil::recvBytes<uint32_t>(socket, &validateNumber, 1);
   if (validateNumber != detail::validationMagicNumber) {
-    TORCH_CHECK(false, "Miscellaneous client with incorrect VALIDATE query is detected");
+    TORCH_CHECK(
+        false,
+        "Miscellaneous client with incorrect VALIDATE query is detected");
   }
 }
 
