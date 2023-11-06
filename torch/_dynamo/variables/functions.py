@@ -90,7 +90,6 @@ class BaseUserFunctionVariable(VariableTracker):
         return tx.inline_user_function_return(
             self, list(self.self_args()) + list(args), kwargs
         )
-        return ret
 
     def num_parameters(self):
         return len(inspect.signature(self.get_function()).parameters)
