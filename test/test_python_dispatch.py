@@ -2112,7 +2112,7 @@ def forward(self, x_1):
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func.overloadpacket == torch.ops.aten.dim:
                     return data.dim()
-                if func.overloadpacket == torch.ops.aten.sym_numel:
+                if func.overloadpacket == torch.ops.aten.sym_numel.default:
                     numel_called[0] = True
                     return None
                 return NotImplemented

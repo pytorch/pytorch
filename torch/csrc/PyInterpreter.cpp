@@ -78,6 +78,7 @@ struct ConcretePyInterpreterVTable final
   c10::IntArrayRef sizes(const c10::TensorImpl* self) const override;
   c10::SymIntArrayRef sym_sizes(const c10::TensorImpl* self) const override;
   c10::Layout layout(const c10::TensorImpl* self) const override;
+  int64_t numel(const c10::TensorImpl* self) const override;
   c10::SymInt sym_numel(const c10::TensorImpl* self) const override;
   c10::SymIntArrayRef sym_strides(const c10::TensorImpl* self) const override;
   c10::SymInt sym_storage_offset(const c10::TensorImpl* self) const override;
@@ -814,6 +815,30 @@ c10::Layout ConcretePyInterpreterVTable::layout(
   return toLayout(out.ptr());
 }
 
+int64_t ConcretePyInterpreterVTable::numel(
+    const c10::TensorImpl* self) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "numel",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("numel")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  if (out.is_none()) {
+    TORCH_CHECK(
+        !self->has_symbolic_sizes_strides(),
+        "Cannot call sizes on a tensor with symbolic shapes/strides");
+    return self->numel_default();
+  }
+  return py::cast<int64_t>(out);
+}
+
 c10::SymInt ConcretePyInterpreterVTable::sym_numel(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
@@ -830,9 +855,6 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
       "torch.ops.aten");
 
   if (out.is_none()) {
-    TORCH_CHECK(
-        !self->has_symbolic_sizes_strides(),
-        "Cannot call numel on a tensor with symbolic shapes/strides");
     return self->sym_numel_default();
   }
   return torch::is_symint(out) ? out.cast<c10::SymInt>()
