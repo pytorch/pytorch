@@ -22,34 +22,18 @@ class C10_API SymbolicShapeMeta {
   }
 
   void refresh_contiguous() {
-    if (strides_valid_) {
-      available_.reset(is_contiguous_avail);
-      is_contiguous_ = true;
-      available_.reset(is_channels_last_contiguous_avail);
-      is_channels_last_contiguous_ = false;
-      available_.reset(is_channels_last_3d_contiguous_avail);
-      is_channels_last_3d_contiguous_ = false;
-      available_.reset(is_channels_last_avail);
-      is_channels_last_ = false;
-      available_.reset(is_channels_last_3d_avail);
-      is_channels_last_3d_ = false;
-      available_.reset(is_non_overlapping_and_dense_avail);
-      is_non_overlapping_and_dense_ = true;
-    } else {
-      // Unstrided tensor types are never contiguous
-      available_.set(is_contiguous_avail);
-      is_contiguous_ = false;
-      available_.set(is_channels_last_contiguous_avail);
-      is_channels_last_contiguous_ = false;
-      available_.set(is_channels_last_3d_contiguous_avail);
-      is_channels_last_3d_contiguous_ = false;
-      available_.set(is_channels_last_avail);
-      is_channels_last_ = false;
-      available_.set(is_channels_last_3d_avail);
-      is_channels_last_3d_ = false;
-      available_.set(is_non_overlapping_and_dense_avail);
-      is_non_overlapping_and_dense_ = false;
-    }
+    available_.reset(is_contiguous_avail);
+    is_contiguous_ = false;
+    available_.reset(is_channels_last_contiguous_avail);
+    is_channels_last_contiguous_ = false;
+    available_.reset(is_channels_last_3d_contiguous_avail);
+    is_channels_last_3d_contiguous_ = false;
+    available_.reset(is_channels_last_avail);
+    is_channels_last_ = false;
+    available_.reset(is_channels_last_3d_avail);
+    is_channels_last_3d_ = false;
+    available_.reset(is_non_overlapping_and_dense_avail);
+    is_non_overlapping_and_dense_ = false;
   }
 
   int64_t dim() const {
@@ -58,108 +42,52 @@ class C10_API SymbolicShapeMeta {
 
   // Accessors for derived quantities, computed lazily on first access
 
-  SymInt numel() const {
-    if (available_.test(numel_avail)) {
-      return numel_;
+  const SymInt& numel() const {
+    if (C10_UNLIKELY(!available_.test(numel_avail))) {
+      init_numel();
     }
-    numel_ = multiply_integers(sizes_);
-    available_.set(numel_avail);
     return numel_;
   }
 
-  SymBool is_contiguous() const {
-    if (available_.test(is_contiguous_avail)) {
-      return is_contiguous_;
+  const SymBool& is_contiguous() const {
+    if (C10_UNLIKELY(!available_.test(is_contiguous_avail))) {
+      init_is_contiguous();
     }
-
-    is_contiguous_ = compute_contiguous();
-    available_.set(is_contiguous_avail);
     return is_contiguous_;
   }
 
-  SymBool is_channels_last_contiguous() const {
-    if (available_.test(is_channels_last_contiguous_avail)) {
-      return is_channels_last_contiguous_;
+  const SymBool& is_channels_last_contiguous() const {
+    if (C10_UNLIKELY(!available_.test(is_channels_last_contiguous_avail))) {
+      init_is_channels_last_contiguous();
     }
-    is_channels_last_contiguous_ = [&] {
-      switch (dim()) {
-        case 5:
-        case 4: {
-          return compute_channels_last_contiguous_2d();
-        }
-        default:
-          return SymBool{false};
-      }
-    }();
-    available_.set(is_channels_last_contiguous_avail);
     return is_channels_last_contiguous_;
   }
 
-  SymBool is_channels_last_3d_contiguous() const {
-    if (available_.test(is_channels_last_3d_contiguous_avail)) {
-      return is_channels_last_3d_contiguous_;
+  const SymBool& is_channels_last_3d_contiguous() const {
+    if (C10_UNLIKELY(!available_.test(is_channels_last_3d_contiguous_avail))) {
+      init_is_channels_last_3d_contiguous();
     }
-    is_channels_last_3d_contiguous_ = [&] {
-      switch (dim()) {
-        case 5:
-          return compute_channels_last_contiguous_3d_dim5();
-        default:
-          return SymBool{false};
-      }
-    }();
-    available_.set(is_channels_last_3d_contiguous_avail);
     return is_channels_last_3d_contiguous_;
   }
 
-  SymBool is_channels_last() const {
-    if (available_.test(is_channels_last_avail)) {
-      return is_channels_last_;
+  const SymBool& is_channels_last() const {
+    if (C10_UNLIKELY(!available_.test(is_channels_last_avail))) {
+      init_is_channels_last();
     }
-    is_channels_last_ = [&] {
-      switch (dim()) {
-        case 5:
-          return compute_channels_last_2d_dim5();
-        case 4:
-          return compute_strides_like_channels_last_2d();
-        default:
-          return SymBool{false};
-      }
-    }();
-    available_.set(is_channels_last_avail);
     return is_channels_last_;
   }
 
-  SymBool is_channels_last_3d() const {
-    if (available_.test(is_channels_last_3d_avail)) {
-      return is_channels_last_3d_;
+  const SymBool& is_channels_last_3d() const {
+    if (C10_UNLIKELY(!available_.test(is_channels_last_3d_avail))) {
+      init_is_channels_last_3d();
     }
-    is_channels_last_3d_ = [&] {
-      switch (dim()) {
-        case 5:
-          return compute_channels_last_3d_dim5();
-        default:
-          return SymBool{false};
-      }
-    }();
-    available_.set(is_channels_last_3d_avail);
     return is_channels_last_3d_;
   }
 
-  SymBool is_non_overlapping_and_dense() const {
-    if (available_.test(is_non_overlapping_and_dense_avail)) {
-      return is_non_overlapping_and_dense_;
+  const SymBool& is_non_overlapping_and_dense() const {
+    if (C10_UNLIKELY(!available_.test(is_non_overlapping_and_dense_avail))) {
+      init_is_non_overlapping_and_dense();
     }
-    is_non_overlapping_and_dense_ = [&] {
-      switch (dim()) {
-        case 5:
-          return compute_is_non_overlapping_and_dense_dim5();
-        case 4:
-          return compute_is_non_overlapping_and_dense_dim4();
-        default:
-          return compute_is_non_overlapping_and_dense_anydim();
-      }
-    }();
-    available_.set(is_non_overlapping_and_dense_avail);
     return is_non_overlapping_and_dense_;
   }
 
@@ -211,6 +139,14 @@ class C10_API SymbolicShapeMeta {
   SymBool compute_is_non_overlapping_and_dense_dim4() const;
   SymBool compute_is_non_overlapping_and_dense_dim5() const;
   SymBool compute_is_non_overlapping_and_dense_anydim() const;
+
+  void init_numel() const;
+  void init_is_contiguous() const;
+  void init_is_channels_last_contiguous() const;
+  void init_is_channels_last_3d_contiguous() const;
+  void init_is_channels_last() const;
+  void init_is_channels_last_3d() const;
+  void init_is_non_overlapping_and_dense() const;
 
   // Lazily initialized variables, with the corresponding available_ flag
   // indicating whether the value has been initialized

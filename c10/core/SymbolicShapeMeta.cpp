@@ -167,4 +167,80 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
   return is_contiguous() | compute_non_overlapping_and_dense();
 }
 
+void SymbolicShapeMeta::init_numel() const {
+  numel_ = multiply_integers(sizes_);
+  available_.set(numel_avail);
+}
+
+void SymbolicShapeMeta::init_is_contiguous() const {
+  is_contiguous_ = compute_contiguous();
+  available_.set(is_contiguous_avail);
+}
+
+void SymbolicShapeMeta::init_is_channels_last_contiguous() const {
+  is_channels_last_contiguous_ = [&] {
+    switch (dim()) {
+      case 5:
+      case 4: {
+        return compute_channels_last_contiguous_2d();
+      }
+      default:
+        return SymBool{false};
+    }
+  }();
+  available_.set(is_channels_last_contiguous_avail);
+}
+
+void SymbolicShapeMeta::init_is_channels_last_3d_contiguous() const {
+  is_channels_last_3d_contiguous_ = [&] {
+    switch (dim()) {
+      case 5:
+        return compute_channels_last_contiguous_3d_dim5();
+      default:
+        return SymBool{false};
+    }
+  }();
+  available_.set(is_channels_last_3d_contiguous_avail);
+}
+
+void SymbolicShapeMeta::init_is_channels_last() const {
+  is_channels_last_ = [&] {
+    switch (dim()) {
+      case 5:
+        return compute_channels_last_2d_dim5();
+      case 4:
+        return compute_strides_like_channels_last_2d();
+      default:
+        return SymBool{false};
+    }
+  }();
+  available_.set(is_channels_last_avail);
+}
+
+void SymbolicShapeMeta::init_is_channels_last_3d() const {
+  is_channels_last_3d_ = [&] {
+    switch (dim()) {
+      case 5:
+        return compute_channels_last_3d_dim5();
+      default:
+        return SymBool{false};
+    }
+  }();
+  available_.set(is_channels_last_3d_avail);
+}
+
+void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
+  is_non_overlapping_and_dense_ = [&] {
+    switch (dim()) {
+      case 5:
+        return compute_is_non_overlapping_and_dense_dim5();
+      case 4:
+        return compute_is_non_overlapping_and_dense_dim4();
+      default:
+        return compute_is_non_overlapping_and_dense_anydim();
+    }
+  }();
+  available_.set(is_non_overlapping_and_dense_avail);
+}
+
 } // namespace c10
