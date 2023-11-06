@@ -738,7 +738,6 @@ class ConvBnInt32WeightQuantizer(Quantizer):
             dtype=torch.int32,
             quant_min=0,
             quant_max=2**31 - 1,
-
             qscheme=torch.per_channel_affine,
             observer_or_fake_quant_ctr=FusedMovingAvgObsFakeQuantize.with_args(
                 observer=MovingAveragePerChannelMinMaxObserver,
