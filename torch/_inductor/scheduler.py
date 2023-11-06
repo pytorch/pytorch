@@ -1339,7 +1339,7 @@ class Scheduler:
 
             # unbacked symbols don't follow ordinary buffer dependencies, so
             # we track their def/uses separately
-            for s in sorted(node.node.get_unbacked_symbol_defs()):
+            for s in node.node.get_unbacked_symbol_defs():
                 # Pick the first definer as canonical.  There may be multiple
                 # because if a MultiOutputLayout buffer propagates an unbacked
                 # symint to multiple outputs, they will all claim to def it.
@@ -1347,7 +1347,7 @@ class Scheduler:
                     unbacked_symbol_to_origin_node[s] = node
 
             # if a kernel takes unbacked symints, register dependencies
-            for s in sorted(node.node.get_unbacked_symbol_uses()):
+            for s in node.node.get_unbacked_symbol_uses():
                 assert (
                     s in unbacked_symbol_to_origin_node
                 ), f"{s} not in {unbacked_symbol_to_origin_node}"
