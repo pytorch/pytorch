@@ -833,11 +833,13 @@ class WrapperCodeGen(CodeGen):
 
         original_name = kernel.__name__
 
-        cache_key = [original_name]
+        # Distinguish between different functions using function id
+        cache_key = [id(kernel.fn)]
         for arg in kwargs.values():
             if isinstance(arg, Buffer):
                 cache_key.append(arg.get_dtype())
-            else:
+            elif len(configs) > 0:
+                # We need to key on non tensor arg only in autotune mode
                 cache_key.append(arg)
         cache_key = tuple(cache_key)
 

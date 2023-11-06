@@ -1972,6 +1972,45 @@ def forward(self, x_1, output_1):
     @requires_cuda()
     @requires_triton()
     @skipIfRocm
+    def test_triton_kernel_caching_duplicate(self):
+        from torch._inductor.utils import run_and_get_code
+
+        class C:
+            @triton.jit
+            def pass_kernel(
+                in_ptr0,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pass
+
+        class D:
+            @triton.jit
+            def pass_kernel(
+                in_ptr0,
+                out_ptr,
+                n_elements,
+                BLOCK_SIZE: "tl.constexpr",
+            ):
+                pass
+
+        def call_triton(x: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = (n_elements,)
+            C.pass_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+            D.pass_kernel[grid](x, output, n_elements, BLOCK_SIZE=16)
+
+        t = torch.ones(5, device="cuda")
+        test, (code,) = run_and_get_code(torch.compile(call_triton), t)
+        # Make sure we emitted two kernels here
+        self.assertTrue("pass_kernel_0.run" in code)
+        self.assertTrue("pass_kernel_1.run" in code)
+
+    @requires_cuda()
+    @requires_triton()
+    @skipIfRocm
     def test_triton_kernel_dependancies(self):
         def call_triton(
             x: torch.Tensor,
