@@ -34,7 +34,15 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    Pointwise,
+    Reduction,
+    StorageBox,
+    TensorBox,
+)
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -163,6 +171,7 @@ class GraphLowering(torch.fx.Interpreter):
         user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
+        is_inference=False,
     ):
         super().__init__(gm)
 
@@ -170,6 +179,7 @@ class GraphLowering(torch.fx.Interpreter):
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
         self.num_channels_last_conv = 0
+        self.is_inference = is_inference
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -823,6 +833,15 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
+            # Realize if a Pointwise has too much stuff to be inlined.
+            # As this may cause RecursionError during Inductor's evaluation.
+            if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+                curr = result.data.data
+                if isinstance(curr, Pointwise):
+                    # Use inner fn as a rough proxy. Good enough.
+                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                        result.realize()
+
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct
         # TensorBox -> StorageBox denoting a non-view; we don't bother trying
@@ -906,7 +925,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        return self.wrapper_code.generate(self.is_inference)
 
     def count_bytes(self):
         from .scheduler import Scheduler
