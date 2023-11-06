@@ -6,7 +6,7 @@ from typing import Any, Tuple
 
 import torch
 from torch._dynamo.utils import counters
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
@@ -916,7 +916,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
         )
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
@@ -1085,7 +1085,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
         bias = kwargs["b"] if "b" in kwargs else None
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
