@@ -21,7 +21,7 @@ __all__ = [
     "device_count",
     "Stream",
     "StreamContext",
-    "Event"
+    "Event",
 ]
 
 _device_t = Union[_device, str, int, None]
