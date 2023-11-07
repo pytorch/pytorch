@@ -6,7 +6,6 @@
 #include <iostream>
 #include <list>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <unordered_map>
 
@@ -48,8 +47,8 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 constexpr const char* TORCH_NCCL_ENABLE_MONITORING =
     "TORCH_NCCL_ENABLE_MONITORING";
 
-constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT =
-    "TORCH_NCCL_HEARTBEAT_TIMEOUT";
+constexpr const char* TORCH_NCCL_HEARTBEAT_TIMEOUT_S =
+    "TORCH_NCCL_HEARTBEAT_TIMEOUT_S";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -730,6 +729,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the heartbeat monitoring threads.
   std::atomic<bool> terminateHeartbeatMonitorThread_;
 
+  // Whether we are in the shut down mode when we are trying to get debug info,
+  // such as desync report.
+  std::atomic<bool> shutDownMode_;
+
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
 
@@ -832,8 +835,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t seq_{0};
 
   std::exception_ptr watchDogException_ = nullptr;
-
-  std::exception_ptr monitorException_ = nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer

@@ -173,8 +173,7 @@ class ProcessGroupNCCLNoHeartbeat : public c10d::ProcessGroupNCCL {
   // It's really hard to unit test std::abort. So we override it instead.
   // Commented this override, we do see process aborted with core dump.
   void terminateProcess(std::string errMsg) override {
-    monitorException_ = std::make_exception_ptr(std::runtime_error(errMsg));
-    std::rethrow_exception(monitorException_);
+    throw std::runtime_error(errMsg);
   }
 
   std::atomic<bool> hasMonitorThreadCaughtError_;
@@ -303,8 +302,12 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
     return;
   }
 
+  int heartBeatIntervalInSec = 2;
+  std::string timeInterval = std::to_string(heartBeatIntervalInSec);
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT, "3", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_S, timeInterval.c_str(), 1) ==
+      0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
   options->timeout = std::chrono::milliseconds(30000);
@@ -320,7 +323,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
     std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
     LOG(INFO) << "Lock watchdog thread.";
     // Wait for a while before monitor thread throws exceptions.
-    std::this_thread::sleep_for(std::chrono::seconds(10));
+    std::this_thread::sleep_for(
+        std::chrono::seconds(heartBeatIntervalInSec * 3));
     // Check the monitoring thread launched and exception thrown.
     EXPECT_TRUE(pg.getErrorCaughtFlag());
   }
