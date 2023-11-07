@@ -983,7 +983,6 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
-    @unittest.skip("Need to reenable")
     def test_repeat_interleave_unbacked_output_size(self):
         def f(x, y):
             s = x.sum().item()
@@ -1613,7 +1612,7 @@ L['a'].size()[0] < 20""")
         fx_g = _trace(f, 2, 4, 8, 16, 32)
         self.assertExpectedInline(show_guards(fx_g), """""")
 
-    @torch._dynamo.config.patch(translation_validation=True)
+    @torch.fx.experimental._config.patch(translation_validation=True)
     def test_constant_specialization(self):
         def f(t):
             assert t.shape[0] == 10
