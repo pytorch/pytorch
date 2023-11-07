@@ -1106,11 +1106,19 @@ class BuiltinVariable(VariableTracker):
                         def _grad_changed(old, new):
                             if old is None or new is None:
                                 return new is not old
-                            if old.shape != new.shape:
-                                return True
-                            if old.stride() != new.stride():
-                                return True
-                            return False
+                            try:
+                                if old.shape != new.shape:
+                                    return True
+                                if old.stride() != new.stride():
+                                    return True
+                                return False
+                            except TypeError as te:
+                                # There is a rare edge case in which
+                                # we seem to get symbol mismatches
+                                # for jagged tensor comparison.
+                                # See PYTORCH_TEST_WITH_DYNAMO=1 python test/test_nestedtensor.py
+                                #   -k test_dropout_backward_layout_torch_jagged_cpu
+                                unimplemented(str(te))
 
                         if _grad_changed(old_grad, new_grad):
                             if new_grad is not None:
