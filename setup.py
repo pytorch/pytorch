@@ -1115,6 +1115,7 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        "packaging",
     ]
 
     # Parse the command line and check the arguments before we proceed with
