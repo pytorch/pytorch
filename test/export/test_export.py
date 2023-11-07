@@ -301,6 +301,33 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn_stack" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+    def test_dropout_capture_pre_autograd_graph(self):
+
+        class MyDropout(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        example_inputs = (torch.randn(1),)
+        m_train = capture_pre_autograd_graph(MyDropout().train(), example_inputs)
+        m_eval = capture_pre_autograd_graph(MyDropout().eval(), example_inputs)
+
+        # Assert that we get torch.ops.aten.native_dropout.default in both cases
+        def do_assert(m, expected_is_training):
+            dropout_node = None
+            for n in m.graph.nodes:
+                if n.target == torch.ops.aten.native_dropout.default:
+                    dropout_node = n
+                    break
+            self.assertTrue(dropout_node is not None)
+            self.assertEqual(dropout_node.args[2], expected_is_training)
+
+        do_assert(m_train, expected_is_training=True)
+        do_assert(m_eval, expected_is_training=False)
+
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims, export
 
