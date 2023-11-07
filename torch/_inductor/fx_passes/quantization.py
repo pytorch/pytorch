@@ -5,7 +5,8 @@ import operator
 from typing import Any, Tuple
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_symbols
+from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
@@ -247,6 +248,8 @@ def _register_quantized_conv_lowering(
             unary_attr.scalars_attr,
             unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qconv2d_unary_matcher_count"] += 1
+        counters["inductor"]["qconv2d_unary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv
@@ -321,6 +324,8 @@ def _register_quantized_linear_lowering(
             unary_attr.scalars_attr,
             unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qlinear_unary_matcher_count"] += 1
+        counters["inductor"]["qlinear_unary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qlinear
@@ -385,6 +390,8 @@ def _register_quantized_conv_binary_lowering(
             binary_unary_attr.scalars_attr,
             binary_unary_attr.algorithm_attr,
         )
+        counters["inductor"]["qconv2d_binary_matcher_count"] += 1
+        counters["inductor"]["qconv2d_binary_matcher_nodes"] += len(match.nodes)
         return L[computation_op](*computation_args)
 
     return qconv_binary
@@ -803,6 +810,8 @@ def _register_dequant_promotion_pass(pattern, pass_number):
             new_sub_node = clone_to_new_node(graph, sub_node, new_mul_node)
             # Step3: Duplicate the to_fp32 node
             _ = clone_to_new_node(graph, to_fp32_node, new_sub_node)
+        counters["inductor"]["dequant_promotion_matcher_count"] += 1
+        counters["inductor"]["dequant_promotion_matcher_nodes"] += len(match.nodes)
 
 
 def _is_valid_dequant_conv2d_pattern(match):
@@ -907,7 +916,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
         )
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
@@ -964,6 +973,10 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
             if clone_node is not None:
                 graph.erase_node(clone_node)
             graph.erase_node(dequant_per_channel)
+            counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
 
 
 def _generate_dequant_convolution_node_pattern(_dequant_per_channel_pattern):
@@ -1072,7 +1085,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
         bias = kwargs["b"] if "b" in kwargs else None
 
         x_shape = qx.meta.get("tensor_meta").shape
-        if free_symbols(x_shape):
+        if has_free_symbols(x_shape):
             # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
@@ -1117,6 +1130,10 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
             # Erase the dequant per channel pattern
             graph.erase_node(t_node)
             graph.erase_node(dequant_per_channel)
+            counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
 
 
 def _generate_dequant_linear_node_pattern(_dequant_per_channel_pattern):
