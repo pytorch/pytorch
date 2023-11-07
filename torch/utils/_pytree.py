@@ -239,6 +239,11 @@ def _odict_unflatten(
 ) -> GenericOrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
+def none_flatten(d) -> Tuple[List[Any], Context]:
+    return [], None
+
+def none_unflatten(values: Iterable[Any], context: Context):
+    return None
 
 _register_pytree_node(
     dict,
@@ -271,6 +276,12 @@ _register_pytree_node(
     _odict_flatten,
     _odict_unflatten,
     serialized_type_name="collections.OrderedDict",
+)
+_register_pytree_node(
+    type(None),
+    none_flatten,
+    none_unflatten,
+    serialized_type_name="builtins.None",
 )
 
 
