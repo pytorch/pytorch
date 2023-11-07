@@ -538,7 +538,7 @@ class BuiltinVariable(VariableTracker):
 
                     ret = wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
                     if self.fn in self._self_assigning_ops() and isinstance(
-                        args[0], TensorVariable
+                        args[0], variables.TensorVariable
                     ):
                         assert (
                             args[0].as_proxy().node.meta["example_value"]
@@ -591,7 +591,7 @@ class BuiltinVariable(VariableTracker):
                 # 1. (legal) SymNodeVariable mutations are propagated via `example_value`
                 # 2. (required) SymNodeVariable can have attribute mutations
                 if self.fn in self._self_assigning_ops() and isinstance(
-                    args[0], TensorVariable
+                    args[0], variables.TensorVariable
                 ):
                     assert (
                         args[0].as_proxy().node.meta["example_value"]
