@@ -22,7 +22,7 @@ static const char* METAL_BUCKETIZATION = R"BUCKETIZE_METAL(
 #include <metal_stdlib>
 using namespace metal;
 
-/*----------Helpers--------*/
+// The bucketization kernels are mostly copied-n-pasted from bucketization.cu.
 
 template<typename input_t>
 int64_t lower_bound(constant input_t *data_ss, int64_t start, int64_t end, const input_t val, constant int64_t *data_sort) {
@@ -89,8 +89,6 @@ int64_t upper_bound(constant input_t *data_ss, int64_t start, int64_t end, const
   }
   return start;
 }
-
-/*----------Kernels----------*/
 
 template<typename input_t, typename output_t>
 kernel void searchsorted_sorter(
@@ -240,6 +238,10 @@ static void searchsorted_mps_contiguous(Tensor& result,
                                         const Tensor& boundaries,
                                         const bool right,
                                         const Tensor& sorter) {
+  TORCH_INTERNAL_ASSERT(input.is_contiguous());
+  TORCH_INTERNAL_ASSERT(boundaries.is_contiguous());
+  TORCH_INTERNAL_ASSERT(!sorter.defined() || sorter.is_contiguous());
+
   int64_t numel_in = input.numel();
   bool is_scalar_input = input.dim() == 0 && numel_in == 1;
   // inner most dim size of input and boundaries
@@ -301,27 +303,24 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
                              const c10::optional<Tensor>& sorter_opt,
                              Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
+  auto sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
   const Tensor& sorter = *sorter_maybe_owned;
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
   resize_output(result, self.sizes());
 
   // we have two inputs to set right, pre_check checks that they aren't set to opposites
-  bool is_right = (side_opt && *side_opt == "right") || right;
+  right |= (side_opt && *side_opt == "right");
   if (self.numel() == 0) {
     return result;
   }
 
   // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing
   // the original result tensor
-  Tensor out = result;
-  if (!result.is_contiguous()) {
-    out = result.contiguous();
-  }
+  Tensor out = result.contiguous();
 
   if (sorted_sequence.is_contiguous() && self.is_contiguous() && sorted_sequence.dtype() == self.dtype() &&
       sorter.is_contiguous()) {
-    mps::searchsorted_mps_contiguous(out, self, sorted_sequence, is_right, sorter);
+    mps::searchsorted_mps_contiguous(out, self, sorted_sequence, right, sorter);
   } else {
     Tensor trimmed_input;
     Tensor trimmed_boundaries;
@@ -331,7 +330,7 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
     const Tensor& final_input = trimmed_input.defined() ? trimmed_input : self;
     const Tensor& final_boundaries = trimmed_boundaries.defined() ? trimmed_boundaries : sorted_sequence;
     const Tensor& final_sorter = trimmed_sorter.defined() ? trimmed_sorter : sorter;
-    mps::searchsorted_mps_contiguous(out, final_input, final_boundaries, is_right, final_sorter);
+    mps::searchsorted_mps_contiguous(out, final_input, final_boundaries, right, final_sorter);
   }
 
   // if result is non-contiguous, we wrote the answer to a copied version, so we copy back to the original result tensor
