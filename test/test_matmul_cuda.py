@@ -287,6 +287,18 @@ class TestFP8MatmulCuda(TestCase):
             lambda: torch._scaled_mm(x, y, out_dtype=torch.float32),
         )
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
+    def test_float8_scale_fast_accum(self, device) -> None:
+        size = (16, 16)
+        x = torch.full(size, .5, device=device, dtype=torch.float8_e4m3fn)
+        y = torch.full(size, .5, device=device, dtype=torch.float8_e5m2).t()
+        scale_a = torch.tensor(1.5, device=device)
+        scale_b = torch.tensor(0.66, device=device)
+        out_fp8, amax_fp8 = torch._scaled_mm(x, y, use_fast_accum=True)
+        self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
+        out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
+        self.assertEqual(out_fp8, out_fp8_s)
+
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")

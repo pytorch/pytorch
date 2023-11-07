@@ -17,9 +17,7 @@
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
 // Do not include this header. Use MPSAllocatorInterface.h instead.
 // TODO: Unify the logic with CUDACachingAllocator and remove redundant code.
-namespace at {
-namespace mps {
-namespace HeapAllocator {
+namespace at::mps::HeapAllocator {
 
 static const size_t kMaxSmallAlloc = MB(1);    // largest "small" allocation is 1 MiB
 static const size_t kMinLargeAlloc = MB(10);   // allocations between 1 and 10 MiB may use kLargeHeap
@@ -400,6 +398,4 @@ private:
   }
 };
 
-} // namespace HeapAllocator
-} // namespace mps
-} // namespace at
+} // namespace at::mps::HeapAllocator
