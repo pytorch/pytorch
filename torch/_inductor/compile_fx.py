@@ -1201,7 +1201,6 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
-
         return inner_compile(
             model,
             example_inputs,
