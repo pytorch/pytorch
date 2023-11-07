@@ -1220,7 +1220,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # test the default value coming from the `init_process_group` kwarg default
         dist.init_process_group(**base_opts)
-        _check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
         dist.destroy_process_group()
 
         # test that `kwarg` timeout takes effect
@@ -1238,7 +1238,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
             # self.assertEqual(len(w), 1)
             # self.assertTrue("pg_options._timeout was specified" in str(w[-1].message))
-        _check_nccl_timeout(torch.distributed.constants.default_pg_nccl_timeout)
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
         dist.destroy_process_group()
 
         # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
