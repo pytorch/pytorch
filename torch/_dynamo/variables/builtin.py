@@ -34,6 +34,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
@@ -460,6 +461,8 @@ class BuiltinVariable(VariableTracker):
         from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        args = [v.realize() for v in args]
+        kwargs = {k: v.realize() for k, v in kwargs.items()}
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)
@@ -934,8 +937,22 @@ class BuiltinVariable(VariableTracker):
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+
+            def _tensor_isinstance(tensor_var, tensor_type):
+                def check_type(ty):
+                    if ty not in tensortype_to_dtype:
+                        return issubclass(arg.python_type(), ty)
+
+                    dtypes = tensortype_to_dtype[ty]
+                    return arg.dtype in dtypes
+
+                if type(tensor_type) is tuple:
+                    return any(check_type(ty) for ty in tensor_type)
+                else:
+                    return check_type(tensor_type)
+
             return variables.ConstantVariable.create(
-                arg.call_isinstance(isinstance_type)
+                _tensor_isinstance(arg, isinstance_type)
             )
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
