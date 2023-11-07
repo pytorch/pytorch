@@ -1,10 +1,8 @@
 """ Define Base class as well as some crowd favorites """
 from abc import ABC, abstractmethod
 from enum import IntEnum
-from typing import Optional, Tuple
+from typing import Optional, Union
 from warnings import warn
-
-from transformer_nuggets.sdpa.utils import input_requires_grad
 
 import torch
 from torch.backends.cuda import (
@@ -16,8 +14,16 @@ from torch.nn.functional import scaled_dot_product_attention
 from torch.utils import _pytree as pytree
 
 
-def input_requires_grad(*tensors: Tuple[torch.Tensor]):
+def input_requires_grad(*tensors: torch.Tensor) -> bool:
     return any(t.requires_grad for t in tensors)
+
+
+def materialize_if_needed(
+    bias: "AttnBias", device: Optional[torch.device] = None
+) -> Union[torch.Tensor, "AttnBias"]:
+    if bias.needs_materialization():
+        return bias.materialize(device)
+    return bias
 
 
 class AttnBias(ABC):
@@ -37,7 +43,7 @@ class AttnBias(ABC):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: "AttnBias",
+        attn_mask,
         dropout_p: float,
         is_causal: bool,
         scale: Optional[float],
@@ -62,7 +68,7 @@ class TensorBias(AttnBias):
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: "TensorBias",
+        attn_mask: "AttnBias",
         dropout_p: float,
         is_causal: bool,
         scale: Optional[float],
@@ -73,6 +79,20 @@ class TensorBias(AttnBias):
 
     def __repr__(self) -> str:
         return f"TensorBias(bias={self.bias})"
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        if func != torch.nn.functional.scaled_dot_product_attention:
+            return NotImplemented
+        args = pytree.tree_map_only(
+            TensorBias, lambda x: materialize_if_needed(x), args
+        )
+        kwargs = pytree.tree_map_only(
+            TensorBias, lambda x: materialize_if_needed(x), kwargs
+        )
+        return func(*args, **kwargs)
 
 
 class LambdaBias(AttnBias):
@@ -239,36 +259,6 @@ class CausalBias(AttnBias):
 
     def __repr__(self) -> str:
         return f"CausalBias(variant={self.variant.name}, seq_len_q={self.seq_len_q}, seq_len_kv={self.seq_len_kv})"
-
-
-def materialize_if_needed(
-    bias: "AttnBias", device: Optional[torch.device] = None
-) -> torch.Tensor:
-    if bias.needs_materialization():
-        return bias.materialize(device)
-    return bias
-
-
-class TensorBiasSubclass(TensorBias):
-    """A bias that is a tensor"""
-
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-        if func != torch.nn.functional.scaled_dot_product_attention:
-            return NotImplemented
-        args = pytree.tree_map_only(
-            TensorBias, lambda x: materialize_if_needed(x), args
-        )
-        kwargs = pytree.tree_map_only(
-            TensorBias, lambda x: materialize_if_needed(x), kwargs
-        )
-        return func(*args, **kwargs)
-
-
-class CausalBiasSubclass(CausalBias):
-    """A bias representing causal attention patterns"""
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):

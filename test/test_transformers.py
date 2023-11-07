@@ -104,8 +104,10 @@ backend_map = {
         "enable_math": False, "enable_flash": False, "enable_mem_efficient": True}
 }
 
-def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype):
+def query_key_value_clones(query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, dtype: torch.dtype=None):
     """ Clones the query, key, and value tensors and moves them to the specified dtype. """
+    if dtype is None:
+        dtype = query.dtype
     query_ref = query.clone().detach().to(dtype).requires_grad_(query.requires_grad)
     key_ref = key.clone().detach().to(dtype).requires_grad_(key.requires_grad)
     value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
@@ -2970,7 +2972,7 @@ class TestSDPACudaOnly(NNTestCase):
 class TestAttnMasks(NNTestCase):
 
     @parametrize("compile", [True, False])
-    def test_base_case(compile: bool):
+    def test_base_case(self, compile: bool):
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
@@ -3005,7 +3007,7 @@ class TestAttnMasks(NNTestCase):
 
 
     @parametrize("compile", [True, False])
-    def test_materialized_case(compile: bool):
+    def test_materialized_case(self, compile: bool):
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
@@ -3058,7 +3060,7 @@ class TestAttnMasks(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     @parametrize("compile", [True, False])
-    def test_causal_variants(causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
+    def test_causal_variants(self, causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
@@ -3118,9 +3120,9 @@ class TestAttnMasks(NNTestCase):
         torch.testing.assert_close(value.grad, value_prototype.grad, atol=grad_atol, rtol=grad_rtol)
 
 
-    @pytest.mark.parametrize("shape", [(16, 16, 128, 16), (16, 16, 52, 32)])
-    @pytest.mark.parametrize("compile", [True, False])
-    def test_tensor_bias(shape: List[Tuple[int]], compile: bool):
+    @parametrize("shape", [(16, 16, 128, 16), (16, 16, 52, 32)])
+    @parametrize("compile", [True, False])
+    def test_tensor_bias(self, shape: List[Tuple[int]], compile: bool):
         if compile:
             torch._dynamo.reset()
         bsz, num_heads, seq_len, head_dim = shape
