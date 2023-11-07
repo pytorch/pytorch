@@ -347,6 +347,7 @@ aten = torch._ops.ops.aten
 # Note that the docstrings for the public methods from this file are in
 # torch/_torch_docs.py
 
+
 def is_noncontiguous_supported(device):
     if device is not None and device.type == "hpu":
         return False
