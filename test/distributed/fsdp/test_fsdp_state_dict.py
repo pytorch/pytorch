@@ -21,7 +21,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
-from torch.distributed.checkpoint.state_dict_utils import (
+from torch.distributed.checkpoint._state_dict_utils import (
     _all_gather_sharded_tensor,
     _gather_state_dict,
 )
