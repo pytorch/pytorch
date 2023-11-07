@@ -21,6 +21,7 @@ RUN_ATTEMPT = 3
 PR_NUMBER = 6789
 JOB_ID = 234
 
+
 class TestUploadStats(unittest.TestCase):
     # Before each test, set the env vars to their default values
     def setUp(self) -> None:
