@@ -165,8 +165,7 @@ def generate_allow_list():
             # print(f"\"{module.__name__}.{name}\": TorchInGraphFunctionVariable,")
             # if module.__name__ == "torch._functorch.vmap" and name == "restore_vmap":
             #     breakpoint()
-            # obj = load_object(f"{module.__name__}.{name}")
-            torch_objects.add(load_object(f"{module.__name__}.{name}"))
+            torch_objects.add(obj)
 
     def heuristic_record_if_ctx_manager(obj, module, name):
         if (
@@ -174,7 +173,6 @@ def generate_allow_list():
             and "__enter__" in obj.__dict__
             and "__exit__" in obj.__dict__
         ):
-            # obj = load_object(f"{module.__name__}.{name}")
             torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
