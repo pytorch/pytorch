@@ -76,12 +76,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  pytorch-linux-focal-py3-clang9-android-ndk-r19c-build:
-    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang9-android-ndk-r21e-build:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r21e-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r21e-build
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -120,7 +120,7 @@ jobs:
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1 },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
         ]}
 
   macos-12-py3-arm64-test:

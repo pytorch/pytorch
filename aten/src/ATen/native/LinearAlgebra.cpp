@@ -59,6 +59,7 @@
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/ger_native.h>
 #include <ATen/ops/index_select.h>
@@ -140,7 +141,7 @@
 #include <string>
 #include <tuple>
 #include <utility>
-#if !defined(__s390x__)
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
 
@@ -1338,7 +1339,7 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8;
       }
@@ -1357,7 +1358,7 @@ static inline int64_t get_mkldnn_matmul_min_size() {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
-#if !defined(__s390x__)
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8 * 1024;
       }
@@ -2603,7 +2604,11 @@ Tensor mexp_impl(
   }
 
   if (!compute_highest_degree_approx) {
-    auto res = at::empty_like(a, {}, at::MemoryFormat::Contiguous);
+    // To prevent undefined behavior which outputs "normal" result from a matrix
+    // contains NaN values, we put NaN values in `res`, so if input has NaN values,
+    // its computation will be skipped to return the NaN contained `res` directly.
+    auto res = at::full_like(a, std::numeric_limits<double>::quiet_NaN(), {},
+                             at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
     // It requires moving data back and forth between devices when `a` is on CUDA,

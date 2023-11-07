@@ -56,6 +56,7 @@ USE_SMALL_BATCH_SIZE = {
     "hf_T5_base": 4,
     "timm_efficientdet": 1,
     "llama_v2_7b_16h": 1,
+    "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
 }
 
 DETECTRON2_MODELS = {
@@ -83,6 +84,8 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
 }
 
 SKIP_DUE_TO_CONTROL_FLOW = {

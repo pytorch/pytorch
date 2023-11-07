@@ -8,6 +8,9 @@
 #   REL_WITH_DEB_INFO
 #     build with optimizations and -g (debug symbols)
 #
+#   USE_CUSTOM_DEBINFO="path/to/file1.cpp;path/to/file2.cpp"
+#     build with debug info only for specified files
+#
 #   MAX_JOBS
 #     maximum number of compile jobs we should use to compile your code
 #
@@ -902,16 +905,10 @@ def configure_extension_build():
             "-Wno-unused-parameter",
             "-Wno-missing-field-initializers",
             "-Wno-unknown-pragmas",
-            # This is required for Python 2 declarations that are deprecated in 3.
-            "-Wno-deprecated-declarations",
             # Python 2.6 requires -fno-strict-aliasing, see
             # http://legacy.python.org/dev/peps/pep-3123/
             # We also depend on it in our code (even Python 3).
             "-fno-strict-aliasing",
-            # Clang has an unfixed bug leading to spurious missing
-            # braces warnings, see
-            # https://bugs.llvm.org/show_bug.cgi?id=21629
-            "-Wno-missing-braces",
         ]
 
     library_dirs.append(lib_path)
@@ -1186,6 +1183,7 @@ def main():
         "include/ATen/cpu/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
+        "include/ATen/cpu/vec/vec256/zarch/*.h",
         "include/ATen/cpu/vec/vec512/*.h",
         "include/ATen/cpu/vec/*.h",
         "include/ATen/core/*.h",
@@ -1298,6 +1296,7 @@ def main():
         "include/torch/csrc/lazy/ts_backend/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
+        "include/pybind11/eigen/*.h",
         "include/TH/*.h*",
         "include/TH/generic/*.h*",
         "include/THC/*.cuh",

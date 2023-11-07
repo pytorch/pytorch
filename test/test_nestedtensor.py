@@ -26,11 +26,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
     subtest,
     TestCase,
 )
 
-from torch.nested._internal.nested_tensor import jagged_from_list, buffer_from_jagged
+from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
+    jagged_from_list,
+    NestedTensor,
+)
+import contextlib
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -90,7 +96,7 @@ def noncontiguous_to_padded_tensor(input, shape=None):
 # Helper function to generate a random nested tensor
 
 
-def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
+def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided):
     if min_dims is None:
         min_dims = tuple([0] * len(max_dims))
     ts1 = []
@@ -99,7 +105,7 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
                             for (min_dim, max_dim) in zip(min_dims, max_dims)])
         t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
         ts1.append(t1)
-    return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
+    return torch.nested.nested_tensor(ts1, device=device, dtype=dtype, layout=layout)
 
 
 # Alternate approach to generating a random NT.
@@ -140,6 +146,16 @@ def random_nt_from_similar(other, dims=None):
 
 
 class TestNestedTensor(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -645,6 +661,14 @@ class TestNestedTensor(TestCase):
 
 
 class TestNestedTensorDeviceType(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
 
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
@@ -790,14 +814,13 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: layer_norm(nt),
         )
 
-    @skipMeta
-    @torch.inference_mode()
-    def test_embedding(self, device):
+    @parametrize("layout", [torch.strided, torch.jagged])
+    def test_embedding(self, device, layout):
         inputs = [
             torch.randint(100, (L,), device=device, dtype=torch.int64)
             for L in torch.randint(5, 50, (8,))
         ]
-        x = torch.nested.nested_tensor(inputs, device=device, dtype=torch.int64)
+        x = torch.nested.nested_tensor(inputs, device=device, dtype=torch.int64, layout=layout)
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
         ys = y.unbind()
@@ -935,6 +958,7 @@ class TestNestedTensorDeviceType(TestCase):
         is_cuda = 'cuda' in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("flaky")
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
@@ -1386,15 +1410,22 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double)
-    def test_dropout(self, device, dtype):
+    @parametrize("layout", [torch.strided, torch.jagged])
+    def test_dropout(self, device, dtype, layout):
         # edge case: empty nested tensor
-        nt0 = torch.nested.nested_tensor([])
-        y = torch.nn.functional.dropout(nt0, 0.5)
-        self.assertEqual(nt0, y)
+        # TODO: support empty NT in jagged layout
+        if layout == torch.strided:
+            nt0 = torch.nested.nested_tensor([], layout=layout)
+            y = torch.nn.functional.dropout(nt0, 0.5)
+            self.assertEqual(nt0, y)
         # normal nested tensor
         ntensors = 4
-        nt = random_nt(device, dtype, ntensors, (4, 4))
+        if layout == torch.jagged:
+            nt = random_nt(device, dtype, ntensors, (4, 4), (0, 3), layout=layout)
+        else:
+            nt = random_nt(device, dtype, ntensors, (4, 4), layout=layout)
         # edge case: invalid dropout
         self.assertRaises(ValueError, lambda: torch.nn.Dropout(-0.1))
         self.assertRaises(ValueError, lambda: torch.nn.Dropout(1.1))
@@ -1410,24 +1441,28 @@ class TestNestedTensorDeviceType(TestCase):
         dropouter = torch.nn.Dropout(1.0)
         y0 = dropouter(nt)
         y1 = torch.nn.functional.dropout(nt, 1.0)
-        nt0 = nt.clone()
-        for i in range(ntensors):
-            nt0[i].fill_(0.0)
+        nt0 = torch.zeros_like(nt)
         self.assertEqual(nt0, y0)
         self.assertEqual(nt0, y1)
         # normal case: normal dropout
         p = 0.2
         y = torch.nn.functional.dropout(nt, p)
         expect = nt.clone()
-        for i in range(ntensors):
-            actual_tensor = y[i].view(-1)
-            expect_tensor = expect[i].view(-1)
-            for j in range(actual_tensor.shape[0]):
-                if actual_tensor[j].item() == 0.0:
-                    expect_tensor[j] = 0.0
-                else:
-                    expect_tensor[j] /= 1.0 - p
-        self.assertEqual(y, expect)
+        if layout == torch.jagged:
+            expect = torch.where(y == 0.0, y, nt)
+            expect /= 1.0 - p
+            self.assertEqual(y, expect)
+        else:
+            expect = nt.clone()
+            for i in range(ntensors):
+                actual_tensor = y[i].view(-1)
+                expect_tensor = expect[i].view(-1)
+                for j in range(actual_tensor.shape[0]):
+                    if actual_tensor[j].item() == 0.0:
+                        expect_tensor[j] = 0.0
+                    else:
+                        expect_tensor[j] /= 1.0 - p
+            self.assertEqual(y, expect)
         with freeze_rng_state():
             dropouter = torch.nn.Dropout(p)
             y0 = dropouter(nt)
@@ -2229,6 +2264,15 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
 class TestNestedTensorAutograd(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -2409,8 +2453,12 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
-    def test_dropout_backward(self):
-        nt = torch.nested.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))], requires_grad=True)
+    @parametrize("layout", [torch.strided, torch.jagged])
+    def test_dropout_backward(self, layout):
+        if layout == torch.jagged:
+            nt = torch.nested.nested_tensor([torch.randn((2, 5)), torch.randn((3, 5))], requires_grad=True, layout=layout)
+        else:
+            nt = torch.nested.nested_tensor([torch.randn((2, 5)), torch.randn((3, 4))], requires_grad=True, layout=layout)
         p = 0.2
         y = torch.nn.functional.dropout(nt, p)
         y.backward(nt.clone().detach())
@@ -2844,24 +2892,63 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
-    def _get_example_tensor_lists(self):
-        return [
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
+    # TODO: consolidate with the below
+    def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
+        Ds = nested_size[1:]
+        out = []
+        for s in nested_size[0]:
+            out.append(
+                torch.randn(s, *Ds, requires_grad=requires_grad, device=device, dtype=torch.float64)
+            )
+        return out
+
+    def _get_example_tensor_lists(self, include_list_of_lists=True, include_requires_grad=True):
+
+        def _make_tensor(*shape, include_requires_grad=include_requires_grad, requires_grad=True):
+            return torch.randn(
+                *shape,
+                requires_grad=(requires_grad if include_requires_grad else False)
+            )
+
+        # Purposefully introduce mixed requires_grad settings for the components
+        # when include_requires_grad=True.
+        example_lists = [
             # (B, *, D) with B=4
             [
-                torch.randn(2, 5),
-                torch.randn(3, 5),
-                torch.randn(4, 5),
-                torch.randn(6, 5)
+                _make_tensor(2, 5),
+                _make_tensor(3, 5, requires_grad=False),
+                _make_tensor(4, 5, requires_grad=False),
+                _make_tensor(6, 5)
             ],
             # (B, *, D_0, D_1) with B=5
             [
-                torch.randn(2, 5, 6),
-                torch.randn(3, 5, 6),
-                torch.randn(4, 5, 6),
-                torch.randn(5, 5, 6),
-                torch.randn(6, 5, 6),
+                _make_tensor(2, 5, 6),
+                _make_tensor(3, 5, 6),
+                _make_tensor(4, 5, 6, requires_grad=False),
+                _make_tensor(5, 5, 6),
+                _make_tensor(6, 5, 6),
             ],
         ]
+
+        if include_list_of_lists:
+            example_lists.append(
+                # (B, *, D) with B=3 in list form
+                [
+                    _make_tensor(2, 5, requires_grad=False).tolist(),
+                    _make_tensor(3, 5).tolist(),
+                    _make_tensor(4, 5).tolist(),
+                ])
+
+        return example_lists
 
     def test_tensor_attributes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -2906,14 +2993,13 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
 
-        def grad_test_func(a, b, c, weight):
+        def grad_test_func(a, b, c):
             nt, _ = jagged_from_list([a, b, c], None)
-            out = nt.sin().cos()
+            out = torch.nn.functional.silu(nt.sin().cos())
             return buffer_from_jagged(out)
 
-        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
     def test_binary_pointwise(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -2939,9 +3025,108 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_split_with_sizes(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        nt, _ = jagged_from_list([a, b, c], None)
+        out = torch.split(nt, [1, 2], -1)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(
+            out[0], jagged_from_list([a[:, 0:1], b[:, 0:1], c[:, 0:1]], None)[0]
+        )
+        self.assertEqual(
+            out[1], jagged_from_list([a[:, 1:], b[:, 1:], c[:, 1:]], None)[0]
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"split_with_sizes\(\): only supported for NestedTensor on dim = -1 for now",
+        ):
+            torch.split(nt, [1, 2], 1)
+
+    def test_binary_pointwise_broadcasting(self, device):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
+        # (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (1, ?, ?) -> (B, j0, ?, ?)
+        # Unsupported: (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)
+        t_sizes = (
+            (4,),
+            (1, 4),
+            (3, 1),
+            (1, 3, 1),
+            (1, 1, 1, 4),
+            # (1, 1, 1, 1, 4), (unsupported today)
+        )
+
+        def grad_test_func(t, *ts):
+            nt, _ = jagged_from_list(ts, None)
+            out = nt + t
+            return buffer_from_jagged(out)
+
+        for t_size in t_sizes:
+            t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
+            gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    @parametrize("keepdim", [False, True])
+    def test_sum_int_DimList(self, device, keepdim):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device=device, requires_grad=True)
+
+        # Check shape correctness
+        reduce_dims = (
+            # dims, expected shape, expected keepdim shape
+            # j0 is represented as None
+            ((0, 1), (3, 4), (1, 1, 3, 4)),
+            ((1, 2), None, None),
+            ((2, 3), (3, None), (3, None, 1, 1)),
+            ((0, 1, 3), (3,), (1, 1, 3, 1)),
+            ((0, 1, 2), (4,), (1, 1, 1, 4)),
+            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
+        )
+        for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
+            if (0 in rd) ^ (1 in rd):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "applying over the ragged dimension, but not the batch dimension"):
+                    nt, _ = jagged_from_list(ts, None)
+                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
+                continue
+
+            nt, _ = jagged_from_list(ts, None)
+            out = torch.sum(nt, dim=rd, keepdim=keepdim)
+            ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
+            self.assertEqual(len(out.shape), len(ref_shape))
+            for o, r in zip(out.shape, ref_shape):
+                if r is not None:
+                    self.assertEqual(o, r)
+                else:
+                    self.assertTrue(isinstance(o, torch.SymInt))
+
+        # Check values correctness
+        # raggedness not reduced
+        nt, _ = jagged_from_list(ts, None)
+        out = torch.sum(nt, dim=(2, 3), keepdim=keepdim)
+        out_ref = torch.sum(nt.values(), dim=(1, 2))
+        self.assertIsInstance(out, NestedTensor)
+        # flatten to avoid having to replicate unsqueeze logic depending on keepdim
+        self.assertTrue(torch.allclose(out.values().view(-1), out_ref.view(-1)))
+
+        # raggedness reduced away
+        nt, _ = jagged_from_list(ts, None)
+        out = torch.sum(nt, dim=(0, 1), keepdim=keepdim)
+        out_ref = torch.sum(nt.values(), dim=(0,))
+        self.assertNotIsInstance(out, NestedTensor)
+        self.assertTrue(torch.allclose(out, out_ref))
+
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_serialization(self, device, dtype, requires_grad):
+    @parametrize("weights_only", [False, True])
+    def test_serialization(self, device, dtype, requires_grad, weights_only):
 
         def compare_metadata(nt1, nt2):
             self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
@@ -2954,7 +3139,7 @@ class TestNestedTensorSubclass(TestCase):
             buffer = io.BytesIO()
             serialized = torch.save(a, buffer)
             buffer.seek(0)
-            b = torch.load(buffer)
+            b = torch.load(buffer, weights_only=weights_only)
             # should be both conceptually equal and metadata equivalent
             self.assertEqual(a, b)
             compare_metadata(a, b)
@@ -2976,30 +3161,71 @@ class TestNestedTensorSubclass(TestCase):
             self.assertIs(pinned, pinned.pin_memory())
             self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    def _validate_nt(self, nt, tensor_list, device, dtype, requires_grad):
+        # Validate a bunch of properties after NT construction.
+        device = torch.device(device)
+        first_t = torch.as_tensor(tensor_list[0])
+        expected_dim = first_t.dim() + 1
+        batch_size = len(tensor_list)
+        self.assertEqual(nt.dim(), expected_dim)
+        self.assertEqual(nt.device, device)
+        self.assertEqual(nt.dtype, dtype)
+        self.assertEqual(nt.layout, torch.jagged)
+        self.assertEqual(nt.requires_grad, requires_grad)
+        self.assertEqual(nt.values().device, device)
+        self.assertEqual(nt.offsets().device, device)
+        self.assertEqual(nt.shape[0], batch_size)
+        self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
+        self.assertEqual(nt.shape[2:], first_t.shape[1:])
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_jagged_layout_construction(self, device, dtype, requires_grad):
-        for tensor_list in self._get_example_tensor_lists():
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_layout_construction_nested_tensor(
+            self, device, dtype, requires_grad, components_require_grad):
+        for tensor_list in self._get_example_tensor_lists(
+                include_list_of_lists=True, include_requires_grad=components_require_grad):
             nt = torch.nested.nested_tensor(
                 tensor_list,
                 device=device,
                 dtype=dtype,
                 layout=torch.jagged,
                 requires_grad=requires_grad)
+            self._validate_nt(nt, tensor_list, device, dtype, requires_grad)
 
-            device = torch.device(device)
-            expected_dim = tensor_list[0].dim() + 1
-            batch_size = len(tensor_list)
-            self.assertEqual(nt.dim(), expected_dim)
-            self.assertEqual(nt.device, device)
-            self.assertEqual(nt.dtype, dtype)
-            self.assertEqual(nt.layout, torch.jagged)
-            self.assertEqual(nt.requires_grad, requires_grad)
-            self.assertEqual(nt.values().device, device)
-            self.assertEqual(nt.offsets().device, device)
-            self.assertEqual(nt.shape[0], batch_size)
-            self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
-            self.assertEqual(nt.shape[2:], tensor_list[0].shape[1:])
+            # Make sure grads -don't- flow back into original tensors for nested_tensor()
+            if requires_grad:
+                (nt * 2).backward(torch.ones_like(nt))
+            for t in tensor_list:
+                t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
+                self.assertTrue(t.grad is None)
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    @dtypes(torch.float, torch.double, torch.half)
+    @parametrize("components_require_grad", [False, True])
+    def test_jagged_layout_construction_as_nested_tensor(
+            self, device, dtype, components_require_grad):
+        # NB: as_nested_tensor(tensor_list) doesn't support lists of lists for tensor_list
+        for tensor_list in self._get_example_tensor_lists(
+                include_list_of_lists=False, include_requires_grad=components_require_grad):
+            nt = torch.nested.as_nested_tensor(
+                tensor_list,
+                device=device,
+                dtype=dtype,
+                layout=torch.jagged)
+
+            # nt.requires_grad=True should be set if at least one component requires grad
+            self._validate_nt(nt, tensor_list, device, dtype, components_require_grad)
+
+            # Make sure grads flow back into original tensors for as_nested_tensor()
+            if components_require_grad:
+                (nt * 2).backward(torch.ones_like(nt))
+                for t in tensor_list:
+                    if t.requires_grad:
+                        self.assertEqual(t.grad, torch.ones_like(t) * 2)
+                    else:
+                        self.assertTrue(t.grad is None)
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
     @onlyCUDA
@@ -3011,7 +3237,7 @@ class TestNestedTensorSubclass(TestCase):
                 device="cpu",
                 pin_memory=True)
 
-            self.assertEqual(nt.device, torch.device('cpu'))
+            self._validate_nt(nt, tensor_list, "cpu", torch.float32, requires_grad=False)
             self.assertTrue(nt.is_pinned())
 
     @dtypes(torch.double, torch.half)
@@ -3032,6 +3258,17 @@ class TestNestedTensorSubclass(TestCase):
             # offsets should still be int64 on the original device
             self.assertEqual(orig_device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
+
+    def test_unbind(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t, tensor_list[i])
 
 
 instantiate_parametrized_tests(TestNestedTensor)

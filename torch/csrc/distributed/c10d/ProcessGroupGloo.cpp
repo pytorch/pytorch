@@ -1541,6 +1541,15 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
   return work;
 }
 
+c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
+    std::vector<at::Tensor>& inputs,
+    const AllreduceOptions& opts) {
+  // all reduce sparse calls into default allreduce which
+  // implemented with all_gathering indices and values
+  // we do ths we do not have a native cuda implementation
+  return allreduce(inputs, opts);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
@@ -1910,6 +1919,38 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
 } // namespace
 
+c10::intrusive_ptr<Work> ProcessGroupGloo::_reduce_scatter_base(
+    at::Tensor& outputTensor,
+    at::Tensor& inputTensor,
+    const ReduceScatterOptions& opts) {
+  if (opts.asyncOp) {
+    throw std::runtime_error(
+        "Gloo reduce_scatter_base fallback not supported with async_op=True");
+  }
+  // first all reduce input
+  // TODO we can probably make this fully async by chaining the allreduce
+  // future.
+  std::vector<at::Tensor> inputs = {inputTensor};
+  std::vector<at::Tensor> outputs = {outputTensor};
+  allreduce(inputs)->wait();
+  std::vector<std::vector<at::Tensor>> inputTensors;
+  if (getRank() == 0) {
+    auto chunkedInputs = at::chunk(inputTensor, this->getSize(), 0);
+    inputTensors = {chunkedInputs};
+  }
+  auto scatterWork = this->scatter(outputs, inputTensors);
+  return scatterWork;
+}
+
+c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
+    at::Tensor& output_tensor,
+    at::Tensor& input_tensor,
+    const AllgatherOptions& opts) {
+  auto tensor_list = at::chunk(output_tensor, this->getSize(), 0);
+  std::vector<std::vector<at::Tensor>> outputs = {tensor_list};
+  std::vector<at::Tensor> inputs = {input_tensor};
+  return this->allgather(outputs, inputs, opts);
+}
 // Note: current CUDA implementation holds the assumption that the
 // tensors in the nested output tensor vectors are on the same device.
 c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
@@ -2104,13 +2145,6 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag, seq_);
   enqueue(work);
   return work;
-}
-
-c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
-    at::Tensor& /*unused */,
-    at::Tensor& /*unused */,
-    const AllgatherOptions& /*unused */) {
-  TORCH_CHECK(false, "no support for _allgather_base in Gloo process group");
 }
 
 namespace {

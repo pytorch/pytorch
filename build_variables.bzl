@@ -16,42 +16,6 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-# NVFuser runtime library
-libtorch_nvfuser_runtime_sources = [
-    "third_party/nvfuser/runtime/array.cu",
-    "third_party/nvfuser/runtime/array_rocm.cu",
-    "third_party/nvfuser/runtime/bf16_support.cu",
-    "third_party/nvfuser/runtime/bf16_support_rocm.cu",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/fp16_support.cu",
-    "third_party/nvfuser/runtime/fused_reduction.cu",
-    "third_party/nvfuser/runtime/fused_welford_helper.cu",
-    "third_party/nvfuser/runtime/fused_welford_impl.cu",
-    "third_party/nvfuser/runtime/grid_broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/grid_sync.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
-    "third_party/nvfuser/runtime/index_utils.cu",
-    "third_party/nvfuser/runtime/memory.cu",
-    "third_party/nvfuser/runtime/random_numbers.cu",
-    "third_party/nvfuser/runtime/swizzle.cu",
-    "third_party/nvfuser/runtime/tensor.cu",
-    "third_party/nvfuser/runtime/tensorcore.cu",
-    "third_party/nvfuser/runtime/tuple.cu",
-    "third_party/nvfuser/runtime/type_traits.cu",
-    "third_party/nvfuser/runtime/warp.cu",
-    "third_party/nvfuser/runtime/warp_rocm.cu",
-    "third_party/nvfuser/runtime/welford.cu",
-    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
-    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
-]
-
-libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
-
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -160,6 +124,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/custom_function.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/input_metadata.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
@@ -482,7 +447,6 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
-    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
     "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
@@ -520,7 +484,9 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
+    "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/GroupRegistry.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
