@@ -86,7 +86,7 @@ class Match:
         if self.kwargs:
             for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
-                    raise FailedMatch(f"kwarg mismatch: {key}")
+                    raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
         self.nodes.extend(other.nodes)
         self.kwargs.update(other.kwargs)
@@ -113,7 +113,7 @@ class Match:
         ]
 
     def output_node(self) -> torch.fx.Node:
-        return [p for p in self.output_nodes() if p][0]
+        return next(p for p in self.output_nodes() if p)
 
     def replace_with_graph(self, replacement_graph, args):
         assert self.ctx
@@ -139,6 +139,12 @@ class Match:
 class FailedMatch(RuntimeError):
     def __init__(self, format_string, *args, **kwargs):
         self.format_string = format_string
+        # We want to construct error messages lazily instead of eagerly, as
+        # constructing them eagerly can significantly worsen compile times.
+        if len(format_string) > 200:
+            raise RuntimeError(
+                f"Format string too long - use lazy construction of strings instead. Format string is\n {format_string}"
+            )
         self.args = args
         self.kwargs = kwargs
 
@@ -402,17 +408,35 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
+        if not self._match_fns(node) or len(node.args) != len(self.args):
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
             return FailedMatch("multiple_users {}", self)
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
+        _args = node.args
+        _kwargs = node.kwargs
+        if len(_kwargs) < len(self.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
+            else:
+                _args, _kwargs = normalized_args_and_kwargs
+                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
+                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+                else:
+                    return FailedMatch(
+                        "function_mismatch: node={}, pattern={}", node, self
+                    )
+        else:
+            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+
+        node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch("args_structure {} {}", node_spec, self_spec)
@@ -543,7 +567,7 @@ class ListOf(PatternExpr):
             pattern_to_node = child_ctx.filter_multi_user_patterns()
             if not child_match:
                 if not self.partial:
-                    return FailedMatch(f"list[{i}]: {child_match}")
+                    return FailedMatch("list[{}]: {}", i, child_match)
                 continue
             matched = True
             m.extend(child_match.bundle())
@@ -1195,7 +1219,7 @@ def fx_to_pattern(
 
     pattern = Converter(gm).run()
     if not isinstance(pattern, PatternExpr):
-        return MultiOutputPattern(pytree.tree_flatten(pattern)[0])
+        return MultiOutputPattern(pytree.tree_leaves(pattern))
     return pattern
 
 
