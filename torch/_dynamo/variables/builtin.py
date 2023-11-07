@@ -19,7 +19,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
@@ -339,7 +339,6 @@ class BuiltinVariable(VariableTracker):
                 a,
                 ListVariable(
                     list(a.items) + list(b.unpack_var_sequence(tx)),
-                    regen_guards=False,
                     **options,
                 ),
             )
@@ -826,23 +825,22 @@ class BuiltinVariable(VariableTracker):
                     mutable_local=MutableLocal(),
                 )
         elif obj.has_unpack_var_sequence(tx):
-            guards = set()
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
-                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                    install_guard(
+                        obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
+                    )
                 else:
-                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             if cls is SetVariable:
                 return cls(
                     list(obj.unpack_var_sequence(tx)),
                     mutable_local=MutableLocal(),
-                    guards=guards,
                 ).add_options(self, obj)
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
-                guards=guards,
             ).add_options(self, obj)
 
     call_iter = _call_iter_tuple_list
@@ -1060,7 +1058,6 @@ class BuiltinVariable(VariableTracker):
         from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
-        guards = options["guards"]
         name = name_var.as_python_constant()
 
         if not name_var.is_python_constant():
@@ -1075,10 +1072,9 @@ class BuiltinVariable(VariableTracker):
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
-            guards.update(hasattr_var.guards)
             assert hasattr_var.as_python_constant() in (True, False)
             if not hasattr_var.as_python_constant():
-                return default.add_guards(guards)
+                return default
 
         if obj.source:
             source = AttrSource(obj.source, name)
@@ -1152,14 +1148,14 @@ class BuiltinVariable(VariableTracker):
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable.create(member, **options)
             else:
-                return VariableBuilder(tx, source)(member).add_guards(guards)
+                return VariableBuilder(tx, source)(member)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            return VariableBuilder(tx, source)(member).add_guards(guards)
+            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(
                 getattr(obj.fn, name), **VariableTracker.propagate(obj)

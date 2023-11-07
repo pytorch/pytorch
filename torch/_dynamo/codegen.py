@@ -76,8 +76,6 @@ class PyCodegen:
             self.clear_tos()
             return
 
-        self.tx.output.guards.update(value.guards)
-
         assert isinstance(value, VariableTracker)
         output = self._output
         graph_outputs = self.graph_outputs

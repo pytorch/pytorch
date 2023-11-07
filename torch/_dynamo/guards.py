@@ -586,7 +586,7 @@ class GuardBuilder(GuardBuilderBase):
             f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
         )
         code = [
-            f"___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id})"
+            f"(___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id}))"
         ]
         self._produce_guard_code(guard, code)
 
@@ -1366,3 +1366,19 @@ def make_dupe_guard(obj_source, dupe_source):
             # However, this should always be a sound guard to add here.
             return functools.partial(GuardBuilder.DUPLICATE_INPUT, source_b=dupe_source)
     return None
+
+
+def install_guard(*guards, skip=0):
+    """
+    Add dynamo guards to the current tracing context.
+
+    Args:
+        guards: guard(s) to add
+        skip: number of stack frames to ignore for debug stack trace
+    """
+    from torch._guards import TracingContext
+
+    add = TracingContext.get().guards_context.dynamo_guards.add
+    for guard in guards:
+        assert isinstance(guard, Guard)
+        add(guard, skip=skip + 1)

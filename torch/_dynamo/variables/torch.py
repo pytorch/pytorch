@@ -8,6 +8,7 @@ import types
 from typing import Dict, List
 
 from torch._streambase import _StreamBase
+from ..guards import install_guard
 
 try:
     import numpy as np
@@ -159,10 +160,10 @@ class TorchCtxManagerClassVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
         return TorchCtxManagerClassVariable(
             value,
             source=source,
-            guards={source.make_guard(GuardBuilder.FUNCTION_MATCH)},
         )
 
     def __init__(self, value, **kwargs):
@@ -258,6 +259,9 @@ class TorchVariable(VariableTracker):
             self_should_be_none = getattr(self.value, "__self__", None)
         except RuntimeError as e:
             assert "No such operator" in str(e), str(e)
+            self_should_be_none = None
+        except AssertionError as e:
+            assert "Unknown attribute" in str(e), str(e)
             self_should_be_none = None
 
         # assert "_ntuple.<locals>.parse" not in str(value)
@@ -425,18 +429,18 @@ class TorchVariable(VariableTracker):
             return self._call_ntuple(tx, args, kwargs, options)
         elif self.value is torch.is_grad_enabled:
             assert not (args or kwargs)
-            return ConstantVariable.create(
-                torch.is_grad_enabled(), **options
-            ).add_guards(GradModeVariable._guards_singleton)
+            install_guard(GradModeVariable._guards_singleton)
+            return ConstantVariable.create(torch.is_grad_enabled(), **options)
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:
             assert not (args or kwargs)
+            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
             return ConstantVariable.create(
                 torch.are_deterministic_algorithms_enabled(), **options
-            ).add_guards(DeterministicAlgorithmsVariable._guards_singleton)
+            )
         elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
@@ -444,9 +448,8 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch._C._is_torch_function_enabled:
             assert not (args or kwargs)
-            return ConstantVariable.create(
-                tx.output.torch_function_enabled, **options
-            ).add_guards(TorchFunctionDisableVariable._guards_singleton)
+            install_guard(TorchFunctionDisableVariable._guards_singleton)
+            return ConstantVariable.create(tx.output.torch_function_enabled, **options)
         elif self.value in (
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,

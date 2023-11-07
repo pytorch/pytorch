@@ -614,12 +614,6 @@ class FunctoolsPartialVariable(VariableTracker):
         self.keywords = keywords
         self.original = original
 
-        self.guards.update(VariableTracker.propagate(func)["guards"])
-        for arg in args:
-            self.guards.update(VariableTracker.propagate(arg)["guards"])
-        for val in keywords.values():
-            self.guards.update(VariableTracker.propagate(val)["guards"])
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

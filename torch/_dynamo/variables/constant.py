@@ -6,7 +6,7 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..utils import np
 from .base import typestr, VariableTracker
 
@@ -41,21 +41,15 @@ class ConstantVariable(VariableTracker):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                guards = (
-                    {item_source.make_guard(GuardBuilder.CONSTANT_MATCH)}
-                    if item_source
-                    else None
-                )
+                if item_source:
+                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
                         source=item_source,
-                        guards=guards,
                     )
                 )
-            return variables.BaseListVariable.cls_for(type(value))(
-                items, regen_guards=True, **kwargs
-            )
+            return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
 
         return ConstantVariable(value, **kwargs)
 
