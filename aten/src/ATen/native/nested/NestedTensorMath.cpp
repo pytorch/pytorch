@@ -245,6 +245,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
     const Tensor& t,
     double padding,
     OptionalIntArrayRef output_size) {
+  TORCH_CHECK(t.numel() > 0, "to_padded_tensor only supports tensors with non-zero numel")
   // TODO: support noncontiguous case
   // error out for now
   TORCH_CHECK(

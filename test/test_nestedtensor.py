@@ -96,15 +96,24 @@ def noncontiguous_to_padded_tensor(input, shape=None):
 # Helper function to generate a random nested tensor
 
 
-def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided):
+def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided, must_non_empty=True):
     if min_dims is None:
         min_dims = tuple([0] * len(max_dims))
-    ts1 = []
-    for _ in range(num_tensors):
-        tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
-                            for (min_dim, max_dim) in zip(min_dims, max_dims)])
-        t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
-        ts1.append(t1)
+    has_non_empty = False
+    while not has_non_empty:
+        # Repeat until we have at least one non-empty tensor
+        ts1 = []
+        has_non_empty = False
+        for _ in range(num_tensors):
+            tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
+                                for (min_dim, max_dim) in zip(min_dims, max_dims)])
+            t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
+            if t1.numel() > 0:
+                has_non_empty = True
+            ts1.append(t1)
+        # Execute only once if must_non_empty is False
+        if not must_non_empty:
+            break
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype, layout=layout)
 
 
@@ -1896,6 +1905,16 @@ class TestNestedTensorDeviceType(NestedTestCase):
             RuntimeError,
             r"for now linear only supports contiguous nested tensor",
             lambda: torch.nn.functional.linear(nt_noncontiguous, weight)
+        )
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_to_padded_tensor_zero_numel_errors(self, device, dtype):
+        ts = [torch.ones(1, 0), torch.ones(0, 0)]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype, layout=torch.strided)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"to_padded_tensor only supports tensors with non-zero numel",
+            lambda: torch.nested.to_padded_tensor(nt, 0.0)
         )
 
     @dtypes(torch.float, torch.float16, torch.double)
