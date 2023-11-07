@@ -3336,7 +3336,7 @@ def margin_ranking_loss(
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute the margin ranking loss.
-    
+
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
     if has_torch_function_variadic(input1, input2, target):
@@ -3405,7 +3405,7 @@ def multilabel_margin_loss(
     reduction: str = "mean",
 ) -> Tensor:
     r"""Compute the multi-label margin loss.
-    
+
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
     if has_torch_function_variadic(input, target):
@@ -3544,7 +3544,9 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""See :class:`~torch.nn.MultiMarginLoss` for details."""
+    r"""Compute the multi margin loss.
+
+    See :class:`~torch.nn.MultiMarginLoss` for details."""
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
             multi_margin_loss,
