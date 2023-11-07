@@ -86,10 +86,10 @@ class BenchmarkFusionTestTemplate:
             start spilling, the related fusion may have already been skipped
             due to longer lantency.
             """
-            ms = old_benchmark_fn(scheduler, nodes)
+            ms, path = old_benchmark_fn(scheduler, nodes)
             if not math.isinf(ms):
                 ms = 1.0
-            return ms
+            return ms, path
 
         # Disable dynamic_scale_rblock to make it easier to trigger register
         # spilling.

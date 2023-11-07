@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import dis
 import functools
 import inspect
@@ -532,7 +531,20 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             or skipfiles.check(frame.f_code)
             or config.disable
         ):
-            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+            if log.isEnabledFor(logging.DEBUG):
+                skip_reason = (
+                    "traced frame already"
+                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    else "in skipfiles"
+                    if skipfiles.check(frame.f_code)
+                    else "dynamo tracing is disabled"
+                )
+                log.debug(
+                    "skipping: %s (reason: %s, file: %s)",
+                    frame.f_code.co_name,
+                    skip_reason,
+                    frame.f_code.co_filename,
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -1201,31 +1213,6 @@ def export(
         # Note: This is needed by rewrite_signature. We need to put it before
         # optimize_assert since user program may mutate the inputs.
         flat_args, in_spec = pytree.tree_flatten((args, kwargs))
-
-        for arg in flat_args:
-            prim_types = (
-                torch.Tensor,
-                str,
-                int,
-                float,
-                bool,
-                torch.SymBool,
-                torch.SymInt,
-                torch.SymFloat,
-            )
-            if not isinstance(arg, prim_types) and (arg is not None):
-                if dataclasses.is_dataclass(arg):
-                    raise RuntimeError(
-                        "Dataclasses are supposed to be pytree nodes to be exportable. "
-                        "Please take a look at torch.export.register_dataclass "
-                        "for more information.",
-                    )
-                else:
-                    raise RuntimeError(
-                        f"Argument {str(arg)} has type {type(arg)} but only {prim_types} are allowed. "
-                        f"If it is a container type, please register it as valid pytree type."
-                        f" Please take a look torch.utils._pytree._register_pytree_node"
-                    )
 
         remove_from_cache(f)
         constraint_violation_error = None

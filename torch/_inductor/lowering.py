@@ -1034,7 +1034,7 @@ def cat(inputs, dim=0):
         # code gen with uint8 data type directly.
         for input in inputs:
             input.realize()
-        if all(len(input.layout.size) == 4 for input in inputs):
+        if all(len(input.get_size()) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat.default)(inputs, dim)
 
@@ -1443,7 +1443,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1463,7 +1463,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -1490,7 +1490,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -1515,7 +1515,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     binary_attr,
                     alpha,
                     unary_attr,
@@ -1535,7 +1535,7 @@ def register_onednn_fusion_ops():
             bias: TensorBox,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1551,7 +1551,7 @@ def register_onednn_fusion_ops():
                     bias,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -1662,7 +1662,16 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 def make_fallback(op, layout_constraint=None, warn=True):
     assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
-    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
+    if (
+        warn
+        and bool(os.getenv("CI"))
+        and get_decompositions([op])
+        # if fallback_random, we allow not decomposing random
+        and not (
+            config.fallback_random
+            and op in torch._decomp.decompositions_for_rng.extra_random_decomps
+        )
+    ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -2756,6 +2765,7 @@ def index_output_size_and_inner_fn(
     indices_loaders,
     indexed_size,
     x_loader,
+    check,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -2845,6 +2855,7 @@ def index_impl(x, indices, check):
         indices_loaders,
         indexed_size,
         x_loader,
+        check=check,
     )
 
     return Pointwise.create(
@@ -2908,6 +2919,11 @@ def index_put_fallback(self, indices, values, accumulate):
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=True)
+
+
+@register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
+def _unsafe_index_put_(self, indices, values, accumulate=False):
+    return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
 def index_put_impl_(self, indices, values, accumulate, check):
@@ -2975,6 +2991,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         indices_loaders,
         indexed_size,
         None,
+        check=check,
     )
 
     values = expand(values, expected_vals_size)
@@ -3542,7 +3559,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and l.free_symbols
+            if isinstance(l, sympy.Expr) and not l.is_number
             else l
         )
         bounds_precomp.append((l_precomp, h))
@@ -4019,7 +4036,9 @@ def _adaptive_avg_pool2d(x, output_size):
     ones_loader = pad_adaptive_loader(ones_like(x))
 
     def fn(idx):
-        return ops.div(fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader))
+        return ops.truediv(
+            fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader)
+        )
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4165,7 +4184,7 @@ def avg_pool2d(
 
         def fn(idx):
             # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.div(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4721,7 +4740,7 @@ def div_prim(a, b):
         return truncdiv(a, b)
 
     def fn(*args):
-        return ops.div(*args)
+        return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
 
@@ -5007,12 +5026,12 @@ def sym_constrain_range(a, min, max):
     return a
 
 
-@register_lowering(aten.sym_size)
+@register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     return a.get_size()[dim]
 
 
-@register_lowering(aten.sym_stride)
+@register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     return a.get_stride()[dim]
 

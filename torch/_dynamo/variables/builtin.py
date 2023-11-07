@@ -800,6 +800,12 @@ class BuiltinVariable(VariableTracker):
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
         if self._dynamic_args(*args, **kwargs):
             return self._dyn_proxy(tx, *args, **kwargs)
+
+        if isinstance(obj, variables.IteratorVariable):
+            # For non-list iterators, we will guard on vars that
+            # determine the control flow
+            return obj
+
         # TODO This should probably be treated as a dict, or dicts should also be treated here
         if self.fn == set:
             cls = SetVariable
@@ -965,9 +971,10 @@ class BuiltinVariable(VariableTracker):
         return variables.SuperVariable(a, b)
 
     def call_next(self, tx, arg):
-        if isinstance(arg, variables.ListIteratorVariable):
-            val, next_iter = arg.next_variables()
-            tx.replace_all(arg, next_iter)
+        if isinstance(
+            arg, (variables.ListIteratorVariable, variables.IteratorVariable)
+        ):
+            val, next_iter = arg.next_variables(tx)
             return val
         elif isinstance(arg, variables.BaseListVariable):
             return arg.items[0].add_options(self, arg)
@@ -1166,7 +1173,18 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            name = name_var.as_python_constant()
+            if name == "data" and all(
+                isinstance(t, variables.TensorVariable)
+                # and not (t.source is None or is_constant_source(t.source))
+                for t in [val, obj]
+            ):
+                unimplemented(
+                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
+                    "need to graph break to apply the aliasing (or track new aliased tensors) "
+                    "to continue to trace the graph"
+                )
+            tx.output.side_effects.store_attr(obj, name, val)
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(

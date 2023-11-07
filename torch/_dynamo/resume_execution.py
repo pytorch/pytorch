@@ -2,7 +2,7 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_call_function,
@@ -32,8 +32,8 @@ CO_ASYNC_GENERATOR = 0x0200
 
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
-    stack_index: int = None
-    target_values: Optional[Tuple] = None
+    stack_index: int
+    target_values: Optional[Tuple[Any, ...]] = None
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
@@ -279,15 +279,17 @@ class ReenterWith:
 @dataclasses.dataclass
 class ResumeFunctionMetadata:
     code: types.CodeType
-    instructions: List[Instruction] = None
+    instructions: List[Instruction] = dataclasses.field(default_factory=list)
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
 
     # map from PUSH_EXC_INFO's in the prefix to original block target offset
-    prefix_block_target_offset_remap: List[int] = None
+    prefix_block_target_offset_remap: List[int] = dataclasses.field(
+        default_factory=list
+    )
     # map from new block target offsets to original block target offsets
-    block_target_offset_remap: Dict[int, int] = None
+    block_target_offset_remap: Optional[Dict[int, int]] = None
 
 
 def _filter_iter(l1, l2, cond):
@@ -333,7 +335,7 @@ class ContinueExecutionCache:
         argnames: Tuple[str],
         setup_fns: Tuple[ReenterWith],
         null_idxes: Tuple[int],
-    ):
+    ) -> types.CodeType:
         assert offset is not None
         assert not (
             code.co_flags
@@ -354,8 +356,6 @@ class ContinueExecutionCache:
 
         is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
-        if is_py311_plus:
-            meta.prefix_block_target_offset_remap = []
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
             meta.instructions = copy.deepcopy(instructions)
@@ -390,7 +390,7 @@ class ContinueExecutionCache:
                     )
                 prefix.append(create_instruction("RESUME", arg=0))
 
-            cleanup = []
+            cleanup: List[Instruction] = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
             hook_target_offsets = {
                 fn.stack_index: setup_fn_target_offsets[i]
@@ -462,7 +462,7 @@ class ContinueExecutionCache:
         return new_code
 
     @staticmethod
-    def unreachable_codes(code_options):
+    def unreachable_codes(code_options) -> List[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
             create_instruction("LOAD_CONST", argval=None),
@@ -471,7 +471,7 @@ class ContinueExecutionCache:
 
     @classmethod
     def generate_based_on_original_code_object(
-        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int], *args
+        cls, code, lineno, offset: int, setup_fn_target_offsets: Tuple[int, ...], *args
     ):
         """
         This handles the case of generating a resume into code generated
@@ -508,7 +508,7 @@ class ContinueExecutionCache:
             # based on the original code object, `meta.code`, the offsets in
             # setup_fn_target_offsets must be based on `meta.code` instead.
             if not meta.block_target_offset_remap:
-                meta.block_target_offset_remap = {}
+                block_target_offset_remap = meta.block_target_offset_remap = {}
 
                 def remap_block_offsets(
                     instructions: List[Instruction], code_options: Dict[str, Any]
@@ -518,7 +518,7 @@ class ContinueExecutionCache:
                     # by counting. Then we can use meta.prefix_block-target_offset_remap
                     # to determine where in the original code the PUSH_EXC_INFO offset
                     # replaced.
-                    prefix_blocks = []
+                    prefix_blocks: List[Instruction] = []
                     for inst in instructions:
                         if len(prefix_blocks) == len(
                             meta.prefix_block_target_offset_remap
@@ -531,10 +531,12 @@ class ContinueExecutionCache:
                     for inst, o in zip(
                         prefix_blocks, meta.prefix_block_target_offset_remap
                     ):
-                        meta.block_target_offset_remap[inst.offset] = o
+                        block_target_offset_remap[cast(int, inst.offset)] = o
 
                     # old bytecode targets are after the prefix PUSH_EXC_INFO's
-                    old_start_offset = prefix_blocks[-1].offset if prefix_blocks else -1
+                    old_start_offset = (
+                        cast(int, prefix_blocks[-1].offset) if prefix_blocks else -1
+                    )
                     # offsets into old bytecode
                     old_inst_offsets = sorted(
                         n for n in setup_fn_target_offsets if n > old_start_offset
@@ -548,13 +550,13 @@ class ContinueExecutionCache:
                         lambda v1, v2: v1[0] is v2,
                     )
                     for new, old in zip(new_targets, targets):
-                        meta.block_target_offset_remap[old.offset] = new[1].offset
+                        block_target_offset_remap[old.offset] = new[1].offset
 
                 transform_code_object(code, remap_block_offsets)
 
             # if offset is not in setup_fn_target_offsets, it is an error
             setup_fn_target_offsets = tuple(
-                meta.block_target_offset_remap[n] for n in setup_fn_target_offsets
+                block_target_offset_remap[n] for n in setup_fn_target_offsets
             )
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args

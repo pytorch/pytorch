@@ -238,11 +238,11 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
         output_code_log.addHandler(ch)
         prev_level = output_code_log.level
         output_code_log.setLevel(logging.DEBUG)
-        fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
         s = log_capture_string.getvalue()
         output_code_log.setLevel(prev_level)
         output_code_log.removeHandler(ch)
-    return s
+    return result, s
 
 
 def check_model(
@@ -827,12 +827,13 @@ class CommonTemplate:
         self.assertEqual(actual, repeat(x, 3))
 
     @skipIfRocm
+    @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(fn, inps, has_assert: bool, has_wrapping: bool):
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
                     # match ternary operator
                     pattern = r"\?.*:"
@@ -892,6 +893,11 @@ class CommonTemplate:
 
         # Constant is propagated as we can prove that the result is always negative.
         test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+        def unsafe_index(a, b):
+            return aten._unsafe_index(a, (b,))
+
+        test(unsafe_index, (a, b), has_assert=False, has_wrapping=True)
 
     def test_computed_buffer_inlining(self):
         def flip(x):
@@ -3449,6 +3455,17 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_uint8(self):
+        def fn(x):
+            batch_shape = x.shape[:1]
+            out = torch.cat([x.new_zeros(1).expand(batch_shape + (1,)), x], dim=-1)
+            return out
+
+        self.common(
+            fn,
+            (torch.randint(0, 256, size=(3, 255), dtype=torch.uint8),),
+        )
+
     def test_cat_empty(self):
         def fn_2(*tensors):
             return torch.cat(tensors)
@@ -3569,6 +3586,27 @@ class CommonTemplate:
         )
         out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
         self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+    def test_remove_noop_copy(self):
+        def fn(x, y):
+            x = x.cos()
+            a = x.copy_(y)
+            return a.sin()
+
+        self.common(fn, (torch.randn(8, 8), torch.randn(8)))
+
+        def fn2(a, b):
+            abs_max = torch.abs(a).max()
+            b[0] = abs_max.to(a.dtype)
+            return b
+
+        self.common(
+            fn2,
+            (
+                torch.randn(8, 8, dtype=torch.float16),
+                torch.randn(8, dtype=torch.float32),
+            ),
+        )
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
@@ -7435,6 +7473,30 @@ class CommonTemplate:
             ),
         )
 
+    @config.patch(
+        "triton.autotune_pointwise", True
+    )  # needed to introduce config that exceed max shared memory usage
+    def test_large_block_sizes(self):
+        """
+        Inductor will try triton configs like x = 64 and y = 1024 which will
+        result in out of shared memory if dtype is fp32.
+
+        Currently inductor will skip such bad configs and pick the best one
+        from the remaining configs.
+        """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
+
+        @torch.compile
+        def fn(x, y):
+            return x.t() + y
+
+        # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
+        # CI while still keep the same up-rounded size-hints.
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
+        fn(a, b)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7561,7 +7623,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             return kernels
 
-        def test_divisibile_by_16_covers_numel_args(self):
+        def test_divisible_by_16_covers_numel_args(self):
             torch._dynamo.reset()
 
             def fn(a: torch.Tensor) -> torch.Tensor:
@@ -7574,13 +7636,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
             # at slot 3 should be in the divisible by 16 descriptor
             arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].meta["configs"][0].divisible_by_16
+                kernels[0].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
 
             # kernel1 reduces from 8 elements to a single scalar.
             arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[1].meta["configs"][0].divisible_by_16
+                kernels[1].triton_meta["configs"][0].divisible_by_16
             )
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
@@ -8089,6 +8151,35 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+    class NanCheckerTest(TestCase):
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_pass(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            ref = f(x)
+            actual, (code,) = run_and_get_code(torch.compile(f), x)
+            self.assertTrue(torch.allclose(ref, actual))
+            self.assertTrue(
+                re.search(r"assert not .*\.isnan\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+            self.assertTrue(
+                re.search(r"assert not .*\.isinf\(\)\.any\(\).item\(\)", code)
+                is not None
+            )
+
+        @config.patch("nan_asserts", True)
+        def test_nan_checker_fail(self):
+            def f(x):
+                return torch.softmax(x, dim=-1)
+
+            x = torch.randn(2, 1024, device="cuda")
+            x[0, 0] = float("nan")
+            with self.assertRaises(AssertionError):
+                torch.compile(f)(x)
 
 
 if HAS_CPU:
