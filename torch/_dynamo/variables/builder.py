@@ -31,6 +31,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
+from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
@@ -538,14 +539,10 @@ class VariableBuilder:
             )
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
-            new_fn, new_source = CollectiveFunctionRewriteVariable.rewrite(value)
-            old_source = self.source
-            self.source = new_source
-            return CollectiveFunctionRewriteVariable(
-                new_fn,
-                orig_fn=value,
-                orig_source=old_source,
-                source=new_source,
+            return CollectiveFunctionRewriteVariable.create(
+                self.tx,
+                value,
+                source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif istype(value, torch.autograd.function.FunctionMeta):
@@ -1115,6 +1112,13 @@ class VariableBuilder:
             )
         )
 
+        if (
+            isinstance(value, torch.Tensor)
+            and value.is_nested
+            and not isinstance(value, NestedTensor)
+        ):
+            unimplemented("torch.compile does not support strided NestedTensor")
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1148,8 +1152,16 @@ class VariableBuilder:
 
         from torch._numpy import _util
 
+        readonly = not value.flags.writeable
+        if readonly:
+            value.flags.writeable = True
+
         try:
             tensor_value = _util._try_convert_to_tensor(value)
+            if readonly:
+                from torch._prims_common import clone_preserve_strides
+
+                tensor_value = clone_preserve_strides(tensor_value)
         except NotImplementedError as e:
             # failed to convert to tensor, graph break
             unimplemented(str(e))
