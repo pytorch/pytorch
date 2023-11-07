@@ -1531,7 +1531,7 @@ In-place version of :func:`~hardtanh`.
 
 
 def relu6(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Modification of the ReLU with activation limited to maximum size of 6.
+    r"""Apply a modification of the ReLU with activation limited to maximum size of 6.
 
     Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
 
@@ -2240,9 +2240,9 @@ def embedding_bag(
     include_last_offset: bool = False,
     padding_idx: Optional[int] = None,
 ) -> Tensor:
-    r"""Directly compute sums, means or maxes of `bags` of embeddings.
+    r"""Compute sums, means or maxes of `bags` of embeddings.
 
-    Calculation done without instantiating the intermediate embeddings.
+    Calculation is done without instantiating the intermediate embeddings.
     See :class:`torch.nn.EmbeddingBag` for more details.
 
     Note:
@@ -2554,7 +2554,7 @@ def group_norm(
 def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.0) -> Tensor:
     r"""Apply local response normalization over an input signal.
 
-    Input signal is composed of several input planes, where channels occupy the second dimension.
+    The input signal is composed of several input planes, where channels occupy the second dimension.
     Normalization is applied across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
@@ -2665,7 +2665,7 @@ def nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Apply the negative log likelihood loss.
+    r"""Compute the negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
 
@@ -2881,7 +2881,7 @@ def kl_div(
     reduction: str = "mean",
     log_target: bool = False,
 ) -> Tensor:
-    r"""Calculate KL Divergence loss.
+    r"""Compute the KL Divergence loss.
 
     Refer - The `Kullback-Leibler divergence Loss
     <https://en.wikipedia.org/wiki/Kullback-Leibler_divergence>`__
@@ -3126,7 +3126,7 @@ def binary_cross_entropy_with_logits(
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
 ) -> Tensor:
-    r"""Caculate Binary Cross Entropy between target and input logits.
+    r"""Calculate Binary Cross Entropy between target and input logits.
 
     See :class:`~torch.nn.BCEWithLogitsLoss` for details.
 
@@ -3197,7 +3197,7 @@ def smooth_l1_loss(
     reduction: str = "mean",
     beta: float = 1.0,
 ) -> Tensor:
-    r"""Calculate Smooth L1 loss.
+    r"""Compute the Smooth L1 loss.
 
     Function uses a squared term if the absolute
     element-wise error falls below beta and an L1 term otherwise.
@@ -3239,7 +3239,7 @@ def huber_loss(
     reduction: str = 'mean',
     delta: float = 1.0,
 ) -> Tensor:
-    r"""Calculate Huber loss.
+    r"""Compute the Huber loss.
 
     Function uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
@@ -3304,7 +3304,7 @@ def mse_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Measure the element-wise mean squared error.
+    r"""Compute the element-wise mean squared error.
 
     See :class:`~torch.nn.MSELoss` for details.
     """
@@ -3335,7 +3335,10 @@ def margin_ranking_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""See :class:`~torch.nn.MarginRankingLoss` for details."""
+    r"""Compute the margin ranking loss.
+    
+    See :class:`~torch.nn.MarginRankingLoss` for details.
+    """
     if has_torch_function_variadic(input1, input2, target):
         return handle_torch_function(
             margin_ranking_loss,
@@ -3368,7 +3371,7 @@ def hinge_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Measure the loss given an input tensor x and a labels tensor y (containing 1 or -1).
+    r"""Compute the loss given an input tensor x and a labels tensor y (containing 1 or -1).
 
     Usually used for measuring whether two inputs are similar or dissimilar,
     e.g. using the L1 pairwise distance as x,
@@ -3401,7 +3404,10 @@ def multilabel_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""See :class:`~torch.nn.MultiLabelMarginLoss` for details."""
+    r"""Compute the multi-label margin loss.
+    
+    See :class:`~torch.nn.MultiLabelMarginLoss` for details.
+    """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
             multilabel_margin_loss,
@@ -3427,7 +3433,7 @@ def soft_margin_loss(
     reduction: str = "mean",
 ) -> Tensor:
     r"""
-    Optimize a two-class classification logistic loss between input tensor x and target tensor y (containing 1 or -1).
+    Optimize a two-class classification logistic loss between input tensor x and target tensor y (containing `1` or `-1`).
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
@@ -3450,7 +3456,7 @@ def multilabel_soft_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Optimize a multi-label one-versus-all loss based on max-entropy.
+    r"""Compute a multi-label one-versus-all loss based on max-entropy.
 
     Creates a criterion between input x and target y of size (N,C) for optimisation.
 
@@ -3500,7 +3506,7 @@ def cosine_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Calculate Cosine Embedding loss.
+    r"""Compute the Cosine Embedding loss.
 
     Creates a criterion that measures the loss given input tensors x1,x2
     and a Tensor label y with values 1 or -1.
@@ -4606,7 +4612,7 @@ def triplet_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Measure triplet loss between given input tensors and a margin greater than 0.
+    r"""Compute the triplet loss between given input tensors and a margin greater than 0.
 
     See :class:`~torch.nn.TripletMarginLoss` for details.
     """
@@ -5127,7 +5133,7 @@ def multi_head_attention_forward(
     average_attn_weights: bool = True,
     is_causal: bool = False,
 ) -> Tuple[Tensor, Optional[Tensor]]:
-    r"""Foward method for MultiHeadAttention.
+    r"""Forward method for MultiHeadAttention.
 
     See :class:`torch.nn.MultiheadAttention` for details.
 
