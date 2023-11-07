@@ -2733,10 +2733,13 @@ def load_object(name):
     x = name.split("#")
     if len(x) == 2:
         obj = _load_obj_from_str(x[0])
-        return getattr(obj, x[1])
+        val = getattr(obj, x[1])
     else:
         assert len(x) == 1
-        return _load_obj_from_str(x[0])
+        val = _load_obj_from_str(x[0])
+    if hasattr(val, "__wrapped__") and val is not torch.ops:
+        val = val.__wrapped__
+    return val
 
 
 @functools.lru_cache(None)
