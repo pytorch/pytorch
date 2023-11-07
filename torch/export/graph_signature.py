@@ -344,7 +344,7 @@ class ExportGraphSignature:
         if assertion_dep_token is None:
             return
         assert len(assertion_dep_token) == 1
-        assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+        assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
         assert (
             len(self.user_outputs) + len(self.buffers_to_mutate)
             == assertion_dep_token_index
