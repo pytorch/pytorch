@@ -230,7 +230,7 @@ class TestFSDPStateDict(FSDPTest):
                 bn1 = checkpoint_wrapper(bn1)
                 lin2 = checkpoint_wrapper(lin2)
             seq = nn.Sequential(
-                FSDP(lin1, *fsdp_args, mixed_precision=lin_mp, **fsdp_kwargs,),
+                FSDP(lin1, *fsdp_args, mixed_precision=lin_mp, **fsdp_kwargs),
                 FSDP(bn1, *fsdp_args, mixed_precision=bn_mp, **fsdp_kwargs),
                 lin2,
             )
