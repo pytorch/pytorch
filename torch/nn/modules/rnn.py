@@ -41,6 +41,7 @@ class RNNBase(Module):
     .. note::
         LSTM and GRU classes override some methods implemented by RNNBase.
     """
+    
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional', 'proj_size']
     __jit_unused_properties__ = ['all_weights']
@@ -164,7 +165,7 @@ class RNNBase(Module):
         super().__setattr__(attr, value)
 
     def flatten_parameters(self) -> None:
-        """Resets parameter data pointer so that they can use faster code paths.
+        """Reset parameter data pointer so that they can use faster code paths.
 
         Right now, this works only if the module is on the GPU and cuDNN is enabled.
         Otherwise, it's a no-op.
@@ -364,10 +365,9 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
-
-    Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
-    input sequence.
+    r"""Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an input sequence.
+    
+    __init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None) 
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -597,10 +597,9 @@ class RNN(RNNBase):
 
 
 class LSTM(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
+    r"""Apply a multi-layer long short-term memory (LSTM) RNN to an input sequence.
 
-    Applies a multi-layer long short-term memory (LSTM) RNN to an input
-    sequence.
+    __init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -897,9 +896,9 @@ class LSTM(RNNBase):
 
 
 class GRU(RNNBase):
-    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
-
-    Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+    r"""Apply a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+    
+    __init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -1218,6 +1217,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+    
     __constants__ = ['input_size', 'hidden_size', 'bias', 'nonlinearity']
     nonlinearity: str
 
@@ -1358,7 +1358,7 @@ class LSTMCell(RNNCellBase):
 
 
 class GRUCell(RNNCellBase):
-    r"""A gated recurrent unit (GRU) cell
+    r"""A gated recurrent unit (GRU) cell.
 
     .. math::
 
