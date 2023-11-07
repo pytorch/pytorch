@@ -152,11 +152,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         "user_code_variable_name",
     }
 
-    @staticmethod
-    def propagate(*vars: List[List["VariableTracker"]]):
-        # TODO(jansel): delete this function
-        return {}
-
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
         args = dict(self.__dict__)
@@ -264,14 +259,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        options = VariableTracker.propagate(self)
-
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
+        source = None
         if self.source:
-            options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, **options)
+            source = AttrSource(self.source, name)
+        return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
         try:
@@ -316,9 +310,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable.create(
-                len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
-            )
+            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
         elif (
             name == "__getattr__"
             and len(args) == 1
