@@ -50,10 +50,7 @@ from torch.testing._internal.common_cuda import (
     with_tf32_off,
 )
 
-from torch.testing._internal.common_device_type import (
-    _has_sufficient_memory,
-    skipCUDAIf,
-)
+from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -104,6 +101,19 @@ vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
 
+def skipCUDAIf(cond, msg):
+    if cond:
+        def decorate_fn(fn):
+            def inner2(self, *args, **kwargs):
+                if self.device == "cuda":
+                    raise unittest.SkipTest(msg)
+                return fn(self, *args, **kwargs)
+            return fn
+    else:
+        def decorate_fn(fn):
+            return fn
+
+    return decorate_fn
 
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
@@ -1172,6 +1182,7 @@ class CommonTemplate:
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_dist_bf16(self):
+
         def fn(a, b):
             return torch.dist(a.to(torch.bfloat16), b.to(torch.bfloat16))
 
@@ -1856,7 +1867,7 @@ class CommonTemplate:
         )
 
     # https://github.com/pytorch/pytorch/issues/98979
-    @unittest.skipIf(HAS_CUDA, "cuda failed for float64 linear")
+    @skipCUDAIf(True, "cuda failed for float64 linear")
     def test_linear_float64(self):
         mod = torch.nn.Sequential(torch.nn.Linear(8, 16).to(torch.float64)).eval()
         with torch.no_grad():
@@ -3538,7 +3549,7 @@ class CommonTemplate:
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
 
-    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
@@ -4020,7 +4031,7 @@ class CommonTemplate:
                 ),
             )
 
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
