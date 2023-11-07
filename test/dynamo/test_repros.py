@@ -1541,7 +1541,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_tensor_setattr_data_graph_breaks(self):
         from torch._dynamo.utils import counters
+
         counters.clear()
+
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
             x.data = y
@@ -1568,9 +1570,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(b, b1)
             self.assertEqual(cnt.frame_count, 2)  # graph breaks
 
-            self.assertEqual(len(counters['graph_break']), 1)
+            self.assertEqual(len(counters["graph_break"]), 1)
             self.assertTrue(
-                ".data assignment to a tracked tensors can introduce aliasing" in next(iter(counters['graph_break'].keys()))
+                ".data assignment to a tracked tensors can introduce aliasing"
+                in next(iter(counters["graph_break"].keys()))
             )
             counters.clear()
 
@@ -1597,6 +1600,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         from torch._dynamo.utils import counters
 
         counters.clear()
+
         # https://github.com/pytorch/pytorch/issues/113030
         def func(x):
             x += 1
@@ -1615,10 +1619,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
         self.assertEqual(a, a1)
         self.assertEqual(cnt.frame_count, 2)
-    
-        self.assertEqual(len(counters['graph_break']), 1)
+
+        self.assertEqual(len(counters["graph_break"]), 1)
         self.assertTrue(
-            ".data assignment to a tracked tensors can introduce aliasing" in next(iter(counters['graph_break'].keys()))
+            ".data assignment to a tracked tensors can introduce aliasing"
+            in next(iter(counters["graph_break"].keys()))
         )
         counters.clear()
 
