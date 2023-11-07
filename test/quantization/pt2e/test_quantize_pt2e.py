@@ -1070,8 +1070,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                x3 -> add2 /
                x4 -/
 
-        all add has shared input and output, and second input is using shared quantization spec pointint
-        to first input, but we set allow_implicit_sharing to all add nodes so input and output of add1,
+        all add has shared input and output, and second input is using shared quantization spec pointing
+        to first input, but we set allow_implicit_sharing to False for all add nodes so input and output of add1,
         add2 and add3 will each belong to one sharing group, so we'll have:
 
         x1 -> obs1 -> add1 -> obs1 -> obs3--> add3 -> obs3
