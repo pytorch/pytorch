@@ -623,6 +623,8 @@ class GraphModule(torch.nn.Module):
             context = torch._guards.TracingContext.get()
             val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
+            print("VAL TO GUARDS", val_to_guards)
+
             # Grab info on sources and guards from the shapeenv
             nonlocal lower_bound_str
             nonlocal upper_bound_str
@@ -642,10 +644,14 @@ class GraphModule(torch.nn.Module):
 
         @torch.compile(backend=backend)
         def fn(x):
-            if x.shape[0] < 10:
-                return torch.mul(x, x)
-            else:
-                return torch.div(x, x)
+            # try-finally to force not compiling both branches
+            try:
+                if x.shape[0] < 10:
+                    return torch.mul(x, x)
+                else:
+                    return torch.div(x, x)
+            finally:
+                pass
 
         inp = torch.ones(4, 4)
 
