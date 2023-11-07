@@ -23,12 +23,12 @@ from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer import QuantizationSpec, Quantizer
 
 from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    convert_scalars_to_attrs,
     OP_TO_ANNOTATOR,
     OperatorConfig,
     OperatorPatternType,
     propagate_annotation,
     QuantizationConfig,
-    convert_scalars_to_attrs,
 )
 
 from torch.fx import Node
@@ -342,9 +342,10 @@ class XNNPACKQuantizer(Quantizer):
         self.module_name_config[module_name] = quantization_config
         return self
 
-    def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """Transforms scalar values to tensor attributes
-        """
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Transforms scalar values to tensor attributes"""
         return convert_scalars_to_attrs(model)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
