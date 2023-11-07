@@ -19,7 +19,7 @@
   } while (0)
 
 #define C10_FORALL_DRIVER_LIBRARIES(_) \
-  _("libcuda.so", 0)                   \
+  _("libcuda.so.1", 0)                 \
   _("libnvidia-ml.so.1", 1)
 
 #define C10_FORALL_DRIVER_API(_)         \
