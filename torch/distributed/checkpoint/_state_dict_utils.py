@@ -108,7 +108,7 @@ def _gather_state_dict(
             )
             value = value.to_local()
         elif isinstance(value, dict):
-            value = _gather_state_dict(value, pg, device)
+            value = _gather_state_dict(value, pg=pg, device=device)
 
         if isinstance(value, torch.Tensor) and cpu_offload:
             value = value.to(cpu_device)
