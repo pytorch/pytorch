@@ -332,6 +332,10 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
+    def _print_align(self, expr):
+        assert len(expr.args) == 1
+        return f"align({self._print(expr.args[0])})"
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -364,6 +368,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"abs({self._print(expr.args[0])})"
 
+    def _print_Max(self, expr):
+        assert len(expr.args) >= 2
+        return f"max({', '.join(map(self._print, expr.args))})"
+
 
 class OpOverrides:
     def __init__(self, parent):
@@ -384,7 +392,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.div("1", x)
+        return ops.truediv("1", x)
 
     @staticmethod
     def square(x):
@@ -438,14 +446,14 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
-        # V.kernel may be null since this method may be called for the
-        # wrapper codegen where there is no specific kernel.
-        if (
-            self.name
-            not in (
-                V.graph.removed_buffers | getattr(V.kernel, "removed_buffers", set())
+        if all(
+            self.name not in x
+            for x in (
+                V.graph.removed_buffers,
+                V.kernel.removed_buffers,
+                V.graph.inplaced_to_remove,
+                V.kernel.inplaced_to_remove,
             )
-            and self.name not in V.graph.inplaced_to_remove
         ):
             return self.line
         return None
@@ -647,7 +655,10 @@ class KernelArgs:
             if self._buffer_is_marked_removed(inplaced):
                 continue
             for other in inplaced.other_names:
-                if other in V.graph.inplaced_to_remove:
+                if (
+                    other in V.graph.inplaced_to_remove
+                    or other in V.kernel.inplaced_to_remove
+                ):
                     continue
                 if other in self.input_buffers:
                     yield self.input_buffers[other], inplaced.inner_name
@@ -888,6 +899,8 @@ class Kernel(CodeGen):
         self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
 
         self.removed_buffers = set()
+        self.inplaced_to_remove = set()
+
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
         #   the buffer specified by key

@@ -15,7 +15,6 @@ import traceback
 import types
 import typing
 import weakref
-from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
@@ -50,6 +49,7 @@ from .bytecode_transformation import (
 )
 from .code_context import code_context
 from .codegen import PyCodegen
+from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
 from .guards import GuardBuilder
@@ -72,7 +72,13 @@ from .utils import (
     LazyString,
     proxy_args_kwargs,
 )
-from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
+from .variables.base import (
+    _is_top_level_scope,
+    is_side_effect_safe,
+    MutableLocal,
+    typestr,
+    VariableTracker,
+)
 from .variables.builder import VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable, EnumVariable
@@ -346,7 +352,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
-                state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
@@ -356,8 +361,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         push and self.push(value)
                         self.jump(inst)
                 else:
-                    # rollback to the state before the __bool__ or __len__ inline
-                    self.restore_graphstate(state)
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
@@ -397,7 +400,6 @@ def break_graph_if_unsupported(*, push):
         @functools.wraps(inner_fn)
         def wrapper(self: "InstructionTranslatorBase", inst: Instruction):
             state = self.copy_graphstate()
-            reason = None
             try:
                 TracingContext.set_current_loc(
                     self.f_code.co_filename, self.lineno, self.f_code.co_name
@@ -412,15 +414,11 @@ def break_graph_if_unsupported(*, push):
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
-                if len(self.states_before_block) > 0:
+                if self.generic_context_manager_depth > 0:
                     # We don't support graph break under GenericContextWrappingVariable,
                     # If there is, we roll back to the checkpoint and fall back.
                     excp.remove_from_stats()
-                    state = self.states_before_block.pop()
-                    self.restore_graphstate(state)
-                    ctx = state.stack[-1]
-                    assert isinstance(ctx, GenericContextWrappingVariable)
-                    unimplemented(f"Graph break under {ctx}")
+                    unimplemented("Graph break under GenericContextWrappingVariable")
 
                 if isinstance(excp, exc.UncapturedHigherOrderOpError):
                     raise
@@ -618,14 +616,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
-        state = self.copy_graphstate()
-        try:
-            result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-            self.output.guards.update(fn.guards)
-            return result
-        except Exception:
-            self.restore_graphstate(state)
-            raise
+        result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+        self.output.guards.update(fn.guards)
+        return result
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -661,7 +654,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.lineno = inst.starts_line
             self.log_starts_line()
 
-        if len(self.stack) == 0 and self.should_compile_partial_graph():
+        if (
+            len(self.stack) == 0
+            and self.should_compile_partial_graph()
+            and self.is_non_empty_graph()
+        ):
             self.checkpoint = inst, self.copy_graphstate()
 
         log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
@@ -716,7 +713,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             return inst.opname != "RETURN_VALUE"
         except Unsupported:
-            if self.empty_checkpoint():
+            if self.checkpoint is None:
                 log.debug("empty checkpoint")
                 raise
 
@@ -814,7 +811,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        loaded_vt = loaded_vt.rename(self, name)
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if _is_top_level_scope(current_scope_id()):
+            loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -1065,11 +1066,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def FOR_ITER(self, inst):
         it = self.pop()
-        if isinstance(it, ListIteratorVariable):
+        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
             try:
-                val, next_iter = it.next_variables()
-                self.replace_all(it, next_iter)
+                val, next_iter = it.next_variables(self)
                 self.push(next_iter)
                 self.push(val)
             except StopIteration:
@@ -1728,7 +1728,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def BINARY_OP(self, inst):
         if sys.version_info >= (3, 11):
-            opname = dis._nb_ops[inst.arg][0][3:]
+            opname = dis._nb_ops[inst.arg][0][3:]  # type: ignore[attr-defined]
             if opname.startswith("INPLACE"):
                 return getattr(self, "INPLACE_" + opname[8:])(inst)
             return getattr(self, "BINARY_" + opname)(inst)
@@ -1793,15 +1793,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.setup_or_before_with(inst)
 
     def setup_or_before_with(self, inst):
-        state = self.copy_graphstate()
         ctx = self.pop()
         if not isinstance(ctx, ContextWrappingVariable):
             unimplemented(f"{inst.opname} {ctx}")
 
         if isinstance(ctx, GenericContextWrappingVariable):
-            # Save the checkpoint to restore if there is
-            # graph break under the GenericContextWrappingVariable.
-            self.states_before_block.append(state)
+            self.generic_context_manager_depth += 1
 
         self.output.guards.update(ctx.guards)
 
@@ -1865,17 +1862,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ) = state
         self.output.restore_graphstate(output_state)
 
-    def empty_checkpoint(self):
-        if self.checkpoint is None:
+    def is_non_empty_graph(self):
+        if self.output.count_calls() > 1:
+            # perf optimization only
+            self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
             return True
-        output_graphstate = self.checkpoint[1][0]
-        graphstate = self.checkpoint[1][1:]
-        state = (*output_graphstate, *graphstate)
-        for obj in state:
-            if isinstance(obj, Sized):
-                if len(obj) != 0:
-                    return False
-        return True
+        return False
 
     def format_frame_summary(self, additional_stack_frames=None):
         if additional_stack_frames is None:
@@ -1945,7 +1937,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.next_instruction = None
         self.block_stack = []
         # states before SETUP_WITH for checkpointing and fallback
-        self.states_before_block: List[InstructionTranslatorGraphState] = []
+        self.generic_context_manager_depth = 0
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
         self.accept_prefix_inst = True
@@ -2127,7 +2119,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
-        return all(b.can_restore() for b in self.block_stack) and not self.one_graph
+        return (
+            all(b.can_restore() for b in self.block_stack)
+            and not self.one_graph
+            and self.generic_context_manager_depth == 0
+        )
 
     def create_call_resume_at(self, inst):
         self.instruction_pointer = None
@@ -2559,11 +2555,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-            if isinstance(tos, ListIteratorVariable):
+            if isinstance(
+                tos, (variables.ListIteratorVariable, variables.IteratorVariable)
+            ):
                 self.output.guards.update(tos.guards)
                 try:
-                    val, next_iter = tos.next_variables()
-                    self.replace_all(tos, next_iter)
+                    val, next_iter = tos.next_variables(self)
                     self.push(val)
                     # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)
