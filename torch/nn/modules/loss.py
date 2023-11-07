@@ -1763,7 +1763,6 @@ class CTCLoss(_Loss):
         return F.ctc_loss(log_probs, targets, input_lengths, target_lengths, self.blank, self.reduction,
                           self.zero_infinity)
 
-
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
 # TODO: ClassSimplexCriterion
