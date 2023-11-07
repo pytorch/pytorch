@@ -26,9 +26,6 @@ class AsyncTensor(torch.Tensor):
     r._fake = fake_tensor
     return r
 
-  # NOTE: Any non-PyTorch reads or mutations in eager region will need to access one of these APIs: `.data_ptr` / `.storage` / `.data`.
-  # We materialize the tensor before executing those calls, so that non-PyTorch reads or mutations in eager region still work normally.
-
   def async_repr(self):
     return f"AsyncTensor({self._handle}, {self._fake})"
 
@@ -46,11 +43,9 @@ class AsyncTensor(torch.Tensor):
     return self._materialized_tensor.__format__(format_spec)
 
   def __getattribute__(self, attr):
-    print(f"getattr: {attr}")
     if attr in dir(torch.Tensor):
       if self._handle is not None:
         AsyncTensor.wait_until_materialized([self])
-        print(f"_materialized_tensor: {self._materialized_tensor}")
         return getattr(self._materialized_tensor, attr)
       else:
         raise Exception(f"Getting {attr} on an AsyncTensor that doesn't have handle is not allowed")
@@ -58,7 +53,6 @@ class AsyncTensor(torch.Tensor):
       return super().__getattribute__(attr)
 
   def __setattr__(self, attr, value):
-    print(f"setattr: {attr} -> {value}")
     if attr in dir(torch.Tensor):
       if self._handle is not None:
         AsyncTensor.wait_until_materialized([self])
@@ -93,7 +87,7 @@ class AsyncTensor(torch.Tensor):
     # breakpoint()
     all_materialized = True
     for t in async_tensors:
-      if isinstance(t, AsyncTensor) and isinstance(t._materialized_tensor, NoneWithUsageDetector):
+      if isinstance(t, AsyncTensor) and t._materialized_tensor is None:
           all_materialized = False
           break
     return all_materialized
@@ -199,8 +193,7 @@ class LazyScheduler:
       gm,
       compiled_fn,
     )
-
-    return compiled_fn
+    return lazy_gm
 
   def maybe_run(self, gm, compiled_fn, *args):
     # Create the handle and the async tensors
@@ -212,8 +205,7 @@ class LazyScheduler:
         args_fake.append(fake_mode.from_tensor(arg))
     with fake_mode:
       outs_fake = gm(*args_fake)
-    # NOTE: important to make sure the same async tensor is used in downstream user code
-    # as well as materialized when handle is finally run.
+
     outs_async = tuple(AsyncTensor(out_fake) for out_fake in outs_fake)
     if gm in self._gm_to_handle_map:
       cur_handle = self._gm_to_handle_map[gm]
@@ -227,37 +219,7 @@ class LazyScheduler:
     cur_handle.schedule()
     cur_handle.wait_for_completion()
     # return cur_handle.outs
+    # The expectation is that when user tries to use the output,
+    # it should either be materialized already, or its materialization will be scheduled immediately.
     # Problem: when returned value is AsyncTensor, the .grad_fn of it is not populated.
     return cur_handle.outs_async  # fails
-
-"""
-TODO: we can potentially implement segment tagging and propagation via:
-```
-mod.register_forward_pre_hook(
-  mod.func1 = RunWithSomeTorchDispatchMode(mod.func1, segment_name)
-)
-
-and then in RunWithSomeTorchDispatchMode, we call mod.func1 with a torch dispatch mode
-that tags the FX node with segment_name via `fx_traceback.current_meta`
-
-This way we don't need to do any change to Dynamo internals.
-```
-"""
-
-
-"""
-TODO: graph with only in-place op doesn't have its output node, why?
-"""
-
-
-"""
-FAQ
-
-Q1: What happens if we have a user-defined segment deep down in a submodule?
-Answer: everything before the defined segment will be in their own segment. Everything after is in another segment.
-You can call this a "segment break".
-
-Q2: What if there are multiple calls to the same module instance's same function?
-Answer: we don't support it for now (we turn off the schedule in this case). In the future we could support it.
-Note that we do support calling the same module class' (but different instances') same function.
-"""
