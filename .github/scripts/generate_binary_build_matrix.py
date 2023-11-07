@@ -54,22 +54,19 @@ def arch_type(arch_version: str) -> str:
 
 
 WHEEL_CONTAINER_IMAGES = {
-    **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    "cpu": "pytorch/manylinux-builder:cpu",
-    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
+    "11.8": "pytorch/manylinux-builder:cuda11.8-2.1",
+    "12.1": "pytorch/manylinux-builder:cuda12.1-2.1",
+    "5.5": "pytorch/manylinux-builder:rocm5.5-2.1",
+    "5.6": "pytorch/manylinux-builder:rocm5.6-2.1",
+    "cpu": "pytorch/manylinux-builder:cpu-2.1",
+    "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-2.1",
+    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64-2.1",
 }
 
 CONDA_CONTAINER_IMAGES = {
-    **{gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}" for gpu_arch in CUDA_ARCHES},
-    "cpu": "pytorch/conda-builder:cpu",
+    "11.8": "pytorch/conda-builder:cuda11.8-2.1",
+    "12.1": "pytorch/conda-builder:cuda12.1-2.1",
+    "cpu": "pytorch/conda-builder:cpu-2.1",
 }
 
 PRE_CXX11_ABI = "pre-cxx11"
@@ -78,24 +75,46 @@ RELEASE = "release"
 DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
-    **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:cuda{gpu_arch}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}"
-        for gpu_arch in CUDA_ARCHES
-    },
-    **{
-        (gpu_arch, PRE_CXX11_ABI): f"pytorch/manylinux-builder:rocm{gpu_arch}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    **{
-        (gpu_arch, CXX11_ABI): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    ("cpu", PRE_CXX11_ABI): "pytorch/manylinux-builder:cpu",
-    ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
+    (
+        "11.8",
+        PRE_CXX11_ABI,
+    ): "pytorch/manylinux-builder:cuda11.8-2.1",
+    (
+        "12.1",
+        PRE_CXX11_ABI,
+    ): "pytorch/manylinux-builder:cuda12.1-2.1",
+    (
+        "11.8",
+        CXX11_ABI,
+    ): "pytorch/libtorch-cxx11-builder:cuda11.8-2.1",
+    (
+        "12.1",
+        CXX11_ABI,
+    ): "pytorch/libtorch-cxx11-builder:cuda12.1-2.1",
+    (
+        "5.5",
+        PRE_CXX11_ABI,
+    ): "pytorch/manylinux-builder:rocm5.5-2.1",
+    (
+        "5.6",
+        PRE_CXX11_ABI,
+    ): "pytorch/manylinux-builder:rocm5.6-2.1",
+    (
+        "5.5",
+        CXX11_ABI,
+    ): "pytorch/libtorch-cxx11-builder:rocm5.5-2.1",
+    (
+        "5.6",
+        CXX11_ABI,
+    ): "pytorch/libtorch-cxx11-builder:rocm5.6-2.1",
+    (
+        "cpu",
+        PRE_CXX11_ABI,
+    ): "pytorch/manylinux-builder:cpu-2.1",
+    (
+        "cpu",
+        CXX11_ABI,
+    ): "pytorch/libtorch-cxx11-builder:cpu-2.1",
 }
 
 FULL_PYTHON_VERSIONS = ["3.8", "3.9", "3.10", "3.11"]

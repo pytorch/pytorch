@@ -95,6 +95,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
+        ("___dict_contains", lambda a, b: a in b),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -259,6 +260,13 @@ class GuardBuilder(GuardBuilderBase):
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
+
+    def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
+        dict_ref = self.arg_ref(guard)
+
+        maybe_not = "not " if invert else ""
+        code = f"{maybe_not}___dict_contains({key!r}, {dict_ref})"
+        return self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
         # Guard on the runtime value being 'False',

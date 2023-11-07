@@ -97,7 +97,7 @@ from ._unshard_param_utils import (
     _unshard_params_recurse,
 )
 from .flat_param import FlatParameter
-from .wrap import CustomPolicy, ModuleWrapPolicy
+from .wrap import ModuleWrapPolicy
 
 
 __all__ = [
@@ -259,7 +259,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             This configures CPU offloading. If this is set to ``None``, then
             no CPU offloading happens. See :class:`CPUOffload` for details.
             (Default: ``None``)
-        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy, CustomPolicy]]):
+        auto_wrap_policy (Optional[Union[Callable[[nn.Module, bool, int], bool], ModuleWrapPolicy]]):
             This specifies a policy to apply FSDP to submodules of ``module``,
             which is needed for communication and computation overlap and thus
             affects performance. If ``None``, then FSDP only applies to
@@ -409,9 +409,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         process_group: ProcessGroupType = None,
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[
-            Union[Callable, ModuleWrapPolicy, CustomPolicy]
-        ] = None,
+        auto_wrap_policy: Optional[Union[Callable, ModuleWrapPolicy]] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,

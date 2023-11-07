@@ -91,12 +91,9 @@ jobs:
           set -eou pipefail
           # To get QEMU binaries in our PATH
           echo "${RUNNER_TEMP}/bin" >> "${GITHUB_PATH}"
-          # Generate PyTorch version to use
-          if [[ ${CHANNEL} == "release" ]]; then
-            echo "PYTORCH_VERSION=2.1.0" >> "${GITHUB_ENV}"
-          else
-            echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py)" >> "${GITHUB_ENV}"
-          fi
+          # Generate PyTorch version to use without suffix
+          echo "PYTORCH_VERSION=$(python3 .github/scripts/generate_pytorch_version.py --no-build-suffix)" >> "${GITHUB_ENV}"
+
       - name: Setup release specific variables
         run: |
           {

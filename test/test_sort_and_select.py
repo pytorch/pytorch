@@ -1123,6 +1123,20 @@ class TestSortAndSelect(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isin(c, d)
 
+    @dtypes(*integral_types())
+    def test_sort_overflow(self, device, dtype):
+        " Regression test for https://github.com/pytorch/pytorch/issues/111189 "
+        prev_num_threads = torch.get_num_threads()
+        try:
+            low = 0 if dtype == torch.uint8 else -1
+            x = torch.full((32768,), low, dtype=dtype, device=device)
+            x[:100] = torch.iinfo(x.dtype).max
+            torch.set_num_threads(1)
+            uv = x.sort().values.unique()
+            self.assertEqual(uv.size(0), 2)
+        finally:
+            torch.set_num_threads(prev_num_threads)
+
 
 instantiate_device_type_tests(TestSortAndSelect, globals())
 

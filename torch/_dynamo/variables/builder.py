@@ -8,6 +8,7 @@ import inspect
 import logging
 import operator
 import re
+import sys
 import types
 from typing import List, NamedTuple, Optional, Union
 
@@ -82,6 +83,7 @@ from .dicts import (
     DataClassVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
+    PythonSysModulesVariable,
 )
 from .distributed import (
     DeviceMeshVariable,
@@ -384,6 +386,8 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
+        elif value is sys.modules:
+            return PythonSysModulesVariable(source=self.source)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
