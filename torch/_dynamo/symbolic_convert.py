@@ -371,7 +371,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif (
-            isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
+            isinstance(value, (TensorVariable, SymNodeVariable))
+            and self.should_compile_partial_graph()
         ):
             # compile a partial subgraph prefix then jump into user code
             if self.has_backedge():
