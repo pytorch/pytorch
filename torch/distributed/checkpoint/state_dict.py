@@ -22,7 +22,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.state_dict_utils import (
+from torch.distributed.checkpoint._state_dict_utils import (
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
