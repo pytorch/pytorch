@@ -37,9 +37,34 @@ __all__ = [
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
     "context_fn_gen",
+    "set_checkpoint_debug_enabled",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
+
+_checkpoint_debug_enabled: Optional[bool] = None
+
+
+@contextlib.contextmanager
+def set_checkpoint_debug_enabled(enabled: Optional[bool]):
+    """
+    Context manager that sets whether checkpoint should print additional debug
+    information when running. See the ``debug`` flag for
+    :func:`~torch.utils.checkpoint.checkpoint` for more information. Note that
+    when set, this context manager overrides the value of ``debug`` passed to
+    checkpoint. To defer to the local setting, pass ``None`` to this context.
+
+    Args:
+        enabled (bool): Whether checkpoint should print debug information.
+            Default is 'None'.
+    """
+    global _checkpoint_debug_enabled
+    try:
+        prev = _checkpoint_debug_enabled
+        _checkpoint_debug_enabled = enabled
+        yield
+    finally:
+        _checkpoint_debug_enabled = prev
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -1105,10 +1130,11 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 def _is_compiling(func, args, kwargs):
     # Check if we are under AOTAutograd tracing
+    # There should probably be a better way to do this...
     for arg in args:
         if isinstance(arg, torch.Tensor):
-            if torch._is_functional_tensor(arg):
-                arg = torch._from_functional_tensor(arg)
+            if isinstance(arg, torch._subclasses.functional_tensor.FunctionalTensor):
+                arg = torch._from_functional_tensor(arg.elem)
             if isinstance(arg, torch._subclasses.FakeTensor):
                 return True
     return False
@@ -1299,7 +1325,7 @@ def _checkpoint_without_reentrant_generator(
     """
     unpack_error_cb = None
 
-    if debug:
+    if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
         if context_fn != noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"

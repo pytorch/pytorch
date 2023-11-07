@@ -31,7 +31,7 @@ from typing import (
 from typing_extensions import ParamSpec
 
 import torch
-from torch import inf, Tensor
+from torch import inf, SymInt, Tensor
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
 from torch.storage import UntypedStorage, TypedStorage
@@ -49,7 +49,6 @@ from torch.types import (
     Device,
     Number,
     Storage,
-    SymInt,
 )
 
 # This module is defined in torch/csrc/Module.cpp
@@ -171,6 +170,7 @@ sparse_csc: layout = ...
 sparse_bsr: layout = ...
 sparse_bsc: layout = ...
 _mkldnn: layout = ...
+jagged: layout = ...
 
 # Defined in torch/csrc/MemoryFormat.cpp
 class memory_format: ...
@@ -1098,6 +1098,8 @@ def _set_deterministic_algorithms(
     *,
     warn_only: _bool = ...,
 ) -> None: ...  # THPModule_setDeterministicAlgorithms
+def _get_deterministic_fill_uninitialized_memory() -> _bool: ...  # THPModule_deterministicFillUninitializedMemory
+def _set_deterministic_fill_uninitialized_memory(arg: _bool) -> None: ...  # THPModule_setDeterministicFillUninitializedMemory
 def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
 def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
@@ -1322,6 +1324,7 @@ class FileCheck:
     ) -> FileCheck: ...
     def check_dag(self, test_string: str) -> FileCheck: ...
     def check_source_highlighted(self, test_string: str) -> FileCheck: ...
+    def check_regex(self, test_string: str) -> FileCheck: ...
 
 # Defined in torch/csrc/jit/python/init.cpp
 class PyTorchFileReader:
@@ -1444,6 +1447,8 @@ def _dispatch_tls_set_dispatch_key_included(
 def _dispatch_tls_is_dispatch_key_included(dispatch: _dispatchkey) -> _bool: ...
 def _dispatch_isTensorSubclassLike(tensor: Tensor) -> _bool: ...
 def _dispatch_key_name(dispatch: _dispatchkey) -> str: ...
+def _dispatch_key_for_device(device_type: str) -> str: ...
+def _parse_dispatch_key(key: str) -> Optional[DispatchKey]: ...
 def _dispatch_key_parse(dispatch: _dispatchkey) -> DispatchKey: ...
 def _dispatch_num_backends() -> _int: ...
 def _dispatch_is_alias_key(dispatch: _dispatchkey) -> _bool: ...
@@ -1514,7 +1519,7 @@ def _are_functorch_transforms_active() -> _bool: ...
 # Define in torch/csrc/autograd/init.cpp
 def _set_python_dispatcher(dispatcher: object) -> None: ...
 
-def _get_singleton_int(id: _int) -> SymInt: ...
+def _get_singleton_int(id: _int, coeff: _int) -> SymInt: ...
 
 def _get_constant_bool_symnode(val: _bool) -> Any: ...
 
@@ -1560,7 +1565,7 @@ class _ImperativeEngine:
 class _TensorMeta(type): ...
 
 # Defined in torch/csrc/autograd/python_variable.cpp
-class _TensorBase(metaclass=_TensorMeta):
+class TensorBase(metaclass=_TensorMeta):
     requires_grad: _bool
     retains_grad: _bool
     shape: Size
@@ -1588,6 +1593,8 @@ class _TensorBase(metaclass=_TensorMeta):
     nbytes: _int
     itemsize: _int
     ${tensor_method_hints}
+
+_TensorBase = TensorBase
 
 # Defined in torch/csrc/multiprocessing/init.cpp
 def _multiprocessing_init() -> None: ...
@@ -1727,6 +1734,7 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
+    gcnArchName: str
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
@@ -1757,7 +1765,7 @@ def _gather(
 def _gather_out(tensors: List[Tensor], out_tensor: Tensor, dim: _int) -> Tensor: ...
 
 # Defined in torch/csrc/cuda/Stream.cpp
-class _CudaStreamBase:
+class _CudaStreamBase(Stream):
     stream_id: _int
     device_index: _int
     device_type: _int

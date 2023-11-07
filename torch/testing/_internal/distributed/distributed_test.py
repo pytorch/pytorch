@@ -185,13 +185,17 @@ DEFAULT_TIMEOUT = 300
 CUSTOMIZED_TIMEOUT = {"test_DistributedDataParallel": 500}
 
 
-def get_profiling_event(postfix, profiler):
+def get_profiling_event(event_name, profiler):
     event_list = (
         profiler.events()
         if isinstance(profiler, torch.profiler.profile)
         else profiler.function_events
     )
-    return [event for event in event_list if event.name.endswith(postfix)]
+    return [
+        event for event in event_list if (
+            event.name.endswith(event_name) or event.name.startswith(event_name)
+        )
+    ]
 
 
 # Base error message substring on unfinished reductions.
@@ -955,7 +959,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[0, 1], [world_size, 2]]
@@ -971,7 +975,7 @@ class DistributedTest:
 
             with self.assertRaisesRegex(
                 ValueError,
-                "The new group's rank should be within the the world_size set by init_process_group",
+                "The new group's rank should be within the world_size set by init_process_group",
             ):
                 dist.new_subgroups_by_enumeration(
                     ranks_per_subgroup_list=[[-1, -2], [-3, -4]]
@@ -4871,7 +4875,7 @@ class DistributedTest:
                     if optimize_subset:
                         self.assertNotEqual(
                             opt_hook_init_params[0],
-                            list(ddp_model_with_optimizer_hook.parameters())[0],
+                            next(iter(ddp_model_with_optimizer_hook.parameters())),
                         )
                         # Untouched params should be equal
                         self.assertEqual(
@@ -7053,7 +7057,7 @@ class DistributedTest:
                     # zero gradient. If we kept dividing by static initial world
                     # size as processes leave, the grad would be smaller.
                     expected_grad = torch.ones(dim, dim, device=self.rank) * grad_scale
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grads so that it's the same every iteration
                     net.zero_grad()
@@ -7073,7 +7077,7 @@ class DistributedTest:
                         * grad_scale
                         * effective_ws
                     ) / dist.get_world_size()
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grad so that it's the same every iteration.
                     net.zero_grad()
@@ -7754,11 +7758,11 @@ class DistributedTest:
                 )
                 proxy_params = list(model.fc2.parameters())
                 proxy_buffers = list(model.fc2.buffers())
-                model_fc2_name = [
+                model_fc2_name = next(
                     module_name
                     for module_name, module in model.named_modules()
                     if module is model.fc2
-                ][0]
+                )
                 proxy_param_names = [
                     f"{model_fc2_name}.{param_name}"
                     for param_name, _ in model.fc2.named_parameters()
@@ -9771,7 +9775,7 @@ class DistributedTest:
             def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(device))._abort()
+                    pg._get_backend(torch.device(device))._shutdown()
                     time.sleep(1)
 
             if self.rank != 1:

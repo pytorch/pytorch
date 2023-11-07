@@ -3,6 +3,7 @@
 
 using namespace c10::guts;
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace {
 
 namespace test_is_equality_comparable {
@@ -155,12 +156,15 @@ void func() {
   static_assert(is_stateless_lambda<decltype(stateless_lambda)>::value, "");
 
   int b = 4;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_1 = [&](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_1)>::value, "");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_2 = [=](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_2)>::value, "");
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto stateful_lambda_3 = [b](int a) { return a + b; };
   static_assert(!is_stateless_lambda<decltype(stateful_lambda_3)>::value, "");
 
@@ -191,3 +195,4 @@ void func() {
       !is_stateless_lambda<Func*>::value, "A function pointer is not a lambda");
 }
 } // namespace test_lambda_is_stateless
+// NOLINTEND(modernize-unary-static-assert)

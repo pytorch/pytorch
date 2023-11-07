@@ -3,21 +3,41 @@
 """Test functions for 1D array set operations.
 
 """
-# TODO: NotImplemented
-# from numpy.lib.arraysetops import (
-#    ediff1d, intersect1d, setxor1d, union1d, setdiff1d, in1d, isin
-#    )
-import pytest
-import torch._numpy as np
+from unittest import skipIf
+
+import numpy
+
 from pytest import raises as assert_raises
 
-from torch._numpy import unique
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+    xfailIfTorchDynamo,
+    xpassIfTorchDynamo,
+)
 
-from torch._numpy.testing import assert_array_equal, assert_equal
+
+# If we are going to trace through these, we should use NumPy
+# If testing on eager mode, we use torch._numpy
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy import ediff1d, in1d, intersect1d, setdiff1d, setxor1d, union1d, unique
+    from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
+
+else:
+    import torch._numpy as np
+    from torch._numpy import unique
+    from torch._numpy.testing import assert_array_equal, assert_equal
 
 
-@pytest.mark.xfail(reason="TODO")
-class TestSetOps:
+@skipIf(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
+@xpassIfTorchDynamo  # (reason="TODO")
+@instantiate_parametrized_tests
+class TestSetOps(TestCase):
     def test_intersect1d(self):
         # unique inputs
         a = np.array([5, 7, 1, 2])
@@ -131,7 +151,7 @@ class TestSetOps:
         assert_array_equal([7, 1], ediff1d(two_elem, to_begin=7))
         assert_array_equal([5, 6, 1], ediff1d(two_elem, to_begin=[5, 6]))
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "ary, prepend, append, expected",
         [
             # should fail because trying to cast
@@ -140,11 +160,14 @@ class TestSetOps:
             (np.array([1, 2, 3], dtype=np.int64), None, np.nan, "to_end"),
             # should fail because attempting
             # to downcast to int type:
-            (
-                np.array([1, 2, 3], dtype=np.int64),
-                np.array([5, 7, 2], dtype=np.float32),
-                None,
-                "to_begin",
+            subtest(
+                (
+                    np.array([1, 2, 3], dtype=np.int64),
+                    np.array([5, 7, 2], dtype=np.float32),
+                    None,
+                    "to_begin",
+                ),
+                decorators=[xfailIfTorchDynamo],
             ),
             # should fail because attempting to cast
             # two special floating point values
@@ -163,7 +186,7 @@ class TestSetOps:
         with assert_raises_regex(TypeError, msg):
             ediff1d(ary=ary, to_end=append, to_begin=prepend)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "ary,prepend,append,expected",
         [
             (
@@ -200,7 +223,8 @@ class TestSetOps:
         assert_equal(actual, expected)
         assert actual.dtype == expected.dtype
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @skipIf(True, reason="NP_VER: fails with NumPy 1.22.x")
+    @parametrize("kind", [None, "sort", "table"])
     def test_isin(self, kind):
         # the tests for in1d cover most of isin's behavior
         # if in1d is removed, would need to change those tests to test
@@ -212,7 +236,7 @@ class TestSetOps:
         isin_slow = np.vectorize(_isin_slow, otypes=[bool], excluded={1})
 
         def assert_isin_equal(a, b):
-            x = isin(a, b, kind=kind)
+            x = np.isin(a, b, kind=kind)
             y = isin_slow(a, b)
             assert_array_equal(x, y)
 
@@ -262,7 +286,7 @@ class TestSetOps:
             assert_isin_equal(ar, empty_array)
             assert_isin_equal(empty_array, empty_array)
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d(self, kind):
         # we use two different sizes for the b array here to test the
         # two different paths in in1d().
@@ -361,7 +385,7 @@ class TestSetOps:
 
         assert_array_equal(c, ec)
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d_invert(self, kind):
         "Test in1d's invert parameter"
         # We use two different sizes for the b array here to test the
@@ -385,7 +409,7 @@ class TestSetOps:
                     np.invert(in1d(a, b, kind=kind)), in1d(a, b, invert=True, kind=kind)
                 )
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d_ravel(self, kind):
         # Test that in1d ravels its input arrays. This is not documented
         # behavior however. The test is to ensure consistentency.
@@ -415,7 +439,7 @@ class TestSetOps:
         c = in1d(a, b, assume_unique=True)
         assert_array_equal(c, ec)
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d_boolean(self, kind):
         """Test that in1d works for boolean input"""
         a = np.array([True, False])
@@ -424,7 +448,7 @@ class TestSetOps:
         assert_array_equal(expected, in1d(a, b, kind=kind))
         assert_array_equal(np.invert(expected), in1d(a, b, invert=True, kind=kind))
 
-    @pytest.mark.parametrize("kind", [None, "sort"])
+    @parametrize("kind", [None, "sort"])
     def test_in1d_timedelta(self, kind):
         """Test that in1d works for timedelta input"""
         rstate = np.random.RandomState(0)
@@ -439,17 +463,17 @@ class TestSetOps:
         a = np.array([0, 1, 2], dtype="timedelta64[s]")
         b = a
         # Make sure it raises a value error:
-        with pytest.raises(ValueError):
+        with assert_raises(ValueError):
             in1d(a, b, kind="table")
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "dtype1,dtype2",
         [
             (np.int8, np.int16),
             (np.int16, np.int8),
         ],
     )
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d_mixed_dtype(self, dtype1, dtype2, kind):
         """Test that in1d works as expected for mixed dtype input."""
         is_dtype2_signed = np.issubdtype(dtype2, np.signedinteger)
@@ -470,12 +494,12 @@ class TestSetOps:
         )
 
         if expect_failure:
-            with pytest.raises(RuntimeError, match="exceed the maximum"):
+            with assert_raises(RuntimeError, match="exceed the maximum"):
                 in1d(ar1, ar2, kind=kind)
         else:
             assert_array_equal(in1d(ar1, ar2, kind=kind), expected)
 
-    @pytest.mark.parametrize("kind", [None, "sort", "table"])
+    @parametrize("kind", [None, "sort", "table"])
     def test_in1d_mixed_boolean(self, kind):
         """Test that in1d works as expected for bool/int input."""
         for dtype in np.typecodes["AllInteger"]:
@@ -642,7 +666,8 @@ class TestSetOps:
         assert_array_equal(c1, c2)
 
 
-class TestUnique:
+@instantiate_parametrized_tests
+class TestUnique(TestCase):
     def test_unique_1d(self):
         def check_all(a, b, i1, i2, c, dt):
             base_msg = "check {0} failed for type {1}"
@@ -738,7 +763,7 @@ class TestUnique:
     #    assert_equal(a3_idx.dtype, np.intp)
     #    assert_equal(a3_inv.dtype, np.intp)
 
-    @pytest.mark.xfail(reason="unique with nans")
+    @xpassIfTorchDynamo  # (reason="unique with nans")
     def test_unique_1d_2(self):
         # test for ticket 2111 - float
         a = [2.0, np.nan, 1.0, np.nan]
@@ -774,9 +799,6 @@ class TestUnique:
         assert_equal(np.unique(all_nans, return_counts=True), (ua, ua_cnt))
 
     def test_unique_axis_errors(self):
-        assert_raises(TypeError, self._run_axis_tests, object)
-        assert_raises(TypeError, self._run_axis_tests, [("a", int), ("b", object)])
-
         assert_raises(np.AxisError, unique, np.arange(10), axis=2)
         assert_raises(np.AxisError, unique, np.arange(10), axis=-2)
 
@@ -787,6 +809,8 @@ class TestUnique:
         assert_array_equal(unique(inp, axis=0), unique(inp_arr, axis=0), msg)
         assert_array_equal(unique(inp, axis=1), unique(inp_arr, axis=1), msg)
 
+    @xpassIfTorchDynamo  # _run_axis_tests xfails with the message
+    #   torch has different unique ordering behaviour"
     def test_unique_axis(self):
         types = []
         types.extend(np.typecodes["AllInteger"])
@@ -805,13 +829,13 @@ class TestUnique:
         result = np.array([[-0.0, 0.0]])
         assert_array_equal(unique(data, axis=0), result, msg)
 
-    @pytest.mark.parametrize("axis", [0, -1])
+    @parametrize("axis", [0, -1])
     def test_unique_1d_with_axis(self, axis):
         x = np.array([4, 3, 2, 3, 2, 1, 2, 2])
         uniq = unique(x, axis=axis)
         assert_array_equal(uniq, [1, 2, 3, 4])
 
-    @pytest.mark.xfail(reason="unique / return_index")
+    @xpassIfTorchDynamo  # (reason="unique / return_index")
     def test_unique_axis_zeros(self):
         # issue 15559
         single_zero = np.empty(shape=(2, 0), dtype=np.int8)
@@ -885,7 +909,6 @@ class TestUnique:
         result = np.array([[0, 0, 1], [0, 1, 0], [0, 0, 1], [0, 1, 0]])
         assert_array_equal(unique(data, axis=1), result.astype(dtype), msg)
 
-        pytest.xfail("torch has different unique ordering behaviour")
         # e.g.
         #
         #     >>> x = np.array([[[1, 1], [0, 1]], [[1, 0], [0, 0]]])
@@ -919,7 +942,8 @@ class TestUnique:
         msg = "Unique's return_counts=True failed with axis=1"
         assert_array_equal(cnt, np.array([2, 1, 1]), msg)
 
-    @pytest.mark.xfail(reason="unique / return_index / nans")
+    @skipIf(True, reason="NP_VER: fails on CI with older NumPy")
+    @xpassIfTorchDynamo  # (reason="unique / return_index / nans")
     def test_unique_nanequals(self):
         # issue 20326
         a = np.array([1, 1, np.nan, np.nan, np.nan])
@@ -930,6 +954,4 @@ class TestUnique:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

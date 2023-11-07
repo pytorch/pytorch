@@ -37,6 +37,8 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                     node.type = parameterized_types[0]
             # NamedTuple type
             elif hasattr(sequence_node.type, "__annotations__"):
+                if sequence_node.type == torch.Tensor:
+                    continue
                 sequence_node_field_types = sequence_node.type.__annotations__
                 field_name = sequence_node.type._fields[index_node]
                 node.type = sequence_node_field_types[field_name]

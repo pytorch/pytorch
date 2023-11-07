@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, overload, Tuple, Union
 
 from torch import Tensor
+from torch._C import ScriptObject
 from torch.futures import Future
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
@@ -10,6 +11,7 @@ from torch.futures import Future
 _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
 _DEFAULT_PG_TIMEOUT: timedelta
+_DEFAULT_PG_NCCL_TIMEOUT: timedelta
 
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
@@ -115,6 +117,7 @@ class BroadcastOptions:
     rootRank: int
     rootTensor: int
     timeout: timedelta
+    asyncOp: bool
 
 class AllreduceOptions:
     reduceOp: ReduceOp
@@ -128,8 +131,9 @@ class ReduceOptions:
     rootTensor: int
     timeout: timedelta
 
-class AllGatherOptions:
+class AllgatherOptions:
     timeout: timedelta
+    asyncOp: bool
 
 class GatherOptions:
     rootRank: int
@@ -138,10 +142,12 @@ class GatherOptions:
 class ScatterOptions:
     rootRank: int
     timeout: timedelta
+    asyncOp: bool
 
 class ReduceScatterOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    asyncOp: bool
 
 class BarrierOptions:
     device_ids: List[int]
@@ -206,6 +212,9 @@ class Work:
     def _source_rank(self) -> int: ...
     def result(self) -> List[Tensor]: ...
     def synchronize(self): ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> Work: ...
 
 class ProcessGroup:
     class Options: ...
@@ -376,6 +385,9 @@ class ProcessGroup:
     ) -> Work: ...
     def recv_anysource(self, tensors: List[Tensor], tag: int) -> Work: ...
     def barrier(self, opts=...) -> Work: ...
+    def boxed(self) -> ScriptObject: ...
+    @staticmethod
+    def unbox(obj: ScriptObject) -> ProcessGroup: ...
 
 class ProcessGroupRoundRobin(ProcessGroup): ...
 

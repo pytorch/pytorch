@@ -173,13 +173,13 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
-using SSArgument = c10::variant<ShapeArguments, IValue>;
+using SSArgument = std::variant<ShapeArguments, IValue>;
 
 static std::ostream& operator<<(std::ostream& out, const SSArgument& sa) {
-  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
+  if (const IValue* iv = std::get_if<IValue>(&sa)) {
     out << *iv;
   } else {
-    out << c10::get<ShapeArguments>(sa);
+    out << std::get<ShapeArguments>(sa);
   }
   return out;
 }
@@ -377,11 +377,11 @@ struct SymbolicShapeOpAnalyzer {
       SSArgument& argument = inputs_[op_in_index];
       Value* graph_in_var = shape_compute_graph_->inputs().at(op_in_index);
 
-      if (IValue* cur_val = c10::get_if<IValue>(&argument)) {
+      if (IValue* cur_val = std::get_if<IValue>(&argument)) {
         GRAPH_DEBUG("Substituting constant input ", *cur_val);
         replaceWithIValue(graph_in_var, *cur_val);
       } else {
-        auto cur_arg = c10::get<ShapeArguments>(argument);
+        auto cur_arg = std::get<ShapeArguments>(argument);
         if (cur_arg.has_dim()) {
           graph_in_var->setType(ListType::ofInts());
         }
@@ -423,7 +423,7 @@ struct SymbolicShapeOpAnalyzer {
         "Missing Arg for Shape Graph");
     for (const auto index :
          c10::irange(shape_compute_graph_->inputs().size())) {
-      auto shape_arguments = c10::get_if<ShapeArguments>(&inputs_[index]);
+      auto shape_arguments = std::get_if<ShapeArguments>(&inputs_[index]);
       if (!shape_arguments || !shape_arguments->has_dim()) {
         continue;
       }
@@ -1146,10 +1146,10 @@ calculateSymbolicShapesOnOp(
 
   std::vector<SSArgument> ssa_args;
   for (auto& arg : inputs) {
-    if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+    if (const IValue* ival = std::get_if<IValue>(&arg)) {
       ssa_args.emplace_back(*ival);
     } else {
-      const c10::SymbolicShape* ss = c10::get_if<c10::SymbolicShape>(&arg);
+      const c10::SymbolicShape* ss = std::get_if<c10::SymbolicShape>(&arg);
       ssa_args.emplace_back(ShapeArguments(*ss));
     }
   }
