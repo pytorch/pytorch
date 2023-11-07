@@ -624,18 +624,25 @@ class MetaConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
-        force_fresh=False,
+        allocate_fresh_if_metadata_mutated=False,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
 
         prior_fake = None
-        if force_fresh:
+        if allocate_fresh_if_metadata_mutated:
             widt = WeakIdRef(t)
             if widt in self.tensor_memo:
                 prior_fake = self.tensor_memo[widt]
-                del self.tensor_memo[widt]
+                if (
+                    prior_fake.shape != t.shape
+                    or prior_fake.stride() != t.stride()
+                    or prior_fake.storage_offset() != t.storage_offset()
+                ):
+                    del self.tensor_memo[widt]
+                else:
+                    return self.tensor_memo[widt]
 
         if (
             type(t) is torch.Tensor

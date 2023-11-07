@@ -4320,7 +4320,7 @@ def create_aot_dispatcher_function(
                 # TODO: Ensure that this codepath is never exercised from
                 # Dynamo
                 dynamic_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                return fake_mode.from_tensor(x, static_shapes=not dynamic_shapes, force_fresh=True)
+                return fake_mode.from_tensor(x, static_shapes=not dynamic_shapes, allocate_fresh_if_metadata_mutated=True)
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 

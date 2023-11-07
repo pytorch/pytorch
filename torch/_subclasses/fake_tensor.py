@@ -332,12 +332,12 @@ class FakeTensorConverter:
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
         memoized_only=False,
-        force_fresh=False,
+        allocate_fresh_if_metadata_mutated=False,
     ):
-        if force_fresh:
+        if allocate_fresh_if_metadata_mutated:
             assert not memoized_only
         maybe_memo = None
-        if not force_fresh:
+        if not allocate_fresh_if_metadata_mutated:
             maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -374,7 +374,7 @@ class FakeTensorConverter:
             source=source,
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
-            force_fresh=force_fresh,
+            allocate_fresh_if_metadata_mutated=allocate_fresh_if_metadata_mutated,
         )
         # Bind original shape and stride to the FakeTensor
         # We must do this because as we trace, transforms like setting .data will
@@ -423,7 +423,7 @@ class FakeTensorConverter:
         dynamic_dims=None,
         constraint_dims=None,
         memoized_only=False,
-        force_fresh=False,
+        allocate_fresh_if_metadata_mutated=False,
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -435,7 +435,7 @@ class FakeTensorConverter:
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
-            force_fresh=force_fresh,
+            allocate_fresh_if_metadata_mutated=allocate_fresh_if_metadata_mutated,
         )
 
 
@@ -1886,7 +1886,7 @@ class FakeTensorMode(TorchDispatchMode):
         # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
         # seen before.
         memoized_only=False,
-        force_fresh=False,
+        allocate_fresh_if_metadata_mutated=False,
     ):
         shape_env = self.shape_env
         if static_shapes is None:
@@ -1905,7 +1905,7 @@ class FakeTensorMode(TorchDispatchMode):
             dynamic_dims=dynamic_dims,
             constraint_dims=constraint_dims,
             memoized_only=memoized_only,
-            force_fresh=force_fresh,
+            allocate_fresh_if_metadata_mutated=allocate_fresh_if_metadata_mutated,
         )
 
 
