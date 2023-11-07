@@ -774,6 +774,20 @@ class InplacingTests(TestCase):
         inp = (T(10), T(10))
         self.assertExpectedInline(count_numel(f, *inp), """90""")
 
+    @requires_cuda()
+    @skipIfRocm
+    def test_inplace_triton_kernel_v6(self):
+        def f(x: torch.Tensor, y: torch.Tensor):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = (n_elements,)
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        t = T(10)
+        inp = (t, t.view(-1))
+        self.assertExpectedInline(count_numel(f, *inp), """150""")
+
     def test_inplace_randperm_scatter(self):
         def scaled_index_add(x, y, scale_y):
             index = torch.randperm(x.shape[0], device=x.device)[: y.shape[0]]
