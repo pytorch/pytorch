@@ -85,6 +85,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     def test_c10d_functional_tagged_pt2_compliant(self):
+        op = torch.ops._c10d_functional.all_reduce.default
+        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
         op = torch.ops.c10d_functional.all_reduce.default
         self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
