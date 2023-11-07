@@ -429,8 +429,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(0)
         y = torch.randn(2)
         self.assertEqual(opt_fn(y), fn(y))
-        self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt_dynamic.frame_count, 2)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt_dynamic.frame_count, 3)  # no dynamic shape, only compile one graph
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
