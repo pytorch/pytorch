@@ -2361,12 +2361,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
                 ] = module
-            else:
-                # Detect inline module method calls in order to propagate node metadata,
-                # by checking if the first argument (self) is a variable tracking a nn.Module.
-                code_context.get_context(code)[
-                    "orig_nnmodule"
-                ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
