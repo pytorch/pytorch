@@ -1249,9 +1249,7 @@ def get_guard_fail_reason(
     """
     Return the reason why `guard_fn` failed.
     Updates `guard_failures` with the generated reason.
-    If `config.report_all_guard_failures` is enabled,
-    all failures in `guard_fn` are reported - otherwise,
-    only the first one is reported.
+    Only the first failed check of guard_fn is reported.
     """
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
@@ -1293,8 +1291,6 @@ def get_and_maybe_log_recompilation_reason(
 ) -> List[str]:
     """
     Return the list of guard failure reasons using cache_entry.
-    If `config.report_all_guard_failures` is disabled, only the last reason
-    of the last guard is returned.
     Logs the recompilation reason if `recompiles` logging is enabled.
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
