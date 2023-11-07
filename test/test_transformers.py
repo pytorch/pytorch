@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
-from torch.nn.attention import CausalVariant, CausalBiasSubclass, TensorBiasSubclass
+from torch.nn.attention import CausalVariant, CausalBias, TensorBias
 from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
@@ -3022,7 +3022,7 @@ class TestAttnMasks(NNTestCase):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
         bias = torch.rand(bsz, num_heads, seq_len, seq_len, dtype=torch.float16, device="cuda")
-        attn_bias = TensorBiasSubclass(bias)
+        attn_bias = TensorBias(bias)
 
         pytorch_output = scaled_dot_product_attention(
             query, key, value, attn_mask=bias, dropout_p=0.0, is_causal=False
@@ -3089,7 +3089,7 @@ class TestAttnMasks(NNTestCase):
         )
         query, key, value = make_q_tensor(), make_kv_tensor(), make_kv_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
-        attn_bias = CausalBiasSubclass(causal_variant, seq_len_q, seq_len_kv)
+        attn_bias = CausalBias(causal_variant, seq_len_q, seq_len_kv)
 
         pytorch_output = scaled_dot_product_attention(
             query, key, value, attn_mask=attn_bias.materialize(device), dropout_p=0.0, is_causal=False
@@ -3132,7 +3132,7 @@ class TestAttnMasks(NNTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         query_prototype, key_prototype, value_prototype = query_key_value_clones(query, key, value)
-        attn_bias = TensorBiasSubclass(
+        attn_bias = TensorBias(
             torch.rand(bsz, num_heads, seq_len, seq_len, dtype=torch.float16, device=device)
         )
 
