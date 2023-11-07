@@ -644,7 +644,7 @@ std::vector<Shape> compute_shape_native_layer_norm_backward(
       output_mask[1] && weight ? weight->sizes().vec()
                                : std::vector<int64_t>{});
   shapes.emplace_back(
-      bias && weight->defined() ? bias->scalar_type() : input.scalar_type(),
+      bias && bias->defined() ? bias->scalar_type() : input.scalar_type(),
       output_mask[2] && bias ? bias->sizes().vec() : std::vector<int64_t>{});
   return shapes;
 }
@@ -1367,6 +1367,22 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
       at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
           self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_normal_functional(
+    const at::Tensor& self,
+    double mean,
+    double std,
+    c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_uniform(
+    const at::Tensor& self,
+    double from,
+    double to,
+    c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 // Restore unused-parameters warnings
