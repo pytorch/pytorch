@@ -15,12 +15,14 @@ class VulkanPackedContext {
 
  public:
   VulkanPackedContext() : packed_{c10::AnyType::get()} {}
+  VulkanPackedContext(const VulkanPackedContext&) = default;
+  VulkanPackedContext(VulkanPackedContext&&) = default;
 
   inline const c10::IValue get_val(int64_t i) const {
     return packed_.get(i);
   }
 
-  inline void set_val(int64_t i, c10::IValue val) const {
+  inline void set_val(int64_t i, const c10::IValue& val) const {
     return packed_.set(i, val);
   }
 

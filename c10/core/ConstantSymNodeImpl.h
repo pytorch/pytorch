@@ -1,5 +1,5 @@
 #include <c10/core/SymNodeImpl.h>
-#include <c10/util/variant.h>
+#include <variant>
 
 namespace c10 {
 
@@ -18,10 +18,10 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   ConstantSymNodeImpl(T val) : value_(val) {}
 
   bool is_int() override {
-    return std::is_same<T, int64_t>::value;
+    return is_int_();
   }
   bool is_bool() override {
-    return std::is_same<T, bool>::value;
+    return is_bool_();
   }
   bool is_float() override {
     return false;
@@ -39,11 +39,11 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   }
   int64_t int_() override {
     TORCH_CHECK(is_int(), "not an int");
-    return c10::get<int64_t>(value_);
+    return std::get<int64_t>(value_);
   }
   bool bool_() override {
     TORCH_CHECK(is_bool(), "not a bool");
-    return c10::get<bool>(value_);
+    return std::get<bool>(value_);
   }
   bool has_hint() override {
     return true;
@@ -54,23 +54,24 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override;
   c10::SymNode lt(const c10::SymNode& other) override;
   c10::SymNode gt(const c10::SymNode& other) override;
+  c10::SymNode mul(const c10::SymNode& other) override;
   std::string str() override {
-    if (is_int()) {
-      return std::to_string(c10::get<int64_t>(value_));
+    if constexpr (is_int_()) {
+      return std::to_string(std::get<int64_t>(value_));
     } else {
-      return c10::get<bool>(value_) ? "true" : "false";
+      return std::get<bool>(value_) ? "true" : "false";
     }
   }
   c10::optional<int64_t> constant_int() override {
-    if (is_int()) {
-      return c10::get<int64_t>(value_);
+    if constexpr (is_int_()) {
+      return std::get<int64_t>(value_);
     } else {
       return c10::nullopt;
     }
   }
   c10::optional<bool> constant_bool() override {
-    if (is_bool()) {
-      return c10::get<bool>(value_);
+    if constexpr (is_bool_()) {
+      return std::get<bool>(value_);
     } else {
       return c10::nullopt;
     }
@@ -83,7 +84,14 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   }
 
  private:
-  c10::variant<int64_t, bool> value_;
+  std::variant<int64_t, bool> value_;
+
+  static constexpr bool is_int_() {
+    return std::is_same<T, int64_t>::value;
+  }
+  static constexpr bool is_bool_() {
+    return std::is_same<T, bool>::value;
+  }
 };
 
 } // namespace c10

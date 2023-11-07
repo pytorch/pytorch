@@ -4,8 +4,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <cstddef>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Calculates the number of args that need to be passed in.
 // Less args may be needed if defaults are provided.
@@ -67,5 +66,4 @@ inline std::pair<int64_t, int64_t> CalculateNecessaryArgs(
   return std::make_pair(0, num_out);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

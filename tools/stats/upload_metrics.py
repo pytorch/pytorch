@@ -42,14 +42,33 @@ class EnvVarMetric:
 
     def value(self) -> Any:
         value = os.environ.get(self.env_var)
-        if value is None and self.required:
+
+        # Github CI will set some env vars to an empty string
+        DEFAULT_ENVVAR_VALUES = [None, ""]
+        if value in DEFAULT_ENVVAR_VALUES:
+            if not self.required:
+                return None
+
             raise ValueError(
                 f"Missing {self.name}. Please set the {self.env_var} "
                 "environment variable to pass in this value."
             )
+
         if self.type_conversion_fn:
             return self.type_conversion_fn(value)
         return value
+
+
+global_metrics: Dict[str, Any] = {}
+
+
+def add_global_metric(metric_name: str, metric_value: Any) -> None:
+    """
+    Adds stats that should be emitted with every metric by the current process.
+    If the emit_metrics method specifies a metric with the same name, it will
+    overwrite this value.
+    """
+    global_metrics[metric_name] = metric_value
 
 
 def emit_metric(
@@ -76,6 +95,10 @@ def emit_metric(
     if metrics is None:
         raise ValueError("You didn't ask to upload any metrics!")
 
+    # Merge the given metrics with the global metrics, overwriting any duplicates
+    # with the given metrics.
+    metrics = {**global_metrics, **metrics}
+
     # We use these env vars that to determine basic info about the workflow run.
     # By using env vars, we don't have to pass this info around to every function.
     # It also helps ensure that we only emit metrics during CI
@@ -85,6 +108,7 @@ def emit_metric(
         EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
+        EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
         EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
         EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
@@ -104,7 +128,7 @@ def emit_metric(
             "calling_module": calling_module,
             "calling_function": calling_function,
             "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
-            **{m.name: m.value() for m in env_var_metrics},
+            **{m.name: m.value() for m in env_var_metrics if m.value()},
         }
     except ValueError as e:
         warn(f"Not emitting metrics for {metric_name}. {e}")
@@ -143,4 +167,14 @@ def emit_metric(
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in data.items()}
+    # Attempt to recurse
+    def _helper(o: Any) -> Any:
+        if isinstance(o, float):
+            return Decimal(str(o))
+        if isinstance(o, list):
+            return [_helper(v) for v in o]
+        if isinstance(o, dict):
+            return {_helper(k): _helper(v) for k, v in o.items()}
+        return o
+
+    return {k: _helper(v) for k, v in data.items()}

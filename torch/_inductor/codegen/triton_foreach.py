@@ -162,9 +162,9 @@ class ForeachKernel(Kernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
+        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
         return (
-            f"@foreach(num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            f"@foreach(num_warps={self.num_warps}, triton_meta={triton_meta!r}, inductor_meta={inductor_meta!r})\n"
             + "@triton.jit"
         )
 
@@ -241,7 +241,7 @@ class ForeachKernel(Kernel):
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_cuda_stream(
+            stream_name = code.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
             code.writeline(

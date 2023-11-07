@@ -64,8 +64,8 @@ serialized.
         Equality constraints: []
 
 ``torch.export`` produces a clean intermediate representation (IR) with the
-following invariants. More specifications about the IR can be found here (coming
-soon!).
+following invariants. More specifications about the IR can be found
+:ref:`here <export.ir_spec>`.
 
 * **Soundness**: It is guaranteed to be a sound representation of the original
   program, and maintains the same calling conventions of the original program.
@@ -249,14 +249,14 @@ Expressing Dynamism
 By default ``torch.export`` will trace the program assuming all input shapes are
 **static**, and specializing the exported program to those dimensions. However,
 some dimensions, such as a batch dimension, can be dynamic and vary from run to
-run. Such dimensions must be marked dynamic using the
-:func:`torch.export.dynamic_dim` API, and passed into
-:func:`torch.export.export` through the ``constraints`` argument. An example:
+run. Such dimensions must be specified by using the
+:func:`torch.export.Dim` API to create them and by passing them into
+:func:`torch.export.export` through the ``dynamic_shapes`` argument. An example:
 
 ::
 
     import torch
-    from torch.export import export, dynamic_dim
+    from torch.export import Dim, export
 
     class M(torch.nn.Module):
         def __init__(self):
@@ -276,16 +276,14 @@ run. Such dimensions must be marked dynamic using the
             return (out1 + self.buffer, out2)
 
     example_args = (torch.randn(32, 64), torch.randn(32, 128))
-    constraints = [
-        # First dimension of each input is a dynamic batch size
-        dynamic_dim(example_args[0], 0),
-        dynamic_dim(example_args[1], 0),
-        # The dynamic batch size between the inputs are equal
-        dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0),
-    ]
+
+    # Create a dynamic batch size
+    batch = Dim("batch")
+    # Specify that the first dimension of each input is that batch size
+    dynamic_shapes = {"x1": {0: batch}, "x2": {0: batch}}
 
     exported_program: torch.export.ExportedProgram = export(
-      M(), args=example_args, constraints=constraints
+        M(), args=example_args, dynamic_shapes=dynamic_shapes
     )
     print(exported_program)
 
@@ -335,7 +333,7 @@ run. Such dimensions must be marked dynamic using the
 
 Some additional things to note:
 
-* Through the :func:`torch.export.dynamic_dim` API, we specified the first
+* Through the :func:`torch.export.Dim` API and the ``dynamic_shapes`` argument, we specified the first
   dimension of each input to be dynamic. Looking at the inputs ``arg5_1`` and
   ``arg6_1``, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
   the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
@@ -357,11 +355,11 @@ Some additional things to note:
   we see in the equality constraints the tuple specifying that ``arg5_1``
   dimension 0 and ``arg6_1`` dimension 0 are equal.
 
-(An experimental mechanism that is designed to eventually subsume the use of
-:func:`torch.export.dynamic_dim` and ``constraints`` involves constructing
-dynamic shape specifications with the :func:`torch.export.Dim` and
-:func:`torch.export.dims` APIs and passing them into :func:`torch.export.export`
-through the ``dynamic_shapes`` argument.)
+(A legacy mechanism for specifying dynamic shapes
+involves marking and constraining dynamic dimensions with the
+:func:`torch.export.dynamic_dim` API and passing them into :func:`torch.export.export`
+through the ``constraints`` argument. That mechanism is now **deprecated** and will
+not be supported in the future.)
 
 
 Serialization
@@ -503,17 +501,8 @@ Graph breaks can also be encountered on data-dependent control flow (``if
 x.shape[0] > 2``) when shapes are not being specialized, as a tracing compiler cannot
 possibly deal with without generating code for a combinatorially exploding
 number of paths. In such cases, users will need to rewrite their code using
-special control flow operators (coming soon!).
-
-Data-Dependent Accesses
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Data dependent behavior such as using the value inside of a tensor to construct
-another tensor, or using the value of a tensor to slice into another tensor, is
-also something the tracer cannot fully determine. Users will need to rewrite
-their code using the inline constraint APIs
-:func:`torch.export.constrain_as_size` and
-:func:`torch.export.constrain_as_value`.
+special control flow operators. Currently, we support :ref:`torch.cond <cond>`
+to express if-else like control flow (more coming soon!).
 
 Missing Meta Kernels for Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -522,9 +511,13 @@ When tracing, a META implementation (or "meta kernel") is required for all
 operators. This is used to reason about the input/output shapes for this
 operator.
 
-Note that the official API for registering custom meta kernels for custom ops is
-currently undergoing development. While the final API is being refined, you can
-refer to the documentation `here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
+To register a meta kernel for a C++ Custom Operator, please refer to
+`this documentation <https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz>`__.
+
+The official API for registering custom meta kernels for custom ops implemented
+in python is currently undergoing development. While the final API is being
+refined, you can refer to the documentation
+`here <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0>`_.
 
 In the unfortunate case where your model uses an ATen operator that is does not
 have a meta kernel implementation yet, please file an issue.
@@ -537,9 +530,11 @@ Read More
    :caption: Additional Links for Export Users
    :maxdepth: 1
 
+   export.ir_spec
    torch.compiler_transformations
    torch.compiler_ir
    generated/exportdb/index
+   cond
 
 .. toctree::
    :caption: Deep Dive for PyTorch Developers
@@ -556,8 +551,6 @@ API Reference
 .. automodule:: torch.export
 .. autofunction:: export
 .. autofunction:: dynamic_dim
-.. autofunction:: constrain_as_size
-.. autofunction:: constrain_as_value
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
@@ -574,7 +567,16 @@ API Reference
 
 .. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
-.. autoclass:: ArgumentKind
-.. autoclass:: ArgumentSpec
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
+
+
+.. automodule:: torch.export.exported_program
+.. automodule:: torch.export.graph_signature
+.. autoclass:: InputKind
+.. autoclass:: InputSpec
+.. autoclass:: OutputKind
+.. autoclass:: OutputSpec
+.. autoclass:: ExportGraphSignature
+
+    .. automethod:: replace_all_uses

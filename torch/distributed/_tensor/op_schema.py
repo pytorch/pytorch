@@ -2,9 +2,17 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._ops import OpOverload
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.utils._pytree import tree_map_only, TreeSpec
+
+try:
+    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+except ImportError:
+    from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
+        tree_map_only,
+        TreeSpec,
+    )
 
 
 # Common type aliases
@@ -27,14 +35,14 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     )
 
 
-def _is_inplace_op(op: torch._ops.OpOverload):
+def _is_inplace_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an inplace variant, it might not
     # be entirely correct, but it's good enough for now.
     return op._schema.name[-1] == "_"
 
 
-def _is_out_variant_op(op: torch._ops.OpOverload):
+def _is_out_variant_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an out variant, it might not
     # be entirely correct, but it's good enough for now.
@@ -51,6 +59,12 @@ class PlacementStrategy:
     output_spec: DTensorSpec
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
+    # redistribute costs for this op placement strategy
+    # we need a nested list to record the cost for each
+    # operand of this operator, and for each operand of
+    # this operator it might have multiple placement strategies
+    redistribute_cost: Optional[List[List[float]]] = None
+
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
 
@@ -58,14 +72,18 @@ class PlacementStrategy:
         if self.input_specs is None:
             input_specs_str = ""
         else:
-            input_specs_str = ", ".join(
-                [
-                    self.pretty_print_placements(spec.placements)
-                    for spec in self.input_specs
-                ]
+            input_specs_str = (
+                "("
+                + ", ".join(
+                    [
+                        self.pretty_print_placements(spec.placements)
+                        for spec in self.input_specs
+                    ]
+                )
+                + ") -> "
             )
         output_spec_str = self.pretty_print_placements(self.output_spec.placements)
-        return f"({input_specs_str}) -> ({output_spec_str}) @ mesh layout: {tuple(self.output_spec.mesh.mesh.shape)}"
+        return f"{input_specs_str}{output_spec_str}"
 
 
 class StrategyType:
@@ -88,7 +106,8 @@ class OpStrategy(StrategyType):
 
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
-        return f"OpStrategy: [{strategy_list_str}]"
+        mesh_shape = self.strategies[0].output_spec.mesh.shape
+        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -108,26 +127,23 @@ class OpStrategy(StrategyType):
 class TupleStrategy(StrategyType):
     """
     TupleStrategy represents the output strategy of this op is a tuple
-    of strategy, i.e. If the output of this op is a tuple of tensors, we should
-    return a TupleStrategy that contains a tuple of OpStrategy.
+    of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
+    with possibly different placement strategies, we should return a TupleStrategy that
+    contains a tuple of OpStrategy.
 
-    NOTE: if the output of the op is a List[Tensor], it's likely we should return
-    OpStrategy directly in all cases.
+    NOTE: if the output of the op is a List[Tensor] and they share the same placement
+    strategy, then we should return a single OpStrategy instead of a TupleStrategy
     """
 
-    def __init__(self, childs: Tuple[StrategyType, ...]) -> None:
+    def __init__(self, childs: Sequence[StrategyType]) -> None:
         super().__init__()
-        self.childs: Tuple[StrategyType, ...] = childs
+        self.childs: Sequence[StrategyType] = childs
 
     def __str__(self) -> str:
-        tuple_strategies_str = "TupleStrategy: "
-        child_strategies_str = "\n".join(
-            [
-                f" tuple idx: {idx}, strategy: {str(strat)}"
-                for idx, strat in enumerate(self.childs)
-            ]
+        child_strategies_str = ", ".join(
+            [f"{str(strat)}" for idx, strat in enumerate(self.childs)]
         )
-        return f"{tuple_strategies_str}\n{child_strategies_str}"
+        return f"TupleStrategy({child_strategies_str})"
 
 
 @dataclass
@@ -145,8 +161,10 @@ class RuntimeSchemaInfo:
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
-    # TODO: make use of this field
-    needs_pytree: bool = True
+    # each op can decide if it wants to use pytree flatten/unflatten during operator
+    # eager execution, by default we don't need to do flatten/unflatten, only if the
+    # op indicate it needs to, this is to accelate eager performance.
+    needs_pytree: bool = False
 
 
 @dataclass
@@ -168,7 +186,7 @@ class OpSchema:
             with its DTensorSpec
     """
 
-    op: torch._ops.OpOverload
+    op: OpOverload
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
@@ -192,6 +210,36 @@ class OpSchema:
             f" kwargs_schema={self.kwargs_schema})"
         )
 
+    def __str__(self) -> str:
+        args_sharding: List[str] = []
+        mesh_shape = None
+        for arg in self.args_schema:
+            if isinstance(arg, DTensorSpec):
+                args_sharding.append(str(arg))
+                mesh_shape = arg.mesh.shape
+            elif isinstance(arg, OpStrategy):
+                assert len(arg.strategies) == 1
+                arg_spec = arg.strategies[0].output_spec
+                args_sharding.append(str(arg_spec))
+                mesh_shape = arg_spec.mesh.shape
+            elif isinstance(arg, TupleStrategy):
+                first_op_strtgy = arg.childs[0]
+                assert isinstance(first_op_strtgy, OpStrategy)
+                mesh_shape = first_op_strtgy.strategies[0].output_spec.mesh.shape
+                args_sharding.append(str(arg))
+            else:
+                args_sharding.append(str(arg))
+        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)}@ mesh: {mesh_shape})"
+
+    def __post_init__(self) -> None:
+        has_symints = False
+        for a in self.args_schema:
+            if isinstance(a, DTensorSpec) and a.tensor_meta is not None:
+                if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
+                    has_symints = True
+                    break
+        self.has_symints = has_symints
+
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
         arg = self.args_schema[arg_idx]
         is_tensor = isinstance(arg, DTensorSpec)
@@ -202,6 +250,13 @@ class OpSchema:
             return False
 
         return all(isinstance(e, DTensorSpec) or e is None for e in arg)
+
+    def return_type_tuple_tensors(self) -> bool:
+        return_types = self.op._schema.returns
+        # all dispatch ops only return Tensor or Tuple[Tensor], so this check if enough
+        return len(return_types) > 1 and isinstance(
+            return_types[0].type, torch.TensorType
+        )
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
@@ -323,11 +378,9 @@ class OpInfo:
     mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
-    flat_kwargs_schema: List[object]
-    flat_local_args: List[object]
-    flat_local_kwargs: List[object]
-    args_tree_spec: TreeSpec
-    kwargs_tree_spec: TreeSpec
+    local_args: Sequence[object]
+    local_kwargs: Dict[str, object]
+    args_tree_spec: Optional[TreeSpec] = None
 
     # the output sharding info
     output_sharding: Optional[OutputSharding] = None

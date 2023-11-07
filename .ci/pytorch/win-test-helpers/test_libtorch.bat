@@ -1,7 +1,3 @@
-:: Skip LibTorch tests when building a GPU binary and testing on a CPU machine
-:: because LibTorch tests are not well designed for this use case.
-::if "%USE_CUDA%" == "0" IF NOT "%CUDA_VERSION%" == "cpu" exit /b 0
-
 call %SCRIPT_HELPERS_DIR%\setup_pytorch_env.bat
 if errorlevel 1 exit /b 1
 
@@ -33,10 +29,6 @@ set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\test
 
 :: Skip verify_api_visibility as it a compile level test
 if "%~1" == "verify_api_visibility" goto :eof
-
-if "%~1" == "module_test" goto :eof
-:: See https://github.com/pytorch/pytorch/issues/25312
-if "%~1" == "converter_nomigraph_test" goto :eof
 
 echo Running "%~2"
 if "%~1" == "c10_intrusive_ptr_benchmark" (

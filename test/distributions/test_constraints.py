@@ -64,7 +64,7 @@ def build_constraint(constraint_fn, args, is_cuda=False):
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
     return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
 
-@pytest.mark.parametrize('constraint_fn, result, value', EXAMPLES)
+@pytest.mark.parametrize(('constraint_fn', 'result', 'value'), EXAMPLES)
 @pytest.mark.parametrize('is_cuda', [False,
                                      pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
                                                                                  reason='CUDA not found.'))])
@@ -73,7 +73,7 @@ def test_constraint(constraint_fn, result, value, is_cuda):
     assert constraint_fn.check(t(value)).all() == result
 
 
-@pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])
+@pytest.mark.parametrize(('constraint_fn', 'args'), [(c[0], c[1:]) for c in CONSTRAINTS])
 @pytest.mark.parametrize('is_cuda', [False,
                                      pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
                                                                                  reason='CUDA not found.'))])
@@ -104,7 +104,7 @@ def test_biject_to(constraint_fn, args, is_cuda):
     assert j.shape == x.shape[:x.dim() - t.domain.event_dim]
 
 
-@pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])
+@pytest.mark.parametrize(('constraint_fn', 'args'), [(c[0], c[1:]) for c in CONSTRAINTS])
 @pytest.mark.parametrize('is_cuda', [False,
                                      pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
                                                                                  reason='CUDA not found.'))])

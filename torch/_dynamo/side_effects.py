@@ -380,9 +380,9 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle):
+    def register_hook(self, tensor, hook, handle, name):
         idx = len(self.tensor_hooks.keys())
-        self.tensor_hooks[idx] = (tensor, hook, handle)
+        self.tensor_hooks[idx] = (tensor, hook, handle, name)
         assert not handle.idx
         handle.idx = idx
 
@@ -394,6 +394,7 @@ class SideEffects:
             tensor,
             hook,
             handle,
+            name,
         ) in self.tensor_hooks.values():
             # Note: [On tensor.register_hook]
             #
@@ -407,7 +408,8 @@ class SideEffects:
             # because we are running residuals firmly before .backward() can be run, it is sound to invoke
             # `register_hook` on a known tensor.
             #
-            # For tensors without a source, we graph break for now.
+            # For tensors without a source, we support a limited subset of hooks. Global functions only, and
+            # compiled_autograd must be enabled or we will graph break.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -422,11 +424,14 @@ class SideEffects:
             #     - Issue a register_hook call on the tensor, linking to the globally stored function.
             #     - Incorporate a handle if one was established in the eager phase.
             #  - For tensors without sources:
-            #    - We graph break
+            #    - We don't generate any instructions for registering a hook.
+            #    - Handles from intermediary hooks are NYI.
+            #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
+            #    - We then manually insert the call function above into the graph.
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
             cg(tensor)
-            cg.extend_output([cg.create_load_attr("register_hook")])
+            cg.extend_output([cg.create_load_attr(name)])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
             # Let's go over how handles work.
@@ -440,7 +445,7 @@ class SideEffects:
             # can be generated at any time after this point, and can be generated multiple times! If we were to defer
             # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
             # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
-            # esentially a lookup.
+            # essentially a lookup.
             if (
                 hasattr(handle, "user_code_variable_name")
                 and handle.user_code_variable_name
@@ -521,7 +526,9 @@ class SideEffects:
     def is_empty(self):
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
+            or self.tensor_hooks
             or self.save_for_backward
+            or self.tensor_hooks
         )
 
     def clear(self):

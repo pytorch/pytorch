@@ -149,7 +149,7 @@ def add_default_options(parser: argparse.ArgumentParser) -> None:
 
 def explain_rule(code: str) -> str:
     proc = run_command(
-        ["ruff", "rule", "--format=json", code],
+        ["ruff", "rule", "--output-format=json", code],
         check=True,
     )
     rule = json.loads(str(proc.stdout, "utf-8").strip())
@@ -227,7 +227,7 @@ def check_files(
                 "ruff",
                 "--exit-zero",
                 "--quiet",
-                "--format=json",
+                "--output-format=json",
                 *([f"--config={config}"] if config else []),
                 *filenames,
             ],

@@ -101,6 +101,7 @@ class SequentialSampler(Sampler[int]):
     Args:
         data_source (Dataset): dataset to sample from
     """
+
     data_source: Sized
 
     def __init__(self, data_source: Sized) -> None:
@@ -115,6 +116,7 @@ class SequentialSampler(Sampler[int]):
 
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
+
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
@@ -123,6 +125,7 @@ class RandomSampler(Sampler[int]):
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
     """
+
     data_source: Sized
     replacement: bool
 
@@ -157,13 +160,12 @@ class RandomSampler(Sampler[int]):
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
-                yield from map(int, torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).numpy())
-            final_samples = torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator)
-            yield from map(int, final_samples.numpy())
+                yield from torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).tolist()
+            yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
             for _ in range(self.num_samples // n):
-                yield from map(int, torch.randperm(n, generator=generator).numpy())
-            yield from map(int, torch.randperm(n, generator=generator)[:self.num_samples % n].numpy())
+                yield from torch.randperm(n, generator=generator).tolist()
+            yield from torch.randperm(n, generator=generator).tolist()[:self.num_samples % n]
 
     def __len__(self) -> int:
         return self.num_samples
@@ -176,6 +178,7 @@ class SubsetRandomSampler(Sampler[int]):
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """
+
     indices: Sequence[int]
 
     def __init__(self, indices: Sequence[int], generator=None) -> None:
@@ -208,6 +211,7 @@ class WeightedRandomSampler(Sampler[int]):
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
         [0, 1, 4, 3, 2]
     """
+
     weights: Tensor
     num_samples: int
     replacement: bool

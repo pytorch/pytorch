@@ -525,7 +525,10 @@ static PyObject* THPVariable_fix_weakref(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
-static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
+static PyObject* view_func_impl(
+    PyObject* self_,
+    PyObject* arg,
+    bool check_has_same_meta) {
   HANDLE_TH_ERRORS
   const auto& self = THPVariable_Unpack(self_);
   TORCH_CHECK(
@@ -540,7 +543,8 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     const auto& view_info = diff_view_meta->get_backward_view();
     // Ensure that the newly provided base is similar to the original base
-    if (torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
+    if (!check_has_same_meta ||
+        torch::autograd::utils::has_same_meta(new_base, view_info.base_)) {
       // Do the actual view replay
       if (view_info.has_view_fn()) {
         out = view_info.view_fn()(new_base);
@@ -552,6 +556,14 @@ static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
   }
   return THPVariable_Wrap(std::move(out));
   END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_view_func(PyObject* self_, PyObject* arg) {
+  return view_func_impl(self_, arg, /*check_has_same_meta=*/true);
+}
+
+static PyObject* THPVariable_view_func_unsafe(PyObject* self_, PyObject* arg) {
+  return view_func_impl(self_, arg, /*check_has_same_meta=*/false);
 }
 
 // Instantiates a subclass of self with the same data.
@@ -1637,6 +1649,7 @@ static PyMethodDef extra_methods[] = {
      nullptr},
     {"_fix_weakref", THPVariable_fix_weakref, METH_NOARGS, nullptr},
     {"_view_func", THPVariable_view_func, METH_O, nullptr},
+    {"_view_func_unsafe", THPVariable_view_func_unsafe, METH_O, nullptr},
     {nullptr}};
 
 struct THPVariableMeta {
@@ -1666,6 +1679,7 @@ PyTypeObject THPVariableMetaType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
@@ -1690,7 +1704,7 @@ PyTypeObject THPVariableMetaType = {
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,
-        0) "torch._C._TensorBase", /* tp_name */
+        0) "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
@@ -1711,6 +1725,7 @@ PyTypeObject THPVariableType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
@@ -1743,7 +1758,7 @@ PyObject* THPVariable_pynew(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       type != &THPVariableType,
-      "Cannot directly construct _TensorBase; subclass it and then construct that");
+      "Cannot directly construct TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
@@ -2193,6 +2208,7 @@ bool THPVariable_initModule(PyObject* module) {
   if (PyType_Ready(&THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
+  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);

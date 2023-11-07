@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -233,6 +234,15 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 _global_higher_order_ops = {}
 _higher_order_ops = {}
 
+_HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.ADInplaceOrView,
+    DispatchKey.BackendSelect,
+    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+]
+
 
 class HigherOrderOperator(OperatorBase):
     # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
@@ -263,6 +273,14 @@ class HigherOrderOperator(OperatorBase):
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.fallthrough(dispatch_key)
+
+    def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+        return super().py_impl(k)
 
     @property
     def namespace(self):
@@ -358,10 +376,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -754,7 +769,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -805,6 +820,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)
@@ -872,6 +891,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """

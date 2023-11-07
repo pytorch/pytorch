@@ -7,8 +7,7 @@ C10_DECLARE_bool(torch_jit_static_then_dynamic);
 
 C10_DECLARE_bool(torch_jit_always_dynamic);
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void runNooptPassPipeline(std::shared_ptr<Graph>& graph);
 
@@ -75,5 +74,4 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<size_t> remaining_bailout_depth_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

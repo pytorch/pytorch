@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -100,7 +99,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allreduce sparse"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -368,8 +370,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // appropriate logging etc.
   void init();
 
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   const int rank_;
   const int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
