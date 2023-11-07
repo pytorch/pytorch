@@ -149,16 +149,17 @@ class NestedTestCase(TestCase):
     # Suppress errors is enabled by default in the test suite. We disable
     # suppress errors in particular for NestedTensors to ensure that dynamo
     # graph breaks cleanly.
-    def tearDown(self):
-        self._exit_stack.close()
-        super(NestedTestCase, self).tearDown()
-
     def setUp(self):
-        super(NestedTestCase, self).setUp()
+        super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(
             unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
         )
+
+    def tearDown(self):
+        self._exit_stack.close()
+        super().tearDown()
+
 
 class TestNestedTensor(NestedTestCase):
     @torch._dynamo.config.patch(suppress_errors=True)
