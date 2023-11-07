@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, List, Optional, Tuple
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -251,3 +251,100 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     ):
         raise RuntimeError("Cannot run _softmax_backward_data on sharding dimension!")
     return pointwise_rule(op_schema)
+
+
+def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # args must be: input, normalized_shape, weight, bias, eps
+    assert len(op_schema.args_schema) == 5
+    (
+        input_schema,
+        normalized_shape,
+        weight_schema,
+        bias_schema,
+        _,
+    ) = op_schema.args_schema
+    # the current layer norm implementation requires that all input DTensor's sharding
+    # must be in form of OpStrategy
+    assert isinstance(input_schema, OpStrategy)
+    assert isinstance(normalized_shape, (int, Sequence, torch.Size))
+    normalized_size = (
+        [normalized_shape]
+        if isinstance(normalized_shape, int)
+        else list(normalized_shape)
+    )
+
+    input_shape = input_schema.output_shape
+    input_ndim = input_schema.output_ndim
+    axis = input_ndim - len(normalized_size)
+
+    # we use OpStrategy because the output (out, mean, rstd) should have the same placements
+    output_strategy = OpStrategy([])
+    for idx, input_arg_strategy in enumerate(input_schema.strategies):
+        input_args_specs = []
+        redistribute_costs = []
+        input_src_spec = input_arg_strategy.output_spec
+
+        # input tensor
+        input_target_spec = DTensorSpec(
+            mesh=mesh,
+            placements=_replicate_dims_start_at(input_src_spec.placements, axis),
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+        input_args_specs.append(input_target_spec)
+        redistribute_costs.append(
+            generate_redistribute_costs(input_schema, input_target_spec)
+        )
+
+        if weight_schema is not None:
+            assert isinstance(weight_schema, OpStrategy)
+            weight_src_spec = weight_schema.strategies[idx].output_spec
+            weight_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(weight_src_spec.placements, 0),
+                tensor_meta=weight_src_spec.tensor_meta,
+            )
+            input_args_specs.append(weight_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(weight_schema, weight_target_spec)
+            )
+
+        if bias_schema is not None:
+            assert isinstance(bias_schema, OpStrategy)
+            bias_src_spec = bias_schema.strategies[idx].output_spec
+            bias_target_spec = DTensorSpec(
+                mesh=mesh,
+                placements=_replicate_dims_start_at(bias_src_spec.placements, 0),
+                tensor_meta=bias_src_spec.tensor_meta,
+            )
+            input_args_specs.append(bias_target_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(bias_schema, bias_target_spec)
+            )
+
+        output_strategy.strategies.append(
+            PlacementStrategy(
+                output_spec=input_target_spec,
+                input_specs=input_args_specs,
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return output_strategy
+
+
+def _replicate_dims_start_at(
+    placements: Sequence[Placement], starting_dim_optional: Optional[int] = 0
+) -> Tuple[Placement, ...]:
+    starting_dim = 0 if starting_dim_optional is None else starting_dim_optional
+    new_placements = []
+    for idx, placement in enumerate(placements):
+        if idx < starting_dim:
+            new_placements.append(placement)  # keep the placement
+        else:
+            new_placements.append(Replicate())  # make it replicate
+    return tuple(new_placements)
+
+
+register_op_strategy(aten.native_layer_norm.default, schema_info=RuntimeSchemaInfo())(
+    layer_norm_strategy
+)

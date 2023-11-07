@@ -282,7 +282,6 @@ dtensor_fails = {
     xfail("nanquantile"),
     xfail("nansum"),
     xfail("native_batch_norm"),
-    xfail("native_layer_norm"),
     xfail("narrow_copy"),
     xfail("ne"),
     xfail("new_empty"),
@@ -334,7 +333,6 @@ dtensor_fails = {
     xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "trilinear"),
-    xfail("nn.functional.layer_norm"),
     xfail("nn.functional.leaky_relu"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
@@ -541,6 +539,8 @@ skip_bw = [
     "torch.eq",
     "torch.isfinite",
     "torch.isnan",
+    "torch.native_layer_norm",
+    "torch.nn.functional.layer_norm",
 ]
 
 
