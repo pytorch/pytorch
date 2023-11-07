@@ -422,6 +422,20 @@ class LazyScheduler:
       cur_handle.wait_for_completion()
       return cur_handle.outs
 
+"""
+TODO: we can potentially implement segment tagging and propagation via:
+```
+mod.register_forward_pre_hook(
+  mod.func1 = RunWithSomeTorchDispatchMode(mod.func1, segment_name)
+)
+
+and then in RunWithSomeTorchDispatchMode, we call mod.func1 with a torch dispatch mode
+that tags the FX node with segment_name via `fx_traceback.current_meta`
+
+This way we don't need to do any change to Dynamo internals.
+```
+"""
+
 
 """
 TODO: graph with only in-place op doesn't have its output node, why?
