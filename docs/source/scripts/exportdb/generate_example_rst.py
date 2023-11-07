@@ -5,10 +5,10 @@ from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export
 
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
+from torch.export import export
 
 
 PWD = Path(__file__).absolute().parent
@@ -31,7 +31,7 @@ def generate_example_rst(example_case: ExportCase):
         if isinstance(model, torch.nn.Module)
         else inspect.getfile(model)
     )
-    with open(source_file, "r") as file:
+    with open(source_file) as file:
         source_code = file.read()
     source_code = re.sub(r"from torch\._export\.db\.case import .*\n", "", source_code)
     source_code = re.sub(r"@export_case\((.|\n)*?\)\n", "", source_code)
@@ -72,7 +72,8 @@ Result:
         exported_program = export(
             model,
             inputs.args,
-            constraints=example_case.constraints,
+            inputs.kwargs,
+            dynamic_shapes=example_case.dynamic_shapes,
         )
         graph_output = str(exported_program)
         graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
@@ -80,6 +81,10 @@ Result:
         output = f"    {graph_output}"
     except torchdynamo.exc.Unsupported as e:
         output = "    Unsupported: " + str(e).split("\n")[0]
+    except AssertionError as e:
+        output = "    AssertionError: " + str(e).split("\n")[0]
+    except RuntimeError as e:
+        output = "    RuntimeError: " + str(e).split("\n")[0]
 
     doc_contents += output + "\n"
 
@@ -114,11 +119,13 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
 
     tag_names = "\n    ".join(t for t in tag_to_modules.keys())
 
-    with open(os.path.join(PWD, "blurb.txt"), "r") as file:
+    with open(os.path.join(PWD, "blurb.txt")) as file:
         blurb = file.read()
 
     # Generate contents of the .rst file
-    doc_contents = f"""ExportDB
+    doc_contents = f""".. _torch.export_db:
+
+ExportDB
 ========
 
 {blurb}
@@ -144,7 +151,11 @@ def generate_tag_rst(tag_to_modules):
 
     for tag, modules_rst in tag_to_modules.items():
         doc_contents = f"{tag}\n{'=' * (len(tag) + 4)}\n"
-        doc_contents += "\n\n".join(modules_rst).replace("=", "-")
+        full_modules_rst = "\n\n".join(modules_rst)
+        full_modules_rst = re.sub(
+            r"={3,}", lambda match: "-" * len(match.group()), full_modules_rst
+        )
+        doc_contents += full_modules_rst
 
         with open(os.path.join(EXPORTDB_SOURCE, f"{tag}.rst"), "w") as f:
             f.write(doc_contents)
@@ -158,13 +169,14 @@ def generate_rst():
     tag_to_modules = {}
     support_level_to_modules = {}
     for example_case in example_cases.values():
-
         doc_contents = generate_example_rst(example_case)
 
         for tag in example_case.tags:
             tag_to_modules.setdefault(tag, []).append(doc_contents)
 
-        support_level_to_modules.setdefault(example_case.support_level, []).append(doc_contents)
+        support_level_to_modules.setdefault(example_case.support_level, []).append(
+            doc_contents
+        )
 
     generate_tag_rst(tag_to_modules)
     generate_index_rst(example_cases, tag_to_modules, support_level_to_modules)

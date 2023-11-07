@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import inspect
 from typing import (
@@ -63,10 +64,11 @@ class _PyTreeExtensionContext:
         Raises:
             AssertionError: If the custom python type is already registered.
         """
-        assert (
-            class_type not in pytree.SUPPORTED_NODES
-            and class_type not in self._extensions
-        ), "PyTree node already registered"
+        if class_type in pytree.SUPPORTED_NODES or class_type in self._extensions:
+            # PyTree node already registered.
+            # E.g., `huggingface/transformer` registers `ModelOutput` as PyTree node after
+            # https://github.com/huggingface/transformers/pull/25358.
+            return
         self._extensions[class_type] = (flatten_func, unflatten_func)
 
     def _register_huggingface_model_output_extension(self):
@@ -187,15 +189,40 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Translate callable to FX graph.
         #
-        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
-        graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *model_args, tracing_mode=fx_mode, **model_kwargs
+        fake_mode = (
+            options.fake_context.fake_mode
+            if options.fake_context
+            else contextlib.nullcontext()
         )
+        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
+        with fake_mode:  # type: ignore[attr-defined]
+            graph_module, graph_guard = torch._dynamo.export(
+                wrapped_model,
+                tracing_mode=fx_mode,
+            )(
+                *model_args,
+                **model_kwargs,
+            )
         del graph_guard  # Unused
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
         self.input_adapter.append_step(
-            io_adapter.FlattenInputWithTreeSpecValidationStep()
+            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
-        return graph_module  # type: ignore[return-value]
+
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    @_beartype.beartype
+    def pre_export_passes(
+        self,
+        options: exporter.ResolvedExportOptions,
+        original_model: Union[torch.nn.Module, Callable],
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return exporter.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )

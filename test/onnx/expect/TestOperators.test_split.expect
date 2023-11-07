@@ -1,10 +1,10 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Split_1"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -22,7 +22,7 @@ graph {
     output: "2"
     output: "3"
     output: "4"
-    name: "Split_1"
+    name: "Split_2"
     op_type: "Split"
     attribute {
       name: "axis"
@@ -30,7 +30,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "tensor"
     type {
@@ -97,5 +97,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

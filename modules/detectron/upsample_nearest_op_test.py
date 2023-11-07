@@ -1,4 +1,3 @@
-
 import unittest
 
 import caffe2.python.hypothesis_test_util as hu
@@ -17,7 +16,7 @@ class TestUpsampleNearestOp(hu.HypothesisTestCase):
         H=st.integers(10, 300),
         W=st.integers(10, 300),
         scale=st.integers(1, 3),
-        **hu.gcs
+        **hu.gcs,
     )
     @settings(deadline=None, max_examples=20)
     def test_upsample_nearest_op(self, N, H, W, scale, gc, dc):

@@ -1,6 +1,6 @@
 from functools import wraps
 from inspect import unwrap
-from typing import Callable, List
+from typing import Callable, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
 
 
 
-def loop_pass(base_pass: Callable, n_iter: int = None, predicate: Callable = None):
+def loop_pass(base_pass: Callable, n_iter: Optional[int] = None, predicate: Optional[Callable] = None):
     """
     Convenience wrapper for passes which need to be applied multiple times.
 

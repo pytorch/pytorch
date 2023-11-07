@@ -23,6 +23,8 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -74,7 +76,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key1", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+      "key1", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
         memcpy(dst, src, n);
       });
   ASSERT_EQ(ret, size);
@@ -94,11 +96,91 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key2", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+      "key2", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
         memcpy(dst, src, n);
       });
   ASSERT_EQ(ret, size);
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
+  // clean up
+  remove(file_name);
+}
+
+TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
+
+  std::ostringstream oss;
+  // write records through writers
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 127> data1;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
+  std::array<char, 64> data2;
+  for (auto i : c10::irange(data1.size())) {
+    data1[i] = data1.size() - i;
+  }
+  writer.writeRecord("key1", data1.data(), data1.size());
+
+  for (auto i : c10::irange(data2.size())) {
+    data2[i] = data2.size() - i;
+  }
+  writer.writeRecord("key2", data2.data(), data2.size());
+
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 2);
+  ASSERT_EQ(written_records.count("key1"), 1);
+  ASSERT_EQ(written_records.count("key2"), 1);
+
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  const char* file_name = "output.zip";
+  std::ofstream foo(file_name);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+
+  // read records through pytorchStreamReader
+  std::istringstream iss(the_file);
+  PyTorchStreamReader reader(&iss);
+  reader.setAdditionalReaderSizeThreshold(0);
+  // before testing, sanity check
+  int64_t size1, size2, ret;
+  at::DataPtr data_ptr;
+  std::tie(data_ptr, size1) = reader.getRecord("key1");
+  std::tie(data_ptr, size2) = reader.getRecord("key2");
+
+  // Test getRecord(name, additional_readers)
+  std::vector<std::shared_ptr<ReadAdapterInterface>> additionalReader;
+  for(int i=0; i<10; ++i){
+    // Test various sized additional readers.
+    std::tie(data_ptr, ret) = reader.getRecord("key1", additionalReader);
+    ASSERT_EQ(ret, size1);
+    ASSERT_EQ(memcmp(data_ptr.get(), data1.data(), size1), 0);
+
+    std::tie(data_ptr, ret) = reader.getRecord("key2", additionalReader);
+    ASSERT_EQ(ret, size2);
+    ASSERT_EQ(memcmp(data_ptr.get(), data2.data(), size2), 0);
+  }
+
+  // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
+  additionalReader.clear();
+  std::vector<uint8_t> dst1(size1), dst2(size2);
+  for(int i=0; i<10; ++i){
+    // Test various sizes of read threads
+    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+
+    ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
+    ASSERT_EQ(ret, size1);
+    ASSERT_EQ(memcmp(dst1.data(), data1.data(), size1), 0);
+
+    ret = reader.getRecord("key2", dst2.data(), size2, additionalReader);
+    ASSERT_EQ(ret, size2);
+    ASSERT_EQ(memcmp(dst2.data(), data2.data(), size2), 0);
+  }
   // clean up
   remove(file_name);
 }
@@ -112,6 +194,9 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+
+  // Inplace memory buffer
+  std::vector<uint8_t> buf;
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -154,6 +239,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
           dst.data(),
           data1.size(),
           3,
+          buf.data(),
           [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); }),
       c10::Error);
 
@@ -171,6 +257,8 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -218,6 +306,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
       dst.data(),
       data1.size(),
       3,
+      buf.data(),
       [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   EXPECT_EQ(ret, 0);
   // clean up
@@ -329,6 +418,59 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   SetAPIUsageMetadataLogger(
       [&](const std::string& context,
           const std::map<std::string, std::string>& metadata_map) {});
+}
+
+class ChunkRecordIteratorTest : public ::testing::TestWithParam<int64_t> {};
+INSTANTIATE_TEST_SUITE_P(
+    ChunkRecordIteratorTestGroup,
+    ChunkRecordIteratorTest,
+    testing::Values(100, 150, 1010));
+
+TEST_P(ChunkRecordIteratorTest, ChunkRead) {
+  auto chunkSize = GetParam();
+  std::string zipFileName = "output_chunk_" + std::to_string(chunkSize) + ".zip";
+  const char* fileName = zipFileName.c_str();
+  const std::string recordName = "key1";
+  const size_t tensorDataSizeInBytes = 1000;
+
+  // write records through writers
+  std::ostringstream oss(std::ios::binary);
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  auto tensorData = std::vector<uint8_t>(tensorDataSizeInBytes, 1);
+  auto dataPtr = tensorData.data();
+  writer.writeRecord(recordName, dataPtr, tensorDataSizeInBytes);
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 1);
+  ASSERT_EQ(written_records.count(recordName), 1);
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  std::ofstream foo(fileName, std::ios::binary);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+  LOG(INFO) << "Finished saving tensor into zip file " << fileName;
+
+  LOG(INFO) << "Testing chunk size " << chunkSize;
+  PyTorchStreamReader reader(fileName);
+  ASSERT_TRUE(reader.hasRecord(recordName));
+  auto chunkIterator = reader.createChunkReaderIter(
+      recordName, tensorDataSizeInBytes, chunkSize);
+  std::vector<uint8_t> buffer(chunkSize);
+  size_t totalReadSize = 0;
+  while (auto readSize = chunkIterator.next(buffer.data())) {
+    auto expectedData = std::vector<uint8_t>(readSize, 1);
+    ASSERT_EQ(memcmp(expectedData.data(), buffer.data(), readSize), 0);
+    totalReadSize += readSize;
+  }
+  ASSERT_EQ(totalReadSize, tensorDataSizeInBytes);
+  // clean up
+  remove(fileName);
 }
 
 } // namespace

@@ -359,9 +359,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 14): The version of the
+        opset_version (int, default 17): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 16.
+            to target. Must be >= 7 and <= 17.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -453,6 +453,11 @@ def export(
             the non-parameter inputs are added as inputs.
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
+
+            If True, `deduplicate_initializers` pass will not be executed. This means
+            initializers with duplicated values will not be deduplicated and
+            will be treated as distinct inputs to the graph. This allows different
+            input initializers to be supplied at the runtime following export.
 
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
@@ -1466,7 +1471,24 @@ def _get_module_attributes(module):
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
-    return {k: getattr(module, k) for k in annotations}
+    # Check whether module attributes can be accessed. Some classes
+    # define attributes but don't provide access to them in their
+    # constructor.
+    #
+    # For example, torch.nn.Embedding has the `freeze` variable and its
+    # type specified in the class but the attribute is not created in the
+    # constructor. In other words, there is no `self.freeze = <True | False>`
+    # in the constructor.
+    #
+    # Reference: https://github.com/pytorch/pytorch/blob/92de1d322223fb5584e384971b32c46b93bc2f4b/torch/nn/modules/sparse.py#L120
+    attrs = {}
+    for k in annotations:
+        try:
+            attrs[k] = getattr(module, k)
+        except AttributeError:
+            torch.onnx.log(f"Skipping module attribute '{k}'")
+            continue
+    return attrs
 
 
 @_beartype.beartype
@@ -1518,6 +1540,20 @@ def _export(
 
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
+
+    # torch.onnx.export does not support opset versions >=18
+    if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
+        # We do not want to fail because we should still allow users to create
+        # custom symbolic functions for opset>17
+        warnings.warn(
+            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"by 'torch.onnx.export()'. "
+            f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
+            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
+            f"Note that dynamo_export() is in preview. Please report errors with "
+            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
+            category=errors.OnnxExporterWarning,
+        )
 
     if export_modules_as_functions and opset_version < 15:
         raise ValueError(
@@ -1603,9 +1639,11 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-            )
+
+            if keep_initializers_as_inputs is not True:
+                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (

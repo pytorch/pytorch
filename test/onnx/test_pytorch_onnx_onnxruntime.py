@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import io
 import itertools
 import os
@@ -38,16 +40,9 @@ from pytorch_test_common import (
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, errors, verification
+from torch.onnx import errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
-
-# The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
-# The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = (
-    _constants.ONNX_MAX_OPSET - 1
-)  # TODO: ORT does not support opset 18 yet
 
 
 def _init_test_generalized_rcnn_transform():
@@ -163,7 +158,7 @@ def _parametrize_rnn_args(arg_name):
 
 @parameterized.parameterized_class(
     **_parameterized_class_attrs_and_values(
-        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+        onnx_test_common.MIN_ONNX_OPSET_VERSION, onnx_test_common.MAX_ONNX_OPSET_VERSION
     ),
     class_name_func=onnx_test_common.parameterize_class_name,
 )
@@ -749,7 +744,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_logit(self):
         class Logit(torch.nn.Module):
             def __init__(self, eps):
-                super(Logit, self).__init__()
+                super().__init__()
                 self.eps = eps
 
             def forward(self, x):
@@ -1459,6 +1454,69 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    def test_maxpool_1d_ceil_corner(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=False
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_2d_ceil_corner(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    def test_maxpool_3d_ceil_corner(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=False,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_1d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool1d(
+            kernel_size=1, dilation=1, stride=2, ceil_mode=True, return_indices=True
+        )
+        x = torch.randn(1, 3, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_2d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool2d(
+            kernel_size=[1, 1],
+            dilation=[1, 1],
+            stride=[2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 32, 32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_maxpool_3d_ceil_corner_with_indices(self):
+        model = torch.nn.MaxPool3d(
+            kernel_size=[7, 8, 4],
+            dilation=[1, 1, 1],
+            stride=[10, 11, 3],
+            padding=[2, 2, 2],
+            ceil_mode=True,
+            return_indices=True,
+        )
+        x = torch.randn(1, 3, 51, 52, 45)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
@@ -1490,29 +1548,31 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
     @common_utils.parametrize(
         "padding",
         (0, 1),
     )
     @common_utils.parametrize(
-        "ceil_mode",
-        (True, False),
-    )
-    @common_utils.parametrize(
         "count_include_pad",
         (True, False),
     )
-    def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
+    def test_avgpool_2d(self, padding, count_include_pad):
         model = torch.nn.AvgPool2d(
             3,
             3,
             padding=padding,
-            ceil_mode=ceil_mode,
             count_include_pad=count_include_pad,
         )
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    # TODO: ceil_mode is not included in the test, because of
+    # https://github.com/microsoft/onnxruntime/issues/16203
+    # The ORT and PyTorch has different calculation for ceil_mode (the last value).
+    @skipIfUnsupportedMinOpsetVersion(19)
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -1523,6 +1583,33 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["x"],
             dynamic_axes={"x": [0, 1]},
             additional_test_inputs=[y],
+        )
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_avgpool_dynamic(self):
+        class test(torch.nn.Module):
+            def __init__(self, in_channels, out_channels):
+                super().__init__()
+                norm_layer = functools.partial(torch.nn.BatchNorm2d, eps=0.0009)
+                self.avgpool = torch.nn.AvgPool2d(
+                    (2, 2), stride=2, ceil_mode=True, count_include_pad=False
+                )
+                self.conv = torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                )
+                self.norm = norm_layer(out_channels)
+
+            def forward(self, x):
+                return self.norm(self.conv(self.avgpool(x)))
+
+        model = test(8, 16)
+        inputs = torch.randn(2, 8, 64, 64)
+        self.run_test(
+            model,
+            inputs,
+            input_names=["input_0"],
+            dynamic_axes={"input_0": {3: "x", 2: "y"}, "output_0": {3: "x", 2: "y"}},
+            output_names=["output_0"],
         )
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -1794,15 +1881,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
-
-        torch.set_default_dtype(prev_default)
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.trace(DivModule(), (x, y)), (x, y))
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
@@ -1818,23 +1901,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
 
-        prev_default = torch.get_default_dtype()
-
         # 1. x,y are int, and output is float.
         #    This can be handled by the default case, where both are cast to float.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.float)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.float):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 2. x,y are int, and output is double.
         #    This can be handled by the default case, where both are cast to double.
         #    It works even if type of x, y are unknown.
-        torch.set_default_dtype(torch.double)
-        self.run_test(torch.jit.script(DivModule()), (x, y))
+        with common_utils.set_default_dtype(torch.double):
+            self.run_test(torch.jit.script(DivModule()), (x, y))
 
         # 3. x is int, y is double, and output is double.
         #    This can only be handled when both type of x and y are known.
-        torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
@@ -2631,6 +2711,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                randint = torch.randint(1, 10, x.shape)
+                x = 0 * randint + x
+                return x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_value(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint(3, 4, x.shape) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_randint_like(self):
+        class RandInt(torch.nn.Module):
+            def forward(self, x):
+                # This randint call always returns 3
+                return torch.randint_like(x, 3, 4) + x
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandInt(), x)
 
     def test_randn(self):
         class RandN(torch.nn.Module):
@@ -4095,7 +4206,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
@@ -4117,7 +4228,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_scatter_reduce_self_rank_zero(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x, index, input):
                 y_max = input.scatter_reduce(0, index, x, reduce="amax")
@@ -6347,6 +6458,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
 
+        class DiagonalModelWithNegativeDims(torch.nn.Module):
+            def forward(self, x):
+                return torch.diagonal(x, offset=0, dim1=-2, dim2=-1)
+
+        x = torch.randn(2, 4, 5, 2)
+        # Other test inputs to test dynamic behavior
+        another_x = torch.randn(5, 6, 7, 8)
+        self.run_test(
+            DiagonalModelWithNegativeDims(),
+            x,
+            additional_test_inputs=[another_x],
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
+
         class DiagonalModelOffsetOverrun(torch.nn.Module):
             def forward(self, x):
                 return torch.diagonal(x, offset=-2), torch.diagonal(x, offset=5)
@@ -6392,6 +6518,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_zeros_with_dtype(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(50, 64)
+
+            def forward(self, x):
+                inp = x.new_zeros(x.shape)
+                return self.emb(inp)
+
+        model = MyModel()
+        x = torch.Tensor([[2, 5, 6], [3, 2, 5]]).to(torch.int64)
+        self.run_test(model, x, input_names=["x"], dynamic_axes={"x": [0, 1]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_ones(self):
@@ -7524,6 +7665,25 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Meshgrid(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_indexing(self):
+        class Meshgrid(torch.nn.Module):
+            def __init__(self, indexing):
+                super().__init__()
+                self.indexing = indexing
+
+            def forward(self, x, y, z):
+                output1, output2, output3 = torch.meshgrid(
+                    x, y, z, indexing=self.indexing
+                )
+                return output1, output2, output3
+
+        x = torch.randn(5, requires_grad=True)
+        y = torch.zeros(6, requires_grad=True)
+        z = torch.randn(7, requires_grad=True)
+        for indexing in ("xy", "ij"):
+            self.run_test(Meshgrid(indexing), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid_scalar(self):
         class Meshgrid(torch.nn.Module):
             def forward(self, x, y, z):
@@ -7719,6 +7879,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+        int_x = torch.tensor([9920, 1036, -1500, 35], dtype=torch.int32)
+        self.run_test(Round(), int_x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_round_with_decimals(self):
+        class Round(torch.nn.Module):
+            def __init__(self, decimals):
+                super().__init__()
+                self.decimals = decimals
+
+            def forward(self, x):
+                return torch.round(x, decimals=self.decimals)
+
+        x = torch.tensor([0.9920, -1234.0362, -1.58960, 3.5000])
+        for decimals in (0, -2, 3):
+            self.run_test(Round(decimals), x)
 
     @skipIfUnsupportedMinOpsetVersion(17)
     def test_stft_default(self):
@@ -12880,7 +13057,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
@@ -12911,7 +13088,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -12944,7 +13121,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -12972,6 +13149,38 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_qat_linear_relu_fused(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant = torch.ao.quantization.QuantStub()
+                self.linear = torch.nn.Linear(4, 2)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.ao.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.linear(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model = M()
+        model.qconfig = torch.ao.quantization.get_default_qconfig("fbgemm")
+        model = torch.ao.quantization.fuse_modules(model.eval(), [["linear", "relu"]])
+        model = torch.ao.quantization.prepare_qat(model.train())
+        # Set fixed weight and bias to avoid flaky test.
+        model.linear.weight = torch.nn.Parameter(
+            _construct_tensor_for_quantization_test((2, 4), max_val=2)
+        )
+        model.linear.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
+        model = torch.ao.quantization.convert(model)
+
+        # Set fixed input to avoid flaky test.
+        input = _construct_tensor_for_quantization_test((3, 4), offset=-384, max_val=12)
+        self.run_test(model, input)
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_maxpool2d(self):
         class M(torch.nn.Module):
@@ -12997,6 +13206,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()  # Scale and Zero-point must be a scalar in ORT:optimization
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
             torch.ao.quantization.QuantStub(),
@@ -13406,4 +13616,5 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
 
 if __name__ == "__main__":
+    common_utils.TestCase._default_dtype_check_enabled = True
     common_utils.run_tests()

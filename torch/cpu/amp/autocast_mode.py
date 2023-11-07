@@ -1,20 +1,30 @@
-import torch
 from typing import Any
 
+import torch
+
 __all__ = ["autocast"]
+
 
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``
     """
-    def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.bfloat16, cache_enabled : bool = True):
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        dtype: torch.dtype = torch.bfloat16,
+        cache_enabled: bool = True,
+    ):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = "cpu"
             self.fast_dtype = dtype
             return
-        super().__init__("cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
+        super().__init__(
+            "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
+        )
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():

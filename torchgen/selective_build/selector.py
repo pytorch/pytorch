@@ -93,7 +93,7 @@ class SelectiveBuilder:
             di_list = data["debug_info"]
             assert isinstance(di_list, list)
 
-            debug_info = tuple((str(x) for x in di_list))
+            debug_info = tuple(str(x) for x in di_list)
 
         operators = {}
         operators_dict = data.get("operators", {})
@@ -141,7 +141,7 @@ class SelectiveBuilder:
 
     @staticmethod
     def from_yaml_path(config_path: str) -> "SelectiveBuilder":
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             contents = yaml.safe_load(f)
             return SelectiveBuilder.from_yaml_dict(contents)
 

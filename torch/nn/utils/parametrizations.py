@@ -20,8 +20,9 @@ def _is_orthogonal(Q, eps=None):
 
 
 def _make_orthogonal(A):
-    """ Assume that A is a tall matrix.
-    Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative
+    """Assume that A is a tall matrix.
+
+    Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative.
     """
     X, tau = torch.geqrf(A)
     Q = torch.linalg.householder_product(X, tau)
@@ -175,7 +176,7 @@ def orthogonal(module: Module,
                orthogonal_map: Optional[str] = None,
                *,
                use_trivialization: bool = True) -> Module:
-    r"""Applies an orthogonal or unitary parametrization to a matrix or a batch of matrices.
+    r"""Apply an orthogonal or unitary parametrization to a matrix or a batch of matrices.
 
     Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, the parametrized
     matrix :math:`Q \in \mathbb{K}^{m \times n}` is **orthogonal** as
@@ -262,7 +263,7 @@ def orthogonal(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
+            f"Module '{module}' has no parameter or buffer with name '{name}'"
         )
 
     # We could implement this for 1-dim tensors as the maps on the sphere
@@ -306,7 +307,7 @@ class _WeightNorm(Module):
 
 
 def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
-    r"""Applies weight normalization to a parameter in the given module.
+    r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -379,7 +380,7 @@ class _SpectralNorm(Module):
 
         if n_power_iterations <= 0:
             raise ValueError('Expected n_power_iterations to be positive, but '
-                             'got n_power_iterations={}'.format(n_power_iterations))
+                             f'got n_power_iterations={n_power_iterations}')
         self.dim = dim if dim >= 0 else dim + ndim
         self.eps = eps
         if ndim > 1:
@@ -480,7 +481,7 @@ def spectral_norm(module: Module,
                   n_power_iterations: int = 1,
                   eps: float = 1e-12,
                   dim: Optional[int] = None) -> Module:
-    r"""Applies spectral normalization to a parameter in the given module.
+    r"""Apply spectral normalization to a parameter in the given module.
 
     .. math::
         \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},
@@ -556,7 +557,7 @@ def spectral_norm(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
+            f"Module '{module}' has no parameter or buffer with name '{name}'"
         )
 
     if dim is None:

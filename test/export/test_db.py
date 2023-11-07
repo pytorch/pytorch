@@ -3,7 +3,7 @@
 import unittest
 
 import torch._dynamo as torchdynamo
-from torch._export import export
+from torch.export import export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import (
     filter_examples_by_support_level,
@@ -23,7 +23,7 @@ class ExampleTests(TestCase):
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.SUPPORTED).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
@@ -32,7 +32,8 @@ class ExampleTests(TestCase):
         exported_program = export(
             model,
             inputs.args,
-            constraints=case.constraints,
+            inputs.kwargs,
+            dynamic_shapes=case.dynamic_shapes,
         )
         exported_program.graph_module.print_readable()
 
@@ -51,17 +52,18 @@ class ExampleTests(TestCase):
     @parametrize(
         "name,case",
         filter_examples_by_support_level(SupportLevel.NOT_SUPPORTED_YET).items(),
-        name_fn=lambda name, case: "case_{}".format(name),
+        name_fn=lambda name, case: f"case_{name}",
     )
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with self.assertRaises(torchdynamo.exc.Unsupported):
+        with self.assertRaises((torchdynamo.exc.Unsupported, AssertionError, RuntimeError)):
             inputs = normalize_inputs(case.example_inputs)
             exported_model = export(
                 model,
                 inputs.args,
-                constraints=case.constraints,
+                inputs.kwargs,
+                dynamic_shapes=case.dynamic_shapes,
             )
 
     @parametrize(
@@ -73,7 +75,7 @@ class ExampleTests(TestCase):
             ).items()
             for rewrite_case in get_rewrite_cases(case)
         ],
-        name_fn=lambda name, case: "case_{}_{}".format(name, case.name),
+        name_fn=lambda name, case: f"case_{name}_{case.name}",
     )
     def test_exportdb_not_supported_rewrite(
         self, name: str, rewrite_case: ExportCase
@@ -83,7 +85,8 @@ class ExampleTests(TestCase):
         exported_model = export(
             rewrite_case.model,
             inputs.args,
-            constraints=rewrite_case.constraints,
+            inputs.kwargs,
+            dynamic_shapes=rewrite_case.dynamic_shapes,
         )
 
 

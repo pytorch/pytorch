@@ -109,7 +109,7 @@ class ProcessFailure:
         self.error_file_data = _EMPTY_ERROR_DATA
         if os.path.isfile(self.error_file):
             try:
-                with open(self.error_file, "r") as fp:
+                with open(self.error_file) as fp:
                     self.error_file_data = json.load(fp)
                     log.debug(
                         "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
@@ -150,7 +150,12 @@ class ProcessFailure:
 
     def signal_name(self) -> str:
         if self.exitcode < 0:
-            return signal.Signals(-self.exitcode).name
+            # We don't want to kill the parent process trying to find the signal name.
+            # if the signal doesn't map to a known name, use not available.
+            try:
+                return signal.Signals(-self.exitcode).name
+            except Exception:
+                return _NOT_AVAILABLE
         else:
             return _NOT_AVAILABLE
 

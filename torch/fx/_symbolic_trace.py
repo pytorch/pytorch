@@ -739,7 +739,7 @@ class Tracer(TracerBase):
                 self.root = torch.nn.Module()
                 fn = root
 
-            tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
+            tracer_cls: Optional[Type[Tracer]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
             if hasattr(fn, '__code__'):
                 code = fn.__code__
@@ -1004,7 +1004,7 @@ def _patch_wrapped_functions(patcher: _Patcher):
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    for (_, name), frame_dict in _wrapped_fns_to_patch.items():
+    for (_, name), frame_dict in _wrapped_fns_to_patch.copy().items():
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:

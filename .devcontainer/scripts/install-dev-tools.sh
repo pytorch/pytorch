@@ -9,3 +9,5 @@ make setup_lint
 
 # Add CMAKE_PREFIX_PATH to bashrc
 echo 'export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}' >> ~/.bashrc
+# Add linker path so that cuda-related libraries can be found
+echo 'export LDFLAGS="-L${CONDA_PREFIX}/lib/ $LDFLAGS"' >> ~/.bashrc

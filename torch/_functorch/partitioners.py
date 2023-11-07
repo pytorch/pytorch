@@ -1,7 +1,7 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    hint_int, magic_methods, method_to_operator, free_symbols,
-    is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+    hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
 import torch
 import torch.fx as fx
@@ -79,7 +79,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         elif node.op == 'placeholder':
             env[node] = InvalidNode
         elif node.op == 'call_function':
-            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
             if any(all_args):
                 env[node] = InvalidNode
@@ -124,13 +124,13 @@ def _is_fwd_seed_offset(node):
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
+    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
@@ -199,9 +199,11 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         saved_symbols |= new_symbols
 
 
-    # Update saved_sym_nodes that are now reordered to have all bindings
-    # at front
-    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
+    # Update saved_sym_nodes that are now reordered to have all bindings at
+    # front. This can also be used later on to figure out the position of saved
+    # sym nodes in the output of fwd graph.
+    saved_sym_nodes.clear()
+    saved_sym_nodes.extend(saved_sym_nodes_binding + saved_sym_nodes_derived)
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
@@ -302,24 +304,7 @@ def _prod(x):
     return s
 
 def _tensor_nbytes(numel, dtype):
-    sizes = {
-        torch.complex64: 8,
-        torch.complex128: 16,
-        torch.float16: 2,
-        torch.bfloat16: 2,
-        torch.float32: 4,
-        torch.float64: 8,
-        torch.int8: 1,
-        torch.int16: 2,
-        torch.int32: 4,
-        torch.int64: 8,
-        torch.uint8: 1,
-        torch.bool: 1,
-    }
-    if dtype not in sizes:
-        raise NotImplementedError("Don't know the size of dtype ", dtype)
-
-    return numel * sizes[dtype]
+    return numel * dtype.itemsize
 
 def _size_of(node: fx.Node) -> int:
     if 'val' in node.meta:
@@ -446,7 +431,7 @@ def reordering_to_mimic_autograd_engine(gm):
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
     get_depth(output_node, depths)
 
     def insert_node_in_graph(node):
@@ -480,7 +465,7 @@ def reordering_to_mimic_autograd_engine(gm):
     return new_gm
 
 
-def functionalize_rng_ops(joint_module, fw_module, bw_module):
+def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # During user-driven activation checkpointing, we have to ensure that a rng
     # op in fwd yields the same output as the recomputed rng op in the bwd.  To
     # do this, we use functionalize wrappers to wrap the random ops and share
@@ -491,7 +476,9 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
     # Step 2 - Modify the fwd pass such that
     #   1) Replace rand with run_and_save_rng_state wrapper
     #   2) Replace the users of the original op with the output[1] of this op.
-    #   3) Collect all the rng_state - output[0] of each op, and make them output nodes.
+    #   3) Collect all the rng_state - output[0] of each op, and make them
+    #   output nodes. Special care needs to be taken here because fwd outputs
+    #   has symints at the very end.
     # Step 3 - Modify the bwd pass such that
     #   1) Add the input nodes just before the tangents for the stashed rng states
     #   2) Replace rand with run_with_save_rng_state wrappers
@@ -510,6 +497,29 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
             ):
                 random_nodes[node.name] = node
         return random_nodes
+
+    def get_device(node):
+        """
+        Check the example value of the node outputs to find the device type.
+        """
+        if "val" not in node.meta:
+            return None
+
+        candidates = node.meta["val"]
+        if not isinstance(candidates, tuple):
+            candidates = (candidates,)
+
+        for candidate in candidates:
+            if isinstance(candidate, torch.Tensor):
+                if candidate.device.type == "cuda":
+                    return "cuda"
+
+        return "cpu"
+
+    def get_sample_rng_state(device):
+        if device == "cuda":
+            return torch.cuda.get_rng_state()
+        return torch.get_rng_state()
 
     # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
@@ -534,6 +544,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
         if node.op == "placeholder" and "tangent" in node.name:
             bw_tangent_start_node = node
             break
+
 
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
@@ -560,7 +571,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
         with bw_graph.inserting_before(bw_tangent_start_node):
             state_name = f"rng_state_output_{next(uid)}"
             bw_rng_state_node = bw_graph.placeholder(state_name)
-            bw_rng_state_node.meta["val"] = torch.cuda.get_rng_state()
+            bw_rng_state_node.meta["val"] = get_sample_rng_state(get_device(fw_node))
 
         with bw_graph.inserting_before(bw_node):
             rng_output = bw_graph.create_node(
@@ -574,11 +585,15 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
             bw_graph.erase_node(bw_node)
 
 
-    # Add the rng states in the output of the fwd graph
-    fw_output = [node for node in fw_module.graph.nodes if node.op == "output"][0]
-    outputs = fw_output.args[0] + fw_rng_state_outputs
+    # Add the rng states in the output of the fwd graph. AOT Autograd assumes
+    # that symints are at the end of forward graph outputs. So, insert the new
+    # rng states accordingly.
+    fw_output_node = next(node for node in fw_module.graph.nodes if node.op == "output")
+    fw_outputs = fw_output_node.args[0]
+    sym_node_start_idx = len(fw_outputs) - num_sym_nodes
+    outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]
     fw_module.graph.output(outputs)
-    fw_module.graph.erase_node(fw_output)
+    fw_module.graph.erase_node(fw_output_node)
     fw_module.recompile()
     bw_module.recompile()
     return fw_module, bw_module
@@ -609,7 +624,7 @@ def min_cut_rematerialization_partition(
 
     To create the fwd and bwd graph, we copy the joint graph, manually set the
     outputs to just original forward or backward outputs. And then we run the
-    resulting graphs through dead code elimintation.
+    resulting graphs through dead code elimination.
 
     .. warning::
         This API is experimental and likely to change.
@@ -787,6 +802,10 @@ def min_cut_rematerialization_partition(
             return (output_size * 4 < input_tensors_size)
 
     def is_fusible(a, b):
+        # We can perform "memory fusion" into a cat, but cat cannot be a
+        # producer to a fusion
+        if get_aten_target(b) == aten.cat:
+            return True
         return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
@@ -826,7 +845,7 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
+        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
 
@@ -866,13 +885,14 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module
+                joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
@@ -891,7 +911,14 @@ def min_cut_rematerialization_partition(
     return fw_module, bw_module
 
 
-def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph", clear_meta=True):
+def draw_graph(
+    traced: torch.fx.GraphModule,
+    fname: str,
+    figname: str = "fx_graph",
+    clear_meta: bool = True,
+    prog: str = None,
+    parse_stack_trace: bool = False,
+) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
         traced = fx.GraphModule(traced, new_graph)
@@ -901,9 +928,14 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     if not ext:
         ext = ".svg"
     print(f"Writing FX graph to file: {base}{ext}")
-    g = graph_drawer.FxGraphDrawer(traced, figname)
+    g = graph_drawer.FxGraphDrawer(traced, figname, parse_stack_trace=parse_stack_trace)
     x = g.get_main_dot_graph()
-    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
+    write_method = getattr(x, "write_" + ext.lstrip("."))
+    fname = f"{base}{ext}"
+    if prog is None:
+        write_method(fname)
+    else:
+        write_method(fname, prog=prog)
 
 
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):

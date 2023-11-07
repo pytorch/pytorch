@@ -5,9 +5,14 @@ from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tupl
 import torch
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import (
+    OpSchema,
+    OutputSharding,
+    RuntimeSchemaInfo,
+)
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,
@@ -16,6 +21,7 @@ from torch.distributed._tensor.ops.utils import (
 )
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 aten = torch.ops.aten
 
@@ -588,11 +594,13 @@ def propagate_shape_and_sharding(
 
 
 def register_prop_rule_map(
-    aten_op_overload: torch._ops.OpOverload, local_op_name: Callable[..., torch.Tensor]
+    aten_op_overload: torch._ops.OpOverload,
+    local_op_name: Callable[..., torch.Tensor],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> None:
     spec: Op = ops[local_op_name]
 
-    @register_prop_rule(aten_op_overload)
+    @register_prop_rule(aten_op_overload, schema_info=schema_info)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
@@ -604,32 +612,45 @@ def register_prop_rule_map(
         global_in_shape = input_dtensor_spec.shape
         assert global_in_shape is not None, "Shape required."
 
-        (
-            global_out_shape,
-            shard_out,
-            shardable_dims,
-        ) = propagate_shape_and_sharding(
-            input_dtensor_spec.placements,
-            tuple(global_in_shape),
-            rules,
-            tuple(mesh.mesh.shape),
-        )
+        with disable_proxy_modes_tracing(), unset_fake_temporarily():
+            (
+                global_out_shape,
+                shard_out,
+                shardable_dims,
+            ) = propagate_shape_and_sharding(
+                input_dtensor_spec.placements,
+                tuple(global_in_shape),
+                rules,
+                mesh.shape,
+            )
 
         if shard_out is not None:
             # no reshard needed
-            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=shard_out)
-            local_out_shape = compute_local_shape(
-                list(global_out_shape), mesh, shard_out
-            )
+            output_dtensor_spec = DTensorSpec(mesh=mesh, placements=tuple(shard_out))
 
             # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema
             shape_argnum = spec.shape_argnum
             if shape_argnum is not None:
-                op_schema.args_schema = (
-                    args[:shape_argnum]
+                # compute the local shape from the global shape, then return
+                # a resharding even if we don't really reshard, the only reason
+                # for this type of resharding is to lower the global shape to
+                # local shape
+                local_out_shape = compute_local_shape(
+                    list(global_out_shape), mesh, shard_out
+                )
+
+                suggested_schema = OpSchema(
+                    op=op_schema.op,
+                    args_schema=args[:shape_argnum]
                     + (tuple(local_out_shape),)
-                    + args[shape_argnum + 1 :]
+                    + args[shape_argnum + 1 :],
+                    kwargs_schema=op_schema.kwargs_schema,
+                )
+                return OutputSharding(
+                    output_spec=output_dtensor_spec,
+                    schema_suggestions=[suggested_schema],
+                    needs_redistribute=True,
                 )
 
             return OutputSharding(output_spec=output_dtensor_spec)
@@ -649,10 +670,10 @@ def register_prop_rule_map(
                 output_spec=None,
                 schema_suggestions=[
                     OpSchema(
-                        func_schema=op_schema.func_schema,
+                        op=op_schema.op,
                         args_schema=(
                             DTensorSpec(
-                                placements=suggested_placements,
+                                placements=tuple(suggested_placements),
                                 mesh=input_dtensor_spec.mesh,
                                 tensor_meta=input_dtensor_spec.tensor_meta,
                             ),
@@ -665,12 +686,28 @@ def register_prop_rule_map(
 
 
 register_prop_rule_map(aten.squeeze.default, torch.squeeze)
-register_prop_rule_map(aten.squeeze.dim, torch.squeeze)
-register_prop_rule_map(aten.view.default, Tensor.view)
-register_prop_rule_map(aten.reshape.default, torch.reshape)
-register_prop_rule_map(aten._unsafe_view.default, Tensor.view)
-register_prop_rule_map(aten.unsqueeze.default, torch.unsqueeze)
-register_prop_rule_map(aten.expand.default, Tensor.expand)
-register_prop_rule_map(aten.permute.default, torch.permute)
-register_prop_rule_map(aten.repeat.default, Tensor.repeat)
-register_prop_rule_map(aten.transpose.int, torch.transpose)
+register_prop_rule_map(
+    aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1))
+register_prop_rule_map(
+    aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten._unsafe_view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.unsqueeze.default, torch.unsqueeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.expand.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.repeat.default, Tensor.repeat, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
+)

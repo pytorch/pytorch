@@ -18,11 +18,17 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.utils import has_triton, run_and_get_triton_code
+from torch.utils._triton import has_triton
+from torch._inductor.utils import run_and_get_triton_code
 import torch._dynamo.logging
+
+def _tolist_with_constrain_as_size(tensor):
+    lst = tensor.tolist()
+    for elem in lst:
+        torch._constrain_as_size(elem)
+    return lst
 
 @requires_nccl()
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -77,6 +83,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    def test_c10d_functional_tagged_pt2_compliant(self):
+        op = torch.ops.c10d_functional.all_reduce.default
+        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -156,7 +166,78 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allreduce_input_buffer_reuse(self):
+        def func(a, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
+            c = torch.relu(a)
+            d = torch.matmul(c, c)
+            e = d + ar
+            return (e,)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = torch.ones(4, 4, device="cuda") + self.rank
+            compiled = torch.compile(func)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allgather_output_buffer_reuse(self):
+        class Model(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.emb = torch.nn.Embedding(4, 4)
+
+            def forward(self, x, world_size, tag, ranks, group_size):
+                y = self.emb(x)
+                last_dim = y.dim() - 1
+                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
+                return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model = Model().cuda()
+            model_compiled = torch.compile(model)
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            out = model_compiled(inp, self.world_size, **self.get_world_trs())
+            correct = model(inp, self.world_size, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allgather_contiguous_input(self):
+        class Model(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.emb = torch.nn.Embedding(4, 4)
+
+            def forward(self, x, world_size, tag, ranks, group_size):
+                y = self.emb(x)
+                last_dim = y.dim() - 1
+                y = y.transpose_(0, last_dim).contiguous()
+                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                out = y.transpose_(0, last_dim).contiguous()
+                return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model = Model().cuda()
+            model_compiled = torch.compile(model)
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            out = model_compiled(inp, self.world_size, **self.get_world_trs())
+            correct = model(inp, self.world_size, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
@@ -216,6 +297,165 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_fn(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_all_to_all_single_inductor(self):
+        def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
+            a2a = torch.ops.c10d_functional.all_to_all_single(
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size,
+            )
+            a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+            out = a2a / a2a.sum(dim=0)
+            return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ):
+            row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
+            input_split_sizes_tensor = torch.tensor([(i + 1) * (self.rank + 1) for i in range(self.world_size)], dtype=torch.int64)
+            output_split_sizes_tensor = torch.tensor([(i + 1) * (self.rank + 1) for i in range(self.world_size)], dtype=torch.int64)
+            inputs = (
+                torch.ones(int(row), 5, device="cuda") * (self.rank + 1),
+                input_split_sizes_tensor,
+                output_split_sizes_tensor,
+            )
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+
+            FileCheck() \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
+
+            eager_out = example(*inputs, **trs)
+            inductor_out = compiled_fn(*inputs, **trs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_all_to_all_single_inductor_output_split_sizes_none(self):
+        def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            a2a = torch.ops.c10d_functional.all_to_all_single(
+                inp,
+                None,
+                input_split_sizes,
+                tag,
+                ranks,
+                group_size,
+            )
+            a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+            out = a2a / a2a.sum(dim=0)
+            return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            input_split_sizes_tensor = torch.tensor([1] * self.world_size, dtype=torch.int64)
+            inputs = (
+                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
+                input_split_sizes_tensor,
+            )
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            FileCheck() \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[i\\d+, i\\d+\\]") \
+                .run(code)  # noqa: B950
+
+            eager_out = example(*inputs, **trs)
+            inductor_out = compiled_fn(*inputs, **trs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_all_to_all_single_inductor_input_split_sizes_none(self):
+        def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
+            output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
+            a2a = torch.ops.c10d_functional.all_to_all_single(
+                inp,
+                output_split_sizes,
+                None,
+                tag,
+                ranks,
+                group_size,
+            )
+            a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+            out = a2a / a2a.sum(dim=0)
+            return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ):
+            output_split_sizes_tensor = torch.tensor([1] * self.world_size, dtype=torch.int64)
+            inputs = (
+                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
+                output_split_sizes_tensor,
+            )
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            FileCheck() \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[i\\d+, i\\d+\\], input_split_sizes=None") \
+                .run(code)  # noqa: B950
+
+            eager_out = example(*inputs, **trs)
+            inductor_out = compiled_fn(*inputs, **trs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_all_to_all_single_inductor_split_sizes_none(self):
+        def example(inp, *, tag, ranks, group_size):
+            a2a = torch.ops.c10d_functional.all_to_all_single(
+                inp,
+                None,
+                None,
+                tag,
+                ranks,
+                group_size,
+            )
+            a2a = torch.ops.c10d_functional.wait_tensor(a2a)
+            out = a2a / a2a.sum(dim=0)
+            return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),)
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+            code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            FileCheck() \
+                .check_regex("all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=None") \
+                .run(code)  # noqa: B950
+
+            eager_out = example(*inputs, **trs)
+            inductor_out = compiled_fn(*inputs, **trs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
 
 @requires_nccl()
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
@@ -243,14 +483,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         out = compiled(inputs, **self.get_world_trs())
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = empty_strided") \
+            .check("buf0 = empty(") \
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("fun_col_impl._register_tensor_work(buf1, buf1_work)") \
-            .check("_wait_tensor(buf0)") \
-            .check("return (buf2, )") \
+            .check("buf0 = _wait_tensor(buf0)") \
+            .check("return (buf0, )") \
             .run(code)
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -275,16 +517,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # wait_tensors before they are returned from the graph.
         FileCheck() \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
-            .check("_wait_tensor(buf1)") \
+            .check("buf1 = _wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("buf4 = empty_strided") \
-            .check("return (buf3, buf4") \
+            .check("buf4 = empty") \
+            .check("return (buf1, buf4") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -311,18 +555,20 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf4 = empty_strided") \
+            .check("buf0 = empty(") \
+            .check("buf4 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf4") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
-            .check("_wait_tensor(buf1)") \
+            .check("buf1 = _wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("return (buf3, buf4, buf5") \
+            .check("return (buf1, buf4, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -552,24 +798,26 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: Make sure we are not unneccessarily copying the outputs of
+        # wait_tensors before they are returned from the graph.
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf5 = empty_strided(") \
+            .check("buf0 = empty(") \
+            .check("buf5 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
-            .check("_wait_tensor(buf1)") \
+            .check("buf1 = _wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("buf6 = buf0; del buf0  # reuse") \
-            .check("_wait_tensor(buf2)") \
+            .check("buf2 = _wait_tensor(buf2)") \
             .check("buf7 = buf2") \
-            .check("return (buf4, buf5, buf6, buf7") \
+            .check("return (buf1, buf5, buf6, buf2") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -597,23 +845,25 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        # NOTE: The first return value should be the output of the first wait_tensor.
+        # We want to make sure no unneccessary copy is made.
         FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf5 = empty_strided(") \
+            .check("buf0 = empty(") \
+            .check("buf5 = empty(") \
             .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-            .check("buf1 = empty_strided") \
-            .check("buf2 = empty_strided") \
+            .check("buf1 = empty(") \
+            .check("buf2 = empty(") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
             .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
-            .check("_wait_tensor(buf1)") \
+            .check("buf1 = _wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("buf6 = buf0; del buf0  # reuse") \
-            .check("_wait_tensor(buf2)") \
+            .check("buf2 = _wait_tensor(buf2)") \
             .check("buf7 = buf2") \
-            .check("return (buf4, buf5, buf6, buf7") \
+            .check("return (buf1, buf5, buf6, buf2") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())

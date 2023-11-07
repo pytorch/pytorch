@@ -226,7 +226,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst), method, args=(args))
             return fut.wait()
         else:
-            raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+            raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
     def _exec_func(self, exec_mode, method, *args):
         return self._exec_func_with_dst(
@@ -288,7 +288,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), fn, args=(t1, t2)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
@@ -302,8 +302,8 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             recv_functions = ctx._recv_functions()
             self.assertEqual(1, len(recv_functions))
             self._verify_graph_for_first_rpc_call(
-                list(send_functions.values())[0],
-                list(recv_functions.values())[0],
+                next(iter(send_functions.values())),
+                next(iter(recv_functions.values())),
                 t1,
                 t2,
                 ret,
@@ -315,7 +315,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
-            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            self._verify_graph_for_rpc_call_exec(next(iter(send_functions.values())))
             # this barrier is needed so one worker does not clean up their
             # autograd context before another worker tries to access it.
             dist.barrier()
@@ -355,7 +355,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     args=(t1, t2, dst_rank, self.world_size, 1),
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             # Barrier to ensure all RPCs are done.
             dist.barrier()
@@ -387,8 +387,8 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             recv_functions = ctx._recv_functions()
             self.assertEqual(1, len(recv_functions))
             self._verify_graph_for_first_rpc_call(
-                list(send_functions.values())[0],
-                list(recv_functions.values())[0],
+                next(iter(send_functions.values())),
+                next(iter(recv_functions.values())),
                 t1,
                 t2,
                 ret,
@@ -406,7 +406,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             ctx = dist_autograd._retrieve_context(ctx_ids[3])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
-            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            self._verify_graph_for_rpc_call_exec(next(iter(send_functions.values())))
             # this barrier is needed so one worker does not clean up their
             # autograd context before another worker tries to access it.
             dist.barrier()
@@ -449,7 +449,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     ),
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name((self.rank + 1) % self.world_size),
@@ -469,7 +469,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             recv_functions = ctx._recv_functions()
             self.assertEqual(2, len(recv_functions))
             self._verify_graph_for_first_rpc_call(
-                list(send_functions.values())[0],
+                next(iter(send_functions.values())),
                 list(recv_functions.values())[1],
                 t1,
                 t2,
@@ -505,7 +505,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), torch.add, args=(t1, t2)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
@@ -548,14 +548,12 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), torch.stack, args=(tensors,)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.
-            next_funcs = list(
-                dist_autograd._current_context()._send_functions().values()
-            )[0].next_functions
+            next_funcs = next(iter(dist_autograd._current_context()._send_functions().values())).next_functions
             idx = 0
             for i in range(len(next_funcs)):
                 self.assertEqual(
@@ -989,7 +987,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
         # For send function when making nest rpc call,
         # next functions of the send function are two recv functions
         # for received two tensors from previous call
-        next_funcs = list(send_functions.values())[0].next_functions
+        next_funcs = next(iter(send_functions.values())).next_functions
         self.assertEqual(2, len(next_funcs))
         self.assertEqual(
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
@@ -1292,7 +1290,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         for context_id in context_ids:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Could not find autograd context with id: {}".format(context_id),
+                f"Could not find autograd context with id: {context_id}",
             ):
                 dist_autograd._retrieve_context(context_id)
 
@@ -1357,7 +1355,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     worker_name(dst_rank), ret_requires_grad
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             dist_autograd.backward(context_id, [ret.sum()])
 
@@ -1460,7 +1458,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         function_events = p.function_events
 
         def get_event(partial_key):
-            return [event for event in function_events if partial_key in event.name][0]
+            return next(event for event in function_events if partial_key in event.name)
 
         send_event = get_event("SendRpcBackward")
         recv_event = get_event("RecvRpcBackward")
@@ -1748,7 +1746,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         context_id = 100  # dummy context_id
         with self.assertRaisesRegex(
             RuntimeError,
-            "Could not find autograd context with id: {}".format(context_id),
+            f"Could not find autograd context with id: {context_id}",
         ):
             res = rpc.rpc_sync(
                 worker_name(self._next_rank()), torch.add, args=(t1, t2)
@@ -2031,7 +2029,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         context_id = 100  # dummy context_id
         with self.assertRaisesRegex(
             RuntimeError,
-            "Could not find autograd context with id: {}".format(context_id),
+            f"Could not find autograd context with id: {context_id}",
         ):
             dist_autograd.backward(context_id, [t1.sum()])
 
@@ -2234,7 +2232,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
             loss = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()),
+                f'worker{self._next_rank()}',
                 DistAutogradTest._python_udf_with_backward_error,
                 args=(t1, t2)).sum()
 

@@ -1,11 +1,17 @@
 # Owner(s): ["module: dynamo"]
+import re
+from textwrap import dedent
 from unittest.mock import patch
 
 import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.fx.traceback as fx_traceback
+import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
+from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch.profiler import profile
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -154,7 +160,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         real = mod(rx)
 
         # Run it in export
-        graph, _ = torch._dynamo.export(mod, rx)
+        graph, _ = torch._dynamo.export(mod)(rx)
 
         # Run exported graph with AOT
         self.assertTrue(torch._dynamo.testing.same(real, graph(rx)))
@@ -185,7 +191,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         real = mod(x, y)
 
         # Run it in export
-        graph, _ = torch._dynamo.export(mod, x, y)
+        graph, _ = torch._dynamo.export(mod)(x, y)
 
         # Assert equal
         self.assertTrue(torch._dynamo.testing.same(real, graph(x, y)))
@@ -271,9 +277,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
     # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
     # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
-    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # that we do not hit this assertion, as dynamo recompiles correctly and protects this condition.
     #
-    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tensors
     # is because dynamo sends fake tensors down to aot_autograd.
     @patch("torch._functorch.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
@@ -714,6 +720,262 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize("aot_eager")(fn)
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
+
+    def test_aot_sequence_nr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=(1, 1),
+                    stride=1,
+                    padding="same",
+                    bias=True,
+                )
+                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                self.relu1 = torch.nn.ReLU()
+                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
+                self.loss_fn = torch.nn.L1Loss()
+
+            def forward(self, x, target):
+                y = x
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu1(x)
+                x = x + y
+                x = torch.flatten(x)
+                x = self.fc1(x)
+                output = self.loss_fn(x, target)
+
+                return (output,)
+
+        mod = Model()
+        mod.train()
+        x = torch.rand(100, 16, 32, 32, requires_grad=True)
+        target = torch.rand(1)
+
+        # Use dynamo export to get the fx graph module
+        g_mod, _ = torch._dynamo.export(mod, x, target)
+
+        def _prepare_model_args():
+            named_parameters = dict(g_mod.named_parameters(remove_duplicate=False))
+            named_buffers = dict(g_mod.named_buffers(remove_duplicate=False))
+            params_and_buffers = {
+                **dict(named_parameters),
+                **dict(named_buffers),
+            }
+            params_and_buffers_flat, params_spec = pytree.tree_flatten(
+                params_and_buffers
+            )
+            params_len = len(params_and_buffers_flat)
+            functional_call = create_functional_call(g_mod, params_spec, params_len)
+            return params_and_buffers_flat, functional_call
+
+        full_args, fn_to_trace = _prepare_model_args()
+        param_and_buf_len = len(full_args)
+        full_args.extend([x, target])
+
+        # aot_export requires a graph mod input of fwd graph
+        # returns the full fwd/bwd graph in graph mod format
+        with torch.enable_grad(), fx_traceback.preserve_node_meta():
+            fx_g, _, _, _ = _aot_export_function(
+                fn_to_trace,
+                full_args,
+                decompositions=None,
+                num_params_buffers=param_and_buf_len,
+                no_tangents=True,
+            )
+
+        # Walk all the nodes in fx graph.
+        # Write the resulting ops to a table
+        min_seq_nr = -1
+        seq_table = "SeqNr|OrigAten|SrcFn\n"
+        for node in fx_g.graph.nodes:
+            if "call_" in node.op and "getitem" not in str(node.target):
+                seq_nr = node.meta.get("seq_nr", -1)
+                if seq_nr < 0:
+                    continue
+                if min_seq_nr < 0:
+                    min_seq_nr = seq_nr
+                source_fn_stack = node.meta.get("source_fn_stack", [])
+                orig_aten = node.meta.get("original_aten", "")
+                mod_name = ""
+                if len(source_fn_stack) > 0:
+                    mod_name = source_fn_stack[-1][0]
+                # Make all seq_nr relative so it starts at 0
+                seq_nr = seq_nr - min_seq_nr
+                seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
+
+        self.maxDiff = None
+        self.assertExpectedInline(
+            seq_table,
+            dedent(
+                """\
+SeqNr|OrigAten|SrcFn
+0|aten.convolution.default|l__self___conv1
+0|aten.add.Tensor|l__self___bn1
+1|aten._native_batch_norm_legit_functional.default|l__self___bn1
+2|aten.relu.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
+3|aten.add.Tensor|add
+4|aten.view.default|flatten
+5|aten.view.default|l__self___fc1
+6|aten.t.default|l__self___fc1
+7|aten.addmm.default|l__self___fc1
+8|aten.view.default|l__self___fc1
+9|aten.sub.Tensor|l__self___loss_fn
+10|aten.abs.default|l__self___loss_fn
+11|aten.mean.default|l__self___loss_fn
+11|aten.ones_like.default|
+11|aten.expand.default|
+11|aten.div.Scalar|
+10|aten.sgn.default|
+10|aten.mul.Tensor|
+8|aten.view.default|
+7|aten.t.default|
+7|aten.mm.default|
+7|aten.t.default|
+7|aten.mm.default|
+7|aten.t.default|
+7|aten.sum.dim_IntList|
+7|aten.view.default|
+6|aten.t.default|
+5|aten.view.default|
+4|aten.view.default|
+2|aten.detach.default|
+2|aten.threshold_backward.default|
+1|aten.native_batch_norm_backward.default|
+0|aten.convolution_backward.default|
+11|aten.add.Tensor|
+"""
+            ),
+        )
+
+    # https://github.com/pytorch/pytorch/issues/110121
+    def test_aot_export_joint_simple_repro(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.linear = torch.nn.Linear(5, 7)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def mini_backend(gm, sample_inputs):
+            from torch._functorch.aot_autograd import aot_export_joint_simple
+
+            fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
+
+            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+                return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
+
+        sample_inputs = [torch.rand((3, 4, 5))]
+        model = Mod()
+        m_compiled = torch.compile(model, backend=mini_backend)
+
+        out_ref = model(*sample_inputs)
+        out_test = m_compiled(*sample_inputs)
+        self.assertEqual(out_ref, out_test)
+
+    def test_eager_sequence_nr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=(1, 1),
+                    stride=1,
+                    padding="same",
+                    bias=True,
+                )
+                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                self.relu1 = torch.nn.ReLU()
+                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
+                self.loss_fn = torch.nn.L1Loss()
+
+            def forward(self, x, target):
+                y = x
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu1(x)
+                x = x + y
+                x = torch.flatten(x)
+                x = self.fc1(x)
+                output = self.loss_fn(x, target)
+
+                return (output,)
+
+        def grad_with_create_graph(mod, x, target):
+            y = mod(x, target)
+            # Set create_graph=True to ensure that the sequence_nr
+            # for backward ops continues to count down.
+            (gx,) = torch.autograd.grad(
+                y[0], x, create_graph=True, grad_outputs=grad_output
+            )
+            return gx
+
+        x = torch.rand(100, 16, 32, 32, requires_grad=True)
+        target = torch.rand(1)
+        mod = Model()
+        args = [mod, x, target]
+        grad_output = torch.tensor(1.0, requires_grad=True)
+        compiled_f1 = torch.compile(backend="aot_eager")(grad_with_create_graph)
+        model_instance = compiled_f1
+        with profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            record_shapes=True,
+        ) as kineto_prof:
+            res = model_instance(*args)
+        bwd_set = set()
+        prof_str = "SeqNr|Thread|FwdThread|Name\n"
+        for event in kineto_prof.events():
+            if event.sequence_nr >= 0:
+                prof_str = (
+                    prof_str + f"{event.sequence_nr}|{event.thread}"
+                    f"|{event.fwd_thread}|{event.name}|\n"
+                )
+                if re.search(r"Backward[01]", event.name):
+                    bwd_set.add(event.sequence_nr)
+        self.assertTrue(len(bwd_set), 13)
+
+    def test_aot_grad_mode_mutation(self):
+        for compiler in ["aot_eager", "inductor"]:
+
+            def f(x):
+                y = x * x
+                torch.set_grad_enabled(False)
+                return y.clone(), y
+
+            f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
+
+            torch.set_grad_enabled(True)
+            x = torch.ones(3, requires_grad=True) * 3
+            y_ref = f(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            y = f_compiled(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            self.assertEqual(y_ref, y)
+
+            self.assertIsNone(y_ref[0].grad_fn)
+            self.assertIsNone(y[0].grad_fn)
+
+            self.assertIsNotNone(y_ref[1].grad_fn)
+            self.assertIsNotNone(y[1].grad_fn)
+
+            # Check that the grad computed for the inputs, given the input, is the same
+            # The tangent to `y[0]`, which has grad_required=False, is irrelevant
+            self.assertEqual(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(
+                    x
+                    for x in y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))
+                    if x is not None
+                ),
+            )
 
 
 if __name__ == "__main__":

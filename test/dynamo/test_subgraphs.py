@@ -6,7 +6,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
 from torch._dynamo.testing import unsupported
 from torch._dynamo.utils import ifdynstaticdefault
 
@@ -327,7 +326,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifdynstaticdefault(4, 1))
+        self._common(fn, ifdynstaticdefault(2, 1), ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -408,10 +407,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # guards for when x and y didn't duck size together, so we end up
         # with a generic graph that also works when x and y happen to duck
         # size together.
-        if config.assume_static_by_default:
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 2)
 
         torch._dynamo.reset()
         cnt_dynamic.frame_count = 0

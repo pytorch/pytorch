@@ -1,6 +1,6 @@
 import gc
 import sys
-from typing import NamedTuple, Tuple, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import types
 import weakref
 import json
@@ -100,7 +100,7 @@ def annotated_references(obj):
     need for a list.  Descriptions are currently strings.
 
     """
-    references = {}
+    references: Dict[int, List[str]] = {}
 
     def add_reference(name, obj):
         references.setdefault(id(obj), []).append(name)
@@ -220,42 +220,36 @@ def object_annotation(obj):
     if isinstance(obj, BASE_TYPES):
         return repr(obj)
     if type(obj).__name__ == 'function':
-        return "function\n{}".format(obj.__name__)
+        return f"function\n{obj.__name__}"
     elif isinstance(obj, types.MethodType):
         try:
             func_name = obj.__func__.__qualname__
         except AttributeError:
             func_name = "<anonymous>"
-        return "instancemethod\n{}".format(func_name)
+        return f"instancemethod\n{func_name}"
     elif isinstance(obj, list):
         return f"[{format_sequence(obj)}]"
     elif isinstance(obj, tuple):
         return f"({format_sequence(obj)})"
     elif isinstance(obj, dict):
-        return "dict[{}]".format(len(obj))
+        return f"dict[{len(obj)}]"
     elif isinstance(obj, types.ModuleType):
-        return "module\n{}".format(obj.__name__)
+        return f"module\n{obj.__name__}"
     elif isinstance(obj, type):
-        return "type\n{}".format(obj.__name__)
+        return f"type\n{obj.__name__}"
     elif isinstance(obj, weakref.ref):
         referent = obj()
         if referent is None:
             return "weakref (dead referent)"
         else:
-            return "weakref to id 0x{:x}".format(id(referent))
+            return f"weakref to id 0x{id(referent):x}"
     elif isinstance(obj, types.FrameType):
         filename = obj.f_code.co_filename
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
-        return "frame\n{}:{}".format(
-            filename,
-            obj.f_lineno,
-        )
+        return f"frame\n{filename}:{obj.f_lineno}"
     else:
-        return "object\n{}.{}".format(
-            type(obj).__module__,
-            type(obj).__name__,
-        )
+        return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
 
 
@@ -272,7 +266,7 @@ def create_graph(objects, *, context=None, filter=None):
         filter = is_cuda_tensor
 
     nodes = [Node(object_annotation(obj), context(obj), filter(obj), []) for obj in objects]
-    node_referrers = [[] for obj in objects]
+    node_referrers: List[List[int]] = [[] for obj in objects]
 
     id_to_node = {id(obj): i for i, obj in enumerate(objects)}
     for obj in objects:
@@ -299,8 +293,8 @@ def create_graph(objects, *, context=None, filter=None):
         to_keep.add(idx)
         referrers = node_referrers[idx]
         to_search.extend(referrers)
-    id_to_filtered_id = {}
-    filtered = []
+    id_to_filtered_id: Dict[int, int] = {}
+    filtered: List[Any] = []
     for i, n in enumerate(nodes):
         if i in to_keep:
             id_to_filtered_id[i] = len(id_to_filtered_id)

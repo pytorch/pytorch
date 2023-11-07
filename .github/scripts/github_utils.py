@@ -2,12 +2,16 @@
 
 import json
 import os
+import warnings
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+
+GITHUB_API_URL = "https://api.github.com"
 
 
 @dataclass
@@ -25,16 +29,20 @@ def gh_fetch_url_and_headers(
     url: str,
     *,
     headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Tuple[Any, Any]:
     if headers is None:
         headers = {}
     token = os.environ.get("GITHUB_TOKEN")
-    if token is not None and url.startswith("https://api.github.com/"):
+    if token is not None and url.startswith(f"{GITHUB_API_URL}/"):
         headers["Authorization"] = f"token {token}"
-    data_ = json.dumps(data).encode() if data is not None else None
+
+    data_ = None
+    if data is not None:
+        data_ = data.encode() if isinstance(data, str) else json.dumps(data).encode()
+
     try:
         with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
             return conn.headers, reader(conn)
@@ -56,7 +64,7 @@ def gh_fetch_url(
     url: str,
     *,
     headers: Optional[Dict[str, str]] = None,
-    data: Optional[Dict[str, Any]] = None,
+    data: Union[Optional[Dict[str, Any]], str] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> Any:
@@ -124,7 +132,7 @@ def gh_post_pr_comment(
     org: str, repo: str, pr_num: int, comment: str, dry_run: bool = False
 ) -> List[Dict[str, Any]]:
     return _gh_post_comment(
-        f"https://api.github.com/repos/{org}/{repo}/issues/{pr_num}/comments",
+        f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/{pr_num}/comments",
         comment,
         dry_run,
     )
@@ -134,12 +142,40 @@ def gh_post_commit_comment(
     org: str, repo: str, sha: str, comment: str, dry_run: bool = False
 ) -> List[Dict[str, Any]]:
     return _gh_post_comment(
-        f"https://api.github.com/repos/{org}/{repo}/commits/{sha}/comments",
+        f"{GITHUB_API_URL}/repos/{org}/{repo}/commits/{sha}/comments",
         comment,
         dry_run,
     )
 
 
 def gh_delete_comment(org: str, repo: str, comment_id: int) -> None:
-    url = f"https://api.github.com/repos/{org}/{repo}/issues/comments/{comment_id}"
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/issues/comments/{comment_id}"
     gh_fetch_url(url, method="DELETE")
+
+
+def gh_fetch_merge_base(org: str, repo: str, base: str, head: str) -> str:
+    merge_base = ""
+    # Get the merge base using the GitHub REST API. This is the same as using
+    # git merge-base without the need to have git. The API doc can be found at
+    # https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#compare-two-commits
+    try:
+        json_data = gh_fetch_url(
+            f"{GITHUB_API_URL}/repos/{org}/{repo}/compare/{base}...{head}",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            reader=json.load,
+        )
+        if json_data:
+            merge_base = json_data.get("merge_base_commit", {}).get("sha", "")
+        else:
+            warnings.warn(
+                f"Failed to get merge base for {base}...{head}: Empty response"
+            )
+    except Exception as error:
+        warnings.warn(f"Failed to get merge base for {base}...{head}: {error}")
+
+    return merge_base
+
+
+def gh_update_pr_state(org: str, repo: str, pr_num: int, state: str = "open") -> None:
+    url = f"{GITHUB_API_URL}/repos/{org}/{repo}/pulls/{pr_num}"
+    gh_fetch_url(url, method="PATCH", data={"state": state})

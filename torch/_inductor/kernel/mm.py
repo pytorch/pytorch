@@ -1,14 +1,22 @@
 import logging
+from typing import Any, Dict, List
 
 import torch
+from torch._inductor.virtualized import V
 from .. import config as inductor_config
+from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_triton_template
+from ..utils import (
+    use_aten_gemm_kernels,
+    use_cutlass_template,
+    use_max_autotune,
+    use_triton_template,
+)
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -29,6 +37,9 @@ mm_template = TritonTemplate(
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
     stride_bk = {{stride("B", 0)}}
@@ -62,6 +73,8 @@ mm_template = TritonTemplate(
         else:
             a = tl.load(A, mask=rk[None, :] < k, other=0.)
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
+        if B_PROLOGUE_CAST_TYPE is not None:
+            b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
@@ -86,6 +99,10 @@ aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
 
+def _is_int8_mat(mat):
+    return mat.get_dtype() in (torch.int8, torch.uint8)
+
+
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
     """
     Giving torch.addmm a 1D tensor calls a different (faster) cublasLt
@@ -105,15 +122,35 @@ def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
     # options to tune from
-    choices = [aten_mm.bind((mat1, mat2), layout)]
-    if use_triton_template(layout):
+    choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+
+    if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
+
+    if m * n != 0 and use_cutlass_template(layout):
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+
+    from torch._inductor.ir import FixedLayout, FlexibleLayout
+
+    if (
+        len(choices) == 1
+        and use_aten_gemm_kernels()
+        and isinstance(layout, FixedLayout)
+    ):
+        # If we are not autotuning, we can swap to a FlexibleLayout
+        # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+        layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
+        choices = [aten_mm.bind((mat1, mat2), layout)]
 
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
@@ -123,15 +160,17 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    choices = [aten__int_mm.bind((mat1, mat2), layout)]
-    if use_triton_template(layout, enable_int32=True):
+    choices = (
+        [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    )
+    if m * n != 0 and use_triton_template(layout, enable_int32=True):
         # TODO: Re-enable eager mode implementation once cuBLAS is fixed
         choices = []
         for config in int8_mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -142,29 +181,39 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if not use_triton_template(layout):
-        choices = [
+    if m * n == 0 or not use_max_autotune():
+        choices = (
+            [
+                aten_addmm.bind(
+                    (inp, mat1, mat2),
+                    layout,
+                    ordered_kwargs_for_cpp_kernel,
+                    alpha=alpha,
+                    beta=beta,
+                )
+            ]
+            if use_aten_gemm_kernels()
+            else []
+        )
+        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
+
+    choices = (
+        [
             aten_addmm.bind(
-                (inp, mat1, mat2),
+                (inp_expanded, mat1, mat2),
                 layout,
                 ordered_kwargs_for_cpp_kernel,
                 alpha=alpha,
                 beta=beta,
             )
         ]
-        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
+        if use_aten_gemm_kernels()
+        else []
+    )
 
-    choices = [
-        aten_addmm.bind(
-            (inp_expanded, mat1, mat2),
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            alpha=alpha,
-            beta=beta,
-        )
-    ]
     if (
-        inp_expanded.get_stride()[0] == 0
+        use_aten_gemm_kernels()
+        and inp_expanded.get_stride()[0] == 0
         and inp_expanded.get_device().type == "cuda"
         and inductor_config.triton.autotune_cublasLt
     ):
@@ -176,16 +225,81 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    for config in mm_configs(m, n, k):
-        mm_template.maybe_append_choice(
+    if use_triton_template(layout):
+        for config in mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(inp_expanded, mat1, mat2),
+                layout=layout,
+                **mm_options(config, k, layout),
+                prefix_args=1,
+                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+            )
+
+    if use_cutlass_template(layout):
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
-            (inp_expanded, mat1, mat2),
             layout,
-            **mm_options(config, k, layout),
-            prefix_args=1,
-            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+            [mat1, mat2, inp_expanded],
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+            fuseable=False,
         )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
     )
+
+
+def fallback_mixed_mm(mat1, mat2, *, out):
+    return torch.mm(mat1, mat2.to(mat1.dtype), out=out)
+
+
+aten_fallback_mixed_mm = ExternKernelChoice(fallback_mixed_mm, None)
+
+
+def tuned_mixed_mm(mat1, mat2, mat2_dtype):
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
+    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
+    if mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous():
+        # can't use triton kernel unless one of these is true
+        return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+    if inductor_config.force_mixed_mm:
+        choices = []
+    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+    has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
+    for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        mm_template.maybe_append_choice(
+            choices,
+            input_nodes=(mat1, mat2),
+            layout=layout,
+            **mm_options(config, k, layout, b_prologue_cast_type),
+        )
+    return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+
+
+# This op is a special case of the int_mm op which we use based on the pattern
+# _int_mm -> mul (defined in ../fx_passes/post_grad.py) in order to prevent
+# realization of the int32 _int_mm output by forcing fusion with the mul op.
+# This is only used when config.force_fuse_int_mm_with_mul = True
+def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
+    out_dtype = (
+        torch.promote_types(mat3.get_dtype(), torch.int32)
+        if out_dtype is None
+        else out_dtype
+    )
+    m, n, k, layout, mat1, mat2, mat3 = mm_args(
+        mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
+    )
+    choices: List[Dict[Any, Any]] = []
+    for config in int8_mm_configs(m, n, k):
+        mm_template.maybe_append_choice(
+            choices,
+            input_nodes=(mat1, mat2, mat3),
+            layout=layout,
+            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
+            suffix_args=1,
+            epilogue_fn=lambda acc, mat3: V.ops.mul(acc, mat3),
+        )
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)

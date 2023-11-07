@@ -18,12 +18,15 @@ from torch.distributed._tensor.dispatch import _operator_dispatch
 from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
+    DTensorSpec,
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
-from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
 
@@ -117,8 +120,21 @@ def _dispatch_with_local_tensors(
         specs = {}
 
     def redistribute(arg: Any) -> Any:
+        tensor_shape, mesh, current_placement, target_placement = specs[arg]
+        tensor_meta = TensorMeta(
+            tensor_shape,
+            stride=arg.stride(),
+            dtype=arg.dtype,
+        )
+        current_spec = DTensorSpec(
+            mesh, tuple(current_placement), tensor_meta=tensor_meta
+        )
+        target_spec = DTensorSpec(
+            mesh, tuple(target_placement), tensor_meta=tensor_meta
+        )
+
         return (
-            _redistribute_with_local_tensor(arg, *specs[arg])  # type: ignore[index]
+            redistribute_local_tensor(arg, current_spec, target_spec)  # type: ignore[index]
             if isinstance(arg, torch.Tensor) and arg in specs  # type: ignore[operator]
             else arg
         )
@@ -133,7 +149,7 @@ def _dispatch_with_local_tensors(
 def _update_specs_for_redistribute(args, target_schema, redistribute):
     # Code adapted from pack_args_kwargs_with_local_tensor
     flatten_args, args_tree_spec = tree_flatten(args)
-    flatten_args_schema, _ = tree_flatten(target_schema.args_schema)
+    flatten_args_schema = pytree.tree_leaves(target_schema.args_schema)
 
     specs: Dict[
         torch.Tensor,
@@ -164,7 +180,7 @@ def _update_specs_for_redistribute(args, target_schema, redistribute):
 # node.
 def _update_node_from_op_schema(node: torch.fx.Node, op_schema: OpSchema) -> None:
     flat_args, args_tree_spec = tree_flatten(node.args)
-    flat_args_schema, _ = tree_flatten(op_schema.args_schema)
+    flat_args_schema = pytree.tree_leaves(op_schema.args_schema)
 
     def is_sym_int_or_int(arg: Union[int, torch.fx.Node]) -> bool:
         if isinstance(arg, torch.fx.Node):
@@ -268,7 +284,7 @@ def factory_with_sizes_rule(
     kwargs: Dict[str, Any],
     default_mesh: DeviceMesh,
 ) -> DTensor:
-    flat_args = tree_flatten(args)[0]
+    flat_args = pytree.arg_tree_leaves(*args)
     assert not any(isinstance(a, DTensor) for a in flat_args), (
         f"Not expect DTensor argument for factory op, but got {node.target} "
         f"with arguments {args}."
@@ -358,7 +374,11 @@ def _get_dtensor_dispatch_graph(
 
         op_overload = cast(torch._ops.OpOverload, node.target)
 
-        if any(a.is_shard() for a in tree_flatten(args)[0] if isinstance(a, DSymInt)):
+        if any(
+            a.is_shard()
+            for a in pytree.arg_tree_leaves(*args)
+            if isinstance(a, DSymInt)
+        ):
             if op_overload in VIEW_SYM_INT_CONSUMERS:
                 assert len(kwargs) == 0, f"Expect empty kwargs, but got {kwargs}"
                 node_to_obj[node] = VIEW_SYM_INT_CONSUMERS[op_overload](node, args)
@@ -409,21 +429,21 @@ def _get_dtensor_dispatch_graph(
         )
         node_to_obj[node] = out
 
-        assert output_sharding.schema_suggestions is not None
-        target_schema = output_sharding.schema_suggestions[0]
-        redistribute = target_schema is not op_schema
+        assert output_sharding is not None
 
         # If no redistribution is needed, we don't need to replace
         # the original node.
-        if not redistribute:
-            _update_node_from_op_schema(node, target_schema)
+        if not output_sharding.needs_redistribute:
+            _update_node_from_op_schema(node, op_schema)
             return None
 
         # TODO: this is broken when kwargs contains tensors
         # or if a non-tensor kwarg was modified by the sharding propagation
         # (in order to fix, need to port over pack_args_kwargs_with_local_tensor for kwargs as well)
+        assert output_sharding.schema_suggestions is not None
+        target_schema = output_sharding.schema_suggestions[0]
         updated_args_spec, unflattened_args = _update_specs_for_redistribute(
-            args, target_schema, redistribute
+            args, target_schema, output_sharding.needs_redistribute
         )
 
         dispatch = partial(
@@ -576,7 +596,7 @@ def _rebuild_graph(
         # Map DT's dispatch graph input placeholder nodes to the ones in
         # local traced graph. It uses index-based accessing, which is
         # brittle, just for testing purpose.
-        flatten_args, _ = tree_flatten(node.args)
+        flatten_args = pytree.arg_tree_leaves(*node.args)
         i, value_remap = 0, {}
         for dtn in traced_dispatch.graph.nodes:
             if dtn.op == OP.PLACEHOLDER:

@@ -210,7 +210,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @contextlib.contextmanager
         def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
+            if frame_summary is not None:
+                seen_frames.append(frame_summary)
             yield
 
         with mock.patch(
@@ -232,7 +233,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             @torch._dynamo.disable
             def helper_disabled(self, x, y):
-                return x * y
+                return x.sin() * y.cos()
 
             def helper(self, x, y):
                 return x * y
@@ -243,26 +244,49 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         e = encoder(y)
 
-        seen_frames = []
-        import contextlib
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(e, backend=cnt)(x)
 
-        @contextlib.contextmanager
-        def global_context_capture_fn(frame_summary):
-            seen_frames.append(frame_summary)
-            yield
+        # first frame is before disable, second frame is after disable
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
 
-        with mock.patch(
-            "torch._guards.TracingContext.current_frame",
-            side_effect=global_context_capture_fn,
-        ):
-            torch._dynamo.optimize("eager")(e)(x)
+    def _test_mark_static_address(self, guarded):
+        compiles_with_buffers = 0
+        compiles = 0
 
-        self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].name, "forward")
-        self.assertEqual(
-            seen_frames[0].line,
-            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
-        )
+        def debug_compiler(gm, _):
+            nonlocal compiles_with_buffers
+            nonlocal compiles
+            compiles_with_buffers += len(gm._buffers) > 0
+            compiles += 1
+            return gm
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x):
+            return x + 1
+
+        inp = torch.ones(2)
+
+        torch._dynamo.mark_static_address(inp, guard=guarded)
+
+        fn(inp)
+        self.assertEqual(compiles_with_buffers, 1)
+
+        inp2 = torch.ones(2)
+
+        # if guarded, should trigger another recompile
+        # since it was not marked static, compiles with buffers
+        # should not be incremented
+        fn(inp2)
+        self.assertEqual(compiles_with_buffers, 1)
+        self.assertEqual(compiles, 2 if guarded else 1)
+
+    def test_mark_static_address_guarded(self):
+        self._test_mark_static_address(guarded=True)
+
+    def test_mark_static_address_unguarded(self):
+        self._test_mark_static_address(guarded=False)
 
 
 if __name__ == "__main__":

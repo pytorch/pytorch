@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
+from torch.fx.experimental import _config as fx_config
+from torch.testing._internal.common_utils import TEST_Z3
 
 try:
     from . import (
@@ -42,7 +45,9 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        (config, "translation_validation", True),
+        (fx_config, "translation_validation", TEST_Z3),
+        (fx_config, "check_shape_env_recorded_events", True),
+        (fx_config, "validate_shape_env_verison_key", True),
         xfail_prop="_expected_failure_dynamic",
     )
 
@@ -61,18 +66,28 @@ tests = [
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
     test_higher_order_ops.HigherOrderOpTests,
+    test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
 ]
 for test in tests:
     make_dynamic_cls(test)
+del test
 
-unittest.expectedFailure(
-    # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
-    # Ref: https://github.com/sympy/sympy/issues/25146
-    DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
-)
+if TEST_Z3:
+    # this only fails when z3 is available
+    unittest.expectedFailure(
+        # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
+        # Ref: https://github.com/sympy/sympy/issues/25146
+        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
+    )
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_Z3:
+        warnings.warn(
+            "translation validation is off. "
+            "Testing with translation validation requires Z3."
+        )
 
     run_tests()

@@ -1,6 +1,4 @@
-r"""
-Weight Normalization from https://arxiv.org/abs/1602.07868
-"""
+r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch import _weight_norm, norm_except_dim
 from typing import Any, TypeVar
@@ -29,10 +27,9 @@ class WeightNorm:
     def apply(module, name: str, dim: int) -> 'WeightNorm':
         warnings.warn("torch.nn.utils.weight_norm is deprecated in favor of torch.nn.utils.parametrizations.weight_norm.")
 
-        for k, hook in module._forward_pre_hooks.items():
+        for hook in module._forward_pre_hooks.values():
             if isinstance(hook, WeightNorm) and hook.name == name:
-                raise RuntimeError("Cannot register two weight_norm hooks on "
-                                   "the same parameter {}".format(name))
+                raise RuntimeError(f"Cannot register two weight_norm hooks on the same parameter {name}")
 
         if dim is None:
             dim = -1
@@ -71,7 +68,7 @@ class WeightNorm:
 T_module = TypeVar('T_module', bound=Module)
 
 def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_module:
-    r"""Applies weight normalization to a parameter in the given module.
+    r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -135,7 +132,7 @@ def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_modul
 
 
 def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
-    r"""Removes the weight normalization reparameterization from a module.
+    r"""Remove the weight normalization reparameterization from a module.
 
     Args:
         module (Module): containing module
@@ -151,5 +148,4 @@ def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             return module
 
-    raise ValueError("weight_norm of '{}' not found in {}"
-                     .format(name, module))
+    raise ValueError(f"weight_norm of '{name}' not found in {module}")

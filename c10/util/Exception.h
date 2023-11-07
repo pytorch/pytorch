@@ -3,11 +3,11 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
 #include <string>
+#include <variant>
 #include <vector>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
@@ -101,7 +101,7 @@ class C10_API Error : public std::exception {
   /// Returns only the error message string, without source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what_without_backtrace() const noexcept {
+  virtual const char* what_without_backtrace() const noexcept {
     return what_without_backtrace_.c_str();
   }
 
@@ -115,7 +115,7 @@ class C10_API Warning {
   class C10_API UserWarning {};
   class C10_API DeprecationWarning {};
 
-  using warning_variant_t = c10::variant<UserWarning, DeprecationWarning>;
+  using warning_variant_t = std::variant<UserWarning, DeprecationWarning>;
 
   Warning(
       warning_variant_t type,
@@ -225,6 +225,15 @@ struct C10_API WarnAlways {
 
 } // namespace WarningUtils
 
+// Like Error, but we always report the C++ backtrace, instead of only
+// reporting when TORCH_SHOW_CPP_STACKTRACES
+class C10_API ErrorAlwaysShowCppStacktrace : public Error {
+  using Error::Error;
+  const char* what_without_backtrace() const noexcept override {
+    return what();
+  }
+};
+
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
 // IndexError when they cross to Python.
@@ -272,10 +281,28 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Base error type for all distributed errors.
+// These turn into DistError when they cross into Python.
+class C10_API DistError : public Error {
+  using Error::Error;
+};
+
 // Used for collective communication library errors from the distributed module.
 // These turn into DistBackendError when they cross into Python.
-class C10_API DistBackendError : public Error {
-  using Error::Error;
+class C10_API DistBackendError : public DistError {
+  using DistError::DistError;
+};
+
+// Used for errors originating from the store.
+// These turn into DistStoreError when they cross into Python.
+class C10_API DistStoreError : public DistError {
+  using DistError::DistError;
+};
+
+// Used for errors originating from the TCP/IP stack and not from collective
+// libraries. These turn into DistNetworkError when they cross into Python.
+class C10_API DistNetworkError : public DistError {
+  using DistError::DistError;
 };
 
 // A utility function to return an exception std::string by prepending its
@@ -296,6 +323,9 @@ C10_API std::string GetExceptionString(const std::exception& e);
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type(               \
       {__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
+
+#define C10_BUILD_ERROR(err_type, msg) \
+  ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
 // Private helper macro for workaround MSVC misexpansion of nested macro
 // invocations involving __VA_ARGS__.  See
@@ -554,6 +584,10 @@ namespace detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+#define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(                                   \
+      ErrorAlwaysShowCppStacktrace, cond, "TYPE", ##__VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \

@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 import os
+import re
 import sys
 import types
 import typing
@@ -8,6 +9,7 @@ import typing_extensions
 from typing import List, Dict, Optional, Tuple
 
 import torch
+import torch.jit.frontend
 import torch.nn as nn
 from torch import Tensor
 from torch.testing import FileCheck
@@ -537,6 +539,38 @@ class TestRecursiveScript(JitTestCase):
         p.__dict__["_c"] = c
 
         sm = torch.jit.script(p)
+
+    def test_prepare_scriptable_escape_hatch(self):
+        class NonJitableClass:
+            def __call__(self, int1, int2, *args):
+                total = int1 + int2
+                for arg in args:
+                    total += arg
+                return total
+
+        obj = NonJitableClass()
+
+        self.assertEqual(obj(1, 2), 3)
+        self.assertEqual(obj(1, 2, 3, 4), 10)
+        with self.assertRaisesRegex(
+            torch.jit.frontend.NotSupportedError, expected_regex="can't take variable number of arguments"
+        ):
+            torch.jit.script(obj)
+
+        def escape_hatch(int1: int, int2: int) -> int:
+            return int1 + int2
+
+        class NonJitableClassWithEscapeHatch(NonJitableClass):
+            def __prepare_scriptable__(self):
+                return escape_hatch
+
+        jit_obj = torch.jit.script(NonJitableClassWithEscapeHatch())
+
+        self.assertEqual(jit_obj(1, 2), 3)
+        with self.assertRaisesRegex(
+            RuntimeError, expected_regex=re.escape("expected at most 2 argument(s) but received 4 argument(s)")
+        ):
+            jit_obj(1, 2, 3, 4)
 
     def test_attributes(self):
         @torch.jit.script

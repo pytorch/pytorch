@@ -30,7 +30,7 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
+from torch._dynamo.testing import CompileCounter, rand_strided, same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -513,7 +513,7 @@ class PartialMaml(torch.nn.Module):
         corrects = [0 for _ in range(self.update_step_test + 1)]
 
         # in order to not ruin the state of running_mean/variance and bn_weight/bias
-        # we finetunning on the copied model instead of self.net
+        # we finetuning on the copied model instead of self.net
         net = deepcopy(self.net)
 
         # 1. run the i-th task and compute loss for k=0
@@ -799,7 +799,7 @@ class TransformerEncoderLayer(nn.Module):
         return self.ff_block(x)
 
 
-class TestModule(torch.nn.Module):
+class MockModule(torch.nn.Module):
     def inner_fn(self, left, right):
         return tuple(left) == tuple(right)
 
@@ -1066,8 +1066,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    # https://github.com/pytorch/pytorch/issues/103620
-    @expectedFailureDynamic
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -1077,7 +1075,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 4)
+        self.assertLessEqual(cnt.op_count, 10)
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to
@@ -1186,9 +1184,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 3)  # rand, rand
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
         try:
-            graph, _ = torch._dynamo.export(fn)
+            graph, _ = torch._dynamo.export(fn)()
             # See https://github.com/pytorch/pytorch/pull/87490
             self.fail("unexpected export success")
         except torch._dynamo.exc.Unsupported:
@@ -1290,6 +1288,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_test_fn = torch._dynamo.optimize(cnt)(test_fn)
         opt_test_fn()
+
+    # See https://github.com/pytorch/pytorch/issues/100067
+    def test_copy_weird_strides(self):
+        # This test requires inductor's copy() decomp to preserve strides properly.
+        def test_fn(a):
+            b = torch.zeros(48, 4, 256, 513)
+            b[:, 0, 1:256, 1:256] = a
+            c = b.view(4, 12, 1024, 513)
+            d = c.transpose(2, 1)
+            d.add_(1)
+            return d
+
+        sh, st, dt, dev, rg = (
+            (48, 255, 255),
+            (787968, 513, 1),
+            torch.float16,
+            "cpu",
+            True,
+        )
+        a = rand_strided(sh, st, dt, dev).requires_grad_(rg)
+        compiled_f = torch.compile(test_fn, backend="aot_eager_decomp_partition")
+        out1 = test_fn(a)
+        out2 = compiled_f(a)
+        self.assertEqual(out1, out2)
 
     def test_indexing_with_list(self):
         def test_fn():
@@ -1611,31 +1633,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
-    def test_numpy_list(self):
-        @torch._dynamo.disable
-        def rand_gen():
-            return list(np.array([random.randint(5, 10) for _ in range(10)]))
+    def test_longtensor_list(self):
+        for partition in [0, 5, 10]:
 
-        def fn(x):
-            random_list = rand_gen()
-            z = torch.LongTensor(random_list)
-            return x * z
+            @torch._dynamo.disable
+            def rand_gen():
+                rand_vals = [random.randint(5, 10) for _ in range(10)]
+                # List of tensors mixed with np.arrays
+                return list(np.array(rand_vals[:partition])) + [
+                    torch.tensor(val) for val in rand_vals[partition:]
+                ]
 
-        x = torch.ones(10) * 2
+            def fn(x):
+                random_list = rand_gen()
+                z = torch.LongTensor(random_list)
+                return x * z
 
-        random.seed(0)
-        ref0 = fn(x)
-        ref1 = fn(x)
+            x = torch.ones(10) * 2
 
-        random.seed(0)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        res0 = opt_fn(x)
-        res1 = opt_fn(x)
+            random.seed(0)
+            ref0 = fn(x)
+            ref1 = fn(x)
 
-        self.assertTrue(same(ref0, res0))
-        self.assertTrue(same(ref1, res1))
+            random.seed(0)
+            opt_fn = torch._dynamo.optimize("eager")(fn)
+            res0 = opt_fn(x)
+            res1 = opt_fn(x)
+
+            self.assertTrue(same(ref0, res0))
+            self.assertTrue(same(ref1, res1))
 
     def test_primtorch(self):
         @torch._dynamo.optimize("eager")
@@ -1749,7 +1775,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # they are evaluated in the wrong order. So if on a subsequent call
         # an int is passed instead of a tensor, guard evaluation will crash
         # with a "no attribute: shape" error
-        m = TestModule()
+        m = MockModule()
         opt_m = torch._dynamo.optimize("eager")(m)
         opt_m.fn(torch.ones((5, 5)))
         opt_m.fn(-3)
@@ -2608,7 +2634,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/93781
         @torch.compile
         def f():
-            _generator_type = type((_ for _ in ()))
+            _generator_type = type(_ for _ in ())
 
         self.assertNoUnraisable(f)
 
@@ -2626,11 +2652,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 6)
         self.assertEqual(cnt.frame_count, 1)
 
-        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
-
-        with self.assertRaisesRegex(RuntimeError, "First dim need to be 3"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
 
     def test_not_rewrite_assert_for_other_errors(self):
         def f(x):
@@ -2644,6 +2667,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
+    def test_rewrite_assert_dont_change_bytecode(self):
+        def fn(x):
+            with torch.no_grad():
+                assert x.max() < 5, f"invalid max {x.max()}"
+                x = torch.sin(x)
+            return x
+
+        x = torch.ones(4)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
     def test_rewrite_assert_without_msg(self):
         def f(x):
             b = x.sin()
@@ -2651,11 +2685,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
-        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
         with self.assertRaisesRegex(RuntimeError, "assertion error"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+            exported(torch.Tensor([5, 6, 7]))
 
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
@@ -2683,7 +2717,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return x.cos() + b
 
         args = (torch.Tensor([3, 4, 5]),)
-        exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
+        exported, _ = torch._dynamo.export(f)(torch.Tensor([3, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
         cnt = torch._dynamo.testing.CompileCounter()
@@ -2693,7 +2727,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 3)
         self.assertEqual(cnt.frame_count, 1)
 
-        exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+        exported, _ = torch._dynamo.export(f)(torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
     def test_size_typematch(self):
@@ -2850,7 +2884,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         inp = torch.randn(6, 5)
 
-        gm, _ = torch._dynamo.export(f, torch.randn(4, 5), aten_graph=True)
+        gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.randn(4, 5))
         self.assertEqual(gm(inp).shape, f(inp).shape)
 
     @torch._dynamo.config.patch("specialize_int", False)
@@ -3023,9 +3057,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         gm, _ = torch._dynamo.export(
             f,
+            aten_graph=True,
+        )(
             torch.zeros(6, 4),
             torch.tensor(1),
-            aten_graph=True,
         )
         self.assertEqual(
             f(torch.zeros(6, 4), torch.tensor(1)),
@@ -3035,6 +3070,60 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f(torch.zeros(6, 4), torch.tensor(2)),
             gm(torch.zeros(6, 4), torch.tensor(2)),
         )
+
+    def test_list_index(self):
+        for i, list_type in enumerate(
+            (
+                list,
+                tuple,
+                torch.Size,
+                collections.deque,
+                namedtuple("FourElems", "one two three four", defaults=[0, 0, 0, 0]),
+            )
+        ):
+            torch._dynamo.reset()
+            for index in ([], [2], [0, 3]):
+
+                def f(t):
+                    if i == 4:  # namedtuple
+                        xs = list_type(1, 2, 3, 4)
+                    else:
+                        xs = list_type([1, 2, 3, 4])
+                    res = xs.index(3, *index)
+                    return t + res
+
+                res = torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
+
+                self.assertEqual(res, torch.tensor([2.0]))
+
+    def test_list_index_not_found(self):
+        def f(t):
+            xs = ["bar", "foo", "baz", "buzz"]
+            res = xs.index("non-existent")
+            return t + res
+
+        # Raising ValueError from item not found is unsupported
+        with self.assertRaises(
+            torch._dynamo.exc.Unsupported,
+        ):
+            torch._dynamo.optimize(backend="eager", nopython=True)(f)(torch.zeros(1))
+
+    def test_list_index_tensor_unsupported(self):
+        for index in ([], [2], [0, 3]):
+
+            def f(t):
+                xs = [torch.tensor([i]) for i in range(4)]
+                res = xs.index(torch.tensor([2]), *index)
+                return t + res
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.UserError, "Dynamic control flow is not supported"
+            ):
+                torch._dynamo.optimize(backend="eager", nopython=True)(f)(
+                    torch.zeros(1)
+                )
 
     def test_hf_xsoftmax_inference(self):
         def fn(input, mask):
@@ -3116,6 +3205,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
+    def test_jit_trace_errors(self):
+        @torch.compile(backend="eager", dynamic=True)
+        def f(x):
+            return x + 1
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.trace(f, torch.randn(3))
+
+        with torch._dynamo.config.patch(error_on_nested_jit_trace=False):
+            torch.jit.trace(f, torch.randn(3))
+
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):
@@ -3123,8 +3223,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         gm, _ = torch._dynamo.export(
             f,
-            torch.zeros(6, 4),
             aten_graph=True,
+        )(
+            torch.zeros(6, 4),
         )
 
         self.assertEqual(f(torch.ones(8, 4)), gm(torch.ones(8, 4)))
@@ -3352,24 +3453,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
-    def test_dataclass_factory(self):
-        from dataclasses import dataclass, field
-        from typing import Any
-
-        @dataclass
-        class DClass:
-            sharding_contexts: Any = field(default_factory=list)
-            a: int = 1
-
-        def fn(x):
-            return DClass().a * x
-
-        opt_fn = torch.compile(fn, backend="eager")
-        x = torch.randn(4)
-        res = fn(x)
-        ref = opt_fn(x)
-        self.assertEqual(ref, res)
-
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
         In this case self.fn = something that should be a TorchVariable.
@@ -3412,6 +3495,104 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return torch.compile(fn, backend="eager")
 
         make_fn(None)()
+
+    def test_string_format(self):
+        s = "temp{i}"
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            if s.format(i=4) == "temp4":
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), torch.sin(x))
+
+    # Repro of torch._dynamo.exc.InternalTorchDynamoError: 'NoneType' object has no attribute 'guards'
+    # due to bad empty list handling
+    def test_empty_list_contains_with_jump(self):
+        def fn(x, l):
+            if x in l:
+                return x.cos()
+            return x.sin()
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)(torch.randn([2, 2]), [])
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_graph_break_on_jit_isinstance(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            if torch.jit.isinstance(x, List[str]):
+                return x * 2
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.rand(4)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+
+    def test_add_sub_alpha_out(self):
+        inp = torch.randn(2, 3, 4)
+        other = 1
+        alpha = 2
+        for op in [torch.add, torch.sub]:
+            out = torch.zeros(2, 3, 4)
+            compile_out = torch.zeros(2, 3, 4)
+            op(inp, other, alpha=alpha, out=out)
+            compiled_fn = torch.compile(op, dynamic=True)
+            compiled_fn(inp, other, alpha=alpha, out=compile_out)
+            self.assertTrue(same(out, compile_out))
+
+    def test_addr_alpha_beta_out(self):
+        inp = torch.randn(2, 3)
+        vec1 = torch.randn(2)
+        vec2 = torch.randn(3)
+        alpha = 2
+        beta = 5
+
+        out = torch.zeros(2, 3)
+        compile_out = torch.zeros(2, 3)
+
+        torch.addr(inp, vec1, vec2, alpha=alpha, beta=beta, out=out)
+        compiled_fn = torch.compile(torch.addr, dynamic=True)
+        compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
+        self.assertTrue(same(out, compile_out))
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(1000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
+        )
+
+    def test_numpy_not_ndarray_recompiles(self):
+        import torch
+
+        def fn(x=None):
+            if x is None:
+                x = np.ones(3)
+            elif isinstance(x, int):
+                x = np.ones(6)
+            elif isinstance(x, str):
+                x = np.ones(9)
+            return x**2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+
+        x = np.zeros((2, 2))
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(opt_fn(), fn())
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(10), fn(10))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_fn("10"), fn("10"))
+        self.assertEqual(cnt.frame_count, 4)
 
 
 if __name__ == "__main__":

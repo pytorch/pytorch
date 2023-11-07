@@ -8,6 +8,7 @@
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
 from itertools import chain
+from typing import Dict, Set
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
@@ -1445,7 +1446,8 @@ def _recover_record_by_prefix(names, prefix=''):
 
 
 class Net:
-    _net_names_used = set()
+    _net_names_used_counters: Dict[str, int] = {}
+    _net_names_used: Set[str] = set()
     operator_registry_ = {}
 
     @staticmethod
@@ -1455,15 +1457,20 @@ class Net:
         return builder.name if builder else ''
 
     @staticmethod
+    def _reset_used_names() -> None:
+        Net._net_names_used_counters = {}
+        Net._net_names_used = set()
+
+    @staticmethod
     def _get_next_net_name(basename):
-        name = basename = '/'.join(
-            x for x in [Net.current_prefix(), basename] if x
-        )
-        next_idx = 1
-        while name in Net._net_names_used:
-            name = basename + '_' + str(next_idx)
-            next_idx += 1
-        Net._net_names_used |= set([name])
+        basename = "/".join(x for x in [Net.current_prefix(), basename] if x)
+        idx = Net._net_names_used_counters.get(basename, 0)
+        while (
+            name := basename if idx == 0 else f"{basename}_{idx}"
+        ) in Net._net_names_used:
+            idx += 1
+        Net._net_names_used_counters[basename] = idx + 1
+        Net._net_names_used.add(name)
         return name
 
     def __init__(self, name_or_proto, inplace=False):
@@ -1638,7 +1645,7 @@ class Net:
             return do_set(self.GivenTensorInt64Fill)
         elif array.dtype == str:
             return do_set(self.GivenTensorStringFill)
-        elif array.dtype == np.bool:
+        elif array.dtype == bool:
             return do_set(self.GivenTensorBoolFill)
         else:
             return do_set(self.GivenTensorFill)

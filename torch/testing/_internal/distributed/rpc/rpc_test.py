@@ -264,7 +264,7 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     res = list_input[0]
     for t in list_input:
         res += t
-    for k, v in dict_input.items():
+    for v in dict_input.values():
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
@@ -914,9 +914,7 @@ class RpcTestCommon:
             self.assertEqual(val, 0)
         tok = time.time()
         print(
-            "Rank {} finished testing {} times in {} seconds.".format(
-                self.rank, repeat, tok - tik
-            )
+            f"Rank {self.rank} finished testing {repeat} times in {tok - tik} seconds."
         )
 
     def _builtin_remote_ret(self, x, y, expected):
@@ -1060,7 +1058,7 @@ class RpcTestCommon:
         for i in range(10):
             outputs = m(torch.rand(10, 10).long())
             loss_fn(outputs, torch.rand(10, 10)).backward()
-            gradient = list(m.parameters())[0].grad
+            gradient = next(iter(m.parameters())).grad
             fut = rref.rpc_async().average(rref, i, gradient)
             gradient = fut.wait()
             if gradient.is_sparse:
@@ -1779,18 +1777,18 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         function_events = prof.function_events
         remote_events = [event for event in function_events if event.is_remote]
-        remote_add_event = [
+        remote_add_event = next(
             event for event in remote_events if "aten::add" in event.name
-        ][0]
+        )
         remote_add_input_shapes = remote_add_event.input_shapes
         # Run profiler on equivalent local op and validate shapes are the same.
         with _profile(record_shapes=True) as prof:
             torch.add(t1, t2)
 
         local_function_events = prof.function_events
-        local_add_event = [
+        local_add_event = next(
             event for event in local_function_events if "aten::add" in event.name
-        ][0]
+        )
         local_add_input_shapes = local_add_event.input_shapes
         self.assertEqual(remote_add_input_shapes, local_add_input_shapes)
 
@@ -2083,9 +2081,9 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 udf_with_torch_ops(-1, True)
 
             local_function_events = prof.function_events
-            local_record_function_event = [
+            local_record_function_event = next(
                 evt for evt in local_function_events if "##forward##" in evt.name
-            ][0]
+            )
             local_children = get_cpu_children(local_record_function_event)
             local_children_names = [
                 evt.name for evt in local_children
@@ -3153,7 +3151,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         rref1 = RRef(self.rank)
         id_class = "GloballyUniqueId"
         self.assertEqual(
-            "OwnerRRef({}(created_on={}, local_id=0))".format(id_class, self.rank), rref1.__str__()
+            f"OwnerRRef({id_class}(created_on={self.rank}, local_id=0))", rref1.__str__()
         )
 
         dst_rank = (self.rank + 1) % self.world_size
@@ -4296,7 +4294,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             return
 
         dst_rank = (self.rank + 1) % self.world_size
-        dst_worker = "worker{}".format(dst_rank)
+        dst_worker = f"worker{dst_rank}"
         # 10 ms timeout
         rref = rpc.remote(dst_worker, my_sleep_func, args=(2, ), timeout=0.01)
         # Future corresponding to the remote creation should time out.

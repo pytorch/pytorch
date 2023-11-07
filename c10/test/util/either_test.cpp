@@ -8,6 +8,7 @@
 #include <sstream>
 #include <vector>
 
+// NOLINTBEGIN(*)
 using c10::either;
 using c10::make_left;
 using c10::make_right;
@@ -1119,7 +1120,7 @@ class OnlyMoveableClassWithDestructorCallback {
 
 } // namespace
 
-TEST(EitherTest_Destructor, LeftDestructorIsCalled) {
+TEST(EitherTestDestructor, LeftDestructorIsCalled) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       2); // Once for the temp object, once when the either class destructs
@@ -1128,7 +1129,7 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalled) {
   either<ClassWithDestructorCallback, string> var = temp;
 }
 
-TEST(EitherTest_Destructor, RightDestructorIsCalled) {
+TEST(EitherTestDestructor, RightDestructorIsCalled) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       2); // Once for the temp object, once when the either class destructs
@@ -1137,7 +1138,7 @@ TEST(EitherTest_Destructor, RightDestructorIsCalled) {
   either<string, ClassWithDestructorCallback> var = temp;
 }
 
-TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterCopying) {
+TEST(EitherTestDestructor, LeftDestructorIsCalledAfterCopying) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       3); // Once for the temp object, once for var1 and once for var2
@@ -1148,7 +1149,7 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterCopying) {
   either<ClassWithDestructorCallback, string> var2 = var1;
 }
 
-TEST(EitherTest_Destructor, RightDestructorIsCalledAfterCopying) {
+TEST(EitherTestDestructor, RightDestructorIsCalledAfterCopying) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       3); // Once for the temp object, once for var1 and once for var2
@@ -1159,7 +1160,7 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterCopying) {
   either<string, ClassWithDestructorCallback> var2 = var1;
 }
 
-TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoving) {
+TEST(EitherTestDestructor, LeftDestructorIsCalledAfterMoving) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       3); // Once for the temp object, once for var1 and once for var2
@@ -1171,7 +1172,7 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoving) {
       std::move(var1);
 }
 
-TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoving) {
+TEST(EitherTestDestructor, RightDestructorIsCalledAfterMoving) {
   DestructorCallback destructorCallback;
   destructorCallback.EXPECT_CALLED(
       3); // Once for the temp object, once for var1 and once for var2
@@ -1183,7 +1184,7 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoving) {
       std::move(var1);
 }
 
-TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterAssignment) {
+TEST(EitherTestDestructor, LeftDestructorIsCalledAfterAssignment) {
   DestructorCallback destructorCallback1;
   DestructorCallback destructorCallback2;
   destructorCallback1.EXPECT_CALLED(
@@ -1199,7 +1200,7 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterAssignment) {
   var1 = var2;
 }
 
-TEST(EitherTest_Destructor, RightDestructorIsCalledAfterAssignment) {
+TEST(EitherTestDestructor, RightDestructorIsCalledAfterAssignment) {
   DestructorCallback destructorCallback1;
   DestructorCallback destructorCallback2;
   destructorCallback1.EXPECT_CALLED(
@@ -1215,7 +1216,7 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterAssignment) {
   var1 = var2;
 }
 
-TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoveAssignment) {
+TEST(EitherTestDestructor, LeftDestructorIsCalledAfterMoveAssignment) {
   DestructorCallback destructorCallback1;
   DestructorCallback destructorCallback2;
   destructorCallback1.EXPECT_CALLED(
@@ -1233,7 +1234,7 @@ TEST(EitherTest_Destructor, LeftDestructorIsCalledAfterMoveAssignment) {
   var1 = std::move(var2);
 }
 
-TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoveAssignment) {
+TEST(EitherTestDestructor, RightDestructorIsCalledAfterMoveAssignment) {
   DestructorCallback destructorCallback1;
   DestructorCallback destructorCallback2;
   destructorCallback1.EXPECT_CALLED(
@@ -1250,3 +1251,4 @@ TEST(EitherTest_Destructor, RightDestructorIsCalledAfterMoveAssignment) {
       std::move(temp2);
   var1 = std::move(var2);
 }
+// NOLINTEND(*)

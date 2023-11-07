@@ -68,6 +68,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
         "repeat",
+        "round",
         # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "sqrt",
@@ -99,7 +100,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "atan2", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Atan")
     ),
-    xfail("atan2", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    xfail(
+        "atan2", dtypes=[torch.float64, torch.float16],
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64", "f16"])
+    ),
     xfail(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
@@ -113,6 +117,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip("nn.functional.scaled_dot_product_attention", opsets=[onnx_test_common.opsets_before(14)], reason="Need Trilu."),
     skip("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
+    xfail("round", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_0", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_neg_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
     skip("scatter_reduce", variant_name="amin", opsets=[onnx_test_common.opsets_before(16)],
          reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
     skip("scatter_reduce", variant_name="amax", opsets=[onnx_test_common.opsets_before(16)],

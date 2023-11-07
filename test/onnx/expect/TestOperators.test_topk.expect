@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "onnx::Reshape_2"
-    name: "Constant_0"
+    name: "Constant_1"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -20,7 +20,7 @@ graph {
     input: "onnx::Reshape_1"
     input: "onnx::Reshape_2"
     output: "onnx::TopK_3"
-    name: "Reshape_1"
+    name: "Reshape_2"
     op_type: "Reshape"
   }
   node {
@@ -28,7 +28,7 @@ graph {
     input: "onnx::TopK_3"
     output: "4"
     output: "5"
-    name: "TopK_2"
+    name: "TopK_3"
     op_type: "TopK"
     attribute {
       name: "axis"
@@ -36,7 +36,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::TopK_0"
     type {

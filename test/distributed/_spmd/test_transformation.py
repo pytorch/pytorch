@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import torch
 import torch.nn as nn
-from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.distributed._spmd.graph_optimization import (
@@ -30,6 +29,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms as base_with_comms,
 )
+from torch.utils._triton import has_triton
 
 
 def with_comms(func):
@@ -272,7 +272,7 @@ class TransformationTest(DTensorTestBase):
             split_fused_optimizer(gm, opt_block, gradients)
             gm.graph.eliminate_dead_code()
             gm.recompile()
-            self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            self.assertEqual(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
             gm.finalize_setup()
             return gm
 

@@ -443,6 +443,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   const auto& result = maybe_get_output();
 
   if (result.defined()) {
+    TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+                "index_out: self (", self.scalar_type(), ") and result (", result.scalar_type(),
+                ") must have the same scalar type");
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     for (const at::OptionalTensorRef& index : materialized) {
@@ -857,7 +860,9 @@ TORCH_IMPL_FUNC(index_copy_out)
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+     result.copy_(self);
+  }
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
@@ -870,7 +875,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     //     selfSlice.add_(sourceSlice);
     //   }
     // But much faster as this reuses the iterator from add_
-    if (numel == 0) {
+    if (numel == 0 || self.numel() == 0) {
       return;
     }
 
@@ -945,8 +950,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
           add_stub(iter.device_type(), iter, alpha);
       }
     });
-  }
-  else {
+  } else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
     // explicitly capture all required variables to work around windows build
@@ -2064,19 +2068,21 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
-  DimVector self_sizes{self.sizes()};
+  SymDimVector self_sizes{self.sym_sizes()};
   // update number of elements at dim as per indices
-  self_sizes[dim] = indices.size(dim);
-  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
-  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+  self_sizes[dim] = indices.sym_size(dim);
+  auto broadcast_shape = infer_size_symint(self_sizes, indices.sym_sizes());
+  auto indices_broadcasted = at::broadcast_to_symint(indices, broadcast_shape);
 
-  DimVector indices_sizes{indices.sizes()};
+  SymDimVector indices_sizes{indices.sym_sizes()};
   // update number of elements at dim as per self
-  indices_sizes[dim] = self.size(dim);
-  broadcast_shape = infer_size(indices_sizes, self.sizes());
-  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+  indices_sizes[dim] = self.sym_size(dim);
+  broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
+  auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
-  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
+  return std::make_tuple(std::move(self_broadcasted),
+                         std::move(indices_broadcasted),
+                         std::move(dim));
 }
 
 static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
@@ -2306,8 +2312,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
 
         for (const auto i : c10::irange(n2)) {
           const char* ptr = data[0] + i * strides[1];
-          for (const auto j : c10::irange(n1)) {
-            (void)j; //Suppress unused variable warning
+          for (C10_UNUSED const auto j : c10::irange(n1)) {
             const auto& val = c10::load<scalar_t>(ptr);
             // If nonzero, write index
             if (val != scalar_t(0)) {

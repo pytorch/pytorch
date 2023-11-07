@@ -32,15 +32,15 @@ class _FunctionalAdam:
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
+            raise ValueError(f"Invalid beta parameter at index 0: {betas[0]}")
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+            raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         self.defaults = {
             "lr": lr,
@@ -73,6 +73,7 @@ class _FunctionalAdam:
         exp_avg_sqs = []
         max_exp_avg_sqs = []
         state_steps: List[Tensor] = []
+        has_complex = torch.is_complex(param)
         if grad is not None:
             params_with_grad.append(param)
             grads.append(grad)
@@ -108,6 +109,7 @@ class _FunctionalAdam:
                 max_exp_avg_sqs,
                 state_steps,
                 amsgrad=self.amsgrad,
+                has_complex=has_complex,
                 maximize=self.maximize,
                 beta1=self.defaults["beta1"],
                 beta2=self.defaults["beta2"],
@@ -128,6 +130,7 @@ class _FunctionalAdam:
         exp_avg_sqs = []
         max_exp_avg_sqs = []
         state_steps: List[Tensor] = []
+        has_complex = False
 
         if len(params) != len(gradients):
             raise ValueError(
@@ -138,6 +141,7 @@ class _FunctionalAdam:
 
         for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
@@ -178,6 +182,7 @@ class _FunctionalAdam:
                 max_exp_avg_sqs,
                 state_steps,
                 amsgrad=self.amsgrad,
+                has_complex=has_complex,
                 maximize=self.maximize,
                 beta1=self.defaults["beta1"],
                 beta2=self.defaults["beta2"],

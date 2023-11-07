@@ -39,6 +39,7 @@ from .planner import (
 from .utils import _create_file_view
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch._utils import _get_device_module
 
 __all__ = [
     "FileSystemWriter",
@@ -126,9 +127,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.stream = stream or torch.cuda.current_stream()
-        if self.stream != torch.cuda.current_stream():
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_module = _get_device_module(self.device_type)
+        self.stream = stream or self.device_module.current_stream()
+        if self.stream != self.device_module.current_stream():
+            self.stream.wait_stream(self.device_module.current_stream())
 
     @property
     def _done(self):
@@ -145,7 +148,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with torch.cuda.stream(self.stream):
+        with self.device_module.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -153,7 +156,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.is_cuda:
+                if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
@@ -284,7 +287,7 @@ def _write_files_from_queue(
             ]
             write_results = []
 
-            with open(file_name, "wb") as stream:
+            with file_name.open("wb") as stream:
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
@@ -292,7 +295,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert not tensor.is_cuda
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )
@@ -339,7 +342,9 @@ class FileSystemWriter(StorageWriter):
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__()
-        self.path = Path(path)
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
@@ -435,7 +440,8 @@ class FileSystemWriter(StorageWriter):
         metadata.storage_data = storage_md
         with (self.path / ".metadata.tmp").open("wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
-            os.fsync(metadata_file.fileno())
+            if self.sync_files:
+                os.fsync(metadata_file.fileno())
 
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
@@ -443,7 +449,9 @@ class FileSystemWriter(StorageWriter):
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
-        self.path = Path(path)
+        if not isinstance(path, Path):
+            path = Path(path)
+        self.path = path
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo):

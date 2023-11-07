@@ -8,9 +8,12 @@ import unittest
 from functools import partial
 
 import torch
+import torch._custom_ops as custom_ops
+import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
@@ -46,7 +49,8 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    # calling div on only symint args
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -60,8 +64,6 @@ if TEST_WITH_ROCM:
     test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
         ("cuda"), is_skip=True
     )
-    # aten.miopen_batch_norm is not registered for lowering
-    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -155,6 +157,140 @@ class TestInductorDynamic(TestCase):
         ref = fn(x, x.size(0))
         self.assertEqual(res, ref)
 
+    # not supported yet on cpu, https://github.com/pytorch/pytorch/issues/109897
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_bool_mask_nobreak(self, device):
+        def f(x, b):
+            return (x[b] * 2).sum()
+
+        opt_f = torch.compile(f, fullgraph=True)
+        x = torch.randn(5, device=device)
+        b = torch.tensor([True, True, False, False, True], device=device)
+        r = f(x, b)
+        opt_r = opt_f(x, b)
+        self.assertEqual(r, opt_r)
+
+    def test_adaptive_max_pool3d_with_indices(self, device):
+        x = 5
+        y = torch.rand([9, 10, 9, 8, 6], dtype=torch.float32, device=device)
+
+        def fn(x, y):
+            return torch.nn.functional.adaptive_max_pool3d_with_indices(
+                output_size=x, input=y, return_indices=True
+            )
+
+        opt_f = self.compile_fn(fn)
+        r = fn(x, y)
+        opt_r = opt_f(x, y)
+        self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_size_factory_nobreak(self, device):
+        def f(x, b):
+            y = torch.nonzero(b)
+            return x.new_zeros(y.size(0))
+
+        opt_f = torch.compile(f, fullgraph=True)
+        x = torch.randn(5, device=device)
+        b = torch.tensor([True, True, False, False, True], device=device)
+        r = f(x, b)
+        opt_r = opt_f(x, b)
+        self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            return torch.empty(y)
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_zeros_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            torch.empty(y)
+            # This will avoid a NopSchedulerNode
+            return x.new_zeros(y)
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_return(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            z = x.item()
+            return y + z
+
+        f(torch.tensor([3], device=device))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_item_to_inputs_kernel_nobreak(self, device):
+        lib = torch.library.Library("test", "DEF")
+
+        try:
+
+            @custom_ops.custom_op("test::foo")
+            def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+                raise NotImplementedError()
+
+            @custom_ops.impl("test::foo")
+            def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
+                return x.clone()
+
+            @torch.library.impl_abstract("test::foo", lib=lib)
+            def foo_meta(x: torch.Tensor, y: int) -> torch.Tensor:
+                return x.clone()
+
+            @torch.compile(fullgraph=True)
+            def f(x, r):
+                y = x.item()
+                return torch.ops.test.foo(r, y)
+
+            f(torch.tensor([3], device=device), torch.randn(10, device=device))
+
+        finally:
+            custom_ops._destroy("test::foo")
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_dynamic_stride_nobreak(self, device):
+        lib = torch.library.Library("test", "DEF")
+
+        try:
+
+            @custom_ops.custom_op("test::foo")
+            def foo(x: torch.Tensor) -> torch.Tensor:
+                raise NotImplementedError()
+
+            @custom_ops.impl("test::foo")
+            def foo_impl(x: torch.Tensor) -> torch.Tensor:
+                stride = x.item()
+                return torch.empty_strided((1,), (stride,), device=x.device)
+
+            @torch.library.impl_abstract("test::foo", lib=lib)
+            def foo_meta(x: torch.Tensor) -> torch.Tensor:
+                ctx = torch.library.get_ctx()
+                stride = ctx.new_dynamic_size()
+                return torch.empty_strided((1,), (stride,), device=x.device)
+
+            @torch.compile(fullgraph=True)
+            def f(x):
+                r = torch.ops.test.foo(x)
+                y = r.stride(0)
+                return torch.empty(y, device=x.device)
+
+            f(torch.tensor([3], device=device))
+
+        finally:
+            custom_ops._destroy("test::foo")
+
     @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
         # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
@@ -200,6 +336,19 @@ class TestInductorDynamic(TestCase):
         ref = pad_same(x, (5, 5), (2, 2))
         self.assertEqual(res, ref, atol=0, rtol=0)
 
+    def test_slice_scatter(self, device):
+        def fn(i):
+            s3 = i.size(0)
+            x = torch.ones(64, s3, device=device)
+            y = torch.ones(64, s3 // 2, device=device)
+            return torch.slice_scatter(x, y, 1, s3 // 2, 2 * (s3 // 2))
+
+        a = torch.randn(16, device=device)
+        cfn = self.compile_fn(fn)
+        expect = fn(a)
+        actual = cfn(a)
+        self.assertEqual(expect, actual)
+
     def test_slice_index_changing_sign(self, device):
         def fn(x, y):
             y0, y1 = y.shape
@@ -218,6 +367,70 @@ class TestInductorDynamic(TestCase):
         b = torch.randn(2, 16, device=device)
         expect = fn(a, b)
         actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    def test_abs(self, device):
+        def fn(x, y):
+            y0, y1 = y.shape
+            # Slicing checks abs in wrapper code,
+            # multiplication tests abs in kernel code
+            return x[: abs(y0 - y1)] * abs(y0 - y1)
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+
+        # y0 > y1 -> y0 - y1 is positive
+        b = torch.randn(16, 2, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+        # y0 < y1 -> y0 - y1 is negative
+        b = torch.randn(2, 16, device=device)
+        expect = fn(a, b)
+        actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    @onlyCPU
+    def test_arithmetic_constant_folding(self, device):
+        def test(fn):
+            cfn = self.compile_fn(fn)
+            expect = fn(3)
+            actual = cfn(3)
+            self.assertEqual(expect, actual)
+
+        def add(x):
+            return x + torch.zeros(3)
+
+        test(add)
+
+        def mul(x):
+            return x * torch.ones(3)
+
+        test(mul)
+
+        def div(x):
+            return x / torch.ones(3)
+
+        test(div)
+
+    @onlyCPU
+    def test_sub_constant_folding(self, device):
+        def sub(x):
+            return x - torch.zeros(3)
+
+        cfn = self.compile_fn(sub)
+        expect = sub(3)
+        actual = cfn(3)
+        self.assertEqual(expect, actual)
+
+    def test_full(self, device):
+        def fn(a):
+            return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
+
+        cfn = self.compile_fn(fn)
+        expect = fn(5)
+        actual = cfn(5)
         self.assertEqual(expect, actual)
 
 

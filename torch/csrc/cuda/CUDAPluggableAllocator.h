@@ -10,11 +10,7 @@
 #include <array>
 #include <mutex>
 
-namespace torch {
-
-namespace cuda {
-
-namespace CUDAPluggableAllocator {
+namespace torch::cuda::CUDAPluggableAllocator {
 
 #if defined(TORCH_HIP_VERSION)
 using streamType = c10::hip::HIPStream;
@@ -29,7 +25,8 @@ createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
 void changeCurrentAllocator(
-    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
+    const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
+        allocator);
 
 struct _AllocationMetadata {
   _AllocationMetadata();
@@ -74,49 +71,47 @@ struct CUDAPluggableAllocator
   c10::DataPtr allocate(size_t size) const override;
   c10::DeleterFnPtr raw_deleter() const override;
 
-  virtual void* raw_alloc(size_t nbytes) override;
-  virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream)
-      override;
-  virtual void raw_delete(void* ptr) override;
-  virtual void init(int device_count) override;
-  virtual bool initialized() override;
-  virtual void setMemoryFraction(double fraction, int device) override;
-  virtual void emptyCache() override;
-  virtual void cacheInfo(int dev_id, size_t* largestBlock) override;
-  virtual void* getBaseAllocation(void* ptr, size_t* size) override;
+  void* raw_alloc(size_t nbytes) override;
+  void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override;
+  void raw_delete(void* ptr) override;
+  void init(int device_count) override;
+  bool initialized() override;
+  void setMemoryFraction(double fraction, int device) override;
+  void emptyCache() override;
+  void cacheInfo(int dev_id, size_t* largestBlock) override;
+  void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  virtual void recordStream(const c10::DataPtr&, streamType stream) override;
+  void recordStream(const c10::DataPtr&, streamType stream) override;
 
-  virtual c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
+  c10::cuda::CUDACachingAllocator::DeviceStats getDeviceStats(
       int device) override;
-  virtual void resetAccumulatedStats(int device) override;
-  virtual void resetPeakStats(int device) override;
-  virtual c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
-  virtual void beginAllocateStreamToPool(
+  void resetAccumulatedStats(int device) override;
+  void resetPeakStats(int device) override;
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
+  void beginAllocateStreamToPool(
       int device,
       cudaStream_t stream,
       c10::cuda::MempoolId_t mempool_id) override;
-  virtual void endAllocateStreamToPool(int device, cudaStream_t stream)
-      override;
-  virtual void releasePool(int device, c10::cuda::MempoolId_t mempool_id)
-      override;
-  virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
-  virtual void recordHistory(
+  void endAllocateStreamToPool(int device, cudaStream_t stream) override;
+  void releasePool(int device, c10::cuda::MempoolId_t mempool_id) override;
+  std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
+  void recordHistory(
       bool enabled,
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
-      bool alloc_trace_record_context) override;
-  virtual void attachOutOfMemoryObserver(
+      c10::cuda::CUDACachingAllocator::RecordContext when) override;
+  void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
-  virtual std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+  void attachAllocatorTraceTracker(
+      c10::cuda::CUDACachingAllocator::AllocatorTraceTracker tracker) override;
+  std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
   getCheckpointState(int device, at::cuda::MempoolId_t id) override;
-  virtual c10::cuda::CUDACachingAllocator::CheckpointDelta
-  setCheckpointPoolState(
+  c10::cuda::CUDACachingAllocator::CheckpointDelta setCheckpointPoolState(
       int device,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
       override;
-  virtual void enablePeerAccess(int dev, int dev_to_access) override;
-  virtual cudaError_t memcpyAsync(
+  void enablePeerAccess(int dev, int dev_to_access) override;
+  cudaError_t memcpyAsync(
       void* dst,
       int dstDevice,
       const void* src,
@@ -124,7 +119,7 @@ struct CUDAPluggableAllocator
       size_t count,
       cudaStream_t stream,
       bool p2p_enabled) override;
-  virtual std::string name() override;
+  std::string name() override;
 
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
@@ -144,6 +139,4 @@ struct CUDAPluggableAllocator
 
   bool initialized_ = false;
 };
-} // namespace CUDAPluggableAllocator
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda::CUDAPluggableAllocator

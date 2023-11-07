@@ -68,8 +68,8 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
     device = "cuda"
 
 
-# conv2d will fallback for dynamic shapes; the fallback path is not yet supported
 test_failures_cpp_wrapper = {
+    # conv2d will fallback for dynamic shapes; the fallback path is not yet supported
     "test_conv2d_unary_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
@@ -79,10 +79,14 @@ test_failures_cpp_wrapper = {
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
+    # aten._native_multi_head_attention.default is not yet supported for dynamic shapes
+    "test_multihead_attention_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
 }
 
 test_failures_cuda_wrapper = {
-    "test_custom_op_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+    "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",), is_skip=True
     ),
 }
@@ -100,7 +104,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
         tests.setUpClass()
         tests.setUp()
         try:
-            code = test_torchinductor.run_and_get_cpp_code(
+            _, code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
@@ -139,7 +143,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
@@ -149,7 +153,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
@@ -159,7 +163,7 @@ if RUN_CPU:
         BaseTest(
             "test_conv2d_unary",
             "cpu",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
@@ -168,24 +172,105 @@ if RUN_CPU:
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest(
             "test_linear_binary",
             "",
-            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_lstm_packed_change_input_sizes",
+            "cpu",
+            test_cpu_repro.CPUReproTests(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_mm_views"),
+        BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest(
+            "test_qconv2d",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_maxpool2d_linear_dynamic",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                [
+                    "op_qconv2d_pointwise.call",
+                    "op_quantized_max_pool2d_.call",
+                    "op_qlinear_pointwise.call",
+                ]
+            ],
+        ),
+        BaseTest(
+            "test_qlinear",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_randint"),
+        BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_attention"),
+        BaseTest("test_scatter1"),
+        BaseTest("test_scatter2"),
+        BaseTest("test_scatter3"),
+        BaseTest("test_scatter4"),
+        BaseTest("test_scatter5"),
+        BaseTest("test_scatter6"),
+        BaseTest("test_scatter_reduce1"),
+        BaseTest("test_scatter_reduce2"),
+        BaseTest("test_scatter_reduce3"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sort"),
         BaseTest("test_sum_dtype"),  # float64
@@ -193,6 +278,7 @@ if RUN_CPU:
         BaseTest("test_tensor2"),  # constant input
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
+        BaseTest("test_view_as_real"),
     ]:
         make_test_case(
             item.name,
@@ -237,15 +323,19 @@ if RUN_CUDA:
         BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
+        BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
+        BaseTest("test_repeat_interleave_2"),
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
@@ -260,7 +350,7 @@ if RUN_CUDA:
         BaseTest(
             "test_cat_slice_cat",
             device=None,
-            tests=test_pattern_matcher.TestPaternMatcher(),
+            tests=test_pattern_matcher.TestPatternMatcher(),
         ),
         BaseTest(
             "test_addmm",
@@ -272,8 +362,17 @@ if RUN_CUDA:
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
+        # TODO: Re-enable this test after fixing cuda wrapper for conv Triton templates with dynamic shapes.
+        # This test is unstable: it succeeds when an ATEN kernel is used, and fails when a Triton kernel is used.
+        # Currently it passes on CI (an ATEN kernel is chosen) and fails locally (a Triton kernel is chosen).
+        # Ideally, it should succeed for whatever kernels.
+        # BaseTest(
+        #     "test_convolution1",
+        #     device=None,
+        #     tests=test_select_algorithm.TestSelectAlgorithm(),
+        # ),
         BaseTest(
-            "test_convolution1",
+            "test_mm_plus_mm2",
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
@@ -293,7 +392,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
-        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":

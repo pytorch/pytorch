@@ -1,11 +1,13 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <type_traits>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorAccessor.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/Logging.h>
 #include <c10/util/bit_cast.h>
 
@@ -18,12 +20,37 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_efficient_attention_forward.h>
+#include <ATen/ops/_efficient_attention_forward_native.h>
+#include <ATen/ops/_fill_mem_eff_dropout_mask_native.h>
+#include <ATen/ops/_flash_attention_forward.h>
+#include <ATen/ops/_flash_attention_forward_native.h>
+#include <ATen/ops/_fused_sdp_choice_native.h>
+#include <ATen/ops/_masked_softmax.h>
+#include <ATen/ops/_native_multi_head_attention_native.h>
+#include <ATen/ops/scaled_dot_product_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention.h>
+#include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_softmax.h>
+#include <ATen/ops/_transform_bias_rescale_qkv.h>
+#include <ATen/ops/_triton_multi_head_attention_native.h>
+#include <ATen/ops/_triton_scaled_dot_attention.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/linear.h>
+#include <ATen/ops/narrow_native.h>
 #include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/scaled_dot_product_attention.h>
+#include <ATen/ops/split_native.h>
+
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
@@ -37,7 +64,9 @@
 
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
-#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#include <ATen/native/transformers/cuda/flash_attn/flash_api.h>
+#endif
+#ifdef USE_MEM_EFF_ATTENTION
 // MemoryEfficient Attention Specific Imports
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
@@ -519,12 +548,16 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     auto k = key.view({key.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
     auto v = value.view({value.size(0), -1, num_head, dim_per_head}).transpose(1, 2);
 
-    sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
+    sdp::sdp_params kernel_params{q, k, v, mask, 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    if (no_seq_len_1_nested &&
+    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
+    // For mem-eff attention this will cause the expand call to error
+    // For now I am going to turn of that path not have to deal with all the annoying
+    // Mask type shape grossness
+    if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
@@ -536,7 +569,6 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
-
       auto y = at::scaled_dot_product_attention(
           chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
 
@@ -636,7 +668,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -649,69 +681,50 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Ten
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
-  const int64_t batch_size = query.size(0);
-  const int64_t num_heads = query.size(1);
-  const int64_t max_seqlen_batch_q = query.size(2);
-  const int64_t head_dim = query.size(3);
 
+  const int64_t max_seqlen_batch_q = query.size(2);
   const int64_t max_seqlen_batch_k = key.size(2);
   const int64_t max_seqlen_batch_v = value.size(2);
   TORCH_CHECK(
       max_seqlen_batch_k == max_seqlen_batch_v,
       "Key and Value must have the same sequence length");
 
-  // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
-  // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
-  // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
+  // Query -> Query(Batch x Q_seq_len  x Num_heads x Dim_per_head)
+  // Key   -> Key  (Batch x KV_seq_len x Num_heads x Dim_per_head)
+  // Value -> Value(Batch x KV_seq_len x Num_heads x Dim_per_head)
   Tensor q_t = query.transpose(1, 2);
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
 
-  Tensor cumulative_sequence_length_q = at::arange(
-      0,
-      (batch_size + 1) * max_seqlen_batch_q,
-      max_seqlen_batch_q,
-      TensorOptions().device(at::kCUDA).dtype(at::kInt));
-
-  Tensor cumulative_sequence_length_k = at::arange(
-      0,
-      (batch_size + 1) * max_seqlen_batch_k,
-      max_seqlen_batch_k,
-      TensorOptions().device(at::kCUDA).dtype(at::kInt));
-
-  int64_t Nnz_q{batch_size * max_seqlen_batch_q};
-  int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
-
-  // For the standard MHA these will actually be views
-  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
-  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
-  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
-
-  Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
-  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
-      at::_flash_attention_forward(
-          query_reshaped,
-          key_reshaped,
-          value_reshaped,
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_k,
-          max_seqlen_batch_q,
-          max_seqlen_batch_k,
-          dropout_p,
-          is_causal,
-          return_debug_mask,
-          scale);
+  auto
+      [output,
+       logsumexp,
+       philox_seed,
+       philox_offset,
+       debug_attn_mask] =
+          at::_flash_attention_forward(
+              q_t,
+              k_t,
+              v_t,
+              c10::nullopt,
+              c10::nullopt,
+              c10::nullopt,
+              c10::nullopt,
+              dropout_p,
+              is_causal,
+              return_debug_mask,
+              scale);
   // Reshape output to convert nnz to batch_size and seq_len
-  attention =
-      attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
+  Tensor attention = output.transpose(1,2);
 
-  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
+  return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
+    const c10::optional<at::Tensor>& attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
@@ -733,11 +746,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
       q_t,
       k_t,
       v_t,
+      attn_bias,
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
-      c10::nullopt,
-      dropout_p /*dropout_p*/,
+      dropout_p,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
       scale);
@@ -748,7 +761,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
-  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
     TORCH_CHECK(
@@ -759,52 +772,106 @@ int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Te
   return static_cast<int64_t>(backend);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const Tensor& cumulative_sequence_length_q,
-    const Tensor& cumulative_sequence_length_k,
-    const int64_t max_seqlen_batch_q,
-    const int64_t max_seqlen_batch_k,
+    const c10::optional<Tensor>& cumulative_sequence_length_q,
+    const c10::optional<Tensor>& cumulative_sequence_length_k,
+    c10::optional<int64_t> max_seqlen_batch_q,
+    c10::optional<int64_t> max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
-  /*
-  num_splits determines how much to parallelize over the seqlen_q dimension
-  num_splits=0 means
-  it will be set by an internal heuristic. We're exposing num_splits mostly for
-  benchmarking. We will hard code it to 0 for now
-  */
-  constexpr int num_splits{0};
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
-  at::Tensor output = at::empty_like(query);
+  const auto softmax_scale =
+      sdp::calculate_scale(query, scale).as_float_unchecked();
+  c10::optional<Tensor> out = c10::nullopt;
 
-  auto [logsumexp, philox_seed, philox_offset, debug_attn_mask] = pytorch_fmha::mha_fwd(
-      query,
-      key,
-      value,
-      output,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_k,
-      max_seqlen_batch_q,
-      max_seqlen_batch_k,
-      dropout_p,
-      softmax_scale,
-      false, /*zero_tensors = false for all calls here*/
-      is_causal,
-      return_debug_mask, /*return_softmax (this is used for testing)*/
-      num_splits);
-
+  // We are going to have two paths:
+  // 1. The standard MHA path for dense tensors
+  // 2. The Varseqlen path
+  TORCH_CHECK(
+      cumulative_sequence_length_q.has_value() ==
+          cumulative_sequence_length_k.has_value(),
+      "cumulative_sequence_length_q and cumulative_sequence_length_k must be both set or both not set");
+  TORCH_CHECK(
+      max_seqlen_batch_q.has_value() == max_seqlen_batch_k.has_value(),
+      "max_seqlen_batch_q and max_seqlen_batch_k must be both set or both not set");
+  Tensor output, q_padded, k_padded, v_padded, logsumexp, output_shape,
+      philox_seed, philox_offset, debug_attn_mask;
+  if (cumulative_sequence_length_q.has_value()) {
+    TORCH_CHECK(
+        max_seqlen_batch_q.has_value(),
+        "max_seqlen_batch_q must be set when cumulative_sequence_length_q is set");
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        pytorch_flash::mha_varlen_fwd(
+            query,
+            key,
+            value,
+            out,
+            cumulative_sequence_length_q.value(),
+            cumulative_sequence_length_k.value(),
+            max_seqlen_batch_q.value(),
+            max_seqlen_batch_k.value(),
+            dropout_p,
+            softmax_scale,
+            false /*zero_tensors*/,
+            is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
+            return_debug_mask,
+            c10::nullopt /*gen_*/);
+  } else {
+    std::tie(
+        output,
+        q_padded,
+        k_padded,
+        v_padded,
+        logsumexp,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask) =
+        pytorch_flash::mha_fwd(
+            query,
+            key,
+            value,
+            out,
+            dropout_p,
+            softmax_scale,
+            is_causal,
+            -1, /*window_size_left*/
+            -1, /*window_size_right*/
+            return_debug_mask, /*return_softmax (this is used for testing)*/
+            c10::nullopt);
+  }
   debug_attn_mask =
       return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+  return std::make_tuple(
+      std::move(output),
+      std::move(logsumexp),
+      std::move(philox_seed),
+      std::move(philox_offset),
+      std::move(debug_attn_mask));
 
-  return std::make_tuple(output, logsumexp, philox_seed, philox_offset, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  return std::make_tuple(
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
@@ -826,7 +893,7 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
     c10::optional<double> scale,
     const c10::optional<at::Tensor>& causal_diagonal,
     const c10::optional<at::Tensor>& seqlen_k) {
-#if defined(USE_FLASH_ATTENTION)
+#if defined(USE_MEM_EFF_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
 // this would avoid runtime architecture checks, we should look into it
@@ -1043,13 +1110,25 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
           "invalid dtype for bias - should match query's dtype");
       p.attn_bias_ptr = (scalar_t*)bias->data_ptr();
 
-      // assign strides for bias, viewed as
-      // (batch_sz, n_heads, n_queries, n_keys)
-      const at::Tensor bias_4d_view =
-          get_bias_4d_view(*bias, B, num_heads, M, N);
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
+      TORCH_CHECK(bias->dim() == 4, "Bias expected in BMHK format");
+      TORCH_CHECK(
+          bias->size(0) == query.size(0),
+          "attn_bias: wrong shape (batch dimension)");
+      TORCH_CHECK(
+          bias->size(1) == query.size(2),
+          "attn_bias: wrong shape (head dimension)");
+      TORCH_CHECK(
+          bias->size(2) == query.size(1),
+          "attn_bias: wrong shape (seqlenQ dimension)");
+      TORCH_CHECK(
+          bias->size(3) == key.size(1),
+          "attn_bias: wrong shape (seqlenKV dimension)");
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias->stride(0));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias->stride(1));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias->stride(2));
+      TORCH_CHECK(
+          bias->stride(3) == 1,
+          "attn_bias: wrong alignment (last dimension must be contiguous)");
     }
 
     p.use_dropout = use_dropout;
@@ -1087,7 +1166,7 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
       std::move(seed_t),
       std::move(offset_t));
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
 
@@ -1098,25 +1177,7 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
 
 REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
 
-// !!This function is deprecated. See FunctionsManual.cpp for the implementation!!
-bool _chunk_grad_outputs_efficient_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool is_causal) {
-
-  int64_t M = query.size(2);
-  int64_t N = key.size(2);
-
-  bool grad_kv_needs_init = is_causal && N > M;
-  bool is_aliased = query.storage().is_alias_of(key.storage()) && query.storage().is_alias_of(value.storage());
-  bool equal_seq_len = query.size(2) == key.size(2);
-  bool q_v_same_head_dim = query.size(3) == value.size(3);
-  bool chunk_grad_outputs = (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
-  return chunk_grad_outputs;
-}
-
-#ifdef USE_FLASH_ATTENTION
+#ifdef USE_MEM_EFF_ATTENTION
 namespace {
 /**
  * simple kernel that populates a tensor with rand uniform values.
@@ -1182,7 +1243,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
   const int64_t n_heads = self.size(1);
   const int64_t n_queries = self.size(2);
   const int64_t n_keys = self.size(3);
-#if defined(USE_FLASH_ATTENTION)
+#if defined(USE_MEM_EFF_ATTENTION)
 
   at::PhiloxCudaState rng_engine_inputs;
   rng_engine_inputs = at::PhiloxCudaState(seed, offset);
@@ -1200,7 +1261,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 
   return self;
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return self;
 }
 

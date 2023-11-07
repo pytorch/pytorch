@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
+  - [Release Cadence](#release-cadence)
   - [General Overview](#general-overview)
     - [Frequently Asked Questions](#frequently-asked-questions)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
@@ -15,6 +16,7 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+    - [Cherry Picking Reverts](#cherry-picking-reverts)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
   - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
@@ -32,8 +34,10 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+- [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
+  - [Triton dependency for the release](#triton-dependency-for-the-release)
 
 <!-- tocstop -->
 
@@ -43,9 +47,22 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
+| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
+
+## Release Cadence
+
+Following is the release cadence for year 2023/2024. All dates below are tentative, for latest updates on the release scheduled please follow [dev discuss](https://dev-discuss.pytorch.org/c/release-announcements/27).
+
+| Minor Version | Release branch cut | Release date | First patch release date | Second patch release date|
+| --- | --- | --- | --- | --- |
+| 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
+| 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
+| 2.3 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
+| 2.4 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
+| 2.5 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
 
 ## General Overview
 
@@ -75,7 +92,6 @@ Following Requirements needs to be met prior to final RC Cut:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
-  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/nightly)
 
 ## Cutting release branches
 
@@ -117,8 +133,8 @@ them:
   * Example: https://github.com/pytorch/pytorch/pull/77983 and https://github.com/pytorch/pytorch/pull/77986
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
   * Example: https://github.com/pytorch/pytorch/pull/86290 and https://github.com/pytorch/pytorch/pull/90506
-* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@master#@release/2.0# $i; done`
-  * Example: https://github.com/pytorch/pytorch/commit/51b42d98d696a9a474bc69f9a4c755058809542f
+* Update branch used in composite actions from trunk to release (for example, can be done by running `for i in .github/workflows/*.yml; do sed -i -e s#@main#@release/2.0# $i; done`
+  * Example: https://github.com/pytorch/pytorch/commit/17f400404f2ca07ea5ac864428e3d08149de2304
 
 These are examples of changes that should be made to the *default* branch after a release branch is cut
 
@@ -180,7 +196,6 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
-  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
 
 Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
 
@@ -197,6 +212,11 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+### Cherry Picking Reverts
+
+If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+
+Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 
 ## Promoting RCs to Stable
 
@@ -217,12 +237,10 @@ The following should be prepared for the release day
 
 ### Modify release matrix
 
-Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
+Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/test-infra/pull/4611) as reference.
 
-After modifying published_versions.json you will need to regenerate the quick-start-module.js file run following command
-```
-python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
-```
+The PR to update published_versions.json and quick-start-module.js is auto generated. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/1467) as reference.
+
 Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
 
 ### Open Google Colab issue
@@ -231,7 +249,9 @@ This is normally done right after the release is completed. We would need to cre
 
 # Patch Releases
 
-A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`)
+A patch release is a maintenance release of PyTorch that includes fixes for regressions found in a previous minor release. Patch releases typically will bump the `patch` version from semver (i.e. `[major].[minor].[patch]`).
+
+Please note: Starting from 2.1 one can expect up to 2 patch releases after every minor ones. Patch releases would only be published for latest minor release.
 
 ## Patch Release Criteria
 
@@ -241,7 +261,6 @@ Patch releases should be considered if a regression meets the following criteria
     * First party domain libraries:
         * [pytorch/vision](https://github.com/pytorch/vision)
         * [pytorch/audio](https://github.com/pytorch/audio)
-        * [pytorch/text](https://github.com/pytorch/text)
 3. Is there not a viable workaround?
     * Can the regression be solved simply or is it not overcomable?
 
@@ -254,10 +273,10 @@ Patch releases should be considered if a regression meets the following criteria
 > Main POC: Patch Release Managers, Triage Reviewers
 
 Patch releases should follow these high-level phases. This process starts immediately after the previous release has completed.
-Minor release process takes around 6-7 weeks to complete.
+Patch release process takes around 4-5 weeks to complete.
 
-1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2-3 weeks after the release completion.
-2. Patch Release: Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
+1. Triage, is a process where issues are identified, graded, compared to Patch Release Criteria and added to Patch Release milestone. This process normally takes 2 weeks after the release completion.
+2. Go/No Go meeting between PyTorch Releng, PyTorch Core and Project Managers where potential issues triggering a release in milestones are reviewed, and following decisions are made:
   * Should the new patch Release be created ?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create patch release. At this point a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
@@ -329,6 +348,10 @@ the size restrictions for publishing on PyPI so the default version that is publ
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
 
+# Submitting Tutorials
+
+Tutorials in support of a release feature must be submitted to the [pytorch/tutorials](https://github.com/pytorch/tutorials) repo at least two weeks before the release date to allow for editorial and technical review. There is no cherry-pick process for tutorials. All tutorials will be merged around the release day and published at [pytorch.org/tutorials](https://pytorch.org/tutorials/).
+
 # Special Topics
 
 ## Updating submodules for a release
@@ -346,3 +369,19 @@ git config --file=.gitmodules -e
 An example of this process can be found here:
 
 * https://github.com/pytorch/pytorch/pull/48312
+
+## Triton dependency for the release
+
+In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
+
+In Nightly builds we have following configuration:
+* Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+
+However for release we have following :
+* Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
+* Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+
+Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .

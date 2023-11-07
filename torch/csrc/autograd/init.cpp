@@ -2,6 +2,7 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/SequenceNumber.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -12,6 +13,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -48,28 +50,6 @@ struct DisableFuncTorch {
         back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
   c10::impl::ExcludeDispatchKeyGuard front_guard_;
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
-};
-
-struct MultithreadingEnabled {
-  MultithreadingEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
-  }
-  ~MultithreadingEnabled() {
-    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
-  }
-  bool old_;
-};
-
-struct ViewReplayEnabled {
-  ViewReplayEnabled(bool enabled)
-      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
-  }
-  ~ViewReplayEnabled() {
-    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
-  }
-  bool old_;
 };
 
 struct DisableAutocast {
@@ -126,6 +106,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!THPFunctionClass)
     return nullptr;
 
+  // NOTE: "leaks" GradientEdge
+  auto autograd_graph_mod =
+      THPObjectPtr(PyImport_ImportModule("torch.autograd.graph"));
+  THPGradientEdgeClass =
+      PyObject_GetAttrString(autograd_graph_mod, "GradientEdge");
+  if (!THPGradientEdgeClass)
+    return nullptr;
+
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;
@@ -180,6 +168,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("Metal", c10::DeviceType::Metal)
       .value("XPU", c10::DeviceType::XPU)
       .value("MPS", c10::DeviceType::MPS)
+      .value("MTIA", c10::DeviceType::MTIA)
       .value("Meta", c10::DeviceType::Meta)
       .value("HPU", c10::DeviceType::HPU)
       .value("VE", c10::DeviceType::VE)
@@ -263,6 +252,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
+  m.def("_get_sequence_nr", &at::sequence_number::peek);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
       .def("trace_start_us", &ProfilerResult::trace_start_us)
@@ -292,7 +282,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // callbacks.
   m.def(
       "_record_function_with_args_enter",
-      [](const std::string& name, py::args args) {
+      [](const std::string& name, const py::args& args) {
         using torch::autograd::profiler::PythonRecordFunction;
         auto python_rec = c10::make_intrusive<PythonRecordFunction>(
             at::RecordScope::USER_SCOPE);
@@ -342,7 +332,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
-  m.def("_unsafe_set_version_counter", [](at::Tensor t, int64_t i) {
+  m.def("_unsafe_set_version_counter", [](const at::Tensor& t, int64_t i) {
     auto vc = torch::autograd::impl::version_counter(t);
     vc.set_version(i);
   });
@@ -408,6 +398,37 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         auto cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
+  _C_m.def("_set_autograd_fallback_mode", [](const std::string& mode) {
+    if (mode == "nothing") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Nothing);
+      return;
+    }
+    if (mode == "warn") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Warn);
+      return;
+    }
+    if (mode == "error") {
+      torch::autograd::setAutogradFallbackMode(
+          torch::autograd::AutogradFallbackMode::Error);
+      return;
+    }
+    TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode: ", mode);
+  });
+  _C_m.def("_get_autograd_fallback_mode", []() {
+    auto mode = torch::autograd::getAutogradFallbackMode();
+    switch (mode) {
+      case torch::autograd::AutogradFallbackMode::Nothing:
+        return "nothing";
+      case torch::autograd::AutogradFallbackMode::Warn:
+        return "warn";
+      case torch::autograd::AutogradFallbackMode::Error:
+        return "error";
+      default:
+        TORCH_INTERNAL_ASSERT(false, "Unsupported AutogradFallbackMode");
+    }
+  });
 
   _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
@@ -426,10 +447,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher");
   py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
-  py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
-      _C_m, "_MultithreadingEnabled");
   py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
-  py_context_manager<ViewReplayEnabled, bool>(_C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -479,7 +497,7 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
       at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled()) {
+      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -722,6 +740,82 @@ static PyObject* is_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_multithreading_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_multithreading_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_multithreading_enabled");
+  }
+  auto multithreading_enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_multithreading_enabled(
+      multithreading_enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_multithreading_enabled(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_view_replay_enabled(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "set_view_replay_enabled(bool enabled)",
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (at::impl::torch_function_mode_enabled()) {
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    return handle_torch_function(
+        r,
+        args,
+        kwargs,
+        torch_C_module,
+        "torch._C",
+        "_set_view_replay_enabled");
+  }
+  auto view_replay_enabled = r.toBool(0);
+  c10::AutogradState::get_tls_state().set_view_replay_enabled(
+      view_replay_enabled);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -863,9 +957,22 @@ static PyObject* push_on_torch_dispatch_stack(
     PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg != Py_None) {
+    using c10::impl::TorchDispatchModeKey;
+    // When we push a mode onto the mode stack, we need to
+    // check if it's an "infra" mode, by checking its _mode_key attribute.
+    c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    py::object maybe_mode_key_obj =
+        PyObject_FastGetAttrString(arg, "_mode_key");
+    if (maybe_mode_key_obj) {
+      mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+      c10::impl::TorchDispatchModeTLS::set_mode(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+          mode_key.value());
+    } else {
+      c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
+          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+    }
     Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::push_onto_stack(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -873,10 +980,25 @@ static PyObject* push_on_torch_dispatch_stack(
 
 static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
-    PyObject* _unused2) {
+    PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::pop_stack();
-  auto* r = mode->ptr(getPyInterpreter());
+  c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  PyObject* r = nullptr;
+  if (maybe_mode_key != Py_None) {
+    mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
+    auto maybe_mode =
+        c10::impl::TorchDispatchModeTLS::unset_mode(mode_key.value());
+    TORCH_CHECK(
+        maybe_mode.has_value(),
+        "Attempted to unset ",
+        c10::impl::to_string(mode_key.value()),
+        ", but there wasn't one active.");
+    auto mode = maybe_mode.value();
+    r = mode->ptr(getPyInterpreter());
+  } else {
+    auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
+    r = mode->ptr(getPyInterpreter());
+  }
   Py_INCREF(r);
   return r;
   END_HANDLE_TH_ERRORS
@@ -900,9 +1022,55 @@ static PyObject* get_dispatch_stack_at(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* len_torch_dispatch_stack(
-    PyObject* _unused,
-    PyObject* _unused2) {
+static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(mode != Py_None);
+
+  py::object maybe_mode_key_obj = PyObject_FastGetAttrString(mode, "_mode_key");
+  TORCH_CHECK(
+      maybe_mode_key_obj,
+      "set_dispatch_mode() called with a mode that does not contain a _mode_key attribute!");
+  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
+
+  Py_INCREF(mode);
+  c10::impl::TorchDispatchModeTLS::set_mode(
+      std::make_shared<c10::SafePyObject>(mode, getPyInterpreter()), mode_key);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(arg != Py_None);
+  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
+
+  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(mode_key);
+  if (maybe_mode == c10::nullopt) {
+    Py_RETURN_NONE;
+  }
+  auto* r = maybe_mode.value()->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(arg != Py_None);
+  auto mode_key = py::cast<c10::impl::TorchDispatchModeKey>(arg);
+
+  const auto maybe_mode = c10::impl::TorchDispatchModeTLS::unset_mode(mode_key);
+  if (maybe_mode == c10::nullopt) {
+    Py_RETURN_NONE;
+  }
+  auto* r = maybe_mode.value()->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
   return utils::wrap(static_cast<int64_t>(len));
@@ -972,6 +1140,19 @@ static PyMethodDef methods[] = { // NOLINT
      is_anomaly_check_nan_enabled,
      METH_NOARGS,
      nullptr},
+    {"_is_multithreading_enabled",
+     is_multithreading_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_multithreading_enabled",
+     castPyCFunctionWithKeywords(set_multithreading_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_view_replay_enabled", is_view_replay_enabled, METH_NOARGS, nullptr},
+    {"_set_view_replay_enabled",
+     castPyCFunctionWithKeywords(set_view_replay_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
@@ -1001,10 +1182,7 @@ static PyMethodDef methods[] = { // NOLINT
      push_on_torch_dispatch_stack,
      METH_O,
      nullptr},
-    {"_pop_torch_dispatch_stack",
-     pop_torch_dispatch_stack,
-     METH_NOARGS,
-     nullptr},
+    {"_pop_torch_dispatch_stack", pop_torch_dispatch_stack, METH_O, nullptr},
     {"_get_dispatch_stack_at",
      castPyCFunctionWithKeywords(get_dispatch_stack_at),
      METH_VARARGS | METH_KEYWORDS,
@@ -1013,6 +1191,10 @@ static PyMethodDef methods[] = { // NOLINT
      len_torch_dispatch_stack,
      METH_NOARGS,
      nullptr},
+    {"_set_dispatch_mode", set_dispatch_mode, METH_O, nullptr},
+    {"_get_dispatch_mode", get_dispatch_mode, METH_O, nullptr},
+    {"_unset_dispatch_mode", unset_dispatch_mode, METH_O, nullptr},
+
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

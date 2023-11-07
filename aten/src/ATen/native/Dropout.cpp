@@ -35,15 +35,14 @@ Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   return input.new_empty_symint(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.sym_numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy() || input.device().is_privateuseone()) && p > 0 && p < 1 && input.sym_numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure

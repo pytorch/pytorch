@@ -7,6 +7,7 @@ import warnings
 from collections import namedtuple
 from contextlib import nullcontext
 from copy import deepcopy
+from itertools import chain
 from typing import Any, Tuple
 
 import torch
@@ -19,13 +20,14 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp._flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
-from torch.distributed.fsdp.flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
     transformer_auto_wrap_policy,
 )
+from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -54,6 +56,16 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class MyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(2, 2)
+        self.b = nn.Linear(2, 2)
+
+    def forward(self, x, y):
+        return self.b(self.a(x + y))
 
 
 class TestFSDPMiscMultiProcess(FSDPTest):
@@ -132,12 +144,116 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_zero2_eval_with_prefetch(self):
+        # Test FSDP validation with SHARD_GRAD_OP and forward_prefetch
+
+        class Mnist(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 32, 3, 1)
+                self.conv2 = nn.Conv2d(32, 64, 3, 1)
+                self.dropout1 = nn.Dropout(0.25)
+                self.dropout2 = nn.Dropout(0.5)
+                self.fc1 = nn.Linear(9216, 128)
+                self.fc2 = nn.Linear(128, 10)
+                self.ln = nn.LayerNorm(9216)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.conv2(x)
+                x = torch.nn.functional.relu(x)
+                x = torch.nn.functional.max_pool2d(x, 2)
+                x = self.dropout1(x)
+                x = torch.flatten(x, 1)
+                x = self.ln(x)
+                x = self.fc1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.dropout2(x)
+                x = self.fc2(x)
+                output = torch.nn.functional.log_softmax(x, dim=1)
+                loss = torch.nn.functional.cross_entropy(output, y)
+                return loss
+
+        model = Mnist().cuda()
+        model1 = Mnist().cuda()
+        model1.load_state_dict(model.state_dict())
+        fsdp_model = FSDP(
+            model,
+            sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
+            forward_prefetch=True,
+            use_orig_params=True,
+            auto_wrap_policy=ModuleWrapPolicy([nn.Linear, nn.Conv2d]),
+        )
+        ddp_model = torch.nn.parallel.DistributedDataParallel(
+            model1,
+        )
+
+        fsdp_opt = torch.optim.SGD(fsdp_model.parameters(), lr=1e-4)
+        ddp_opt = torch.optim.SGD(ddp_model.parameters(), lr=1e-4)
+
+        seed = self.rank + 20231010
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+
+        losses = []
+        grads = []
+        for i in range(5):
+            x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+            y = torch.randint(low=0, high=9, size=(8,), device="cuda")
+            for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
+                seed = self.rank + i
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
+                loss = model(x, y).sum()
+                losses.append(loss)
+                loss.backward()
+                opt.step()
+                grads.append(x.grad)
+                opt.zero_grad()
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
+            losses.clear()
+            grads.clear()
+
+        with torch.no_grad():
+            fsdp_model.eval()
+            ddp_model.eval()
+            for _ in range(5):
+                x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+                y = torch.randint(low=0, high=9, size=(8,), device="cuda")
+                fsdp_loss = fsdp_model(x, y)
+                ddp_loss = ddp_model(x, y)
+                assert torch.allclose(fsdp_loss, ddp_loss)
+
+        fsdp_model.train()
+        ddp_model.train()
+        for i in range(5):
+            x = torch.randn(8, 1, 28, 28, device="cuda").requires_grad_()
+            y = torch.randint(low=0, high=9, size=(8,), device="cuda")
+            for model, opt in ((fsdp_model, fsdp_opt), (ddp_model, ddp_opt)):
+                seed = self.rank + i
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed(seed)
+                loss = model(x, y).sum()
+                losses.append(loss)
+                loss.backward()
+                opt.step()
+                grads.append(x.grad)
+                opt.zero_grad()
+            assert torch.allclose(losses[0], losses[1])
+            assert torch.allclose(grads[0], grads[1])
+            losses.clear()
+            grads.clear()
+
+    @skip_if_lt_x_gpu(2)
     @parametrize("use_second_layer", [True, False])
     @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
     def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
         # When use_second_layer=True, b is involved in forward computation but does
         # not receive grad in backward. Otherwise, b is not involved in forward
         # computation.
+
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -168,8 +284,8 @@ class TestFSDPMiscMultiProcess(FSDPTest):
             loss.backward()
 
             # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._handles[0].flat_param.grad
-            b_grad = fsdp.module.b._handles[0].flat_param.grad
+            a_grad = fsdp.module.a._handle.flat_param.grad
+            b_grad = fsdp.module.b._handle.flat_param.grad
             self.assertIsNotNone(a_grad)
             self.assertIsNone(b_grad)
 
@@ -201,13 +317,15 @@ class TestFSDPMiscMultiProcess(FSDPTest):
                 return (a, b)
 
         def _check_resharded(fsdp_module):
-            for handle in fsdp_module._handles:
-                param = handle.flat_param
-                if handle.uses_sharded_strategy:
-                    full_param = param._full_param_padded
-                    self.assertEqual(full_param.storage().size(), 0)
+            handle = fsdp_module._handle
+            if not handle:
+                return
+            param = handle.flat_param
+            if handle.uses_sharded_strategy:
+                full_param = param._full_param_padded
+                self.assertEqual(full_param.storage().size(), 0)
 
-                self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
+            self.assertEqual(param.data_ptr(), param._local_shard.data_ptr())
 
         def _check_equal(local, fsdp):
             with FSDP.summon_full_params(fsdp):
@@ -262,11 +380,134 @@ class TestFSDPMiscMultiProcess(FSDPTest):
         dist.barrier()
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_optim_overlap_no_use_orig_params_error(self):
+        fsdp_overlap = FSDP(
+            MyModel().cuda(),
+            auto_wrap_policy=always_wrap_policy,
+            use_orig_params=False,
+        )
+        optim_cls = torch.optim.SGD
+        optim_kwargs = {"lr": 0.03}
+        _apply_optimizer_in_backward(
+            optimizer_class=optim_cls,
+            params=fsdp_overlap.parameters(),
+            optimizer_kwargs=optim_kwargs,
+            register_hook=False,
+        )
+
+        inp = torch.randn(10, 10, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError, "only supported with use_orig_params=True"
+        ):
+            fsdp_overlap(inp, inp)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_optimizer_overlap(self):
+        torch.manual_seed(0)
+        for cpu_offload in [True, False]:
+            offload = CPUOffload(offload_params=cpu_offload)
+            model = MyModel().cuda()
+            model_overlap = deepcopy(model)
+            fsdp = FSDP(
+                model.cuda(),
+                auto_wrap_policy=always_wrap_policy,
+                use_orig_params=True,
+                cpu_offload=offload,
+            )
+            fsdp_overlap = FSDP(
+                model_overlap.cuda(),
+                auto_wrap_policy=always_wrap_policy,
+                use_orig_params=True,
+                cpu_offload=offload,
+            )
+            optim_cls = torch.optim.SGD
+            optim_kwargs = {"lr": 0.03}
+            _apply_optimizer_in_backward(
+                optimizer_class=optim_cls,
+                params=fsdp_overlap.parameters(),
+                optimizer_kwargs=optim_kwargs,
+                register_hook=False,
+            )
+            for p in fsdp_overlap.parameters():
+                assert hasattr(p, "_in_backward_optimizers")
+            optim = optim_cls(fsdp.parameters(), **optim_kwargs)
+
+            # Verify params initially equal
+            for p1, p2 in zip(fsdp.parameters(), fsdp_overlap.parameters()):
+                self.assertEqual(p1, p2)
+
+            with FSDP.summon_full_params(fsdp_overlap):
+                fsdp_overlap_prev_params = [
+                    (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
+                ]
+
+            for i in range(6):
+                inp = torch.randn(2, 2, device="cuda")
+                with torch.no_grad():
+                    inp_clone = inp.clone()
+                fsdp(inp, inp).sum().backward()
+                fsdp_overlap(inp_clone, inp_clone).sum().backward()
+
+                optim.step()
+                optim.zero_grad()
+
+                # Overlapped optimizer FSDP module should have sharded_grad as None.
+                for fsdp_unit in FSDP.fsdp_modules(fsdp_overlap):
+                    handle = fsdp_unit._handle
+                    if handle:
+                        handle_grad = handle.sharded_grad
+                        self.assertEqual(
+                            None,
+                            handle_grad,
+                            "Overlapped FSDP sharded_grad is not None!",
+                        )
+
+                # Note: FSDP without optimizer overlap won't set sharded_grad to None until the next
+                # pre-forward since it needs to run FSDP specific logic that picks up that set_to_none=True
+                # has been called (or that the gradients have been otherwise set to None)
+
+                # Verify parameters are different than prev iteration
+                with FSDP.summon_full_params(fsdp_overlap, with_grads=True):
+                    for (n, p), (n_prev, p_prev) in zip(
+                        fsdp_overlap.named_parameters(), fsdp_overlap_prev_params
+                    ):
+                        self.assertNotEqual(
+                            p,
+                            p_prev,
+                            f"{n_prev} Params at iter {i} same as previous iter!",
+                        )
+
+                # Verify overlap and non overlapped are the same
+                with FSDP.summon_full_params(fsdp_overlap):
+                    with FSDP.summon_full_params(fsdp):
+                        for (n_overlap, p_overlap), (n, p) in zip(
+                            fsdp_overlap.named_parameters(), fsdp.named_parameters()
+                        ):
+                            self.assertEqual(n_overlap, n)
+                            self.assertEqual(
+                                p,
+                                p_overlap,
+                                f"Rank {self.rank}: Params not equal at iteration {i}: {n_overlap} - {p} vs {p_overlap}",
+                            )
+                            self.assertEqual(
+                                None, p.grad, f"Expected param {n} grad to be None"
+                            )
+                            self.assertEqual(
+                                None,
+                                p_overlap.grad,
+                                f"Expected param {n_overlap} grad to be None",
+                            )
+
+                    fsdp_overlap_prev_params = [
+                        (n, p.clone()) for n, p in fsdp_overlap.named_parameters()
+                    ]
+
+    @skip_if_lt_x_gpu(2)
     def test_fsdp_cpu_init_stays_on_cpu(self):
         # Move me to MT test once warning logging and backward collective issue
         # is resolved.
         """Tests that passing a CPU module to FSDP preserves that the wrapped
-        module is on CPU after FSDP initialization, albeit after loging a
+        module is on CPU after FSDP initialization, albeit after logging a
         warning, and that FSDP moves CPU input to GPU before the forward."""
         torch.cuda.set_device(self.rank)
         regex = "passed-in `module` is on CPU"
@@ -502,6 +743,52 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         # without device_id, we hit an error
         with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
             FSDP(CPUGPUModule())
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_ignored_module_meta(self):
+        torch.cuda.set_device(self.rank)
+
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        meta_device = torch.device("meta")
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+        # Test with param_init_fn
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(
+            m,
+            device_id=torch.cuda.current_device(),
+            ignored_modules=[m.a],
+            use_orig_params=True,
+            param_init_fn=lambda m: m.to_empty(
+                device=torch.cuda.current_device(), recurse=False
+            ),
+        )
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_id_no_move_ignored_params_and_bufs(self):
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+                self.a.register_buffer("buf", torch.ones(1))
+
+        m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        ignored_params = m.a.parameters()
+        ignored_bufs = m.a.buffers()
+        for t in chain(ignored_params, ignored_bufs):
+            self.assertEqual(torch.device("cpu"), t.device)
 
     @skip_if_lt_x_gpu(2)
     def test_multigpu_module(self):

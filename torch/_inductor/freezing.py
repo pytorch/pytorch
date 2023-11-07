@@ -1,64 +1,39 @@
-import itertools
+from __future__ import annotations
 
-import unittest
+import itertools
+import logging
+
 import weakref
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import detect_fake_mode, dynamo_timed
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
+from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
 
-from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
-from torch.fx.experimental.proxy_tensor import make_fx
-from . import config
-from .decomposition import select_decomp_table
 
-aten = torch.ops.aten
+from . import config
 
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-
-def replace_node_with_constant(gm, node, constant):
-    g = gm.graph
-
-    if not hasattr(gm, "_frozen_param_count"):
-        gm._frozen_param_count = 0
-
-    i = gm._frozen_param_count
-
-    while True:
-        qualname = f"_frozen_param{i}"
-        if not hasattr(gm, qualname):
-            break
-        i += 1
-
-    gm._frozen_param_count = i + 1
-
-    with g.inserting_before(node):
-        new_input_node = g.create_node("get_attr", qualname, (), {})
-        node.replace_all_uses_with(new_input_node)
-        new_input_node.meta.update(node.meta)
-        g.erase_node(node)
-
-    # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
-    gm.register_buffer(qualname, constant)
-    setattr(gm, qualname, constant)
+log = logging.getLogger(__name__)
 
 
-def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
+def replace_params_with_constants(
+    gm: torch.fx.GraphModule,
+    flat_params: list[Any],
+    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+) -> List[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
     """
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
     fake_inp_nodes = params[: len(params)]
-    g = gm.graph
     preserved_arg_indices = []
     aliased_input_args = [
         out_info.base_idx
@@ -66,7 +41,7 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
         if out_info.base_idx is not None
     ]
     for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
+        if i in fw_metadata.mutated_inp_indices or i in aliased_input_args:
             preserved_arg_indices.append(i)
             continue
         replace_node_with_constant(gm, node, real_input)
@@ -75,112 +50,6 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     # is this necessary ?
     gm.recompile()
     return preserved_arg_indices
-
-
-class ConstantFolder(torch.fx.Interpreter):
-    def __init__(self, gm, skip_constructors=False):
-        super().__init__(gm)
-        self.node_replacements = {}
-        self.unknown_value = object()
-        self.skip_constructors = skip_constructors
-
-    def run_node(self, node):
-        aten = torch.ops.aten
-        args, kwargs = self.fetch_args_kwargs_from_env(node)
-
-        if node.target == "output":
-            return super().run_node(node)
-
-        flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
-        if self.unknown_value in flattened_inputs:
-            return self.unknown_value
-
-        # TODO - fix errors with this
-        if (
-            node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
-        ):
-            return self.unknown_value
-
-        # skip constructors, since inductor generates optimal code for them already
-        # and turning into tensor would result in an additional global memory read
-        # TODO - more complicated strategy
-        if (
-            self.skip_constructors
-            and node.op != "get_attr"
-            and not any(isinstance(e, torch.Tensor) for e in flattened_inputs)
-        ):
-            return self.unknown_value
-
-        # All mutations should either be removed or on inputs which we did not make constant
-        if (
-            isinstance(node.target, torch._ops.OpOverload)
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
-            return self.unknown_value
-
-        out = super().run_node(node)
-
-        # TODO - remove constant from node_replacement when it has no uses
-        if node.op != "get_attr" and isinstance(out, torch.Tensor):
-            self.node_replacements[node] = out
-
-        return out
-
-    def run(self):
-        env = {}
-        for n in self.module.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = self.unknown_value
-        return super().run(initial_env=env)
-
-
-@torch.utils._python_dispatch._disable_current_modes()
-def constant_fold(gm):
-    cf = ConstantFolder(gm, skip_constructors=True)
-    cf.run()
-
-    for node, constant in cf.node_replacements.items():
-        replace_node_with_constant(gm, node, constant)
-
-    erased_params = []
-    for node in gm.graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
-            delattr(gm, node.target)
-            erased_params.append(node)
-
-    for node in erased_params:
-        gm.graph.erase_node(node)
-
-    gm.graph.eliminate_dead_code()
-    gm.graph.lint()
-    gm.recompile()
-
-
-@torch.utils._python_dispatch._disable_current_modes()
-def fuse_conv_bn(gm):
-    return _fuse_conv_bn_(gm)
-
-
-def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
-    if not any(
-        node.target is aten._native_batch_norm_legit_no_training.default
-        for node in gm.graph.nodes
-    ):
-        return gm
-
-    fake_mode = detect_fake_mode(example_inputs)
-
-    # constant params will be real tensors, not fake
-    # TODO: fake_mode should should enable py dispatcher if its symbolic ?
-    with unittest.mock.patch.object(
-        fake_mode, "allow_non_fake_inputs", True
-    ), fake_mode:
-        args = [e for i, e in enumerate(example_inputs) if i in preserved_arg_indices]
-        with fx_traceback.preserve_node_meta():
-            gm = make_fx(gm, select_decomp_table())(*args)
-
-    return gm
 
 
 def freeze(
@@ -203,43 +72,41 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
-    fw_metadata = torch._guards.TracingContext.get().fw_metadata
-    params_flat = torch._guards.TracingContext.get().params_flat
-    assert fw_metadata is not None and params_flat is not None
+    # We have convert conv's weight to channels last which may meet error for .view
+    # when doing fake_tensor_prop. So we need to convert view to reshape first.
+    # See the details in fx_codegen_and_compile of compile_fx.py.
+    view_to_reshape(aot_autograd_gm)
 
-    preserved_arg_indices = replace_params_with_constants(
-        aot_autograd_gm, params_flat, fw_metadata
-    )
+    if torch._guards.TracingContext.get():
+        fw_metadata = torch._guards.TracingContext.get().fw_metadata
+        params_flat = torch._guards.TracingContext.get().params_flat
+        assert fw_metadata is not None and params_flat is not None
 
-    constant_fold(aot_autograd_gm)
+        preserved_arg_indices = replace_params_with_constants(
+            aot_autograd_gm, params_flat, fw_metadata
+        )
+    else:
+        inputs = [
+            node for node in aot_autograd_gm.graph.nodes if node.op == "placeholder"
+        ]
+        preserved_arg_indices = list(range(len(inputs)))
 
-    fuse_conv_bn(aot_autograd_gm)
-    # now, decomp batch norm if we were unable to fuse it
-    aot_autograd_gm = decompose_unfused_batchnorms(
-        aot_autograd_gm, example_inputs, preserved_arg_indices
-    )
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph
     aot_autograd_gm.recompile()
 
-    # We have convert conv's weight to channels last which may meet error for .view
-    # when doing fake_tensor_prop. So we need to convert view to reshape first.
-    # See the details in fx_codegen_and_compile of compile_fx.py.
-    view_to_reshape(aot_autograd_gm)
-    # Make sure meta['val'] is properly setup(weight conversion
-    # or decompose_unfused_batchnorms lost meta['val']).
     aot_example_inputs = [example_inputs[ind] for ind in preserved_arg_indices]
-    fake_tensor_prop(aot_autograd_gm, aot_example_inputs, True)
-    freezing_passes(aot_autograd_gm)
+    freezing_passes(aot_autograd_gm, aot_example_inputs)
 
-    # TODO - apply legalization in pattern matcher
-    torch.fx.passes.tools_common.legalize_graph(aot_autograd_gm)
     constant_fold(aot_autograd_gm)
     # invalidate nn Modules
     if config.freezing_discard_parameters:
         invalidate_eager_modules()
         discard_traced_gm_params(dynamo_gm)
+
+    log.debug("%s", lazy_format_graph_code("FROZEN GRAPH", aot_autograd_gm))
+
     return aot_autograd_gm, preserved_arg_indices
 
 
@@ -256,15 +123,15 @@ class ErasedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         erased_tensors = [
             e
-            for e in pytree.tree_flatten((args, kwargs))[0]
+            for e in pytree.arg_tree_leaves(*args, **kwargs)
             if isinstance(e, ErasedTensor)
         ]
         assert len(erased_tensors) > 0
         e = erased_tensors[0]
 
         raise RuntimeError(
-            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
-            "The original parameters have been discarded for memeory efficiency. "
+            f"Trying to run Pytorch Eager Module after Dynamo Freezing. "
+            "The original parameters have been discarded for memory efficiency. "
             f"Found in op {func} for erased parameter {e.erased_name} of {e.owning_mod_ref()}"
         )
 
@@ -289,7 +156,7 @@ def invalidate_eager_modules():
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod):
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
     for attr_name, tensor in list(
         itertools.chain(
             mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -303,7 +170,7 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
-def enforce_output_layout(gm):
+def enforce_output_layout(gm: torch.fx.GraphModule):
     """
     Make sure the output node's layout does not change due to compiler optimizations
     by adding aten.as_strided nodes with the expected strides.
@@ -334,8 +201,33 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
+def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
+    """
+    Make sure the as_strided node's input's layout does not change due to compiler
+    optimizations, because the as_strided strides info depends on input tensor stride info.
+    """
+
+    as_strided_ops = [
+        torch.ops.aten.as_strided.default,
+        torch.ops.aten.as_strided_.default,
+        torch.ops.aten.as_strided_scatter.default,
+    ]
+    strided_nodes = [n for n in gm.graph.nodes if n.target in as_strided_ops]
+    for n in strided_nodes:
+        with gm.graph.inserting_before(n):
+            # add a node to enforce eager layout
+            ft = n.args[0].meta["val"]
+            new_node = gm.graph.call_function(
+                prims.inductor_force_stride_order.default, (n.args[0], ft.stride())
+            )
+            n.replace_input_with(n.args[0], new_node)
+
+    gm.graph.lint()
+    gm.recompile()
+
+
 @dynamo_timed
-def convert_conv_weights_to_channels_last(gm):
+def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     """
     Convert 4d convolution weight tensor to channels last format.
 
@@ -359,4 +251,5 @@ def convert_conv_weights_to_channels_last(gm):
             )
             conv.replace_input_with(weight_node, new_node)
 
+    enforce_as_strided_input_layout(gm)
     enforce_output_layout(gm)

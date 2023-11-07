@@ -143,7 +143,7 @@ def _rematerialize_optimizer(
     assert opt is not None
 
     # update opt.state with proxy tensors
-    orig_states: Dict[str, Any] = copy(opt.state)
+    orig_states = copy(opt.state)
     for n in named_states:
         # opt.state's key type is string, but optimizer uses Parameter as keys
         opt.state[params[n]] = named_states[n]  # type: ignore[index]
@@ -271,11 +271,17 @@ SPMD_DECOMP_TABLE = {
     aten._foreach_mul_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
     ),
+    aten._foreach_div_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_div.Scalar
+    ),
     aten._foreach_neg_.default: partial(
         _foreach_unaop_decomp, aten._foreach_neg.default
     ),
     aten._foreach_reciprocal_.default: partial(
         _foreach_unaop_decomp, aten._foreach_reciprocal.default
+    ),
+    aten._foreach_sqrt_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_sqrt.default
     ),
     aten._foreach_sub_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
@@ -296,7 +302,7 @@ def _dedup_collectives(gm: fx.GraphModule) -> fx.GraphModule:
 
     for node in gm.graph.nodes:
         # replace all args with the results from the first unique comm op
-        args, _ = pytree.tree_flatten(node.args)
+        args = pytree.arg_tree_leaves(*node.args)
 
         if node.target in DEDUP_TARGETS:
             args_key = (node.target, *args)
@@ -334,7 +340,7 @@ def _compile(
     # FIXME(@mrshenli): support multiple Optiimzer instances
     # FIXME(@mrshenli): need to broadcast model to sync parameters
     mod, opt = None, None
-    for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[0]:
+    for arg in pytree.arg_tree_leaves(*args, **kwargs):
         if isinstance(arg, nn.Module):
             assert mod is None, "Only support single nn.Module for now"
             mod = arg
@@ -383,7 +389,7 @@ def _compile(
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), {**params, **buffers}
+            mod, {**params, **buffers}
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
@@ -460,7 +466,7 @@ def _compile(
     #   container that maintains the state tensors in the same order as they
     #   appear in graph placeholders.
     #   - Reduced runtime cost. The state container is only flattened once upfront.
-    flat_state, _ = pytree.tree_flatten([params_and_buffers, named_states])
+    flat_state = pytree.tree_leaves([params_and_buffers, named_states])
     gm = _to_caller_flattened_graph_module(gm)
 
     # 6. dedup comm operators.
@@ -533,7 +539,9 @@ def compile(
                 compiled_obj = _compile(func, module_override, mode, *args, **kwargs)
                 wrapper.__dict__[COMPILED_OBJECT_KEY] = compiled_obj
 
-            flat_inps = compiled_obj.flat_state + pytree.tree_flatten([args, kwargs])[0]
+            flat_inps = compiled_obj.flat_state + pytree.arg_tree_leaves(
+                *args, **kwargs
+            )
 
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been

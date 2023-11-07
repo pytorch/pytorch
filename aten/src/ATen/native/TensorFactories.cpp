@@ -253,7 +253,12 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
-  return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  Tensor result = at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    fill_empty_deterministic_(result);
+  }
+  return result;
 }
 
 Tensor empty_names(
@@ -320,7 +325,12 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
                          c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
-  return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  Tensor result = at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    fill_empty_deterministic_(result);
+  }
+  return result;
 }
 
 Tensor& empty_out(IntArrayRef size,
@@ -336,6 +346,10 @@ Tensor& empty_out(IntArrayRef size,
     result.sparse_resize_and_clear_(size, size.size(), 0);
   } else {
     result.resize_(size);
+  }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    fill_empty_deterministic_(result);
   }
   return result;
 }
@@ -692,6 +706,45 @@ Tensor linspace(
   return at::linspace_out(result, start, end, steps);
 }
 
+Tensor linspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::linspace(start.item(), end.item(), steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::linspace(start.item(), end, steps, dtype, layout, device, pin_memory);
+}
+
+Tensor linspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "linspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::linspace(start, end.item(), steps, dtype, layout, device, pin_memory);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor logspace(
@@ -710,6 +763,48 @@ Tensor logspace(
   auto result_options = linspace_logspace_infer_options(start, end, options, "torch.logspace()");
   Tensor result = at::empty({steps}, result_options);
   return at::logspace_out(result, start, end, steps, base);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0 && end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s) and end with ", end.dim()," dimension(s).");
+  return at::logspace(start.item(), end.item(), steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Tensor& start,
+    const Scalar& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(start.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got start with ", start.dim(), " dimension(s).");
+  return at::logspace(start.item(), end, steps, base, dtype, layout, device, pin_memory);
+}
+
+Tensor logspace(
+    const Scalar& start,
+    const Tensor& end,
+    int64_t steps,
+    double base,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(end.dim() == 0, "logspace only supports 0-dimensional start and end tensors, "
+    "but got end with ", end.dim()," dimension(s).");
+  return at::logspace(start, end.item(), steps, base, dtype, layout, device, pin_memory);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/Context.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/mps/MPSEvent.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -23,8 +24,9 @@
 #include <c10/util/intrusive_ptr.h>
 
 
-namespace at {
-namespace mps {
+namespace at::mps {
+
+typedef MPSEvent* mpsEvent_t;
 
 // TODO: Move the MPSGuardImpl to inherit from NoOpDeviceGuardImpl
 // https://github.com/pytorch/pytorch/issues/77170
@@ -169,4 +171,4 @@ struct OptionalMPSGuard {
 
 C10_REGISTER_GUARD_IMPL(MPS, MPSGuardImpl);
 
-}} // namespace at::mps
+} // namespace at::mps

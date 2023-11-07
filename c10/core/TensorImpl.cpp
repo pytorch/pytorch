@@ -73,9 +73,7 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() {
-  pyobj_slot_.destroy_pyobj_if_needed();
-}
+TensorImpl::~TensorImpl() = default;
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -503,7 +501,7 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 // test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
 // very slowly.
 
-static bool definitely_true(SymBool b) {
+static bool definitely_true(const SymBool& b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
@@ -582,7 +580,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.destroy_pyobj_if_needed();
+  pyobj_slot_.maybe_destroy_pyobj();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -591,7 +589,15 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
+  TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+      false, "Cannot call ", meth, "() on tensor with symbolic sizes/strides");
+}
+
 void TensorImpl::throw_storage_access_error() const {
+  if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
+    TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
@@ -629,7 +635,9 @@ bool TensorImpl::is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
   }
   return sizes_default();
@@ -664,7 +672,9 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->strides(this);
   }
   return strides_default();

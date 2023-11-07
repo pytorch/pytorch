@@ -14,7 +14,16 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, ModularIndexing
+from .functions import (
+    CleanDiv,
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+    ModularIndexing,
+    Pow,
+    TrueDiv,
+    Where,
+)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -22,8 +31,6 @@ from .functions import CleanDiv, FloorDiv, ModularIndexing
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
-
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
     # TODO default to some decompositions if the interpreter doesn't have them
@@ -42,10 +49,12 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
+        Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",
         sympy.Pow: "pow",
+        Mod: "mod",
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
@@ -55,6 +64,9 @@ def handlers():
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
+        sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
+        sympy.Piecewise: "piecewise",
+        IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
     }
     return HANDLERS
 
@@ -66,15 +78,16 @@ def sympy_interp(
     analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
-    # TODO: not really sure if I'm passing the right dtype here
-    # TODO: wouldn't it be better to pass the sympy expression through
-    # sometimes?
-    if isinstance(expr, sympy.Integer):
-        return analysis.constant(int(expr), torch.int64)
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
     elif isinstance(expr, sympy.Number):
-        return analysis.constant(float(expr), torch.double)
-    elif isinstance(expr, BooleanAtom):
-        return analysis.constant(bool(expr), torch.bool)
+        dtype = torch.double
+
+    if dtype is not None:
+        return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
         return env[expr]
 

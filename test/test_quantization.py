@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 import logging
@@ -80,17 +79,19 @@ except ImportError as e:
     # velocity. These are covered by a separate test target `quantization_fx`
     logging.warning(e)
 
-# Quantization for PyTorch 2.0 Export path
+# PyTorch 2 Export Quantization
 try:
     # To be moved to compiler side later
     from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
+    from quantization.pt2e.test_duplicate_dq import TestDuplicateDQPass  # noqa: F401
+    from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EOps  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
+    from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
+    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXX86Inductor  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
 except ImportError as e:
     # In FBCode we separate PT2 out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_pt2e`
@@ -150,6 +151,18 @@ except ImportError as e:
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPU  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCUDA  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
+try:
+    from quantization.core.experimental.test_float8 import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
+except ImportError as e:
+    logging.warning(e)
 
 if __name__ == '__main__':
     run_tests()

@@ -5,14 +5,15 @@
 #include <mutex>
 #include <type_traits>
 #include <utility>
+#include <variant>
 
 #include <ATen/Context.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/data_flow.h>
 #include <torch/csrc/profiler/events.h>
@@ -55,6 +56,9 @@ struct TORCH_API RawTensorMetadataBase {
 struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata() = default;
   RawTensorMetadata(const RawTensorMetadata&) = default;
+  RawTensorMetadata(RawTensorMetadata&&) noexcept = default;
+  RawTensorMetadata& operator=(const RawTensorMetadata&) = default;
+  RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
   // Wrap `weak_self_` in `c10::optional` and split device into components to
@@ -85,7 +89,7 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   c10::optional<AllocationID> allocation_id_;
 };
 
-using op_input_t = c10::variant<
+using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
@@ -114,6 +118,7 @@ struct TorchOpBasicFields {
 using jit_stack_t = std::vector<std::string>;
 using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
+using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct FallbackPair {
   ProfilerVoidEventStub device_event_start_ = nullptr;
@@ -125,12 +130,13 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   ExtraFields(
       TorchOpBasicFields&& f,
       uint64_t correlation_id,
-      time_t end_time_ns,
+      c10::time_t end_time_ns,
       std::vector<op_input_t>&& inputs,
       std::vector<op_input_t>&& concrete_inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
+      extra_meta_t&& extra_meta,
       FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
       std::unique_ptr<perf_counters_t>&& perf_event_counters)
@@ -142,16 +148,18 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
+        extra_meta_{std::move(extra_meta)},
         device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
-  time_t end_time_ns_;
+  c10::time_t end_time_ns_;
   std::vector<op_input_t> inputs_;
   std::vector<op_input_t> concrete_inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
+  extra_meta_t extra_meta_;
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
@@ -171,7 +179,7 @@ struct ExtraFields<EventType::Backend> {
 
 template <>
 struct ExtraFields<EventType::Vulkan> {
-  using raw_event_t = std::pair<approx_time_t, vulkan_id_t>;
+  using raw_event_t = std::pair<c10::approx_time_t, vulkan_id_t>;
   std::string name_;
   int64_t duration_ns_{0};
   // While building the event tree, we want to report a vulkan event's duration
@@ -180,7 +188,7 @@ struct ExtraFields<EventType::Vulkan> {
 };
 
 struct RawAllocation {
-  torch::profiler::impl::approx_time_t start_time_;
+  c10::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
   size_t total_allocated_;
@@ -206,7 +214,7 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
 
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
-  torch::profiler::impl::approx_time_t start_time_;
+  c10::approx_time_t start_time_;
   int64_t alloc_size_;
   size_t total_allocated_;
   size_t total_reserved_;
@@ -266,12 +274,15 @@ struct OptimizerInfo {
 };
 
 struct PyExtraFieldsBase {
-  PyExtraFieldsBase(time_t end_time_ns, size_t python_tid, PyFrameState caller)
+  PyExtraFieldsBase(
+      c10::time_t end_time_ns,
+      size_t python_tid,
+      PyFrameState caller)
       : end_time_ns_{end_time_ns},
         python_tid_{python_tid},
         caller_{std::move(caller)} {}
 
-  time_t end_time_ns_;
+  c10::time_t end_time_ns_;
   size_t python_tid_;
   PyFrameState caller_;
 
@@ -288,7 +299,7 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
   };
 
   ExtraFields(
-      time_t end_time_ns,
+      c10::time_t end_time_ns,
       size_t python_tid,
       PyFrameState caller,
       args_t args)
@@ -307,7 +318,7 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
   using args_t = at::StringView;
 
   ExtraFields(
-      time_t end_time_ns,
+      c10::time_t end_time_ns,
       size_t python_tid,
       PyFrameState caller,
       args_t args)
@@ -345,12 +356,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 
   template <typename T>
   decltype(auto) visit(T&& visitor) {
-    return c10::visit(std::forward<T>(visitor), extra_fields_);
+    return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T>
   decltype(auto) visit(T&& visitor) const {
-    return c10::visit(std::forward<T>(visitor), extra_fields_);
+    return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T, typename Fn>
@@ -379,7 +390,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   int64_t start_time_ns_;
   uint64_t start_tid_;
   kineto::DeviceAndResource kineto_info_;
-  c10::variant<
+  std::variant<
       ExtraFields<EventType::TorchOp>,
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Vulkan>,
@@ -417,10 +428,11 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
 struct KinetoObserverContext : public at::ObserverContext {
   struct Event {
     TorchOpBasicFields basic_fields_;
-    approx_time_t start_time_;
+    c10::approx_time_t start_time_;
 
     // Set in the exit callback.
-    approx_time_t end_time_{std::numeric_limits<approx_time_t>::min()};
+    c10::approx_time_t end_time_{
+        std::numeric_limits<c10::approx_time_t>::min()};
 
     bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
@@ -545,7 +557,7 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
-        const std::function<time_t(approx_time_t)> time_converter,
+        const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);
 
@@ -579,6 +591,9 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
+    // report extra metadata, i.e. collective communication meta
+    AppendOnlyList<extra_meta_t, BlockSize> extra_meta_;
+
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
@@ -598,7 +613,9 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
 
   // with_stack (Python)
-  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
+  AppendOnlyList<
+      std::pair<python_tracer::TraceKey, c10::approx_time_t>,
+      BlockSize>
       py_calls_;
 };
 
@@ -615,7 +632,7 @@ class TORCH_API RecordQueue {
       std::vector<std::shared_ptr<Result>>,
       std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
   getRecords(
-      std::function<time_t(approx_time_t)> time_converter,
+      std::function<c10::time_t(c10::approx_time_t)> time_converter,
       uint64_t start_time_us,
       uint64_t end_time_us);
 
@@ -636,6 +653,10 @@ TORCH_API void set_record_concrete_inputs_enabled_val(bool);
 TORCH_API bool get_fwd_bwd_enabled();
 TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
 TORCH_API void set_fwd_bwd_enabled_val(bool);
+
+TORCH_API bool get_cuda_sync_enabled();
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
+TORCH_API void set_cuda_sync_enabled_val(bool);
 
 } // namespace impl
 } // namespace profiler
