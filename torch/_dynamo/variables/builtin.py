@@ -508,10 +508,6 @@ class BuiltinVariable(VariableTracker):
             try:
                 fn = self.fn
 
-                if fn in self._self_assigning_ops():
-                    # propagate mutable local
-                    options["mutable_local"] = args[0].mutable_local
-
                 if self.fn is operator.iadd and isinstance(
                     args[0], variables.ConstantVariable
                 ):
@@ -539,9 +535,12 @@ class BuiltinVariable(VariableTracker):
                         *proxy_args_kwargs(args, kwargs),
                     )
 
-                    return wrap_fx_proxy_cls(
+                    ret = wrap_fx_proxy_cls(
                         variables.NumpyNdarrayVariable, tx, proxy, **options
                     )
+                    if self.fn in self._self_assigning_ops():
+                        tx.replace_all(args[0], ret)
+                    return ret
 
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -549,7 +548,7 @@ class BuiltinVariable(VariableTracker):
                     *proxy_args_kwargs(args, kwargs),
                 )
                 if any(isinstance(arg, FakeItemVariable) for arg in args):
-                    return wrap_fx_proxy_cls(
+                    ret = wrap_fx_proxy_cls(
                         FakeItemVariable,
                         tx,
                         proxy,
@@ -565,7 +564,7 @@ class BuiltinVariable(VariableTracker):
                         if isinstance(x, variables.UnspecializedPythonVariable)
                     )
 
-                    return wrap_fx_proxy_cls(
+                    ret = wrap_fx_proxy_cls(
                         UnspecializedPythonVariable,
                         tx,
                         proxy,
@@ -574,7 +573,7 @@ class BuiltinVariable(VariableTracker):
                         **options,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
-                    return SymNodeVariable.create(tx, proxy, None, **options)
+                    ret = SymNodeVariable.create(tx, proxy, None, **options)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
@@ -582,7 +581,11 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    return wrap_fx_proxy(tx, proxy, **options)
+                    ret = wrap_fx_proxy(tx, proxy, **options)
+
+                if self.fn in self._self_assigning_ops():
+                    tx.replace_all(args[0], ret)
+                return ret
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
