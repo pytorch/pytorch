@@ -517,6 +517,18 @@ def forward(self, x_1):
         # you're unlikely to get other equalities like this on the
         # unbacked SymInts.)
 
+    def test_unbacked_substitution(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        i1 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i0 == i1 * 4))
+        self.assertExpectedInline(str(i0), """4*i1""")
+
+        i2 = shape_env.create_unbacked_symint()
+        i3 = shape_env.create_unbacked_symint()
+        self.assertTrue(expect_true(i2 * 4 == i3))
+        self.assertExpectedInline(str(i3), """4*i2""")
+
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
         ia = [shape_env.create_unbacked_symint() for _ in range(11)]  # allocate 10
