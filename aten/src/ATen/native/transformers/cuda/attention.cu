@@ -734,7 +734,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
     bool is_causal,
     bool training,
     c10::optional<double> scale) {
-  std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   // TORCH_INTERNAL_ASSERT(is_causal);
