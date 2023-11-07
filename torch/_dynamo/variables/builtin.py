@@ -536,11 +536,10 @@ class BuiltinVariable(VariableTracker):
                         *proxy_args_kwargs(args, kwargs),
                     )
 
-                    ret = wrap_fx_proxy_cls(
-                        variables.NumpyNdarrayVariable, tx, proxy, **options
-                    )
-                    if self.fn in self._self_assigning_ops():
-                        assert isinstance(args[0], TensorVariable)
+                    ret = wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
+                    if self.fn in self._self_assigning_ops() and isinstance(
+                        args[0], TensorVariable
+                    ):
                         assert (
                             args[0].as_proxy().node.meta["example_value"]
                             is ret.as_proxy().node.meta["example_value"]
@@ -578,7 +577,7 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
-                    ret = SymNodeVariable.create(tx, proxy, None, **options)
+                    ret = SymNodeVariable.create(tx, proxy, None)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
@@ -586,9 +585,14 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    ret = wrap_fx_proxy(tx, proxy, **options)
+                    ret = wrap_fx_proxy(tx, proxy)
 
-                if self.fn in self._self_assigning_ops():
+                # TODO: does this also apply to SymNodeVariable? A: Yes if:
+                # 1. (legal) SymNodeVariable mutations are propagated via `example_value`
+                # 2. (required) SymNodeVariable can have attribute mutations
+                if self.fn in self._self_assigning_ops() and isinstance(
+                    args[0], TensorVariable
+                ):
                     assert (
                         args[0].as_proxy().node.meta["example_value"]
                         is ret.as_proxy().node.meta["example_value"]
@@ -596,6 +600,9 @@ class BuiltinVariable(VariableTracker):
                     # The mutation is propagated via the example_value
                     ret = args[0]
                 return ret
+
+            except NotImplementedError:
+                unimplemented(f"partial tensor op: {self} {args} {kwargs}")
 
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
