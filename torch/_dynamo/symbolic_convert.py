@@ -1571,10 +1571,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             vals_list = vals[prefix : len(vals) - suffix]
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
-                self.push(item.add_options(options))
+                self.push(item)
             self.push(TupleVariable(vals_list, **options))
             for item in reversed(vals_prefix):
-                self.push(item.add_options(options))
+                self.push(item)
         else:
             unimplemented(f"UNPACK_EX {seq}")
 
@@ -1638,9 +1638,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif (flags & 0x03) == 0x03:
             value = BuiltinVariable(ascii).call_function(self, [value], {})
 
-        fmt_var = ConstantVariable.create(
-            "{:" + fmt_spec.as_python_constant() + "}"
-        ).add_options(fmt_spec)
+        fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
         self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 

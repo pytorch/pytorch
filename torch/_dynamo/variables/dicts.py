@@ -68,7 +68,7 @@ class ConstDictVariable(VariableTracker):
             return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
-        return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
+        return self.items[ConstDictVariable.get_key(arg)]
 
     def call_method(
         self,
@@ -151,7 +151,7 @@ class ConstDictVariable(VariableTracker):
             and len(args) == 2
         ):
             # missing item, return the default value
-            return args[1].add_options(options)
+            return args[1]
         elif (
             name == "pop"
             and args
@@ -161,7 +161,7 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
             tx.replace_all(self, self.modifed(newval, **options))
-            return result.add_options(options)
+            return result
         elif (
             name == "update"
             and args
@@ -178,8 +178,7 @@ class ConstDictVariable(VariableTracker):
             and ConstDictVariable.is_valid_key(args[0])
             and ConstDictVariable.get_key(args[0]) in self.items
         ):
-            result = self.items[ConstDictVariable.get_key(args[0])]
-            return result.add_options(options)
+            return self.items[ConstDictVariable.get_key(args[0])]
         elif (
             name == "__contains__" and args and ConstDictVariable.is_valid_key(args[0])
         ):
@@ -407,7 +406,7 @@ class SetVariable(VariableTracker):
             )
             return result
         elif name == "__len__":
-            return ConstantVariable.create(len(self.items)).add_options(options)
+            return ConstantVariable.create(len(self.items))
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
@@ -424,7 +423,7 @@ class SetVariable(VariableTracker):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.items]
+        return list(self.items)
 
 
 def _is_matching_transformers_cls(cls) -> bool:
@@ -567,12 +566,10 @@ class DataClassVariable(ConstDictVariable):
             assert not kwargs and len(args) == 1
             index = args[0].as_python_constant()
             if isinstance(index, str):
-                return self.items[index].add_options(options)
+                return self.items[index]
             else:
-                return (
-                    self.call_method(tx, "to_tuple", [], {})
-                    .call_method(tx, "__getitem__", args, kwargs)
-                    .add_options(options)
+                return self.call_method(tx, "to_tuple", [], {}).call_method(
+                    tx, "__getitem__", args, kwargs
                 )
         elif name == "to_tuple":
             assert not (args or kwargs)
@@ -590,9 +587,7 @@ class DataClassVariable(ConstDictVariable):
             defaults = {f.name: f.default for f in dataclasses.fields(self.user_cls)}
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
-                return variables.ConstantVariable.create(defaults[name]).add_options(
-                    self
-                )
+                return variables.ConstantVariable.create(defaults[name])
         super().var_getattr(tx, name)
 
 
@@ -743,9 +738,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return ConstantVariable.create(getattr(self.obj, name))
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
-            self
-        )
+        return variables.ConstantVariable.create(hasattr(self.obj, name))
 
 
 class PythonSysModulesVariable(VariableTracker):

@@ -54,7 +54,7 @@ class LazyVariableTracker(VariableTracker):
         """Force construction of the real VariableTracker"""
         if self._cache.vt is None:
             self._cache.realize(self.parents_tracker)
-        return self._cache.vt.add_options(self)
+        return self._cache.vt
 
     def unwrap(self):
         """Return the real VariableTracker if it already exists"""
@@ -78,7 +78,6 @@ class LazyVariableTracker(VariableTracker):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    add_options = VariableTracker.add_options
     apply = VariableTracker.apply
     copy = VariableTracker.copy
     __post_init__ = VariableTracker.__post_init__
