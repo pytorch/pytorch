@@ -5229,6 +5229,8 @@ def meta_scaled_mm(
     return torch.empty(
         self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device
     ), torch.empty((), dtype=torch.float32, device=self.device)
+
+
 @register_meta(
     [
         aten._efficient_attention_forward,
