@@ -1180,7 +1180,18 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
-            tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
+            name = name_var.as_python_constant()
+            if name == "data" and all(
+                isinstance(t, variables.TensorVariable)
+                # and not (t.source is None or is_constant_source(t.source))
+                for t in [val, obj]
+            ):
+                unimplemented(
+                    ".data assignment to a tracked tensors can introduce aliasing, hence we "
+                    "need to graph break to apply the aliasing (or track new aliased tensors) "
+                    "to continue to trace the graph"
+                )
+            tx.output.side_effects.store_attr(obj, name, val)
             return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
