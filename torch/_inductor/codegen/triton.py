@@ -1283,7 +1283,7 @@ class TritonKernel(Kernel):
 
         if mask_vars:
             mask = (
-                f"{list(mask_vars)[0]}"
+                f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
                 else f"({' & '.join(str(v) for v in mask_vars)})"
             )
@@ -1357,7 +1357,7 @@ class TritonKernel(Kernel):
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
         if ("tmp" in mask or "rmask" in mask) and V.graph.get_dtype(name) != torch.bool:
-            other = ", other=0"
+            other = ", other=0.0"
         else:
             other = ""
 
