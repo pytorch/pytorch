@@ -60,6 +60,46 @@ def _get_split_args_default(split_node):
     )
 
 
+# noqa: W605
+# ############The pattern to be optimized is#########
+#         unbind (dim=0)
+#       /   ...    \
+# getitem      getitem   -> user=1
+#    |            |
+#  split         split  -> dim=1, user=1, split_section_size=1
+#    |            |
+#  getitem       getitem  -> user=1
+#    \           /
+#        cat (dim=1)  -> user=1
+#          |
+
+# ################After transformation#############
+#          unbind (dim=0)
+#        /    ...   \
+#    getitem       getitem  -> user=1
+#       \          /
+#        cat (dim=1)  -> user=1
+#         |
+
+
+def remove_split_with_size_one(
+    graph: torch.fx.Graph,
+    node: torch.fx.Node,
+    input: torch.fx.Node,
+):
+    # find the grand children of the split_node
+    next_users = find_next_users(node)
+    user = next(iter(node.users.keys()))
+    # replace the users of grand child node with the input node
+    for next_user in next_users:
+        next_user.replace_input_with(user, input)
+    # erase the split node and its child
+    graph.erase_node(user)
+    graph.erase_node(node)
+
+    counters["inductor"]["remove_split_with_size_one"] += 1
+
+
 def normalize_split_base(
     match: Match,
     _get_split_args: Callable[
@@ -84,6 +124,10 @@ def normalize_split_base(
 
     if any(isinstance(section, torch.SymInt) for section in split_sections):
         # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
+        return
+    # remove the dummy split whose split sections size is one
+    if len(split_sections) == 1:
+        remove_split_with_size_one(graph, split_node, split_input)
         return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["example_value"].dim()
