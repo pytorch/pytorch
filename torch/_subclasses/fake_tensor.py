@@ -599,10 +599,10 @@ def nonzero(fake_mode, func, arg):
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
-            free_symbols,
+            has_free_symbols,
         )
 
-        if not free_symbols(arg.numel()):
+        if not has_free_symbols(arg.numel()):
             # Don't upgrade the range if numel is less than two, since we then
             # have an empty range which makes things go explodey.  We also
             # don't allow for 2 because that would specialize the unbacked
@@ -635,10 +635,10 @@ def masked_select(fake_mode, func, self, mask):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import (
         _constrain_range_for_size,
-        free_symbols,
+        has_free_symbols,
     )
 
-    if not free_symbols(arg.numel()):
+    if not has_free_symbols(arg.numel()):
         if arg.numel() >= 2:
             maxval = int(arg.numel())
 
@@ -1428,6 +1428,12 @@ class FakeTensorMode(TorchDispatchMode):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
+        elif func is torch.ops.aten.size.default:
+            return tuple(int(s) for s in args[0].size())
+        elif func is torch.ops.aten.stride.default:
+            return tuple(int(s) for s in args[0].stride())
+        elif func is torch.ops.aten.storage_offset.default:
+            return int(args[0].storage_offset())
 
         if log.getEffectiveLevel() <= logging.DEBUG:
             log.debug(
@@ -1628,6 +1634,13 @@ class FakeTensorMode(TorchDispatchMode):
         # e.g., manipulating args on constructor calls to construct meta tensors
         # and then afterwards wrapping them to a FakeTensor
         for run_impl_check, op_impl in op_implementations:
+            if func in (
+                aten._nested_tensor_from_tensor_list.default,
+                aten._nested_tensor_from_tensor_list.out,
+            ):
+                raise UnsupportedOperatorException(
+                    "torch.compile does not support strided NestedTensor"
+                )
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
                 if op_impl_out != NotImplemented:

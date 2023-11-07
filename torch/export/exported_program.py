@@ -1,17 +1,14 @@
 import copy
 import dataclasses
-from enum import auto, Enum
 from typing import (
     Any,
     Callable,
-    Collection,
     Dict,
     Iterator,
     List,
-    Mapping,
     Optional,
-    Set,
     Tuple,
+    Type,
     TYPE_CHECKING,
     Union,
 )
@@ -33,368 +30,28 @@ from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 
+from .graph_signature import (  # noqa: F401
+    _sig_to_specs,
+    ArgumentSpec,
+    ConstantArgument,
+    ExportGraphSignature,
+    InputKind,
+    InputSpec,
+    OutputKind,
+    OutputSpec,
+    SymIntArgument,
+    TensorArgument,
+)
+
 
 __all__ = [
-    "TensorArgument",
-    "ConstantArgument",
-    "SymIntArgument",
-    "ExportBackwardSignature",
     "ExportedProgram",
-    "ExportGraphSignature",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "InputKind",
-    "InputSpec",
-    "OutputKind",
-    "OutputSpec",
 ]
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
-
-
-@dataclasses.dataclass
-class TensorArgument:
-    name: str
-
-
-@dataclasses.dataclass
-class SymIntArgument:
-    name: str
-
-
-@dataclasses.dataclass
-class ConstantArgument:
-    value: Union[int, float, bool, None]
-
-
-ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
-
-
-class InputKind(Enum):
-    USER_INPUT = auto()
-    PARAMETER = auto()
-    BUFFER = auto()
-
-
-@dataclasses.dataclass
-class InputSpec:
-    kind: InputKind
-    arg: ArgumentSpec
-    target: Optional[str]
-
-    def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
-
-
-class OutputKind(Enum):
-    USER_OUTPUT = auto()
-    LOSS_OUTPUT = auto()
-    BUFFER_MUTATION = auto()
-    GRADIENT_TO_PARAMETER = auto()
-    GRADIENT_TO_USER_INPUT = auto()
-
-
-@dataclasses.dataclass
-class OutputSpec:
-    kind: OutputKind
-    arg: ArgumentSpec
-    target: Optional[str]
-
-    def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
-
-
-def _sig_to_specs(
-    *,
-    user_inputs: Set[str],
-    inputs_to_parameters: Mapping[str, str],
-    inputs_to_buffers: Mapping[str, str],
-    user_outputs: Set[str],
-    buffer_mutations: Mapping[str, str],
-    grad_params: Mapping[str, str],
-    grad_user_inputs: Mapping[str, str],
-    loss_output: Optional[str],
-    inputs: List[ArgumentSpec],
-    outputs: List[ArgumentSpec],
-) -> Tuple[List[InputSpec], List[OutputSpec]]:
-    def to_input_spec(i: ArgumentSpec) -> InputSpec:
-        if not isinstance(i, TensorArgument):
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
-        name = i.name
-        if name in user_inputs:
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
-        elif name in inputs_to_parameters:
-            return InputSpec(
-                kind=InputKind.PARAMETER,
-                arg=i,
-                target=inputs_to_parameters[name],
-            )
-        elif name in inputs_to_buffers:
-            return InputSpec(
-                kind=InputKind.BUFFER, arg=i, target=inputs_to_buffers[name]
-            )
-        else:
-            raise AssertionError(f"Unknown tensor input kind: {name}")
-
-    def to_output_spec(o: ArgumentSpec) -> OutputSpec:
-        if not isinstance(o, TensorArgument):
-            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
-        name = o.name
-        if name in user_outputs:
-            return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
-        elif name in buffer_mutations:
-            return OutputSpec(
-                kind=OutputKind.BUFFER_MUTATION,
-                arg=o,
-                target=buffer_mutations[name],
-            )
-        elif name in grad_params:
-            return OutputSpec(
-                kind=OutputKind.GRADIENT_TO_PARAMETER,
-                arg=o,
-                target=grad_params[name],
-            )
-        elif name in grad_user_inputs:
-            return OutputSpec(
-                kind=OutputKind.GRADIENT_TO_USER_INPUT,
-                arg=o,
-                target=grad_user_inputs[name],
-            )
-        elif name == loss_output:
-            return OutputSpec(kind=OutputKind.LOSS_OUTPUT, arg=o, target=None)
-        else:
-            raise AssertionError(f"Unknown tensor output kind: {name}")
-
-    input_specs = [to_input_spec(i) for i in inputs]
-    output_specs = [to_output_spec(o) for o in outputs]
-    return input_specs, output_specs
-
-
-@dataclasses.dataclass
-class ExportBackwardSignature:
-    gradients_to_parameters: Dict[str, str]
-    gradients_to_user_inputs: Dict[str, str]
-    loss_output: str
-
-
-@dataclasses.dataclass
-class ExportGraphSignature:
-    """
-    :class:`ExportGraphSignature` models the input/output signature of Export Graph,
-    which is a fx.Graph with stronger invariants gurantees.
-
-    Export Graph is functional and does not access "states" like parameters
-    or buffers within the graph via ``getattr`` nodes. Instead, :func:`export`
-    gurantees that parameters and buffers are lifted out of the graph as inputs.
-    Similarly, any mutations to buffers are not included in the graph either,
-    instead the updated values of mutated buffers are modeled as additional outputs
-    of Export Graph.
-
-    The ordering of all inputs and outputs are::
-
-        Inputs = [*parameters_buffers, *flattened_user_inputs]
-        Outputs = [*mutated_inputs, *flattened_user_outputs]
-
-    e.g. If following module is exported::
-
-        class CustomModule(nn.Module):
-            def __init__(self):
-                super(CustomModule, self).__init__()
-
-                # Define a parameter
-                self.my_parameter = nn.Parameter(torch.tensor(2.0))
-
-                # Define two buffers
-                self.register_buffer('my_buffer1', torch.tensor(3.0))
-                self.register_buffer('my_buffer2', torch.tensor(4.0))
-
-            def forward(self, x1, x2):
-                # Use the parameter, buffers, and both inputs in the forward method
-                output = (x1 + self.my_parameter) * self.my_buffer1 + x2 * self.my_buffer2
-
-                # Mutate one of the buffers (e.g., increment it by 1)
-                self.my_buffer2.add_(1.0) # In-place addition
-
-                return output
-
-    Resulting Graph would be::
-
-        graph():
-            %arg0_1 := placeholder[target=arg0_1]
-            %arg1_1 := placeholder[target=arg1_1]
-            %arg2_1 := placeholder[target=arg2_1]
-            %arg3_1 := placeholder[target=arg3_1]
-            %arg4_1 := placeholder[target=arg4_1]
-            %add_tensor := call_function[target=torch.ops.aten.add.Tensor](args = (%arg3_1, %arg0_1), kwargs = {})
-            %mul_tensor := call_function[target=torch.ops.aten.mul.Tensor](args = (%add_tensor, %arg1_1), kwargs = {})
-            %mul_tensor_1 := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg4_1, %arg2_1), kwargs = {})
-            %add_tensor_1 := call_function[target=torch.ops.aten.add.Tensor](args = (%mul_tensor, %mul_tensor_1), kwargs = {})
-            %add_tensor_2 := call_function[target=torch.ops.aten.add.Tensor](args = (%arg2_1, 1.0), kwargs = {})
-            return (add_tensor_2, add_tensor_1)
-
-    Resulting ExportGraphSignature would be::
-
-        ExportGraphSignature(
-            # Indicates that there is one parameter named `my_parameter`
-            parameters=['L__self___my_parameter'],
-
-            # Indicates that there are two buffers, `my_buffer1` and `my_buffer2`
-            buffers=['L__self___my_buffer1', 'L__self___my_buffer2'],
-
-            # Indicates that the nodes `arg3_1` and `arg4_1` in produced graph map to
-            # original user inputs, ie. x1 and x2
-            user_inputs=['arg3_1', 'arg4_1'],
-
-            # Indicates that the node `add_tensor_1` maps to output of original program
-            user_outputs=['add_tensor_1'],
-
-            # Indicates that there is one parameter (self.my_parameter) captured,
-            # its name is now mangled to be `L__self___my_parameter`, which is now
-            # represented by node `arg0_1` in the graph.
-            inputs_to_parameters={'arg0_1': 'L__self___my_parameter'},
-
-            # Indicates that there are two buffers (self.my_buffer1, self.my_buffer2) captured,
-            # their name are now mangled to be `L__self___my_my_buffer1` and `L__self___my_buffer2`.
-            # They are now represented by nodes `arg1_1` and `arg2_1` in the graph.
-            inputs_to_buffers={'arg1_1': 'L__self___my_buffer1', 'arg2_1': 'L__self___my_buffer2'},
-
-            # Indicates that one buffer named `L__self___my_buffer2` is mutated during execution,
-            # its new value is output from the graph represented by the node named `add_tensor_2`
-            buffers_to_mutate={'add_tensor_2': 'L__self___my_buffer2'},
-
-            # Backward graph not captured
-            backward_signature=None,
-
-            # Work in progress feature, please ignore now.
-            assertion_dep_token=None
-        )
-    """
-
-    input_specs: List[InputSpec]
-    output_specs: List[OutputSpec]
-
-    # A list of parameters uniquely identified by mangled fully qualified name
-    @property
-    def parameters(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
-            s.target
-            for s in self.input_specs
-            if s.kind == InputKind.PARAMETER
-            if isinstance(s.target, str)
-        ]
-
-    # A list of buffers uniquely identified by mangled fully qualified name
-    @property
-    def buffers(self) -> Collection[str]:
-        # TODO Make this tuple.
-        return [
-            s.target
-            for s in self.input_specs
-            if s.kind == InputKind.BUFFER
-            if isinstance(s.target, str)
-        ]
-
-    # Graph node names of pytree-flattened inputs of original program
-    @property
-    def user_inputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.input_specs
-            if s.kind == InputKind.USER_INPUT and isinstance(s.arg, TensorArgument)
-        )
-
-    # Graph node names of pytree-flattened outputs of original program
-    @property
-    def user_outputs(self) -> Collection[str]:
-        return tuple(
-            s.arg.name
-            for s in self.output_specs
-            if s.kind == OutputKind.USER_OUTPUT and isinstance(s.arg, TensorArgument)
-        )
-
-    # A dictionary mapping graph input node names to parameters. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted parameter.
-    @property
-    def inputs_to_parameters(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
-            for s in self.input_specs
-            if s.kind == InputKind.PARAMETER
-            and isinstance(s.arg, TensorArgument)
-            and isinstance(s.target, str)
-        }
-
-    # A dictionary mapping graph input node names to buffers. If a graph input
-    # name is found in this dictionary, it is guranteed to be a lifted buffer.
-    @property
-    def inputs_to_buffers(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
-            for s in self.input_specs
-            if s.kind == InputKind.BUFFER
-            and isinstance(s.arg, TensorArgument)
-            and isinstance(s.target, str)
-        }
-
-    # A dictionary mapping graph output node names to buffers that are mutated in the
-    # original program. Buffers that are not mutated will not be found in this dictionary.
-    @property
-    def buffers_to_mutate(self) -> Mapping[str, str]:
-        return {
-            s.arg.name: s.target
-            for s in self.output_specs
-            if s.kind == OutputKind.BUFFER_MUTATION
-            and isinstance(s.arg, TensorArgument)
-            and isinstance(s.target, str)
-        }
-
-    @property
-    def backward_signature(self) -> Optional[ExportBackwardSignature]:
-        loss_output = None
-        gradients_to_parameters: Dict[str, str] = {}
-        gradients_to_user_inputs: Dict[str, str] = {}
-        for spec in self.output_specs:
-            if spec.kind == OutputKind.LOSS_OUTPUT:
-                assert loss_output is None
-                assert isinstance(spec.arg, TensorArgument)
-                loss_output = spec.arg.name
-            elif spec.kind == OutputKind.GRADIENT_TO_PARAMETER:
-                assert isinstance(spec.target, str)
-                assert isinstance(spec.arg, TensorArgument)
-                gradients_to_parameters[spec.arg.name] = spec.target
-            elif spec.kind == OutputKind.GRADIENT_TO_USER_INPUT:
-                assert isinstance(spec.target, str)
-                assert isinstance(spec.arg, TensorArgument)
-                gradients_to_user_inputs[spec.arg.name] = spec.target
-
-        if loss_output is None:
-            return None
-
-        return ExportBackwardSignature(
-            loss_output=loss_output,
-            gradients_to_parameters=gradients_to_parameters,
-            gradients_to_user_inputs=gradients_to_user_inputs,
-        )
-
-    # Map from assertion dependency token index to assertion dep token output
-    # name in output. The shape of output after aot_autograd will be like:
-    # (updated_inputs, user_outputs, dep_token).
-    @property
-    def assertion_dep_token(self) -> Optional[Mapping[int, str]]:
-        return None
-
-    def __post_init__(self) -> None:
-        assertion_dep_token = self.assertion_dep_token
-        if assertion_dep_token is None:
-            return
-        assert len(assertion_dep_token) == 1
-        assertion_dep_token_index = list(assertion_dep_token.keys())[0]
-        assert (
-            len(self.user_outputs) + len(self.buffers_to_mutate)
-            == assertion_dep_token_index
-        )
 
 
 @dataclasses.dataclass
@@ -437,7 +94,7 @@ class ExportedProgram:
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        dialect: Optional[str] = None,
+        verifier: Optional[Type[Any]] = None,  # TODO Change typing hint to Verifier.
     ):
         from torch._export.exported_program import _create_graph_module_for_export
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
@@ -458,7 +115,17 @@ class ExportedProgram:
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
-        self._dialect = dialect or "ATEN"
+
+        from torch._export.verifier import Verifier
+
+        if verifier is None:
+            verifier = Verifier
+        assert issubclass(verifier, Verifier)
+        self._verifier = verifier
+
+        # Validate should be always the last step of the constructor.
+        # TODO(zhxchen17) Uncomment the following line.
+        # self.verifier().check(self)
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -548,8 +215,14 @@ class ExportedProgram:
         )
 
     @property
-    def dialect(self):
-        return self._dialect
+    @compatibility(is_backward_compatible=False)
+    def verifier(self) -> Any:
+        return self._verifier
+
+    @property
+    @compatibility(is_backward_compatible=False)
+    def dialect(self) -> str:
+        return self._verifier.dialect
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -592,7 +265,7 @@ class ExportedProgram:
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
             if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
                 res = res[:assertion_dep_token_index]
 
             res = res[num_mutated:]
@@ -657,7 +330,9 @@ class ExportedProgram:
         from torch._export.passes.lift_constant_tensor_pass import (
             lift_constant_tensor_pass,
         )
-        from torch._export.passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
+        from torch._export.passes.replace_sym_size_ops_pass import (
+            _replace_sym_size_ops_pass,
+        )
         from torch._functorch.aot_autograd import aot_export_module
 
         def _get_placeholders(gm):
@@ -778,16 +453,19 @@ class ExportedProgram:
             for inp_dim1, inp_dim2 in self.equality_constraints
         ]
 
+        state_dict = self.state_dict.copy()
+        lift_constant_tensor_pass(gm, new_graph_signature, state_dict)
+        _replace_sym_size_ops_pass(gm)
         exported_program = ExportedProgram(
             gm,
             gm.graph,
             new_graph_signature,
-            self.state_dict,
+            state_dict,
             new_range_constraints,
             new_equality_constraints,
             copy.deepcopy(self.module_call_graph),
             self.example_inputs,
-            self.dialect,
+            self.verifier,
         )
 
         if len(new_range_constraints) > 0 or len(new_equality_constraints) > 0:
@@ -796,9 +474,8 @@ class ExportedProgram:
                     new_range_constraints, new_equality_constraints
                 )
             )
-        exported_program = lift_constant_tensor_pass(exported_program)
 
-        return exported_program._transform(_ReplaceSymSizeOpPass())
+        return exported_program
 
     def _transform(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
@@ -903,7 +580,7 @@ class ExportedProgram:
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
-            self.dialect,
+            self.verifier,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
@@ -931,15 +608,7 @@ class ExportedProgram:
         _assertion_graph(*args)
 
     def _validate(self):
-        from torch._export.verifier import Verifier, verify_exported_program_signature
-
-        verify_exported_program_signature(self)
-
-        verifier = Verifier()
-        for gm in self.graph_module.modules():
-            if not isinstance(gm, torch.fx.GraphModule):
-                continue
-            verifier.check_valid(self.graph_module)
+        self.verifier().check(self)
 
 
 def _get_updated_range_constraints(

@@ -7,7 +7,7 @@ from typing import Any, Optional, Tuple
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
-    default_observer,
+    default_fake_quant,
     FusedMovingAvgObsFakeQuantize,
     MovingAverageMinMaxObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -625,6 +625,50 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = convert_pt2e(m)
         m(*example_inputs)
 
+        # Find conv node
+        conv_node = None
+        for n in m.graph.nodes:
+            if n.target == torch.ops.aten.conv2d.default:
+                conv_node = n
+                break
+        assert conv_node is not None, "bad test setup"
+
+        # Assert that both weight and bias are quantized
+        weight_dq = conv_node.args[1]
+        bias_dq = conv_node.args[2]
+        self.assertEqual(
+            weight_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_dq.target,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        )
+        weight_q = weight_dq.args[0]
+        bias_q = bias_dq.args[0]
+        self.assertEqual(
+            weight_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
+        self.assertEqual(
+            bias_q.target,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        )
+
+        # Assert that bias scale = weight scale * input scale
+        input_dq = conv_node.args[0]
+        input_scale = input_dq.args[1]
+        bias_scale = bias_dq.args[1]
+        weight_scale = weight_dq.args[1]
+        self.assertEqual(bias_scale, input_scale * weight_scale)
+
+        # Assert that args for the bias' quantize and dequantize ops
+        # are copied correctly after subgraph rewriting
+        (bias_qmin, bias_qmax, bias_dtype) = bias_dq.args[3:]
+        self.assertEqual(bias_qmin, -(2**31))
+        self.assertEqual(bias_qmax, 2**31 - 1)
+        self.assertEqual(bias_dtype, torch.int32)
+
 
 class ConvBnDerivedBiasQuantizer(Quantizer):
     """
@@ -639,26 +683,32 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
         bias_zero_point = torch.tensor([0], dtype=torch.int32)
         return bias_scale, bias_zero_point
 
-    def _get_conv_bn_nodes(self, model: torch.fx.GraphModule):
+    def _get_nodes(self, model: torch.fx.GraphModule):
+        model.graph.eliminate_dead_code()
+        model.recompile()
         conv_node = None
         bn_node = None
+        getitem_node = None
         for n in model.graph.nodes:
             if n.target == torch.ops.aten.conv2d.default:
                 conv_node = n
             if n.target == torch.ops.aten._native_batch_norm_legit.default:
                 bn_node = n
+            if n.target == operator.getitem:
+                getitem_node = n
         assert conv_node is not None, "bad test setup"
         assert bn_node is not None, "bad test setup"
-        return (conv_node, bn_node)
+        assert getitem_node is not None, "bad test setup"
+        return (conv_node, bn_node, getitem_node)
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        conv_node, bn_node = self._get_conv_bn_nodes(model)
+        conv_node, _, getitem_node = self._get_nodes(model)
         act_and_weight_qspec = QuantizationSpec(
             dtype=torch.uint8,
             quant_min=0,
             quant_max=255,
             qscheme=torch.per_tensor_affine,
-            observer_or_fake_quant_ctr=default_observer,
+            observer_or_fake_quant_ctr=default_fake_quant,
         )
         bias_qspec = DerivedQuantizationSpec(
             derived_from=[
@@ -679,7 +729,7 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
             },
             _annotated=True,
         )
-        bn_node.meta["quantization_annotation"] = QuantizationAnnotation(
+        getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
             output_qspec=act_and_weight_qspec,
             _annotated=True,
         )

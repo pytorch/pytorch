@@ -53,6 +53,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
     SizeArg,
+    TensorArg,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
 
@@ -1259,7 +1260,7 @@ class TritonKernel(Kernel):
 
         if mask_vars:
             mask = (
-                f"{list(mask_vars)[0]}"
+                f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
                 else f"({' & '.join(str(v) for v in mask_vars)})"
             )
@@ -1333,7 +1334,7 @@ class TritonKernel(Kernel):
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
         if ("tmp" in mask or "rmask" in mask) and V.graph.get_dtype(name) != torch.bool:
-            other = ", other=0"
+            other = ", other=0.0"
         else:
             other = ""
 
@@ -1919,9 +1920,12 @@ class TritonKernel(Kernel):
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
-            "mutated_arg_names": mutated_args,
+        }
+
+        inductor_meta = {
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "mutated_arg_names": mutated_args,
         }
 
         for tree in self.range_trees:
@@ -1956,7 +1960,8 @@ class TritonKernel(Kernel):
                     size_hints={size_hints!r},
                     reduction_hint={reduction_hint},
                     filename=__file__,
-                    meta={triton_meta!r}
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r}
                 )
                 @triton.jit
             """
@@ -1971,7 +1976,8 @@ class TritonKernel(Kernel):
                 @{heuristics}(
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
-                    meta={triton_meta!r},
+                    triton_meta={triton_meta!r},
+                    inductor_meta={inductor_meta!r},
                     min_elem_per_thread={self.min_elem_per_thread}
                 )
                 @triton.jit
@@ -2088,6 +2094,19 @@ class TritonKernel(Kernel):
             cuda=True,
             triton=True,
         )
+
+    def codegen_nan_check(self):
+        if not config.nan_asserts:
+            return
+
+        wrapper = V.graph.wrapper_code
+        _, call_args, arg_types = self.args.python_argdefs()
+        for arg, arg_type in zip(call_args, arg_types):
+            if isinstance(arg_type, TensorArg):
+                line = f"assert not {arg}.isnan().any().item()"
+                wrapper.writeline(line)
+                line = f"assert not {arg}.isinf().any().item()"
+                wrapper.writeline(line)
 
     def warn_mix_layout(self, kernel_name):
         """
@@ -2522,6 +2541,7 @@ class TritonScheduling(BaseScheduling):
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        kernel.codegen_nan_check()
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
