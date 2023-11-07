@@ -172,8 +172,6 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
             learning rate of the optimizer. A higher value of `lr` will result in
             faster learning, but it can also lead to overfitting.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0).
-                      The `weight_decay` parameter applies a penalty to the weights
-                      of the model, which can help to prevent overfitting.
         {foreach}
         {maximize}
         {differentiable}
