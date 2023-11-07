@@ -864,6 +864,7 @@ class DistributedDataParallel(Module, Joinable):
             MOD_INLINELIST.add("torch.nn.parallel.distributed")
             self._register_acc_grad_hook()
         _dummy_compiler_var.to(self.device)
+        torch._inductor.config.allreduce_fusion_bucket_size = bucket_cap_mb
 
     def _register_acc_grad_hook(self):
         def compiled_acc_grad_hook(

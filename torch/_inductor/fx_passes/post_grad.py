@@ -5,10 +5,10 @@ import operator
 from collections import defaultdict, namedtuple
 from typing import Any, Dict, List, Optional, Union
 
-from sympy import Expr
-
 import torch
 import torch._inductor as inductor
+
+from sympy import Expr
 from torch._decomp import register_decomposition
 
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_functional
@@ -37,6 +37,7 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
+from .distributed import allreduce_comm_fusion, schedule_comm_wait
 from .group_batch_fusion import group_batch_fusion_post_grad_passes
 
 
@@ -83,6 +84,16 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             patterns.apply(gm.graph)
         if is_inference:
             inference_patterns.apply(gm.graph)
+
+    if config.allreduce_fusion:
+        # Figure out how to do the fusion with different size.
+        allreduce_comm_fusion(
+            gm.graph,
+            config.allreduce_fusion_bucket_size,
+            use_concat=(not config.allreduce_fusion_with_coalescing),
+        )
+        # This may not need anymore.
+        schedule_comm_wait(gm.graph)
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)

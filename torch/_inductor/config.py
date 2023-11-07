@@ -264,6 +264,12 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 worker_start_method = "fork"
 
 
+# Fuse the allredue collectives.
+allreduce_fusion = True
+allreduce_fusion_with_coalescing = True
+allreduce_fusion_bucket_size = 25
+
+
 def decide_compile_threads():
     """
     Here are the precedence to decide compile_threads
