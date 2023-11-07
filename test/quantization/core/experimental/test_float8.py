@@ -125,27 +125,15 @@ def simulateFp8Precision(input, variant):
     excessive_bits = torch.tensor(21, dtype=int_type)
 
     signs = torch.where(input < 0.0, -1.0, 1.0).to(dtype)
-    bits = torch.bitwise_and(input.view(int_type), 2147483647)
+    asInt = torch.bitwise_and(input.view(int_type), 2147483647)
 
     mant_odd = torch.bitwise_and(
-        torch.bitwise_right_shift(bits, excessive_bits),
+        torch.bitwise_right_shift(asInt, excessive_bits),
         torch.tensor(1, dtype=int_type),
     )
-    if variant == torch.float8_e4m3fnuz:
-        exponent = torch.bitwise_right_shift(bits, 23)
-        is_normal = (exponent > 0).to(int_type)
-        rebiased_exponent = exponent + 126 - 6
-        offset = torch.tensor(20, dtype=int_type) - rebiased_exponent + is_normal
-        bias = (
-            torch.bitwise_and(torch.bitwise_right_shift(bits, offset), 1)
-            + torch.bitwise_left_shift(1, offset - 1)
-            - 1
-        )
-        rounded = torch.bitwise_or(torch.bitwise_and(bits, 8388607), torch.bitwise_left_shift(is_normal, 23)) + bias
-    else:
-        rounded = bits + mask_round
-    odded = rounded + mant_odd
-    masked = torch.bitwise_and(odded, mask)
+    asInt_masked = asInt + mask_round
+    asInt_odded = asInt_masked + mant_odd
+    masked = torch.bitwise_and(asInt_odded, mask)
     return masked.view(dtype) * signs
 
 
