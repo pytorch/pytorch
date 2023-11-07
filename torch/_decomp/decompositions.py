@@ -4091,7 +4091,6 @@ def scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    attn_mask: Optional[Tensor] = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
@@ -4140,7 +4139,7 @@ def scaled_dot_product_flash_attention(
         requires_grad=query.requires_grad,
     )
     output, _ = aten._scaled_dot_product_attention_math.default(
-        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+        query, key, value, None, dropout_p, is_causal, None, scale=scale
     )
     # Why this change?
     # In pre-dispatch export scaled_dot_product_attention is executed via

@@ -921,7 +921,6 @@ class DecompOneOffTests(TestCase):
         value_layer = torch.randn(1, 128, 100, 64, device=device)
 
         attention = ScaledDotProductAttention()
-
         fx_g = make_fx(
             attention,
             decomposition_table=get_decompositions(
@@ -931,10 +930,11 @@ class DecompOneOffTests(TestCase):
             ),
         )(query_layer, key_layer, value_layer)
 
+        compiled_res = fx_g(query_layer, key_layer, value_layer)
         eager_res = F.scaled_dot_product_attention(
             query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
         )
-        self.assertTrue(torch.allclose(fx_g[0], eager_res[0]))
+        self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
