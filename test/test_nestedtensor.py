@@ -145,16 +145,23 @@ def random_nt_from_similar(other, dims=None):
     ], device=other.device)
 
 
-class TestNestedTensor(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
+class NestedTestCase(TestCase):
+    # Suppress errors is enabled by default in the test suite. We disable
+    # suppress errors in particular for NestedTensors to ensure that dynamo
+    # graph breaks cleanly.
     def setUp(self):
+        super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(
             unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
         )
 
+    def tearDown(self):
+        self._exit_stack.close()
+        super().tearDown()
+
+
+class TestNestedTensor(NestedTestCase):
     @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
@@ -660,16 +667,7 @@ class TestNestedTensor(TestCase):
             torch.cat([x, y], dim=-1)
 
 
-class TestNestedTensorDeviceType(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorDeviceType(NestedTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -2263,16 +2261,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_cont, memory_format=torch.channels_last_3d))
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
-class TestNestedTensorAutograd(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorAutograd(NestedTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -2891,16 +2880,7 @@ class TestNestedTensorAutograd(TestCase):
 
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
-class TestNestedTensorSubclass(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorSubclass(NestedTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
