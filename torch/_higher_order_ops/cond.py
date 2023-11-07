@@ -75,7 +75,7 @@ def cond(pred, true_fn, false_fn, operands):
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple[Pytree[torch.Tensor]]): A tuple of inputs to the true/false functions.
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
 
     Example::
 
@@ -127,11 +127,12 @@ def cond(pred, true_fn, false_fn, operands):
         if not callable(true_fn) or not callable(false_fn):
             raise RuntimeError("Expect both branches to be callbale.")
 
-        if not isinstance(operands, (tuple, list)) or any(
-            not isinstance(t, torch.Tensor) for t in pytree.tree_flatten(operands)[0]
+        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), operands
         ):
             raise RuntimeError(
-                f"Expect operands to be a tuple of pytrees that only consists of tensor leaves, but got {operands}."
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                f"consists of tensor leaves, but got {operands}."
             )
 
     _validate_input(pred, true_fn, false_fn, operands)

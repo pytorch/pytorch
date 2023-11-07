@@ -2187,7 +2187,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         for pytree_in in [(1,), ("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 RuntimeError,
-                r"Expect operands to be a tuple of pytrees that only consists of tensor leaves",
+                r"Expect operands to be a tuple of possibly nested dict/list/tuple",
             ):
                 fn(pred, pytree_in)
 

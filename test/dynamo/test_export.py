@@ -3023,7 +3023,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expect operands to be a tuple of pytrees that only consists of tensor leaves, but got",
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_list_operands(*example_inputs)
 
@@ -3037,7 +3037,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Expect operands to be a tuple of pytrees that only consists of tensor leaves, but got",
+            r"Expect operands to be a tuple of possibly nested dict/list/tuple",
         ):
             f_non_tensor_operands(*example_inputs)
 
