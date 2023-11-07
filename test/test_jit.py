@@ -75,6 +75,7 @@ from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
 from jit.test_dataclasses import TestDataclasses  # noqa: F401
+from jit.test_generator import TestGenerator  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -14165,6 +14166,41 @@ dedent """
             init_fn = getattr(torch.nn.init, name)
             script_out = self.runAndSaveRNG(cu.test, args_fn())
             eager_out = self.runAndSaveRNG(init_fn, args_fn())
+            self.assertEqual(script_out, eager_out)
+
+            FileCheck().check_not("prim::PythonOp").run(cu.test.graph)
+
+    def test_nn_init_generator(self):
+        init_fns = (
+            'uniform_', 'normal_', 'xavier_normal_', 'xavier_uniform_',
+        )
+
+        for name in init_fns:
+            # Build test code
+            code = dedent('''
+                def test(tensor, generator):
+                    # type: (Tensor, Generator)
+                    return torch.nn.init.{name}(tensor, generator=generator)
+            ''').format(name=name)
+            cu = torch.jit.CompilationUnit(code)
+
+            # Compare functions
+            init_fn = getattr(torch.nn.init, name)
+
+            torch.manual_seed(1)
+
+            g = torch.Generator()
+            g.manual_seed(2023)
+            script_out = cu.test(torch.ones(2, 2), g)
+
+            # Change the seed of the default generator to make
+            # sure that we're using the provided generator
+            torch.manual_seed(2)
+
+            g = torch.Generator()
+            g.manual_seed(2023)
+            eager_out = init_fn(torch.ones(2, 2), generator=g)
+
             self.assertEqual(script_out, eager_out)
 
             FileCheck().check_not("prim::PythonOp").run(cu.test.graph)

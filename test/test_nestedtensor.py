@@ -31,7 +31,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch.nested._internal.nested_tensor import jagged_from_list, buffer_from_jagged
+from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
+    jagged_from_list,
+    NestedTensor,
+)
+import contextlib
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -141,6 +146,16 @@ def random_nt_from_similar(other, dims=None):
 
 
 class TestNestedTensor(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -646,6 +661,14 @@ class TestNestedTensor(TestCase):
 
 
 class TestNestedTensorDeviceType(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
 
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
@@ -1387,6 +1410,7 @@ class TestNestedTensorDeviceType(TestCase):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double)
     @parametrize("layout", [torch.strided, torch.jagged])
     def test_dropout(self, device, dtype, layout):
@@ -2240,6 +2264,15 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
 class TestNestedTensorAutograd(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -2859,6 +2892,25 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
+    def tearDown(self):
+        self._exit_stack.close()
+
+    def setUp(self):
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
+        )
+
+    # TODO: consolidate with the below
+    def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
+        Ds = nested_size[1:]
+        out = []
+        for s in nested_size[0]:
+            out.append(
+                torch.randn(s, *Ds, requires_grad=requires_grad, device=device, dtype=torch.float64)
+            )
+        return out
+
     def _get_example_tensor_lists(self, include_list_of_lists=True, include_requires_grad=True):
 
         def _make_tensor(*shape, include_requires_grad=include_requires_grad, requires_grad=True):
@@ -2973,6 +3025,7 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -2993,9 +3046,87 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_binary_pointwise_broadcasting(self, device):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device, requires_grad=True)
+        # (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
+        # (B, j0, ?, ?) + (1, ?, ?) -> (B, j0, ?, ?)
+        # Unsupported: (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)
+        t_sizes = (
+            (4,),
+            (1, 4),
+            (3, 1),
+            (1, 3, 1),
+            (1, 1, 1, 4),
+            # (1, 1, 1, 1, 4), (unsupported today)
+        )
+
+        def grad_test_func(t, *ts):
+            nt, _ = jagged_from_list(ts, None)
+            out = nt + t
+            return buffer_from_jagged(out)
+
+        for t_size in t_sizes:
+            t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
+            gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    @parametrize("keepdim", [False, True])
+    def test_sum_int_DimList(self, device, keepdim):
+        # (B, j0, 3, 4)
+        ts = self._get_list_for_jagged_tensor(((2, 3, 4), 3, 4), device=device, requires_grad=True)
+
+        # Check shape correctness
+        reduce_dims = (
+            # dims, expected shape, expected keepdim shape
+            # j0 is represented as None
+            ((0, 1), (3, 4), (1, 1, 3, 4)),
+            ((1, 2), None, None),
+            ((2, 3), (3, None), (3, None, 1, 1)),
+            ((0, 1, 3), (3,), (1, 1, 3, 1)),
+            ((0, 1, 2), (4,), (1, 1, 1, 4)),
+            ((0, 1, 2, 3), tuple(), (1, 1, 1, 1)),
+        )
+        for rd, ref_shape_no_keepdim, ref_shape_keepdim in reduce_dims:
+            if (0 in rd) ^ (1 in rd):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "applying over the ragged dimension, but not the batch dimension"):
+                    nt, _ = jagged_from_list(ts, None)
+                    out = torch.sum(nt, dim=rd, keepdim=keepdim)
+                continue
+
+            nt, _ = jagged_from_list(ts, None)
+            out = torch.sum(nt, dim=rd, keepdim=keepdim)
+            ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
+            self.assertEqual(len(out.shape), len(ref_shape))
+            for o, r in zip(out.shape, ref_shape):
+                if r is not None:
+                    self.assertEqual(o, r)
+                else:
+                    self.assertTrue(isinstance(o, torch.SymInt))
+
+        # Check values correctness
+        # raggedness not reduced
+        nt, _ = jagged_from_list(ts, None)
+        out = torch.sum(nt, dim=(2, 3), keepdim=keepdim)
+        out_ref = torch.sum(nt.values(), dim=(1, 2))
+        self.assertIsInstance(out, NestedTensor)
+        # flatten to avoid having to replicate unsqueeze logic depending on keepdim
+        self.assertTrue(torch.allclose(out.values().view(-1), out_ref.view(-1)))
+
+        # raggedness reduced away
+        nt, _ = jagged_from_list(ts, None)
+        out = torch.sum(nt, dim=(0, 1), keepdim=keepdim)
+        out_ref = torch.sum(nt.values(), dim=(0,))
+        self.assertNotIsInstance(out, NestedTensor)
+        self.assertTrue(torch.allclose(out, out_ref))
+
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
-    def test_serialization(self, device, dtype, requires_grad):
+    @parametrize("weights_only", [False, True])
+    def test_serialization(self, device, dtype, requires_grad, weights_only):
 
         def compare_metadata(nt1, nt2):
             self.assertEqual(nt1._nested_tensor_size(), nt2._nested_tensor_size())
@@ -3008,7 +3139,7 @@ class TestNestedTensorSubclass(TestCase):
             buffer = io.BytesIO()
             serialized = torch.save(a, buffer)
             buffer.seek(0)
-            b = torch.load(buffer)
+            b = torch.load(buffer, weights_only=weights_only)
             # should be both conceptually equal and metadata equivalent
             self.assertEqual(a, b)
             compare_metadata(a, b)
@@ -3047,6 +3178,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
@@ -3069,6 +3201,7 @@ class TestNestedTensorSubclass(TestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
+    @torch._dynamo.config.patch(suppress_errors=True)
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
