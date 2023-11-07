@@ -42,7 +42,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
         return 2
 
     @with_comms
-    def test_downsampling_convolution_cuda(self):
+    def test_downsampling_convolution(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(3)]
 
@@ -91,7 +91,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(bias_mse_rel <= 1e-6, f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}")
 
     @with_comms
-    def test_depthwise_convolution_cuda(self):
+    def test_depthwise_convolution(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(3)]
 
