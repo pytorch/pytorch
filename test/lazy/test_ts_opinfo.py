@@ -231,6 +231,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)
@@ -238,6 +241,7 @@ class TestLazyOpInfo(TestCase):
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
 
+            torch._lazy.mark_step()
             assert_allclose_rec((r_actual, r_exp))
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
@@ -263,6 +267,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)

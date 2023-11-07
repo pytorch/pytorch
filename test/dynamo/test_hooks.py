@@ -566,6 +566,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             return x * y
 
         cnts = None
+
         def test_fn(fn):
             fn(x, y)
             b = torch.tensor([2.0, 2.0, 2.0], requires_grad=True)
@@ -589,7 +590,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
                 x = torch.tensor([0.5, 0.5, 0.5], requires_grad=True)
                 y = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-
 
                 cnts = torch._dynamo.testing.CompileCounterWithBackend(backend)
                 compiled_fn = torch._dynamo.optimize(cnts, nopython=True)(reg_and_mul)
