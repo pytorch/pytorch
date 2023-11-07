@@ -160,9 +160,8 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
-            of squared gradients (default: 0.9). The `rho` parameter controls the 
-            rate at which the squared gradients are averaged. A higher value of 
-            `rho` will result in a slower average, which can be helpful for preventing 
+            of squared gradients (default: 0.9). A higher value of `rho` will
+            result in a slower average, which can be helpful for preventing 
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6). The `eps` parameter is a small value that is added to the denominator to
