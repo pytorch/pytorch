@@ -1,3 +1,79 @@
+r"""This file contains two PyTorch modules for handling embeddings.
+
+1. `Embedding`:
+   A simple lookup table that stores embeddings of a fixed dictionary and size.
+   This module is often used to store word embeddings and retrieve them using indices.
+   The input to the module is a list of indices, and the output is the corresponding word embeddings.
+
+   Args:
+       num_embeddings (int): size of the dictionary of embeddings
+       embedding_dim (int): the size of each embedding vector
+       padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                    therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                    i.e. it remains as a fixed "pad". For a newly constructed Embedding,
+                                    the embedding vector at :attr:`padding_idx` will default to all zeros,
+                                    but can be updated to another value to be used as the padding vector.
+       max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                   is renormalized to have norm :attr:`max_norm`.
+       norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+       scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
+                                           the words in the mini-batch. Default ``False``.
+       sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+                                See Notes for more details regarding sparse gradients.
+
+   Attributes:
+       weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
+                        initialized from :math:`\mathcal{N}(0, 1)`
+
+   Shape:
+       - Input: :math:`(*)`, IntTensor or LongTensor of arbitrary shape containing the indices to extract
+       - Output: :math:`(*, H)`, where `*` is the input shape and :math:`H=\text{embedding_dim}`
+
+   .. note::
+       Keep in mind that only a limited number of optimizers support
+       sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
+       :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
+
+   .. note::
+       When :attr:`max_norm` is not ``None``, :class:`Embedding`'s forward method will modify the
+       :attr:`weight` tensor in-place. Since tensors needed for gradient computations cannot be
+       modified in-place, performing a differentiable operation on ``Embedding.weight`` before
+       calling :class:`Embedding`'s forward method requires cloning ``Embedding.weight`` when
+       :attr:`max_norm` is not ``None``.
+
+2. `EmbeddingBag`:
+   Computes sums or means of 'bags' of embeddings, without instantiating the intermediate embeddings.
+   For bags of constant length, no :attr:`per_sample_weights`, no indices equal to :attr:`padding_idx`,
+   and with 2D inputs, this class is equivalent to various operations based on the specified `mode`.
+
+   Args:
+       num_embeddings (int): size of the dictionary of embeddings
+       embedding_dim (int): the size of each embedding vector
+       max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                   is renormalized to have norm :attr:`max_norm`.
+       norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+       scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
+                                           the words in the mini-batch. Default ``False``.
+       mode (str, optional): Specifies the way to reduce the bag. Supported modes are "sum", "mean", and "max".
+                             Default: "mean"
+       sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+                                See Notes for more details regarding sparse gradients. Note: this option is not
+                                supported when ``mode="max"``.
+       include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+                                  is equivalent to the size of `indices`. This matches the CSR format.
+       padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                   gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                   during training, i.e. it remains as a fixed "pad". For a newly constructed
+                                   EmbeddingBag, the embedding vector at :attr:`padding_idx` will default to all
+                                   zeros, but can be updated to another value to be used as the padding vector.
+
+   Attributes:
+       weight (Tensor): the learnable weights of the module of shape `(num_embeddings, embedding_dim)`
+                        initialized from :math:`\mathcal{N}(0, 1)`.
+
+Examples are provided for both modules in the docstring.
+"""
+
 from typing import Optional
 
 import torch
@@ -107,6 +183,7 @@ class Embedding(Module):
                 [-0.7895, -0.7089, -0.0364],
                 [ 0.6778,  0.5803,  0.2678]], requires_grad=True)
     """
+    
     __constants__ = ['num_embeddings', 'embedding_dim', 'padding_idx', 'max_norm',
                      'norm_type', 'scale_grad_by_freq', 'sparse']
 
@@ -124,6 +201,23 @@ class Embedding(Module):
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  sparse: bool = False, _weight: Optional[Tensor] = None, _freeze: bool = False,
                  device=None, dtype=None) -> None:
+        r"""Parameters.
+
+        num_embeddings (int): size of the dictionary of embeddings
+        embedding_dim (int): the size of each embedding vector
+        padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
+                                     therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
+                                     i.e. it remains as a fixed "pad". For a newly constructed Embedding,
+                                     the embedding vector at :attr:`padding_idx` will default to all zeros,
+                                     but can be updated to another value to be used as the padding vector.
+        max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                    is renormalized to have norm :attr:`max_norm`.
+        norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
+                                                the words in the mini-batch. Default ``False``.
+        sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor.
+                                 See Notes for more details regarding sparse gradients.
+        """
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.num_embeddings = num_embeddings
@@ -150,6 +244,11 @@ class Embedding(Module):
         self.sparse = sparse
 
     def reset_parameters(self) -> None:
+        """Reset the parameters of the sparse tensor.
+
+        Initializing the weight tensor with random values drawn from a normal 
+        distribution with mean 0 and standard deviation 1.
+        """
         init.normal_(self.weight)
         self._fill_padding_idx_with_zero()
 
@@ -159,11 +258,26 @@ class Embedding(Module):
                 self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input: Tensor) -> Tensor:
+        """Perform a sparse embedding operation on the input tensor.
+
+        Args:
+            input (Tensor): The input tensor of shape (batch_size, sequence_length).
+
+        Returns:
+            Tensor: The output tensor of shape (batch_size, sequence_length, embedding_dim).
+        """
         return F.embedding(
             input, self.weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
     def extra_repr(self) -> str:
+        r"""Return module configuration in human-readable format.
+
+        Return a string containing a human-readable description of the module's
+        configuration, including the number of embeddings, the embedding dimension,
+        and any additional parameters that were set during initialization (such as
+        padding_idx, max_norm, norm_type, scale_grad_by_freq, and sparse).
+        """
         s = '{num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
@@ -181,7 +295,7 @@ class Embedding(Module):
     def from_pretrained(cls, embeddings, freeze=True, padding_idx=None,
                         max_norm=None, norm_type=2., scale_grad_by_freq=False,
                         sparse=False):
-        r"""Creates Embedding instance from given 2-dimensional FloatTensor.
+        r"""Create Embedding instance from given 2-dimensional FloatTensor.
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the Embedding.
@@ -224,8 +338,7 @@ class Embedding(Module):
 
 
 class EmbeddingBag(Module):
-    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
-    intermediate embeddings.
+    r"""Computes sums or means of 'bags' of embeddings, without instantiating the intermediate embeddings.
 
     For bags of constant length, no :attr:`per_sample_weights`, no indices equal to :attr:`padding_idx`,
     and with 2D inputs, this class
@@ -301,6 +414,7 @@ class EmbeddingBag(Module):
                 padding_idx=embedding.padding_idx,
                 mode='sum')
     """
+
     __constants__ = ['num_embeddings', 'embedding_dim', 'max_norm', 'norm_type',
                      'scale_grad_by_freq', 'mode', 'sparse', 'include_last_offset',
                      'padding_idx']
@@ -321,6 +435,35 @@ class EmbeddingBag(Module):
                  mode: str = 'mean', sparse: bool = False, _weight: Optional[Tensor] = None,
                  include_last_offset: bool = False, padding_idx: Optional[int] = None,
                  device=None, dtype=None) -> None:
+        """Parameters.
+        
+        Args:
+            num_embeddings (int): size of the dictionary of embeddings
+            embedding_dim (int): the size of each embedding vector
+            max_norm (float, optional): If given, each embedding vector with norm larger than :attr:`max_norm`
+                                        is renormalized to have norm :attr:`max_norm`.
+            norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
+            scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
+                                                    the words in the mini-batch. Default ``False``.
+                                                    Note: this option is not supported when ``mode="max"``.
+            mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+                                    ``"sum"`` computes the weighted sum, taking :attr:`per_sample_weights`
+                                    into consideration. ``"mean"`` computes the average of the values
+                                    in the bag, ``"max"`` computes the max value over each bag.
+                                    Default: ``"mean"``
+            sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` matrix will be a sparse tensor. See
+                                    Notes for more details regarding sparse gradients. Note: this option is not
+                                    supported when ``mode="max"``.
+            include_last_offset (bool, optional): if ``True``, :attr:`offsets` has one additional element, where the last element
+                                        is equivalent to the size of `indices`. This matches the CSR format.
+            padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
+                                        gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
+                                        during training, i.e. it remains as a fixed "pad". For a newly constructed
+                                        EmbeddingBag, the embedding vector at :attr:`padding_idx` will default to all
+                                        zeros, but can be updated to another value to be used as the padding vector.
+                                        Note that the embedding vector at :attr:`padding_idx` is excluded from the
+                                        reduction.
+        """
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.num_embeddings = num_embeddings
@@ -347,6 +490,11 @@ class EmbeddingBag(Module):
         self.include_last_offset = include_last_offset
 
     def reset_parameters(self) -> None:
+        """Reset the parameters of the sparse tensor to random values.
+
+        This method initializes the weight tensor with random values drawn from a normal distribution
+        with mean 0 and standard deviation 1. It also fills the padding index with zeros.
+        """
         init.normal_(self.weight)
         self._fill_padding_idx_with_zero()
 
@@ -393,6 +541,7 @@ class EmbeddingBag(Module):
                                self.padding_idx)
 
     def extra_repr(self) -> str:
+        """Return a string containing a printable representation of the module and its attributes."""
         s = '{num_embeddings}, {embedding_dim}'
         if self.max_norm is not None:
             s += ', max_norm={max_norm}'
@@ -410,7 +559,7 @@ class EmbeddingBag(Module):
                         norm_type: float = 2., scale_grad_by_freq: bool = False,
                         mode: str = 'mean', sparse: bool = False, include_last_offset: bool = False,
                         padding_idx: Optional[int] = None) -> 'EmbeddingBag':
-        r"""Creates EmbeddingBag instance from given 2-dimensional FloatTensor.
+        r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 
         Args:
             embeddings (Tensor): FloatTensor containing weights for the EmbeddingBag.
