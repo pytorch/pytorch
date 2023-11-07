@@ -173,7 +173,7 @@ register_pytree_node = _register_pytree_node
 
 
 def _private_register_pytree_node(
-    cls: Any,
+    cls: Type[Any],
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
     *,
@@ -272,33 +272,33 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_register_pytree_node(
+_private_register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
     serialized_type_name="builtins.list",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
     serialized_type_name="builtins.tuple",
 )
-_register_pytree_node(
-    namedtuple,
+_private_register_pytree_node(
+    namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten,
     _namedtuple_unflatten,
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
     serialized_type_name="collections.namedtuple",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
@@ -351,10 +351,7 @@ class TreeSpec:
             children_specs_str += self.children_specs[0].__repr__(indent)
             children_specs_str += "," if len(self.children_specs) > 1 else ""
             children_specs_str += ",".join(
-                [
-                    "\n" + " " * indent + child.__repr__(indent)
-                    for child in self.children_specs[1:]
-                ]
+                ["\n" + " " * indent + child.__repr__(indent) for child in self.children_specs[1:]]
             )
         repr_suffix: str = f"{children_specs_str}])"
         return repr_prefix + repr_suffix
