@@ -941,7 +941,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     #   # No need to check main thread. If this thread is alive, the main loader
     #   # thread must be alive, because this thread is set as daemonic.
     #   While `pin_memory_thread_done_event` is not set:
-    #     Get from `index_queue`.
+    #     Get from `worker_result_queue`.
     #       If timed out, continue to get in the next iteration.
     #       Otherwise, process data.
     #       While `pin_memory_thread_done_event` is not set:
