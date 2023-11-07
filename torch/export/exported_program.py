@@ -587,7 +587,7 @@ class ExportedProgram:
         return transformed_ep
 
     def _check_input_constraints(self, *args):
-        from torch._export.exported_program import _check_input_constraints_for_graph
+        from torch._export.utils import _check_input_constraints_for_graph
 
         _check_input_constraints_for_graph(
             self.graph, self.range_constraints, self.equality_constraints

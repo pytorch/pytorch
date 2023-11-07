@@ -65,10 +65,10 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from .exported_program import (
+    _create_stateful_graph_module,
     _process_constraints,
     CallSpec,
     combine_args_kwargs,
-    _UnliftedGraphModule,
 )
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
@@ -386,11 +386,10 @@ def capture_pre_autograd_graph(
 
         flat_args, _ = pytree.tree_flatten(combine_args_kwargs(args, kwargs))
         range_constraints, equality_constraints = _process_constraints(m, 0, flat_args)
-        unlifted_m = _UnliftedGraphModule(
+        unlifted_m = _create_stateful_graph_module(
             m,
-            m.graph,
             range_constraints=range_constraints,
-            equality_constraints=equality_constraints
+            equality_constraints=equality_constraints,
         )
         unlifted_m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
         unlifted_m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]

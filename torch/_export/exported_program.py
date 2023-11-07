@@ -33,6 +33,8 @@ from torch.export.exported_program import (
     ModuleCallSignature,
 )
 
+from .utils import _check_input_constraints_pre_hook
+
 
 __all__ = [
     "ExportBackwardSignature",
@@ -239,24 +241,41 @@ def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict)
     return inp_pos_to_param_buffer_name
 
 
-class _UnliftedGraphModule(torch.fx.GraphModule):
+class _StatefulGraphModuleFactory(type):
+    """
+    Metaclass that ensures a private constructor for _StatefulGraphModule
+    """
+
+    def __call__(cls, *args, **kwargs):
+        raise TypeError(
+            f"{cls.__module__}.{cls.__qualname__} has no public constructor. "
+        )
+
+    def _create(cls, root, graph, range_constraints=None, equality_constraints=None):
+        return super().__call__(
+            root,
+            graph,
+            range_constraints=range_constraints,
+            equality_constraints=equality_constraints
+        )
+
+
+class _StatefulGraphModule(torch.fx.GraphModule, metaclass=_StatefulGraphModuleFactory):
     def __init__(self, root, graph, range_constraints=None, equality_constraints=None):
         super().__init__(root, graph)
         self.range_constraints = range_constraints or []
         self.equality_constraints = equality_constraints or []
 
-    @torch._dynamo.disable
-    def _check_input_constraints(self, *args, **kwargs):
-        flat_args, _ = pytree.tree_flatten(args)
-        return _check_input_constraints_for_graph(
-            self.graph,
-            range_constraints=self.range_constraints,
-            equality_constraints=self.equality_constraints
-        )(*flat_args)
 
-    def __call__(self, *args, **kwargs):
-        self._check_input_constraints(*args, **kwargs)
-        return super().__call__(*args, **kwargs)
+def _create_stateful_graph_module(plain_graph_module: torch.fx.GraphModule, range_constraints, equality_constraints):
+    stateful_gm = _StatefulGraphModule._create(
+        plain_graph_module,
+        plain_graph_module.graph,
+        range_constraints=range_constraints,
+        equality_constraints=equality_constraints
+    )
+    stateful_gm.register_forward_pre_hook(_check_input_constraints_pre_hook, with_kwargs=True)
+    return stateful_gm
 
 
 def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
@@ -273,12 +292,7 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
         ep.graph_signature.buffers_to_mutate,
         ep.graph_signature.user_outputs,
     )
-    unlift_gm = _UnliftedGraphModule(
-        new_gm,
-        new_gm.graph,
-        range_constraints=ep.range_constraints,
-        equality_constraints=ep.equality_constraints
-    )
+    unlift_gm = _create_stateful_graph_module(new_gm, ep.range_constraints, ep.equality_constraints)
     unlift_gm.meta.update(ep.graph_module.meta)
     return unlift_gm
 
@@ -391,29 +405,6 @@ def _process_constraints(
 
     return range_constraints, equality_constraints
 
-def _check_input_constraints_for_graph(graph: torch.fx.Graph, range_constraints, equality_constraints):
-    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-        _AddRuntimeAssertionsForConstraintsPass,
-    )
-
-    def inner(*args):
-        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
-        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
-        for p in graph.nodes:
-            if p.op != "placeholder":
-                continue
-            new_p = _assertion_graph.graph.placeholder(p.name)
-            new_p.meta = p.meta
-        _assertion_graph.graph.output(())
-        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
-            range_constraints,
-            equality_constraints,
-        )(_assertion_graph)
-        assert _assertion_graph_res is not None
-        _assertion_graph = _assertion_graph_res.graph_module
-        _assertion_graph(*args)
-
-    return inner
 
 def combine_args_kwargs(args, kwargs):
     kwargs = kwargs or {}
