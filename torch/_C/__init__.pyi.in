@@ -1098,6 +1098,8 @@ def _set_deterministic_algorithms(
     *,
     warn_only: _bool = ...,
 ) -> None: ...  # THPModule_setDeterministicAlgorithms
+def _get_deterministic_fill_uninitialized_memory() -> _bool: ...  # THPModule_deterministicFillUninitializedMemory
+def _set_deterministic_fill_uninitialized_memory(arg: _bool) -> None: ...  # THPModule_setDeterministicFillUninitializedMemory
 def _get_warnAlways() -> _bool: ...  # THPModule_warnAlways
 def _set_warnAlways(arg: _bool) -> None: ...  # THPModule_setWarnAlways
 def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
@@ -1732,6 +1734,7 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
+    gcnArchName: str
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...

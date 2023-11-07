@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import os
 import pprint
 import textwrap
@@ -12,6 +13,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
@@ -28,6 +30,8 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    green_text,
+    red_text,
     sympy_product,
 )
 from .virtualized import V
@@ -328,10 +332,8 @@ class BaseSchedulerNode:
                             ),
                         )
                         and not (
-                            isinstance(
-                                input_node.node, (ir.FallbackKernel, ir.MultiOutput)
-                            )
-                            and input_node.node.has_aliasing()
+                            isinstance(input_node.node, ir.FallbackKernel)
+                            and len(input_node.node.get_alias_names()) > 0
                         )
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
@@ -1043,7 +1045,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for name in other_node.get_names():
                 self.name_to_node[name] = other_node
 
-        self.group = (nodes[0].get_device(), 0)
+        self.group = (nodes[0].get_device(), "foreach")
 
         self.origins: Set[torch.fx.Node] = set()
 
@@ -1134,12 +1136,16 @@ class NodeUser:
         )
 
 
+_post_grad_graph_counter = itertools.count()
+
+
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.nodes = []
         self.available_buffer_names = {
@@ -1161,12 +1167,21 @@ class Scheduler:
             str, BaseSchedulerNode
         ] = dict()  # set in fuse_nods()
 
-        # we handle mutation by renaming modified versions of the same
+        # mutation_real_name: Maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_real_name = {"buf0" : "buf1"}
+        # all subsequent uses of buf0 become buf1's usage in dependency graph
+        self.mutation_real_name = {}
+
+        # We handle mutation by renaming modified versions of the same
         # buffer in the dependency graph to prevent cycles.
         # mutation_renames: tracks the current name for a given buffer
         #                   (changed once per mutation)
-        self.mutation_real_name = {}
-        # mutation_real_name: maps back to the original name for codegen
+        # Example:
+        # If you mutate buf0 inside of buf1's kernel, then:
+        # mutation_renames = {"buf1" : "buf0"}
+        # in codegen we only use buf0, never buf1
         self.mutation_renames = {}
 
         self.compute_dependencies()
@@ -1182,6 +1197,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
+        self.logged_slow_fusion = set()
         self.fuse_nodes()
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
@@ -1200,7 +1216,13 @@ class Scheduler:
         # for debug attribution
         self.origin_to_index = {}
 
-        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+        get_metric_table("graph_stats").add_row(
+            lambda: {
+                "graph_id": self.post_grad_graph_id,
+                "num_nodes_before_fusion": self.num_orig_nodes,
+                "num_nodes_after_fusion": len(self.nodes),
+            }
+        )
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1332,6 +1354,7 @@ class Scheduler:
                 node.add_fake_dep(StarDep(unbacked_symbol_to_origin_node[s].get_name()))
 
             # a node will mutate either 0 or 1 buffers
+            assert len(node.get_mutations()) <= 1
             for alt_name in node.get_mutations():
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
@@ -1523,6 +1546,114 @@ class Scheduler:
                 fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
                 break
 
+    def benchmark_fused_nodes(self, nodes):
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        assert len(nodes) > 0
+        device = nodes[0].get_device()
+        V.graph.scheduler = self
+        self.current_device = device
+        backend = self.get_backend(device)
+        return backend.benchmark_fused_nodes(nodes)
+
+    def speedup_by_fusion(self, node1, node2):
+        """
+        If config.benchmark_fusion is False, always return True.
+        Otherwise, return True if fusion can brings speedup.
+        """
+        if not config.benchmark_fusion:
+            return True
+
+        if node1.is_template():
+            # TODO support benchmarking epilogue fusion
+            return True
+
+        node_list_1 = node1.get_nodes()
+        device = node_list_1[0].get_device()
+
+        # don't support benchmark fusion for CPU right now.
+        if device.type == "cpu":
+            return True
+
+        node_list_2 = node2.get_nodes()
+        node_list_fused = node_list_1 + node_list_2
+
+        # We can not accurately benchmark kernel using atomic_add
+        # due to how we generate random integer inputs.
+        # Skip benchmarking them by allowing fusion.
+        if any(
+            hasattr(n.node, "data")
+            and hasattr(n.node.data, "scatter_mode")
+            and n.node.data.scatter_mode == "atomic_add"
+            for n in node_list_fused
+        ):
+            return True
+
+        from triton.compiler.errors import CompilationError
+
+        try:
+            ms1, path1 = self.benchmark_fused_nodes(node_list_1)
+            if math.isinf(ms1):
+                log.debug(
+                    "Skip fusion because of register spilling of the first kernel"
+                )
+                return False
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+            if math.isinf(ms2):
+                log.debug(
+                    "Skip fusion because of register spilling of the second kernel"
+                )
+                return False
+            ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
+            if math.isinf(ms_fused):
+                log.debug(
+                    "Skip fusion because of register spilling of the fused kernel"
+                )
+                return False
+        except CompilationError as e:
+            # workaround triton issue: https://github.com/openai/triton/issues/2151
+            if "Loop-carried variable" in str(e):
+                return True  # allow fusion
+            else:
+                raise
+
+        if log.isEnabledFor(logging.DEBUG):
+            if ms_fused < ms1 + ms2:
+                log.debug(
+                    "Fusing %s with %s cause %sx speedup",
+                    node1.get_names(),
+                    node2.get_names(),
+                    green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+                )
+            else:
+                log.debug(
+                    "Fusing %s with %s cause %sx slowdown",
+                    node1.get_names(),
+                    node2.get_names(),
+                    red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+                )
+
+        if (
+            is_metric_table_enabled("slow_fusion")
+            and ms_fused >= ms1 + ms2
+            and (path1, path2) not in self.logged_slow_fusion
+        ):
+            self.logged_slow_fusion.add((path1, path2))
+            get_metric_table("slow_fusion").add_row(
+                lambda: {
+                    "kernel1_path": path1,
+                    "kernel1_latency": ms1,
+                    "kernel2_path": path2,
+                    "kernel2_latency": ms2,
+                    "fused_kernel_path": path_fused,
+                    "fused_kernel_latency": ms_fused,
+                    "slow_down_ratio": ms_fused / (ms1 + ms2),
+                }
+            )
+        return ms_fused < ms1 + ms2
+
     def fuse_nodes_once(self):
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
@@ -1538,6 +1669,8 @@ class Scheduler:
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
+                if not self.speedup_by_fusion(node1, node2):
+                    continue
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1912,7 +2045,7 @@ class Scheduler:
                 remove = all(n in names_to_remove for n in buf.other_names)
                 if remove:
                     self.remove_inplace_buffer(name)
-                V.graph.inplaced_to_remove.add(name)
+                V.kernel.inplaced_to_remove.add(name)
             else:
                 self.remove_buffer(name)
 
@@ -2112,5 +2245,12 @@ class BaseScheduling:
     def flush(self):
         """
         Flush the generated kernel and python wrapper code to the source code file.
+        """
+        raise NotImplementedError()
+
+    def benchmark_fused_nodes(self, nodes):
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError()
