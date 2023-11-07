@@ -149,9 +149,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
     """ + r"""
-    The `Adadelta` optimizer is a popular choice for deep learning, as it is
-    relatively simple to implement and can be effective in a variety of
-    settings.`Adadelta` is based on the idea of adaptive learning rates,
+    The `Adadelta` optimizer is based on the idea of adaptive learning rates,
     which means that the learning rate for each parameter is adjusted
     individually based on its own history of gradients. This strategy can
     increase robustness against changes in the data and prevent the optimizer
