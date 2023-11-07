@@ -1,7 +1,7 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py
 
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple_no_segment
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test1
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_inplace_in_unnamed_NOT_WORKING
 """
@@ -62,9 +62,11 @@ class TestLazyScheduler(TestCase):
     )
 
     actual_ls = compiled_m_ls(x, y)
+    print(f"actual_ls: {actual_ls}")
     actual_ls.sum().backward()
     print(f"compiled_ls: first iter done")
     actual_ls = compiled_m_ls(x, y)
+    print(f"actual_ls: {actual_ls}")
     actual_ls.sum().backward()
     print(f"compiled_ls: second iter done")
 
