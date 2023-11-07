@@ -259,7 +259,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
 
 
 def vjp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create a function to compute the dot product between a vector ``v`` and the Jacobian of given function at a specified point.
+    r"""Compute the dot product between a vector ``v`` and the Jacobian of given function at a specified point.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -354,7 +354,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def jvp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create a function to compute the dot product between the Jacobian of given function at given specified point and a vector ``v``.
+    r"""Compute the dot product between the Jacobian of given function at given specified point and a vector ``v``.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -577,7 +577,7 @@ def jacobian(
     vectorize=False,
     strategy="reverse-mode",
 ):
-    r"""Create a function to compute the Jacobian of a given function.
+    r"""Compute the Jacobian of a given function.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -834,7 +834,7 @@ def hessian(
     vectorize=False,
     outer_jacobian_strategy="reverse-mode",
 ):
-    r"""Create a function to compute the Hessian of a given scalar function.
+    r"""Compute the Hessian of a given scalar function.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -965,7 +965,7 @@ def hessian(
 
 
 def vhp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create a function to calculate dot product between vector ``v`` and Hessian of a scalar function at a specified point.
+    r"""Calculate dot product between vector ``v`` and Hessian of a scalar function at a specified point.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -1066,7 +1066,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def hvp(func, inputs, v=None, create_graph=False, strict=False):
-    r"""Create a function to compute the dot product between the scalar function's Hessian and a vector ``v`` at a specified point.
+    r"""Compute the dot product between the scalar function's Hessian and a vector ``v`` at a specified point.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
