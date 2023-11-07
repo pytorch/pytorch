@@ -1,5 +1,3 @@
-# Older version that tries to reorder FWD/BWD ops: https://gist.github.com/yf225/10a6f559daadc7f1b51cc197d82720cb
-
 import torch
 import itertools
 from typing import Optional, Dict, Callable
