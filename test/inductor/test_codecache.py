@@ -17,6 +17,7 @@ from torch._inductor.codecache import (
     TensorMetadataAndValues,
 )
 from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -92,13 +93,15 @@ class TestFxGraphCache(TestCase):
         cls.tmpdir.cleanup()
 
     def setUp(self):
+        super().setUp()
         counters.clear()
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
     @parametrize("dtype", (torch.float32, torch.bfloat16))
-    def test_cache_load_function(self, device, dtype):
+    @parametrize("dynamic", (False, True))
+    def test_cache_load_function(self, device, dtype, dynamic):
         """
         Verify that we can populate and load functions from the cache.
         """
@@ -114,7 +117,7 @@ class TestFxGraphCache(TestCase):
         b = torch.rand(5, 5, dtype=dtype, device=device)
         c = a.view(5, 5)
 
-        compiled_fn = torch.compile(fn, dynamic=False)
+        compiled_fn = torch.compile(fn, dynamic=dynamic)
 
         # A first call shold miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
@@ -137,8 +140,9 @@ class TestFxGraphCache(TestCase):
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", ("cuda", "cpu"))
-    @parametrize("dtype", (torch.float32, torch.float16))
-    def test_cache_load_model(self, device, dtype):
+    @parametrize("dtype", (torch.float32, torch.float64))
+    @parametrize("dynamic", (False, True))
+    def test_cache_load_model(self, device, dtype, dynamic):
         """
         Verify that we can populate and load models from the cache.
         """
@@ -150,7 +154,7 @@ class TestFxGraphCache(TestCase):
             mod(x).sum().backward()
             return [p.grad for p in mod.parameters()]
 
-        compiled_fn = torch.compile(fn, dynamic=False)
+        compiled_fn = torch.compile(fn, dynamic=dynamic)
 
         mod = MyModelConv2d().to(device=device, dtype=dtype)
         inp = torch.randn(2, 3, 16, 16, device=device, dtype=dtype)
@@ -171,6 +175,132 @@ class TestFxGraphCache(TestCase):
 
         # And the results should be the same.
         self.assertEqual(grads1, grads2)
+
+    @largeTensorTest("64GB", device="cuda")
+    @config.patch({"fx_graph_cache": True})
+    @parametrize("device", ("cuda",))
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_cache_load_with_guards_int32_bounds(self, device, dtype):
+        """
+        Test caching the same graph, but under conditions that introduce guards
+        for tensor sizes < int32.
+        """
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("requires CUDA")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return (x + x, y + y)
+
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        # Iterate over different shapes, varying whether the total
+        # size is below or above int32. For each combination, we expect
+        # different guards around whether the symbolic sizes do or do
+        # not exceed int32.
+        shapes = (
+            ((5, 6), (7, 8)),
+            ((5, 6), (47000, 47001)),
+            ((47000, 47001), (5, 6)),
+        )
+        for a_shape, b_shape in shapes:
+            a = torch.rand(a_shape, device=device, dtype=dtype)
+            b = torch.rand(b_shape, device=device, dtype=dtype)
+
+            # AVOID a dynamo reset here. We expect guards to have been
+            # added that will be violated with the new shape. We should
+            # see a recompilation (along with a cache miss).
+            counters.clear()
+            res1 = compiled_fn(a, b)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            # A second call should hit. (Reset here to force compilation).
+            counters.clear()
+            torch._dynamo.reset()
+            res2 = compiled_fn(a, b)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.assertEqual(res1, res2)
+
+    @config.patch({"fx_graph_cache": True})
+    @parametrize("device", ("cuda", "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    def test_cache_load_with_guards_static_bounds(self, device, dtype):
+        """
+        Test caching the same graph, but under conditions that introduce guards
+        for static bounds.
+        """
+        if device == "cuda" and not HAS_CUDA:
+            raise unittest.SkipTest("requires CUDA")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        # See lowering; for all of the pooling operators, we always guard and
+        # make the height/width static.
+        def fn(x):
+            return torch.nn.functional.adaptive_avg_pool2d(x, [5, 7])
+
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        # Iterate over different input shapes. Each new shape should cause
+        # a cache miss.
+        shapes = ((1, 64, 8, 9), (1, 64, 9, 10), (1, 64, 10, 11))
+        for shape in shapes:
+            x = torch.rand(shape, device=device, dtype=dtype)
+
+            # AVOID a dynamo reset here. For each cache hit, we expect guards
+            # to have been added that will be violated with each new shape.
+            # We should see a recompilation (along with a cache miss).
+            counters.clear()
+            res1 = compiled_fn(x)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            # A second call should hit.
+            counters.clear()
+            torch._dynamo.reset()
+            res2 = compiled_fn(x)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            self.assertEqual(res1, res2)
+
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_clear(self):
+        """
+        Test clearing the cache.
+        """
+
+        def fn(x, y):
+            return (x * y,)
+
+        a = torch.rand(5, 5)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn)
+
+        # A first call shold miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A second call should hit.
+        counters.clear()
+        torch._dynamo.reset()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+        # Clear the cache; now we should miss.
+        counters.clear()
+        torch._dynamo.reset()
+        torch._inductor.codecache.FxGraphCache.clear()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
 
 class TestFxGraphCacheHashing(TestCase):
@@ -296,16 +426,16 @@ class TestFxGraphCacheHashing(TestCase):
         ordering of the kwargs dict and any set arguments.
         """
         # Dict order of the kwargs should not affect hashes.
-        details1 = FxGraphHashDetails([], {"a": 0, "z": 1})
-        details2 = FxGraphHashDetails([], {"z": 1, "a": 0})
+        details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1})
+        details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0})
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # Different kwarg values should affect hashes.
-        details1 = FxGraphHashDetails([], {"a": 0})
-        details2 = FxGraphHashDetails([], {"a": 1})
+        details1 = FxGraphHashDetails(None, [], {"a": 0})
+        details2 = FxGraphHashDetails(None, [], {"a": 1})
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -315,16 +445,16 @@ class TestFxGraphCacheHashing(TestCase):
         # sorting and creating a new set seems to change the order.
         set1 = {"a", "b", "c", "d", "e", "f", "g"}
         set2 = set(sorted(set1))  # noqa: C414
-        details1 = FxGraphHashDetails([], {"a": set1})
-        details2 = FxGraphHashDetails([], {"a": set2})
+        details1 = FxGraphHashDetails(None, [], {"a": set1})
+        details2 = FxGraphHashDetails(None, [], {"a": set2})
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # But different set contents should affect hashes.
-        details1 = FxGraphHashDetails([], {"a": {1, 2, 3}})
-        details2 = FxGraphHashDetails([], {"a": {1, 2}})
+        details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}})
+        details2 = FxGraphHashDetails(None, [], {"a": {1, 2}})
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -335,11 +465,11 @@ class TestFxGraphCacheHashing(TestCase):
         Test that different config settings affect hashes.
         """
         with config.patch({"max_autotune": False}):
-            details1 = FxGraphHashDetails([], {})
-            details2 = FxGraphHashDetails([], {})
+            details1 = FxGraphHashDetails(None, [], {})
+            details2 = FxGraphHashDetails(None, [], {})
 
         with config.patch({"max_autotune": True}):
-            details3 = FxGraphHashDetails([], {})
+            details3 = FxGraphHashDetails(None, [], {})
 
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),

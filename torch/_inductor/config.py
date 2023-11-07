@@ -1,4 +1,4 @@
-import os
+import os  # noqa: C101
 import sys
 
 import torch
@@ -29,6 +29,7 @@ static_weight_shapes = True
 
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
+nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -38,6 +39,16 @@ inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
+
+# Enable pooled allocations for non-output tensors
+memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
+
+# How to organize memory under memory_planning=True:
+# - "none": do not try to pool storage, just reuse
+# - "intermediates": all non-outputs share storage, outputs each get unique storage
+# - "outputs": two pools, one for intermediates (freed on return) and one for outputs
+# - "combined": a single pool for both intermediates and outputs
+memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 
 # codegen benchmark harness
 benchmark_harness = True
@@ -198,6 +209,8 @@ aggressive_fusion = False
 # For each fused kernel in the wrapper, comment with the nodes that get fused.
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
+enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -481,7 +494,9 @@ class aot_inductor:
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
-    # If not specified, a temp directory will be created under the default caching path
+    # If not specified, a temp directory will be created under the default caching path.
+    # If the specified path contains something like "model.so", the sub-string will be used
+    # to name the generated library.
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
@@ -544,11 +559,20 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx = None
 
+    # If set to True, it will ensure that only GEMM ops capable of
+    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
+    # are enabled for the CUTLASS backend.
+    cutlass_only_evt_capable_ops: bool = False
+
 
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+
+    # Save debug information to a temporary directory
+    # If not specified, a temp directory will be created by system
+    debug_dir = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
