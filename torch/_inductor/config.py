@@ -1,4 +1,4 @@
-import os
+import os  # noqa: C101
 import sys
 
 import torch
@@ -558,6 +558,11 @@ class cuda:
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx = None
+
+    # If set to True, it will ensure that only GEMM ops capable of
+    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
+    # are enabled for the CUTLASS backend.
+    cutlass_only_evt_capable_ops: bool = False
 
 
 # create a directory containing lots of debug information
