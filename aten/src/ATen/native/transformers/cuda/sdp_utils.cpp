@@ -45,7 +45,7 @@ namespace {
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
-      SDPBackend::cudnn_mha,
+      SDPBackend::cudnn,
       SDPBackend::flash_attention,
       SDPBackend::efficient_attention,
       SDPBackend::math};
@@ -360,6 +360,7 @@ inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }
+  std::cout << "supported? " << supported << " ok? " << ok << std::endl;
   return ok;
 }
 
@@ -481,7 +482,7 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   // 3. Math fallback
   auto& ctx = at::globalContext();
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() &&
-      !ctx.userEnabledMemEfficientSDP()) {
+      !ctx.userEnabledMemEfficientSDP() && !ctx.userEnabledCuDNNSDP()) {
     return SDPBackend::error;
   }
   // Get ideal kernel ordering
@@ -492,9 +493,9 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
   bool print_debug = false;
   for (auto& backend : ordering) {
     switch (backend) {
-      case SDPBackend::cudnn_mha:
+      case SDPBackend::cudnn:
         if (use_cudnn_mha(kernel_params, print_debug)) {
-              return SDPBackend::cudnn_mha;
+              return SDPBackend::cudnn;
         }
 	break;
       case SDPBackend::flash_attention:

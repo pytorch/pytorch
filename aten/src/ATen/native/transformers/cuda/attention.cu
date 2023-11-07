@@ -564,7 +564,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // Mask type shape grossness
     if (!mask.has_value() && no_seq_len_1_nested &&
         (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention ||
-	 backend == sdp::SDPBackend::cudnn_mha)) {
+	 backend == sdp::SDPBackend::cudnn)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);
@@ -682,7 +682,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  std::cout << "is_causal: " << is_causal << std::endl;
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -767,7 +766,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
                       head_dim/*int64_t d*/,
                       softmax_scale/*float scaling_factor*/,
                       training/* bool */,
-		      is_causal/* bool */,
+		              is_causal/* bool */,
                       dropout_p/*double dropout_probability*/,
                       query/* Tensor q*/,
                       key/* Tensor k*/,
@@ -785,6 +784,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _cudnn_mha(
   // attention =
   //  attention.reshape({batch_size, num_heads, max_seqlen_batch_q, head_dim}).transpose(1,2);
   std::cout << "got attention shape and stride after: " << attention.sizes() << " " << attention.strides() << std::endl;
+  //// TODO(eqy): why does cuDNN return S, B, H, D layout?
+  //// We have B, H, S, D, want contiguous B, S, H, D
+  //attention = attention.transpose(1, 2).contiguous().transpose(1, 2); // thanks Gautam!
   return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
 
@@ -855,7 +857,6 @@ _flash_attention_forward(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
-  std::cout << "is_causal: " << is_causal << std::endl;
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();

@@ -74,6 +74,11 @@ struct MHAParams {
 
 void setMHAParams(MHAParams& params, int64_t b, int64_t h, int64_t s_q, int64_t s_kv, int64_t d, const Tensor& q, const Tensor& k, const Tensor & v, double dropout_probability, bool is_causal, bool return_softmaxstats) {
   memset(&params, 0, sizeof(MHAParams));
+  params.device_id = at::cuda::current_device();
+  params.dataType = fe::DataType_t::HALF;
+  if (q.scalar_type() == kBFloat16) {
+    params.dataType = fe::DataType_t::BFLOAT16;
+  }
   params.b = b;
   params.h = h;
   params.d = d;
@@ -147,7 +152,7 @@ auto build_graph_and_tensors(int64_t b,
                                 MHAParams& params) {
     auto dtype = fe::DataType_t::HALF;
     if (q.scalar_type() == kBFloat16) {
-      dtype = fe::DataType_t::HALF;
+      dtype = fe::DataType_t::BFLOAT16;
     }
     auto mha_graph = std::make_shared<fe::graph::Graph>();
     mha_graph->set_io_data_type(dtype)
@@ -281,7 +286,7 @@ run_cudnn_LLM_fprop(int64_t b,
                     Tensor& dropoutoffset) {
     std::cout << "running cuDNN" << std::endl;
     cudnnHandle_t handle = getCudnnHandle();
-    o = at::empty_strided({b, h, s_q, d}, {h * d, d, b * h * d, 1}, q.options());
+    o = at::empty_strided({b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());
     if (return_softmaxstats) {
       // TODO(eqy): fix strides
       softmaxstats = at::empty({b, h, s_q}, q.options());

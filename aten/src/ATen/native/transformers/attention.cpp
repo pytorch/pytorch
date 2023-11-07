@@ -646,7 +646,7 @@ Tensor scaled_dot_product_attention(
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
-    case sdp::SDPBackend::cudnn_mha: {
+    case sdp::SDPBackend::cudnn: {
       bool compute_logsumexp =
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
