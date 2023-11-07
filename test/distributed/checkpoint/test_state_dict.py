@@ -10,12 +10,14 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
+    get_model_state_dict,
     get_state_dict,
     PG,
+    set_model_state_dict,
     set_state_dict,
     STATE,
     StateDictOptions,
@@ -31,7 +33,7 @@ from torch.testing._internal.common_dist_composable import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 if not dist.is_available():
@@ -221,11 +223,20 @@ class TestStateDict(FSDPTest):
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
         self._verify_osd(model, optim, osd, dist_osd)
 
-    def _test_fsdp(self, use_orig_params: bool, use_composable: bool) -> None:
+    def _test_fsdp(
+        self, use_orig_params: bool, use_composable: bool, use_dtensor: bool
+    ) -> None:
         if not use_orig_params and use_composable:
             return
 
+        # TODO: remove this return after we complete the composable API side change for device_mesh
+        if use_composable and use_dtensor:
+            return
+
         def init_model_optim():
+            if use_dtensor:
+                device_mesh = init_device_mesh("cuda", (self.world_size,))
+
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
             copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
@@ -234,11 +245,21 @@ class TestStateDict(FSDPTest):
                     copy.deepcopy(orig_model), policy=ModuleWrapPolicy({UnitModule})
                 )
             else:
-                dist_model = FSDP(
-                    copy.deepcopy(orig_model),
-                    auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
-                    use_orig_params=use_orig_params,
-                )
+                if use_dtensor:
+                    device_mesh = init_device_mesh("cuda", (self.world_size,))
+                    dist_model = FSDP(
+                        copy.deepcopy(orig_model),
+                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        use_orig_params=use_orig_params,
+                        device_mesh=device_mesh,
+                    )
+                else:
+                    dist_model = FSDP(
+                        copy.deepcopy(orig_model),
+                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        use_orig_params=use_orig_params,
+                    )
+
             dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
@@ -247,7 +268,11 @@ class TestStateDict(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fsdp(self) -> None:
         self.run_subtests(
-            {"use_orig_params": [True, False], "use_composable": [True, False]},
+            {
+                "use_orig_params": [True, False],
+                "use_composable": [True, False],
+                "use_dtensor": [True, False],
+            },
             self._test_fsdp,
         )
 
@@ -359,30 +384,32 @@ class TestStateDict(FSDPTest):
     def test_strict(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict, _ = get_state_dict(model)
+        model_state_dict = get_model_state_dict(model)
         key = next(iter(model_state_dict.keys()))
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
-        model_state_dict.pop("abc")
+            set_model_state_dict(model, model_state_dict=model_state_dict)
         model_state_dict.pop(key)
-        set_state_dict(
+        incompatible_keys = set_model_state_dict(
             model,
             model_state_dict=model_state_dict,
             options=StateDictOptions(strict=False),
         )
+        self.assertEqual(incompatible_keys.missing_keys, [key])
+        self.assertEqual(incompatible_keys.unexpected_keys, ["abc"])
+        model_state_dict.pop("abc")
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
-            set_state_dict(model, model_state_dict=model_state_dict)
+            set_model_state_dict(model, model_state_dict=model_state_dict)
 
     @skip_if_lt_x_gpu(1)
     def test_partial(self) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
 
-        model_state_dict1, _ = get_state_dict(model)
+        model_state_dict1 = get_model_state_dict(model)
         model_state_dict1 = copy.deepcopy(model_state_dict1)
-        model_state_dict2, _ = get_state_dict(model, submodules={model.l})
+        model_state_dict2 = get_model_state_dict(model, submodules={model.l})
         model_state_dict2 = copy.deepcopy(model_state_dict2)
-        model_state_dict3, _ = get_state_dict(
+        model_state_dict3 = get_model_state_dict(
             model,
             submodules={model.l},
             options=StateDictOptions(keep_submodule_prefixes=False),
@@ -402,7 +429,7 @@ class TestStateDict(FSDPTest):
             k: torch.zeros_like(v) for k, v in model_state_dict1.items()
         }
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict=model_state_dict2,
             options=StateDictOptions(strict=False),
@@ -411,10 +438,14 @@ class TestStateDict(FSDPTest):
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
 
         model.load_state_dict(zeros_state_dict)
-        set_state_dict(
+        set_model_state_dict(
             model,
             model_state_dict={model.l: model_state_dict3},
             options=StateDictOptions(strict=False),
         )
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+
+if __name__ == "__main__":
+    run_tests()

@@ -180,7 +180,15 @@ TestEnvironment.def_flag(
     env_var="SANDCASTLE",
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False)
-TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE", include_in_repro=False)
+
+_is_fbcode_default = (
+    hasattr(torch._utils_internal, "IS_FBSOURCE") and
+    torch._utils_internal.IS_FBSOURCE
+)
+
+TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
+                         default=_is_fbcode_default,
+                         include_in_repro=False)
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
@@ -603,6 +611,69 @@ class parametrize(_TestParametrizer):
             if values is check_exhausted_iterator:
                 raise ValueError(f'{test}: An empty arg_values was passed to @parametrize. '
                                  'Note that this may result from reuse of a generator.')
+
+
+class decorateIf(_TestParametrizer):
+    """
+    Decorator for applying parameter-specific conditional decoration.
+    Composes with other test parametrizers (e.g. @modules, @ops, @parametrize, etc.).
+
+    Examples::
+
+        @decorateIf(unittest.skip, lambda params: params["x"] == 2)
+        @parametrize("x", range(5))
+        def test_foo(self, x):
+            ...
+
+        @parametrize("x,y", [(1, 'foo'), (2, 'bar'), (3, 'baz')])
+        @decorateIf(
+            unittest.expectedFailure,
+            lambda params: params["x"] == 3 and params["y"] == "baz"
+        )
+        def test_bar(self, x, y):
+            ...
+
+        @decorateIf(
+            unittest.expectedFailure,
+            lambda params: params["op"].name == "add" and params["dtype"] == torch.float16
+        )
+        @ops(op_db)
+        def test_op_foo(self, device, dtype, op):
+            ...
+
+        @decorateIf(
+            unittest.skip,
+            lambda params: params["module_info"].module_cls is torch.nn.Linear and \
+                params["device"] == "cpu"
+        )
+        @modules(module_db)
+        def test_module_foo(self, device, dtype, module_info):
+            ...
+
+    Args:
+        decorator: Test decorator to apply if the predicate is satisfied.
+        predicate_fn (Callable): Function taking in a dict of params and returning a boolean
+            indicating whether the decorator should be applied or not.
+    """
+    def __init__(self, decorator, predicate_fn):
+        self.decorator = decorator
+        self.predicate_fn = predicate_fn
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+
+        # Leave test as-is and return the appropriate decorator_fn.
+        def decorator_fn(params, decorator=self.decorator, predicate_fn=self.predicate_fn):
+            if predicate_fn(params):
+                return [decorator]
+            else:
+                return []
+
+        @wraps(test)
+        def test_wrapper(*args, **kwargs):
+            return test(*args, **kwargs)
+
+        test_name = ''
+        yield (test_wrapper, test_name, {}, decorator_fn)
 
 
 class ProfilingMode(Enum):
@@ -1105,7 +1176,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
-IS_ARM64 = platform.machine() == 'arm64'
+IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1271,6 +1342,14 @@ if TEST_WITH_TORCHDYNAMO:
         torch._inductor.config.fallback_random = True
 
 
+def xpassIfTorchDynamo(func):
+    return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
+
+
+def xfailIfTorchDynamo(func):
+    return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
+
+
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def decorator(fn):
         if not isinstance(fn, type):
@@ -1298,14 +1377,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -1320,7 +1399,7 @@ def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor 
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
-    torch._dynamo.config.translation_validation = True
+    torch.fx.experimental._config.translation_validation = True
 
 # Some tests take too long when dynamic_shapes is combined with
 # translation_validation. Whenever that happens, we solve that by
@@ -1330,7 +1409,7 @@ def disable_translation_validation_if_dynamic_shapes(fn):
     def wrapper(*args, **kwargs):
         if torch._dynamo.config.dynamic_shapes:
             # Turning TV off due to high latency on dynamic shapes.
-            torch._dynamo.config.translation_validation = False
+            torch.fx.experimental._config.translation_validation = False
         return fn(*args, **kwargs)
     return wrapper
 
@@ -1469,21 +1548,25 @@ def setLinalgBackendsToDefaultFinally(fn):
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
-    def __init__(self, deterministic, *, warn_only=False):
+    def __init__(self, deterministic, *, warn_only=False, fill_uninitialized_memory=True):
         self.deterministic = deterministic
         self.warn_only = warn_only
+        self.fill_uninitialized_memory = fill_uninitialized_memory
 
     def __enter__(self):
         self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
         self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
+        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory
         torch.use_deterministic_algorithms(
             self.deterministic,
             warn_only=self.warn_only)
+        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
+        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
@@ -4614,11 +4697,11 @@ def custom_op(opname, symbolic_fn, opset_version):
 
 def outs_and_grads(fn, graph_inps, inps):
     outs = fn(*graph_inps)
-    for out in pytree.tree_flatten(outs)[0]:
+    for out in pytree.tree_leaves(outs):
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
-    for inp in pytree.tree_flatten(inps)[0]:
+    grads = [inp.grad for inp in pytree.tree_leaves(inps) if isinstance(inp, torch.Tensor)]
+    for inp in pytree.tree_leaves(inps):
         if isinstance(inp, torch.Tensor):
             inp.grad = None
     return outs, grads

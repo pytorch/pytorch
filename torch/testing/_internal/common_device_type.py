@@ -459,7 +459,7 @@ class DeviceTypeTestBase(TestCase):
             parametrize_fn = compose_parametrize_fns(dtype_parametrize_fn, parametrize_fn)
 
         # Instantiate the parametrized tests.
-        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):
+        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):  # noqa: B020
             test_suffix = '' if test_suffix == '' else '_' + test_suffix
             device_suffix = '_' + cls.device_type
 

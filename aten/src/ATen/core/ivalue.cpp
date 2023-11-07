@@ -861,7 +861,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
 
   }
-  AT_ERROR("Tag not found: ", v.tagKind());
+  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ">";
 }
 
 #undef TORCH_FORALL_TAGS
@@ -1210,7 +1210,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
         TypePtr typePtr,
         std::vector<c10::Device> devices)
         : srcFutures(srcs),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
+          dstFuture(make_intrusive<ivalue::Future>(std::move(typePtr), std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;

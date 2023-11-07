@@ -58,7 +58,7 @@ void reportMemoryUsageToProfiler(
 }
 
 void reportOutOfMemoryToProfiler(
-    size_t alloc_size,
+    int64_t alloc_size,
     size_t total_allocated,
     size_t total_reserved,
     Device device) {
@@ -73,7 +73,7 @@ void reportOutOfMemoryToProfiler(
 MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
 
 void MemoryReportingInfoBase::reportOutOfMemory(
-    size_t /*alloc_size*/,
+    int64_t /*alloc_size*/,
     size_t /*total_allocated*/,
     size_t /*total_reserved*/,
     Device /*device*/) {}

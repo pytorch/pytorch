@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
 
@@ -38,7 +39,6 @@ class NestedTensor(torch.Tensor):
     _stride: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
     def __new__(
@@ -61,7 +61,7 @@ class NestedTensor(torch.Tensor):
             torch.jagged,
             values.device,
             False,
-            False,
+            kwargs.get("requires_grad", False),
             "sizes",
             False,
             True,  # dispatch_layout
@@ -86,10 +86,8 @@ class NestedTensor(torch.Tensor):
         B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
-
-        from torch._prims_common import make_contiguous_strides_for
-
-        self._strides = make_contiguous_strides_for(self._size)
+        stride = values.stride()
+        self._strides = (ragged_size * stride[0], *stride)
         self._ragged_idx = 1
 
         if values.requires_grad:
@@ -141,6 +139,37 @@ class NestedTensor(torch.Tensor):
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
 
+        # NOTE [ Storing symbolic values as plain attributes on subclasses ]
+        #
+        # When a subclass like NestedTensor stores a "size-like" value (which
+        # can either be Symintified or not) into meta, it's responsible for:
+        #
+        #   (1) Propagating that symint during torch dispatch when performing
+        #       operations, i.e. torch dispatch plays the role of a meta kernel.
+        #
+        #   (2) Facilitating the behavior around symbolic -> non-symbolic
+        #       conversions and vice versa, see below.
+        #
+        # [ non-symbolic -> symbolic (fakification in meta_utils) ]
+        #
+        # __tensor_unflatten__ is passed symbolic dense tensors and meta from
+        # non-symbolic subclasses. In this case, the subclass is responsible for
+        # intercepting meta["ragged_size"] for example and replacing it with the
+        # symintified version.
+        #
+        # [ symbolic -> non-symbolic ]
+        #
+        # __tensor_unflatten__ is passed non-symbolic dense tensors and with
+        # meta extracted from fake subclasses. In this case the subclass gets
+        # propagated the meta["ragged_size"] which is still a symint and the
+        # subclass is responsible for making sure that the symint doesn't leak.
+        #
+        if not has_free_symbols(values) and not has_free_symbols(offsets):
+            # Note that we cannot simply check if is_fake(values) because
+            # during aot autograd, FunctionalTensors are not fake but hold
+            # symbolic sizes.
+            meta["ragged_size"] = None
+
         return NestedTensor(
             values,
             offsets=offsets,
@@ -161,18 +190,35 @@ class NestedTensor(torch.Tensor):
 
         raise NotImplementedError(func)
 
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        from .ops import jagged_torch_function
+
+        try:
+            return jagged_torch_function(func, *args, **kwargs)
+        except NotImplementedError:
+            pass
+        with torch._C.DisableTorchFunctionSubclass():
+            return func(*args, **kwargs)
+
 
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
+        ctx.kwargs = {
+            "ragged_size": x._size[x._ragged_idx],
+        }
         return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
-        return NestedTensor(gO, offsets=offsets)
+        return NestedTensor(gO, offsets=offsets, **ctx.kwargs)
 
 
 # Not actually a view!

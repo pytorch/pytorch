@@ -40,7 +40,10 @@ def _calculate_shape(
     output: torch.Tensor, grad: torch.Tensor, is_grads_batched: bool
 ) -> Tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
     # is_same_size ensures that both tensors are either nested or non nested
-    if output.is_nested:
+    # circular import
+    from torch.nested._internal.nested_tensor import NestedTensor
+
+    if output.is_nested and not isinstance(output, NestedTensor):
         if is_grads_batched:
             raise RuntimeError("Batched grads are not supported with Nested Tensor.")
         out_shape = output._nested_tensor_size()

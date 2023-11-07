@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 
@@ -1073,7 +1073,8 @@ def add(
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
-    return prims.add(a, b)
+    output = prims.add(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
@@ -2004,7 +2005,7 @@ def _to_device(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": device,
         "dtype": dtype,
@@ -2022,7 +2023,7 @@ def _to_device_str(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": torch.device(device),
         "dtype": dtype,
@@ -2039,7 +2040,7 @@ def _to_dtype(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "dtype": dtype,
         "non_blocking": non_blocking,
@@ -2055,7 +2056,7 @@ def _to_other(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     device = other.device
     dtype = other.dtype
     layout = other.layout
@@ -2226,18 +2227,10 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
-    # case must be handled separately.
-    if dim is None:
-        assert not keepdim
-        result = torch.logical_not(torch.any(torch.logical_not(a)))
-    else:
-        result = torch.logical_not(
-            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
-        )
+    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
         result = result.to(dtype=torch.uint8)
@@ -2257,7 +2250,10 @@ def any(
     keepdim: bool = False,
 ) -> TensorLikeType:
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        result = a_.clone()
+    else:
+        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -6186,7 +6182,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(
+            raise ValueError(  # noqa: TRY200
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle

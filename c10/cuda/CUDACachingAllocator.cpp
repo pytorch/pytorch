@@ -132,24 +132,19 @@ using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
 
-void add_amount_to_stat(Stat& stat, size_t amount) {
-  stat.current += amount;
-  stat.peak = std::max(stat.current, stat.peak);
-  stat.allocated += amount;
-}
-
-void decrease_amount_from_stat(Stat& stat, size_t amount) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      amount <= stat.current,
-      "Negative tracked stat in CUDA allocator (likely logic error).");
-  stat.current -= amount;
-  stat.freed += amount;
-}
 void update_stat(Stat& stat, int64_t amount) {
-  if (amount >= 0) {
-    add_amount_to_stat(stat, amount);
-  } else {
-    decrease_amount_from_stat(stat, -amount);
+  stat.current += amount;
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      stat.current >= 0,
+      "Negative tracked stat in CUDA allocator (likely logic error).");
+
+  stat.peak = std::max(stat.current, stat.peak);
+  if (amount > 0) {
+    stat.allocated += amount;
+  }
+  if (amount < 0) {
+    stat.freed += -amount;
   }
 }
 
@@ -171,13 +166,13 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
-void decrease_stat_array(
+void update_stat_array(
     StatArray& stat_array,
-    size_t amount,
+    int64_t amount,
     const StatTypes& stat_types) {
   for_each_selected_stat_type(
       stat_types, [&stat_array, amount](size_t stat_type) {
-        decrease_amount_from_stat(stat_array[stat_type], amount);
+        update_stat(stat_array[stat_type], amount);
       });
 }
 
@@ -195,7 +190,6 @@ struct BlockPool {
         owner_PrivatePool(private_pool) {}
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
 };
@@ -457,7 +451,6 @@ struct ExpandableSegment {
   }
 
   char* ptr() const {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return (char*)ptr_;
   }
   size_t size() const {
@@ -510,8 +503,8 @@ struct ExpandableSegment {
       handles_.pop_back();
     }
   }
-  void forEachAllocatedRange(const std::function<void(size_t, size_t)>& fn) {
-    size_t start = 0;
+  void forEachAllocatedRange(std::function<void(size_t, size_t)> fn) {
+    auto start = 0;
     for (auto i : c10::irange(handles_.size())) {
       if (handles_.at(i) && (i == 0 || !handles_.at(i - 1))) {
         start = i;
@@ -797,6 +790,10 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 
 static std::string reportProcessMemoryInfo(int device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
+  void* nvml_handle = DriverAPI::get_nvml_handle();
+  if (!nvml_handle) {
+    return "";
+  }
   static c10::once_flag nvml_init;
   c10::call_once(nvml_init, [] {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
@@ -822,15 +819,15 @@ static std::string reportProcessMemoryInfo(int device) {
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
   unsigned int size = procs.size();
-  nvmlReturn_t r{NVML_ERROR_UNKNOWN};
+  nvmlReturn_t r;
   while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
               nvml_device, &size, procs.data())) ==
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   unsigned int self_pid = getpid();
   std::stringstream ss;
+  TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
   for (auto i : c10::irange(size)) {
     auto& proc = procs[i];
@@ -891,7 +888,8 @@ class DeviceCachingAllocator {
   bool set_fraction = false;
 
   bool record_history = false;
-  std::atomic<CreateContextFn> context_recorder_{};
+
+  std::atomic<CreateContextFn> context_recorder_;
   size_t alloc_trace_next = 0;
   RecordContext record_context_ = RecordContext::NEVER;
   size_t alloc_trace_max_entries_ = 1;
@@ -918,6 +916,8 @@ class DeviceCachingAllocator {
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
+
+  std::vector<AllocatorTraceTracker> trace_trackers_;
 
  public:
   DeviceCachingAllocator()
@@ -974,6 +974,11 @@ class DeviceCachingAllocator {
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
     oom_observers_.emplace_back(std::move(observer));
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    trace_trackers_.emplace_back(std::move(tracker));
   }
 
   // Must be called outside of `mutex` or deadlocks are possible with Python
@@ -1060,21 +1065,20 @@ class DeviceCachingAllocator {
 
       std::string proc_info = reportProcessMemoryInfo(device);
 
-      if (record_history) {
-        record_trace(
-            TraceEntry::OOM,
-            device_free,
-            params.size(),
-            params.stream(),
-            std::move(context));
-      }
+      record_trace(
+          TraceEntry::OOM,
+          device_free,
+          params.size(),
+          params.stream(),
+          params.device(),
+          std::move(context));
       stats.num_ooms += 1;
 
       c10::reportOutOfMemoryToProfiler(
           size,
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+          stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
 
@@ -1143,11 +1147,11 @@ class DeviceCachingAllocator {
 
     bool split_remainder = should_split(params.block, params.size());
     return alloc_found_block(
-        params, orig_size, std::move(context), split_remainder);
+        std::move(params), orig_size, std::move(context), split_remainder);
   }
 
   Block* alloc_found_block(
-      const AllocParams& params,
+      AllocParams params,
       size_t orig_size,
       std::shared_ptr<GatheredContext> context,
       bool split_remainder) {
@@ -1182,56 +1186,65 @@ class DeviceCachingAllocator {
 
       if (already_split && !block->expandable_segment_) {
         // An already-split inactive block is being shrunk by size bytes.
-        decrease_stat_array(
-            stats.inactive_split_bytes, block->size, params.stat_types);
+        update_stat_array(
+            stats.inactive_split_bytes,
+            -static_cast<std::int64_t>(block->size),
+            params.stat_types);
       } else if (!block->expandable_segment_) {
         // A new split inactive block is being created from a previously unsplit
         // block, size remaining->size bytes.
         for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-          add_amount_to_stat(
-              stats.inactive_split_bytes[stat_type], remaining->size);
-          add_amount_to_stat(stats.inactive_split[stat_type], 1);
+          update_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<std::int64_t>(remaining->size));
+          update_stat(stats.inactive_split[stat_type], 1);
         });
       }
 
     } else if (already_split && !block->expandable_segment_) {
       // An already-split block is becoming active
       for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-        decrease_amount_from_stat(
-            stats.inactive_split_bytes[stat_type], block->size);
-        decrease_amount_from_stat(stats.inactive_split[stat_type], 1);
+        update_stat(
+            stats.inactive_split_bytes[stat_type],
+            -static_cast<std::int64_t>(block->size));
+        update_stat(stats.inactive_split[stat_type], -1);
       });
     }
 
     block->allocated = true;
     block->requested_size = orig_size;
-    if (record_history) {
-      block->context_when_allocated = std::move(context);
-      record_trace(
-          TraceEntry::ALLOC,
-          int64_t(block->ptr),
-          orig_size,
-          block->stream,
-          block->context_when_allocated);
-    }
+
+    block->context_when_allocated = std::move(context);
+    record_trace(
+        TraceEntry::ALLOC,
+        int64_t(block->ptr),
+        orig_size,
+        block->stream,
+        block->device,
+        block->context_when_allocated);
 
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-      add_amount_to_stat(stats.allocation[stat_type], 1);
-      add_amount_to_stat(stats.allocated_bytes[stat_type], block->size);
-      add_amount_to_stat(stats.active[stat_type], 1);
-      add_amount_to_stat(stats.active_bytes[stat_type], block->size);
-      add_amount_to_stat(
-          stats.requested_bytes[stat_type], block->requested_size);
+      update_stat(stats.allocation[stat_type], 1);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(stats.active[stat_type], 1);
+      update_stat(
+          stats.active_bytes[stat_type],
+          static_cast<std::int64_t>(block->size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          static_cast<std::int64_t>(block->requested_size));
     });
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      add_amount_to_stat(stats.oversize_allocations, 1);
+      update_stat(stats.oversize_allocations, 1);
 
     c10::reportMemoryUsageToProfiler(
         block->ptr,
-        static_cast<int64_t>(block->size),
+        block->size,
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, device));
@@ -1253,19 +1266,22 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_amount_from_stat(stats.allocation[stat_type], 1);
-      decrease_amount_from_stat(stats.allocated_bytes[stat_type], block->size);
+      update_stat(stats.allocation[stat_type], -1);
+      update_stat(
+          stats.allocated_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
-    if (record_history) {
-      record_trace(
-          TraceEntry::FREE_REQUESTED,
-          int64_t(block->ptr),
-          block->requested_size,
-          block->stream,
-          context ? context : block->context_when_allocated);
-    }
+
+    record_trace(
+        TraceEntry::FREE_REQUESTED,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        context ? context : block->context_when_allocated);
+
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      decrease_amount_from_stat(stats.oversize_allocations, 1);
+      update_stat(stats.oversize_allocations, -1);
 
     if (!block->stream_uses.empty()) {
       if (C10_UNLIKELY(captures_underway)) {
@@ -1283,7 +1299,7 @@ class DeviceCachingAllocator {
 
     c10::reportMemoryUsageToProfiler(
         orig_block_ptr,
-        -static_cast<int64_t>(orig_block_size),
+        -orig_block_size,
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, block->device));
@@ -1463,7 +1479,7 @@ class DeviceCachingAllocator {
   void setSegmentStateToCheckpoint(
       Block* block,
       SegmentState& segment,
-      const std::shared_ptr<GatheredContext>& context,
+      std::shared_ptr<GatheredContext> context,
       RestoreResult& rr) {
     Block* curr_block = block;
     Block* last_block = block;
@@ -1493,7 +1509,8 @@ class DeviceCachingAllocator {
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
-      curr_block = alloc_found_block(params, block_state.size, context, split);
+      curr_block = alloc_found_block(
+          std::move(params), block_state.size, context, split);
 
       TORCH_CHECK(curr_block->ptr == block_state.ptr);
       TORCH_CHECK(curr_block->size == block_state.size);
@@ -1695,9 +1712,7 @@ class DeviceCachingAllocator {
           return a.address < b.address;
         });
 
-    if (record_history) {
-      record_trace(TraceEntry::SNAPSHOT, 0, total_active, nullptr, nullptr);
-    }
+    record_trace(TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, nullptr);
     return result;
   }
 
@@ -1707,12 +1722,12 @@ class DeviceCachingAllocator {
     result.reserve(alloc_trace->size());
     result.insert(
         result.end(),
-        alloc_trace->begin() + static_cast<std::ptrdiff_t>(alloc_trace_next),
+        alloc_trace->begin() + alloc_trace_next,
         alloc_trace->end());
     result.insert(
         result.end(),
         alloc_trace->begin(),
-        alloc_trace->begin() + static_cast<std::ptrdiff_t>(alloc_trace_next));
+        alloc_trace->begin() + alloc_trace_next);
     return result;
   }
 
@@ -1972,18 +1987,18 @@ class DeviceCachingAllocator {
     total_allocated_memory += mapped_range.size;
     StatTypes stat_types = get_stat_types_for_pool(*to_map->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      add_amount_to_stat(stats.reserved_bytes[stat_type], mapped_range.size);
+      update_stat(stats.reserved_bytes[stat_type], mapped_range.size);
     });
-    if (record_history) {
-      record_trace(
-          TraceEntry::SEGMENT_MAP,
-          int64_t(mapped_range.ptr),
-          mapped_range.size,
-          to_map->stream,
-          ctx);
-      if (!to_map->prev && !to_map->context_when_segment_allocated) {
-        to_map->context_when_segment_allocated = ctx;
-      }
+
+    record_trace(
+        TraceEntry::SEGMENT_MAP,
+        int64_t(mapped_range.ptr),
+        mapped_range.size,
+        to_map->stream,
+        to_map->device,
+        ctx);
+    if (!to_map->prev && !to_map->context_when_segment_allocated) {
+      to_map->context_when_segment_allocated = ctx;
     }
 
     return true;
@@ -2029,14 +2044,15 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
-    if (record_history) {
-      record_trace(
-          TraceEntry::FREE_COMPLETED,
-          int64_t(block->ptr),
-          block->requested_size,
-          block->stream,
-          context ? context : block->context_when_allocated);
-    }
+
+    record_trace(
+        TraceEntry::FREE_COMPLETED,
+        int64_t(block->ptr),
+        block->requested_size,
+        block->stream,
+        block->device,
+        context ? context : block->context_when_allocated);
+
     block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
@@ -2047,10 +2063,11 @@ class DeviceCachingAllocator {
 
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
-      auto subsumed_size = try_merge_blocks(block, merge_candidate, pool);
+      const int64_t subsumed_size =
+          try_merge_blocks(block, merge_candidate, pool);
       if (subsumed_size > 0) {
         net_change_inactive_split_blocks -= 1;
-        net_change_inactive_split_size -= static_cast<int64_t>(subsumed_size);
+        net_change_inactive_split_size -= subsumed_size;
       }
     }
 
@@ -2062,7 +2079,7 @@ class DeviceCachingAllocator {
 
     if (block->is_split()) {
       net_change_inactive_split_blocks += 1;
-      net_change_inactive_split_size += static_cast<int64_t>(block->size);
+      net_change_inactive_split_size += block->size;
     }
 
     StatTypes stat_types = get_stat_types_for_pool(pool);
@@ -2081,11 +2098,13 @@ class DeviceCachingAllocator {
             stats.inactive_split_bytes[stat_type],
             net_change_inactive_split_size);
       }
-      decrease_amount_from_stat(stats.active[stat_type], 1);
-      decrease_amount_from_stat(
-          stats.active_bytes[stat_type], original_block_size);
-      decrease_amount_from_stat(
-          stats.requested_bytes[stat_type], requested_size);
+      update_stat(stats.active[stat_type], -1);
+      update_stat(
+          stats.active_bytes[stat_type],
+          -static_cast<std::int64_t>(original_block_size));
+      update_stat(
+          stats.requested_bytes[stat_type],
+          -static_cast<std::int64_t>(requested_size));
     });
   }
 
@@ -2384,23 +2403,22 @@ class DeviceCachingAllocator {
     total_allocated_memory += size;
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
-      add_amount_to_stat(stats.segment[stat_type], 1);
-      add_amount_to_stat(stats.reserved_bytes[stat_type], size);
+      update_stat(stats.segment[stat_type], 1);
+      update_stat(stats.reserved_bytes[stat_type], size);
     });
     if (size >= CUDAAllocatorConfig::max_split_size())
-      add_amount_to_stat(stats.oversize_segments, 1);
+      update_stat(stats.oversize_segments, 1);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
-    if (record_history) {
-      record_trace(
-          TraceEntry::SEGMENT_ALLOC,
-          int64_t(p.block->ptr),
-          p.block->size,
-          p.stream(),
-          ctx);
-      p.block->context_when_segment_allocated = ctx;
-    }
+    record_trace(
+        TraceEntry::SEGMENT_ALLOC,
+        int64_t(p.block->ptr),
+        p.block->size,
+        p.stream(),
+        p.device(),
+        ctx);
+    p.block->context_when_segment_allocated = ctx;
     return true;
   }
 
@@ -2498,6 +2516,14 @@ class DeviceCachingAllocator {
 
   void release_block(Block* block) {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
+    record_trace(
+        TraceEntry::SEGMENT_FREE,
+        int64_t(block->ptr),
+        block->size,
+        block->stream,
+        block->device,
+        nullptr);
+
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
 
@@ -2510,20 +2536,14 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_amount_from_stat(stats.segment[stat_type], 1);
-      decrease_amount_from_stat(stats.reserved_bytes[stat_type], block->size);
+      update_stat(stats.segment[stat_type], -1);
+      update_stat(
+          stats.reserved_bytes[stat_type],
+          -static_cast<std::int64_t>(block->size));
     });
 
     if (block->size >= CUDAAllocatorConfig::max_split_size())
-      decrease_amount_from_stat(stats.oversize_segments, 1);
-    if (record_history) {
-      record_trace(
-          TraceEntry::SEGMENT_FREE,
-          int64_t(block->ptr),
-          block->size,
-          block->stream,
-          nullptr);
-    }
+      update_stat(stats.oversize_segments, -1);
     pool->blocks.erase(block);
     delete block;
   }
@@ -2573,16 +2593,16 @@ class DeviceCachingAllocator {
     total_allocated_memory -= unmapped.size;
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      decrease_amount_from_stat(stats.reserved_bytes[stat_type], unmapped.size);
+      update_stat(stats.reserved_bytes[stat_type], -unmapped.size);
     });
-    if (record_history) {
-      record_trace(
-          TraceEntry::SEGMENT_UNMAP,
-          int64_t(unmapped.ptr),
-          unmapped.size,
-          block->stream,
-          nullptr);
-    }
+
+    record_trace(
+        TraceEntry::SEGMENT_UNMAP,
+        int64_t(unmapped.ptr),
+        unmapped.size,
+        block->stream,
+        block->device,
+        nullptr);
   }
   void release_blocks(BlockPool& pool) {
     std::vector<Block*> to_unmap;
@@ -2728,19 +2748,32 @@ class DeviceCachingAllocator {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
+      int device,
       std::shared_ptr<GatheredContext> context) {
+    if (!record_history && !trace_trackers_.size())
+      return;
+
     auto te = TraceEntry(
         action,
+        device,
         addr,
         size,
         stream,
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
-    if (alloc_trace->size() < alloc_trace_max_entries_) {
-      alloc_trace->emplace_back(te);
-    } else {
-      (*alloc_trace)[alloc_trace_next++] = te;
-      if (alloc_trace_next == alloc_trace_max_entries_) {
-        alloc_trace_next = 0;
+
+    // Callbacks should not include any Pytorch call
+    for (const auto& cb : trace_trackers_) {
+      cb(te);
+    }
+
+    if (record_history) {
+      if (alloc_trace->size() < alloc_trace_max_entries_) {
+        alloc_trace->emplace_back(te);
+      } else {
+        (*alloc_trace)[alloc_trace_next++] = te;
+        if (alloc_trace_next == alloc_trace_max_entries_) {
+          alloc_trace_next = 0;
+        }
       }
     }
   }
@@ -2887,6 +2920,12 @@ class NativeCachingAllocator : public CUDAAllocator {
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     for (auto& allocator : device_allocator) {
       allocator->attachOutOfMemoryObserver(std::move(observer));
+    }
+  }
+
+  void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) override {
+    for (auto& allocator : device_allocator) {
+      allocator->attachAllocatorTraceTracker(tracker);
     }
   }
 
@@ -3091,7 +3130,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void enablePeerAccess(int dev, int dev_to_access) override {
-    c10::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(dev));
+    c10::cuda::CUDAGuard device_guard(dev);
     cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
       // ignore and clear the error if access was already enabled
@@ -3164,7 +3203,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
-          cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(curr_device));
+          cuda::CUDAGuard device_guard(curr_device);
           std::lock_guard<std::mutex> deleter_lock(IpcMutex);
           C10_CUDA_CHECK(cudaIpcCloseMemHandle(ptr));
           ipcMemHandle_to_devptr.erase(handle);
@@ -3202,13 +3241,13 @@ std::string format_size(uint64_t size) {
   if (size <= 1024) {
     os << size << " bytes";
   } else if (size <= 1048576) {
-    os << (static_cast<double>(size) / 1024.0);
+    os << (size / 1024.0);
     os << " KiB";
   } else if (size <= 1073741824ULL) {
-    os << static_cast<double>(size) / 1048576.0f;
+    os << size / 1048576.0;
     os << " MiB";
   } else {
-    os << static_cast<double>(size) / 1073741824.0f;
+    os << size / 1073741824.0;
     os << " GiB";
   }
   return os.str();

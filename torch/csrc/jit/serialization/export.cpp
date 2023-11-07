@@ -40,6 +40,35 @@ C10_DIAGNOSTIC_POP()
 
 namespace torch::jit {
 
+static std::string get_little_endian_data(const at::Tensor& t) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+  return std::string(
+      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  const size_t element_size = t.element_size();
+  const size_t num_elements = t.numel();
+
+  std::vector<char> data_copy{
+      static_cast<char*>(t.data_ptr()),
+      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
+
+  for (size_t i = 0; i < num_elements; ++i) {
+    char* start_byte = data_copy.data() + i * element_size;
+    char* end_byte = start_byte + element_size - 1;
+    /* keep swapping */
+    for (size_t count = 0; count < element_size / 2; ++count) {
+      std::swap(*start_byte, *end_byte);
+      ++start_byte;
+      --end_byte;
+    }
+  }
+
+  return std::string(data_copy.data(), element_size * num_elements);
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
+}
+
 void writeArchiveAndTensors(
     const std::string& archive_name,
     const char* data,
@@ -207,7 +236,8 @@ void CreateExternalFile(
         std::string("ONNX export failed. Could not open file or directory: ") +
         fullFilePath);
   }
-  fwrite(tensor.data_ptr(), tensor.element_size(), tensor.numel(), fp.get());
+  std::string s = get_little_endian_data(tensor);
+  fwrite(s.c_str(), tensor.element_size(), tensor.numel(), fp.get());
 } // fclose() called here through CloseFile(), if FILE* is not a null pointer.
 
 class GraphEncoder {
@@ -1260,35 +1290,6 @@ void GraphEncoder::EncodeTypeProto(
     auto elem_type = list_type->getElementType();
     EncodeTypeProto(seq_type->mutable_elem_type(), elem_type, name);
   }
-}
-
-static std::string get_little_endian_data(const at::Tensor& t) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  return std::string(
-      static_cast<char*>(t.data_ptr()), t.element_size() * t.numel());
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-  const size_t element_size = t.element_size();
-  const size_t num_elements = t.numel();
-
-  std::vector<char> data_copy{
-      static_cast<char*>(t.data_ptr()),
-      static_cast<char*>(t.data_ptr()) + element_size * num_elements};
-
-  for (size_t i = 0; i < num_elements; ++i) {
-    char* start_byte = data_copy.data() + i * element_size;
-    char* end_byte = start_byte + element_size - 1;
-    /* keep swapping */
-    for (size_t count = 0; count < element_size / 2; ++count) {
-      std::swap(*start_byte, *end_byte);
-      ++start_byte;
-      --end_byte;
-    }
-  }
-
-  return std::string(data_copy.data(), element_size * num_elements);
-#else
-#error Unexpected or undefined __BYTE_ORDER__
-#endif
 }
 
 void GraphEncoder::EncodeTensor(

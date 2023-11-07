@@ -257,7 +257,7 @@ class GradientToUserInputSpec:
 @dataclass
 class OutputSpec(_Union):
     user_output: UserOutputSpec
-    loss_outout: LossOutputSpec
+    loss_output: LossOutputSpec
     buffer_mutation: BufferMutationSpec
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec

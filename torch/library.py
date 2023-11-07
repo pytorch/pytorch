@@ -4,6 +4,8 @@ import traceback
 import torch
 import weakref
 import functools
+import inspect
+import re
 
 __all__ = [
     'Library',
@@ -19,6 +21,7 @@ __all__ = [
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
+_defs: Set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
@@ -58,6 +61,7 @@ class Library:
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
+        self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
         self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
         self.kind = kind
@@ -66,18 +70,23 @@ class Library:
         # Python __del__ can lead to weird things (globals and locals may already
         # be gone when __del__ actually gets called!). finalizers help the
         # situation because it lets us capture references and keeps them alive
-        weakref.finalize(self, _del_library, _impls, self._op_impls, self._registration_handles)
+        weakref.finalize(self, _del_library, _impls, self._op_impls, _defs, self._op_defs, self._registration_handles)
 
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
-    def define(self, schema, alias_analysis=""):
+    def define(self, schema, alias_analysis="", *, tags=()):
         r'''Defines a new operator and its semantics in the ns namespace.
 
         Args:
             schema: function schema to define a new operator.
             alias_analysis (optional): Indicates if the aliasing properties of the operator arguments can be
                                        inferred from the schema (default behavior) or not ("CONSERVATIVE").
+            tags (Tag | Sequence[Tag]): one or more torch.Tag to apply to this
+                                       operator. Tagging an operator changes the operator's behavior
+                                       under various PyTorch subsystems; please read the docs for the
+                                       torch.Tag carefully before applying it.
+
         Returns:
             name of the operator as inferred from the schema.
 
@@ -91,7 +100,13 @@ class Library:
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
             raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
         assert self.m is not None
-        return self.m.define(schema, alias_analysis)
+        if isinstance(tags, torch.Tag):
+            tags = (tags,)
+        result = self.m.define(schema, alias_analysis, tuple(tags))
+        qualname = self.ns + "::" + schema.split("(")[0]
+        self._op_defs.add(qualname)
+        _defs.add(qualname)
+        return result
 
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
@@ -161,8 +176,9 @@ class Library:
         self._registration_handles.clear()
 
 
-def _del_library(captured_impls, op_impls, registration_handles):
+def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
     captured_impls -= op_impls
+    captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
 
@@ -170,18 +186,22 @@ def _del_library(captured_impls, op_impls, registration_handles):
 _keep_alive = []
 
 
+NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
+
+
 @functools.singledispatch
-def define(qualname, schema, *, lib=None):
+def define(qualname, schema, *, lib=None, tags=()):
     r"""Defines a new operator.
 
     In PyTorch, defining an op (short for "operator") is a two step-process:
     - we need to define the op (by providing an operator name and schema)
     - we need to implement behavior for how the operator interacts with
-      various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
+    various PyTorch subsystems, like CPU/CUDA Tensors, Autograd, etc.
 
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
-    ``impl_*`` APIs.
+    ``impl_*`` APIs, like :func:`torch.library.impl` or
+    :func:`torch.library.impl_abstract`.
 
     Args:
         qualname (str): The qualified name for the operator. Should be
@@ -190,9 +210,15 @@ def define(qualname, schema, *, lib=None):
             avoid name collisions; a given operator may only be created once.
             If you are writing a Python library, we recommend the namespace to
             be the name of your top-level module.
-        schema (str): The schema of the operator
+        schema (str): The schema of the operator. E.g. "(Tensor x) -> Tensor"
+            for an op that accepts one Tensor and returns one Tensor. It does
+            not contain the operator name (that is passed in ``qualname``).
         lib (Optional[Library]): If provided, the lifetime of this operator
             will be tied to the lifetime of the Library object.
+        tags (Tag | Sequence[Tag]): one or more torch.Tag to apply to this
+            operator. Tagging an operator changes the operator's behavior
+            under various PyTorch subsystems; please read the docs for the
+            torch.Tag carefully before applying it.
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
@@ -202,8 +228,8 @@ def define(qualname, schema, *, lib=None):
         >>> # Define the operator
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for DispatchKey::CPUj
-        >>> @torch.library.impl("mylibrary::sin", "CPU")
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylibrary::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
@@ -221,7 +247,12 @@ def define(qualname, schema, *, lib=None):
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
-    lib.define(name + schema, alias_analysis="")
+    if not NAMELESS_SCHEMA.fullmatch(schema):
+        raise ValueError(
+            f"define(qualname, schema, ...): expected schema "
+            f"to look like e.g. \"(Tensor x) -> Tensor\" but "
+            f"got \"{schema}\"")
+    lib.define(name + schema, alias_analysis="", tags=tags)
 
 
 @define.register
@@ -237,29 +268,31 @@ def _(lib: Library, schema, alias_analysis=""):
 
 
 @functools.singledispatch
-def impl(qualname, dispatch_key, func=None, *, lib=None):
-    """Register an implementation for a DispatchKey for this operator.
+def impl(qualname, types, func=None, *, lib=None):
+    """Register an implementation for a device type for this operator.
 
-    torch.library.impl is a low-level API to directly register
-    an implementation for an operator for some DispatchKey in PyTorch.
+    You may pass "default" for ``types`` to register this implementation as the
+    default implementation for ALL device types.
+    Please only use this if the implementation truly supports all device types;
+    for example, this is true if it is a composition of built-in PyTorch operators.
 
-    This API may be used as a function or a decorator (see examples)
+    Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
     Args:
         qualname (str): Should be a string that looks like "namespace::operator_name".
-        dispatch_key (str): The DispatchKey to register an impl for
+        types (str | Sequence[str]): The device types to register an impl to.
         lib (Optional[Library]): If provided, the lifetime of this registration
             will be tied to the lifetime of the Library object.
 
-    Examples::
+    Examples:
         >>> import torch
         >>> import numpy as np
         >>>
         >>> # Define the operator
         >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for DispatchKey::CPU
-        >>> @torch.library.impl("mylibrary::sin", "CPU")
+        >>> # Add implementations for the cpu device
+        >>> @torch.library.impl("mylibrary::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
@@ -267,6 +300,21 @@ def impl(qualname, dispatch_key, func=None, *, lib=None):
         >>> y = torch.ops.mylibrary.sin(x)
         >>> assert torch.allclose(y, x.sin())
     """
+    if isinstance(types, str):
+        types = (types,)
+    keys = set({})
+    for typ in types:
+        is_dispatch_key = torch._C._parse_dispatch_key(typ)
+        if is_dispatch_key:
+            # We also support passing a DispatchKey to impl. Please prefer using
+            # the higher-level torch.library APIs and only pass DispatchKey to
+            # torch.library.impl with caution (or even better, don't use this
+            # option and file an issue on GitHub for what you need).
+            # We don't advertise this to users because
+            # it is very easy to shoot yourself in the foot.
+            keys.add(typ)
+        else:
+            keys.add(_device_type_to_key(typ))
 
     def register(func):
         namespace, _ = torch._library.utils.parse_namespace(qualname)
@@ -275,12 +323,23 @@ def impl(qualname, dispatch_key, func=None, *, lib=None):
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib.impl(qualname, func, dispatch_key)
+        for key in keys:
+            use_lib.impl(qualname, func, key)
 
     if func is None:
         return register
     else:
         register(func)
+
+
+def _device_type_to_key(device_type: str) -> str:
+    if device_type == "default":
+        # This is technically not correct, because although all device_type
+        # DispatchKeys are included in CompositeExplicitAutograd,
+        # not everything in CompositeExplicitAutograd is associated with a
+        # device_type. I don't really care that much about the difference.
+        return "CompositeExplicitAutograd"
+    return torch._C._dispatch_key_for_device(device_type)
 
 
 @impl.register
@@ -293,7 +352,7 @@ def _(lib: Library, name, dispatch_key=""):
 
 
 
-def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
+def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     r"""Register an abstract implementation for this operator.
 
     An "abstract implementation" specifies the behavior of this operator on
@@ -315,14 +374,15 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
     For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
 
-    Examples::
+    Examples:
         >>> import torch
         >>> import numpy as np
         >>> from torch import Tensor
         >>>
         >>> # Example 1: an operator without data-dependent output shape
-        >>> lib = torch.library.Library("mylib", "FRAGMENT")
-        >>> lib.define("mylib::custom_linear(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>> torch.library.define(
+        >>>     "mylib::custom_linear",
+        >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylib::custom_linear")
         >>> def custom_linear_abstract(x, weight):
@@ -336,8 +396,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     return (x @ weight.t()) + bias
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> lib = torch.library.Library("mylib", "FRAGMENT")
-        >>> lib.define("mylib::custom_nonzero(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylib::custom_nonzero")
         >>> def custom_nonzero_abstract(x):
@@ -351,19 +410,28 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
-        >>> @torch.library.impl(lib, "custom_nonzero", "CPU")
+        >>> @torch.library.impl("mylib::custom_nonzero", "cpu")
         >>> def custom_nonzero_cpu(x):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
         >>>     return torch.tensor(res, device=x.device)
 
     """
-
     source = torch._library.utils.get_source(_stacklevel + 1)
+    frame = inspect.stack()[_stacklevel]
+    caller_module = inspect.getmodule(frame[0])
+    # Can be none if you call impl_abstract from somewhere there isn't a module
+    # (e.g. __main__)
+    caller_module_name = None if caller_module is None else caller_module.__name__
 
     def inner(func):
-        entry = torch._library.simple_registry.singleton.find(name)
-        handle = entry.abstract_impl.register(func, source)
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        if caller_module_name is not None:
+            func_to_register = _check_pystubs_once(func, qualname, caller_module_name)
+        else:
+            func_to_register = func
+
+        handle = entry.abstract_impl.register(func_to_register, source)
         if lib is not None:
             lib._registration_handles.append(handle)
         return func
@@ -371,6 +439,45 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
     if func is None:
         return inner
     return inner(func)
+
+
+# If the op was defined in C++, then we want to make sure there was an
+# m.impl_abstract_pystub(module, ...) call and that the module is the
+# same as the module that called torch.library.impl_abstract.
+def _check_pystubs_once(func, qualname, actual_module_name):
+    checked = False
+
+    def inner(*args, **kwargs):
+        nonlocal checked
+        if checked:
+            return func(*args, **kwargs)
+
+        op = torch._library.utils.lookup_op(qualname)
+        if op._defined_in_python:
+            checked = True
+            return func(*args, **kwargs)
+
+        maybe_pystub = torch._C._dispatch_pystub(
+            op._schema.name,
+            op._schema.overload_name)
+        if not maybe_pystub:
+            raise RuntimeError(
+                f"Operator '{qualname}' was defined in C++ and has a Python "
+                f"abstract impl. In this situation, it is required to have a "
+                f"C++ `m.impl_abstract_pystub` call, but we could not find one."
+                f"Please add a call to `m.impl_abstract_pystub(\"{actual_module_name}\");` "
+                f"to the C++ TORCH_LIBRARY block the operator was "
+                f"defined in.")
+        pystub_module = maybe_pystub[0]
+        if actual_module_name != pystub_module:
+            raise RuntimeError(
+                f"Operator '{qualname}' specified that its python abstract impl "
+                f"is in the Python module '{pystub_module}' but it was actually found "
+                f"in '{actual_module_name}'. Please either move the abstract impl "
+                f"or correct the m.impl_abstract_pystub call.")
+        checked = True
+        return func(*args, **kwargs)
+    return inner
 
 
 # NOTE [ctx inside the fake implementation]
@@ -383,6 +490,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
 def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an abstract impl.
+    Calling ``get_ctx()`` is only valid inside of an abstract impl
+    (see :func:`torch.library.impl_abstract` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()
