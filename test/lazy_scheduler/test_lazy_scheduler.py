@@ -2,8 +2,6 @@
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py
 
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple_no_segment
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test1
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_inplace_in_unnamed_NOT_WORKING
 """
 
 import torch
