@@ -104,7 +104,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
         tests.setUpClass()
         tests.setUp()
         try:
-            code = test_torchinductor.run_and_get_cpp_code(
+            _, code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
@@ -194,6 +194,67 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_multi_threading"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest(
+            "test_qconv2d",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_add_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qconv2d_maxpool2d_linear_dynamic",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                [
+                    "op_qconv2d_pointwise.call",
+                    "op_quantized_max_pool2d_.call",
+                    "op_qlinear_pointwise.call",
+                ]
+            ],
+        ),
+        BaseTest(
+            "test_qlinear",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_qlinear_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction

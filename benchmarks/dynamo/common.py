@@ -68,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -566,7 +566,10 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -3882,6 +3885,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

@@ -93,6 +93,9 @@ class elementwise_type_promotion_wrapper:
     type_promotion_kind must be one of the kinds specified by ELEMENTWISE_TYPE_PROMOTION_KIND.
     See its documentation for details.
 
+    The return_dtype will be coerced to the wrapped function's dtype arg if it is available and
+    not None.
+
     Other type promotion behavior, like validating the Python type of scalar arguments, must
     be handled separately.
     """
@@ -132,6 +135,12 @@ class elementwise_type_promotion_wrapper:
             bound.arguments.update(promoted_args)
 
             result = fn(**bound.arguments)
+
+            # Override the return_dtype if a dtype arg is present and not None
+            if "dtype" in bound.arguments:
+                maybe_dtype = bound.arguments["dtype"]
+                if maybe_dtype:  # dtype cannot be None
+                    result_dtype = maybe_dtype
 
             if isinstance(result, TensorLike):
                 return _maybe_convert_to_dtype(result, result_dtype)
@@ -289,7 +298,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert sig.return_annotation in (sig.empty, out_type)
+        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+            sig.empty,
+            out_type,
+        )
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
             parameters=params, return_annotation=return_type  # type: ignore[arg-type]

@@ -1034,7 +1034,7 @@ def cat(inputs, dim=0):
         # code gen with uint8 data type directly.
         for input in inputs:
             input.realize()
-        if all(len(input.layout.size) == 4 for input in inputs):
+        if all(len(input.get_size()) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat.default)(inputs, dim)
 
@@ -1443,7 +1443,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1463,7 +1463,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -1490,7 +1490,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -1515,7 +1515,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     binary_attr,
                     alpha,
                     unary_attr,
@@ -1535,7 +1535,7 @@ def register_onednn_fusion_ops():
             bias: TensorBox,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1551,7 +1551,7 @@ def register_onednn_fusion_ops():
                     bias,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -1662,7 +1662,16 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 def make_fallback(op, layout_constraint=None, warn=True):
     assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
-    if get_decompositions([op]) and warn and bool(os.getenv("CI")):
+    if (
+        warn
+        and bool(os.getenv("CI"))
+        and get_decompositions([op])
+        # if fallback_random, we allow not decomposing random
+        and not (
+            config.fallback_random
+            and op in torch._decomp.decompositions_for_rng.extra_random_decomps
+        )
+    ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
         # Ignore the 'suppress errors' configs in CI, as this particular warning happens on startup anyway and is not
@@ -3550,7 +3559,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and l.free_symbols
+            if isinstance(l, sympy.Expr) and not l.is_number
             else l
         )
         bounds_precomp.append((l_precomp, h))
@@ -4027,7 +4036,9 @@ def _adaptive_avg_pool2d(x, output_size):
     ones_loader = pad_adaptive_loader(ones_like(x))
 
     def fn(idx):
-        return ops.div(fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader))
+        return ops.truediv(
+            fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader)
+        )
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4173,7 +4184,7 @@ def avg_pool2d(
 
         def fn(idx):
             # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.div(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -4729,7 +4740,7 @@ def div_prim(a, b):
         return truncdiv(a, b)
 
     def fn(*args):
-        return ops.div(*args)
+        return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
 
@@ -5056,7 +5067,9 @@ def accumulate_grad_(variable, new_grad):
 
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    ir.UserDefinedTritonKernel.create(
+        kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
