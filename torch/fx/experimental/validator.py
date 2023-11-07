@@ -603,7 +603,7 @@ class BisectValidationException(TorchDynamoException):
     def __init__(self, validation_exc, expr, failed_action, traced_node):
         self.msg = f"translation validation failed when {failed_action}: {expr}"
         self.details = f"""\
-Failure ocurred while running node:
+Failure occurred while running node:
     {traced_node.format_node()}
 
 {validation_exc.details}"""
