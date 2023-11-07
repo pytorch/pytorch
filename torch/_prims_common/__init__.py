@@ -845,19 +845,21 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         else:
             torch._check(False, lambda: f"invalid shape dimension {d}")
     if dim is None:
-        torch._check(numel == newsize)
+        torch._check(
+            numel == newsize,
+            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+        )
     else:
+        from torch.fx.experimental.symbolic_shapes import definitely_true
+
         torch._check(
             newsize != 0,
             lambda: (
-                f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                f"cannot reshape tensor of 0 elements into shape {list(shape)} because the "
                 f"unspecified dimension size -1 can be any value and is ambiguous"
+                if definitely_true(numel == 0)
+                else f"shape '{list(shape)}' is invalid for input of size {numel}"
             ),
-        )
-        # NB: this check is probably redundant
-        torch._check(
-            newsize > 0,
-            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
         )
         torch._check(
             numel % newsize == 0,
