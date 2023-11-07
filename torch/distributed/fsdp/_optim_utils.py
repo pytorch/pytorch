@@ -24,7 +24,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Replicate
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
@@ -344,11 +344,10 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = _get_pg_default_device(group)
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
-        tensor = state.to(device)
+        tensor = state.to(fsdp_state.compute_device)
     else:
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
@@ -358,7 +357,9 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
+        tensor = torch.zeros(
+            state.shape, dtype=state.dtype, device=fsdp_state.compute_device
+        )
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -1155,6 +1156,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
+    # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
@@ -1427,9 +1429,27 @@ def _unflatten_orig_param_states(
     fsdp_state = fsdp_param_info.state
     for fqn, gathered_state in output_states.items():
         value = gathered_state[state_name]
-
         param_idx = fsdp_param_info.param_indices[fqn]
-        value = value.reshape(flat_param._shapes[param_idx])
+
+        # TODO: This solution is not general and only apply to PTD TP solution.
+        if isinstance(value, DTensor):
+            placement = value.placements[0]
+            # If gathered state is a DTensor and its TP placement is not Replicate(), we need to
+            # gather the tensor on its TP dimension before chunking them into DTensor again.
+            if placement != Replicate():
+                placement_dim = placement.dim  # type: ignore[attr-defined]
+                value_local = value.redistribute(placements=(Replicate(),))
+                reshape_size = list(flat_param._shapes[param_idx])
+                reshape_size[placement_dim] *= 2
+                reshape_size = torch.Size(reshape_size)
+                value = value.reshape(reshape_size)
+            # If gathered state is a replicate DTensor, we directly reshape it.
+            else:
+                value = value.reshape(flat_param._shapes[param_idx])
+        else:
+            # If gathered state is a tensor, we directly reshape it into unflatten state.
+            value = value.reshape(flat_param._shapes[param_idx])
+
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
             if getattr(osd_config, "_use_dtensor", False):
@@ -1701,7 +1721,15 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info[fqn]
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            if fsdp_param_info is None:
+                # This can happen if the not all FSDP instances have all the
+                # parameters. This can happen with FSDP + some MPMD style
+                # parallelism.
+
+                # TODO: it is unclear if we need to do the same check with
+                # non-FSDP managed keys.
+                continue
             state = {} if param_key is None else optim_state_dict[param_key]
             if id(fsdp_param_info) not in all_states:
                 all_states[id(fsdp_param_info)] = {}

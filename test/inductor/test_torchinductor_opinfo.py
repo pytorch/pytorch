@@ -197,15 +197,21 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
+    "cross": {f16},
     "exponential": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "geometric": {f16},
+    "histc": {f16},
+    "linalg.cross": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},

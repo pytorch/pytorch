@@ -55,7 +55,18 @@ def test_bsr_dense_mm(x, y, **meta):
     from torch.sparse._triton_ops import bsr_dense_mm
 
     def test_func(x=x, y=y):
-        return bsr_dense_mm(x, y)
+        return bsr_dense_mm(
+            x, y, meta=dict(GROUP_SIZE_ROW=4, num_stages=1, num_warps=4)
+        )
+
+    return _test_worker(test_func)
+
+
+def test_bsr_dense_mm_with_meta(x, y, **meta):
+    from torch.sparse._triton_ops import bsr_dense_mm
+
+    def test_func(x=x, y=y, meta=meta):
+        return bsr_dense_mm(x, y, meta=meta)
 
     return _test_worker(test_func)
 
@@ -82,6 +93,27 @@ def test_bsr_scatter_mm6(x, y, **meta):
 
     def test_func(x=x, y=y):
         return bsr_scatter_mm(x, y, indices_data=indices_data)
+
+    return _test_worker(test_func)
+
+
+def test_bsr_scatter_mm(x, y, **meta):
+    from torch.sparse._triton_ops import bsr_scatter_mm, bsr_scatter_mm_indices_data
+
+    def test_func(x=x, y=y):
+        indices_data = bsr_scatter_mm_indices_data(
+            x, y, indices_format="bsr_strided_mm_compressed", **meta
+        )
+        return bsr_scatter_mm(x, y, indices_data=indices_data)
+
+    return _test_worker(test_func)
+
+
+def test_linear(x, y, **meta):
+    import torch.nn.functional as F
+
+    def test_func(x=x, y=y.transpose(-2, -1)):
+        return F.linear(y, x)
 
     return _test_worker(test_func)
 
@@ -183,41 +215,50 @@ if __name__ == "__main__":
         k = k_list[0] or m
         bm = bm_list[0]
         bk = bk_list[0] or bm
-        meta = torch.sparse._triton_ops.scatter_mm_meta(m, k, n, bm, bk)
-        assert {
-            split_n_list[0],
-            tile_m_list[0],
-            tile_n_list[0],
-            group_size_list[0],
-            num_warps_list[0],
-            num_stages_list[0],
-        }
-        if split_n_list[0] is None:
-            split_n_list = [meta["SPLIT_N"] // 2, meta["SPLIT_N"], meta["SPLIT_N"] * 2][
-                int(meta["SPLIT_N"] == 1) :
-            ]
-        elif split_n_list[0] == 0:
-            split_n_list = [meta["SPLIT_N"]]
-        if tile_m_list[0] is None:
-            tile_m_list = [meta["TILE_M"] // 2, meta["TILE_M"], meta["TILE_M"] * 2][
-                int(meta["TILE_M"] == 16) :
-            ]
-        elif tile_m_list[0] == 0:
-            tile_m_list = [meta["TILE_M"]]
-        if tile_n_list[0] is None:
-            tile_n_list = [meta["TILE_N"] // 2, meta["TILE_N"], meta["TILE_N"] * 2][
-                int(meta["TILE_N"] == 16) :
-            ]
-        elif tile_n_list[0] == 0:
-            tile_n_list = [meta["TILE_N"]]
-        if group_size_list[0] is None:
-            group_size_list = [
-                meta["GROUP_SIZE"] - 1,
-                meta["GROUP_SIZE"],
-                meta["GROUP_SIZE"] + 1,
-            ][int(meta["GROUP_SIZE"] == 1) :]
-        elif group_size_list[0] == 0:
-            group_size_list = [meta["GROUP_SIZE"]]
+        if "bsr_scatter_mm6" in ops:
+            meta = torch.sparse._triton_ops.scatter_mm_meta(m, k, n, bm, bk)
+        elif "bsr_dense_mm_with_meta" in ops:
+            meta = torch.sparse._triton_ops.bsr_dense_mm_meta(m, k, n, bm, bk)
+        else:
+            raise NotImplementedError(f"--star not implemented for operations in {ops}")
+        if "bsr_scatter_mm6" in ops:
+            if split_n_list[0] is None:
+                split_n_list = [
+                    meta["SPLIT_N"] // 2,
+                    meta["SPLIT_N"],
+                    meta["SPLIT_N"] * 2,
+                ][int(meta["SPLIT_N"] == 1) :]
+            elif split_n_list[0] == 0:
+                split_n_list = [meta["SPLIT_N"]]
+            if tile_m_list[0] is None:
+                tile_m_list = [meta["TILE_M"] // 2, meta["TILE_M"], meta["TILE_M"] * 2][
+                    int(meta["TILE_M"] == 16) :
+                ]
+            elif tile_m_list[0] == 0:
+                tile_m_list = [meta["TILE_M"]]
+            if tile_n_list[0] is None:
+                tile_n_list = [meta["TILE_N"] // 2, meta["TILE_N"], meta["TILE_N"] * 2][
+                    int(meta["TILE_N"] == 16) :
+                ]
+            elif tile_n_list[0] == 0:
+                tile_n_list = [meta["TILE_N"]]
+            if group_size_list[0] is None:
+                group_size_list = [
+                    meta["GROUP_SIZE"] - 1,
+                    meta["GROUP_SIZE"],
+                    meta["GROUP_SIZE"] + 1,
+                ][int(meta["GROUP_SIZE"] == 1) :]
+            elif group_size_list[0] == 0:
+                group_size_list = [meta["GROUP_SIZE"]]
+        if "bsr_dense_mm_with_meta" in ops:
+            if group_size_list[0] is None:
+                group_size_list = [
+                    meta["GROUP_SIZE_ROW"] - 1,
+                    meta["GROUP_SIZE_ROW"],
+                    meta["GROUP_SIZE_ROW"] + 1,
+                ][int(meta["GROUP_SIZE_ROW"] == 1) :]
+            elif group_size_list[0] == 0:
+                group_size_list = [meta["GROUP_SIZE_ROW"]]
         if num_warps_list[0] is None:
             num_warps_list = [
                 meta["num_warps"] // 2,
@@ -250,13 +291,14 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
     for m, k, n, bm, bk, sparsity in itertools.product(
-        m_list, n_list, k_list, bm_list, bk_list, sparsity_list
+        m_list, k_list, n_list, bm_list, bk_list, sparsity_list
     ):
         k = k or m
         n = n or m
         bk = bk or bm
 
         if bm > m or bk > k:
+            # Skip invalid parameter combinations
             continue
 
         blocksize = (bm, bk)
@@ -282,6 +324,7 @@ if __name__ == "__main__":
         for op in ops:
             if op == "dense_dense_mm":
                 if (m, k, n) in dense_dense_mm_sizes:
+                    # Skip already benchmarked cases
                     continue
                 dense_dense_mm_sizes.add((m, k, n))
             best_tflops = 0
@@ -306,20 +349,24 @@ if __name__ == "__main__":
                     or n % (split_n or 1) != 0
                     or (split_n or 0) > n
                 ):
+                    # Skip invalid parameter combinations
                     continue
                 test_func = globals()["test_" + op]
-                meta = (
-                    dict(
+                meta = dict(
+                    bsr_scatter_mm6=dict(
                         SPLIT_N=split_n,
                         TILE_M=tile_m,
                         TILE_N=tile_n,
                         GROUP_SIZE=group_size,
                         num_stages=num_stages,
                         num_warps=num_warps,
-                    )
-                    if op == "bsr_scatter_mm6"
-                    else dict()
-                )
+                    ),
+                    bsr_dense_mm_with_meta=dict(
+                        GROUP_SIZE_ROW=group_size,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                    ),
+                ).get(op, dict())
 
                 meta_str = ";".join(
                     f"{k}={v}" for k, v in meta.items() if v is not None
@@ -336,6 +383,8 @@ if __name__ == "__main__":
                             file=outfile,
                         )
                         continue
+                    except AssertionError:
+                        raise
                     except Exception as msg:
                         msg = str(msg).split("\n", 1)[0]
                         print(
@@ -384,5 +433,6 @@ if __name__ == "__main__":
                         file=outfile,
                     )
                     outfile.flush()
-                if op not in {"bsr_scatter_mm6"}:
+                if op not in {"bsr_scatter_mm6", "bsr_dense_mm_with_meta"}:
+                    # Break on operations that do not consume parameters
                     break

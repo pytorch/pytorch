@@ -68,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -559,14 +559,17 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     # NOTE(angelayi): For huggingface benchmark, some example outputs are
     # formatted as a dataclass which pytree cannot consume. So we want
     # to register the pytree implementation here
-    example_outputs_flat, _ = pytree.tree_flatten(example_outputs)
+    example_outputs_flat = pytree.tree_leaves(example_outputs)
     output_dataclass_types = [
         type(out) for out in example_outputs_flat if dataclasses.is_dataclass(type(out))
     ]
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -638,17 +641,17 @@ def speedup_experiment_fx2trt(args, model_iter_fn, model, example_inputs):
 
 
 def recompile_profiler_experiment(args, model_iter_fn, model, example_inputs):
-    with torch._dynamo.utils.CompileProfiler() as prof:
-        opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
-            model_iter_fn
-        )
-        opt_model_iter_fn(model, example_inputs)
-        output_csv(
-            output_filename, ["model", "profiler report"], [current_name, prof.report()]
-        )
-        met = prof.get_metrics()
-        guard_failures = len(met["guard_failures"])
-        return [guard_failures]
+    prof = torch._dynamo.utils.CompilerProfiler()
+    opt_model_iter_fn = torch._dynamo.optimize(prof, nopython=args.nopython)(
+        model_iter_fn
+    )
+    opt_model_iter_fn(model, example_inputs)
+    output_csv(
+        output_filename, ["model", "profiler report"], [current_name, prof.report()]
+    )
+    met = prof.get_metrics()
+    guard_failures = len(met["guard_failures"])
+    return [guard_failures]
 
 
 def randomize_input(inputs):
@@ -1175,27 +1178,18 @@ class AOTInductorModelCache:
             example_outputs = model(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path, exported = torch._export.aot_compile(
-                model, example_args, example_kwargs
-            )
+            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
 
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher(so_path, device)],
-                functions=["run"],
+                functions=["run", "get_call_spec"],
                 with_cuda=(device == "cuda"),
             )
 
-            value = {
-                "module": module,
-                "exported": exported,
-            }
-            cls.cache[key] = value
+            cls.cache[key] = module
 
-        return (
-            cls.cache[key]["module"],
-            cls.cache[key]["exported"],
-        )
+        return cls.cache[key]
 
 
 def export(model, example_inputs):
@@ -1213,15 +1207,19 @@ def export(model, example_inputs):
 
 
 def export_aot_inductor(model, example_inputs, device):
-    module, exported = AOTInductorModelCache.load(model, example_inputs, device)
+    module = AOTInductorModelCache.load(model, example_inputs, device)
+    call_spec = module.get_call_spec()
+    in_spec = pytree.treespec_loads(call_spec[0])
+    out_spec = pytree.treespec_loads(call_spec[1])
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        flat_example_inputs = fx_pytree.tree_flatten_spec(
-            (example_args, example_kwargs), exported.call_spec.in_spec
+
+        flat_inputs = fx_pytree.tree_flatten_spec(
+            (example_args, example_kwargs), in_spec
         )
-        output_tensors = module.run(flat_example_inputs)
-        return pytree.tree_unflatten(output_tensors, exported.call_spec.out_spec)
+        flat_outputs = module.run(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return opt_aot_inductor
 
@@ -1501,7 +1499,7 @@ class OnnxModelFromTorchScript(OnnxModel):
         if isinstance(pt_outputs, torch.Tensor):
             pt_outputs = (pt_outputs,)
 
-        pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+        pt_outputs = pytree.tree_leaves(pt_outputs)
 
         # Hack for huggingface model outputs
         try:
@@ -1516,7 +1514,7 @@ class OnnxModelFromTorchScript(OnnxModel):
                 return x
 
             pt_outputs = pytree.tree_map(_to_tuple, pt_outputs)
-            pt_outputs, _ = pytree.tree_flatten(pt_outputs)
+            pt_outputs = pytree.tree_leaves(pt_outputs)
 
         return pt_outputs
 
@@ -1529,27 +1527,31 @@ class OnnxModelFromDynamo(OnnxModel):
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         super().__init__(output_directory, model, example_inputs, dynamic_shapes)
         self._dynamic_shapes = dynamic_shapes
-        self._export_output = self._export(model, example_inputs, self.model_path)
+        self._onnx_program = self._export(model, example_inputs, self.model_path)
+        # Clear the model proto to save memory.
+        # The model proto is saved to disk and no longer needed from `onnx_program`.
+        # `onnx_program` is kept for i/o adapter usage.
+        self._onnx_program.model_proto.Clear()
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(
         self, model, example_inputs, output_path: str
-    ) -> torch.onnx.ExportOutput:
+    ) -> torch.onnx.ONNXProgram:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
 
-        export_output.save(output_path)
-        return export_output
+        onnx_program.save(output_path)
+        return onnx_program
 
     def format_pt_inputs(self, pt_inputs):
         pt_args, pt_kwargs = _normalize_bench_inputs(pt_inputs)
-        return self._export_output.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
+        return self._onnx_program.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
 
     def format_pt_outputs(self, pt_outputs):
-        return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+        return self._onnx_program.adapt_torch_outputs_to_onnx(pt_outputs)
 
 
 class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
@@ -1559,10 +1561,10 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
 
     def _export(
         self, model, example_inputs, output_path: str
-    ) -> torch.onnx.ExportOutput:
+    ) -> torch.onnx.ONNXProgram:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
         # Apply AOT inline post export.
@@ -1570,9 +1572,15 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
         import onnx
         import onnx.inliner
 
-        model_proto = onnx.inliner.inline_local_functions(export_output.model_proto)
+        # Workaround for inliner not supporting with models larger than 2GB.
+        # Save model to disk first separating out external data,
+        # and load back without external data for inliner to work on.
+        model_proto = onnx_program.model_proto
         onnx.save_model(model_proto, output_path, save_as_external_data=True)
-        return export_output
+        model_proto = onnx.load(output_path, load_external_data=False)
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        onnx.save_model(model_proto, output_path)
+        return onnx_program
 
 
 class _OnnxPatch:
@@ -1626,7 +1634,7 @@ class _OnnxPatch:
             )
 
         # Flatten nested tuple of tensors, i.e. past_key_values
-        correct_result = pytree.tree_flatten(correct_result)[0]
+        correct_result = pytree.tree_leaves(correct_result)
         # Hack to put results from different runs on same device.
         # This is needed for ONNX CPU fallback benchmark, where PyTorch eager is run on GPU.
         # Assuming outputs from a single run are always on same device!
@@ -1635,12 +1643,12 @@ class _OnnxPatch:
             x == devices[0] for x in devices
         ), "All tensors must be on same device!"
         device = devices[0]
-        new_result = pytree.tree_flatten(new_result)[0]
+        new_result = pytree.tree_leaves(new_result)
         new_result = pytree.tree_map(
             lambda x: x.to(device=device) if isinstance(x, torch.Tensor) else x,
             new_result,
         )
-        fp64_outputs = pytree.tree_flatten(fp64_outputs)[0]
+        fp64_outputs = pytree.tree_leaves(fp64_outputs)
 
         return correct_result, new_result, fp64_outputs
 
@@ -1778,7 +1786,7 @@ def optimize_onnx_ctx(
             return outputs
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
-            diagnostic_context = e.export_output.diagnostic_context
+            diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
@@ -2199,6 +2207,38 @@ class BenchmarkRunner:
         )
         return start, end
 
+    def get_fsdp_auto_wrap_policy(self, model_name: str) -> Optional[ModuleWrapPolicy]:
+        from diffusers.models.transformer_2d import Transformer2DModel
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
+        from torchbenchmark.models.nanogpt.model import Block
+        from transformers.models.llama.modeling_llama import LlamaDecoderLayer
+
+        from transformers.models.t5.modeling_t5 import T5Block
+        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        # handcrafted wrap policy
+        MODEL_FSDP_WRAP = {
+            "stable_diffusion_unet": (Transformer2DModel,),
+            "hf_T5": (T5Block,),
+            "hf_T5_base": (T5Block,),
+            "hf_T5_large": (T5Block,),
+            "hf_Whisper": (WhisperEncoderLayer,),
+            "llama_v2_7b_16h": (LlamaDecoderLayer,),
+            "nanogpt": (Block,),
+        }
+
+        if model_name not in MODEL_FSDP_WRAP:
+            # default to using wrap policy based on module size
+            return functools.partial(
+                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
+            )
+
+        return ModuleWrapPolicy(MODEL_FSDP_WRAP[model_name])
+
     def deepcopy_and_maybe_ddp(self, model):
         model = self.deepcopy_model(model)
         if self.args.ddp:
@@ -2217,8 +2257,6 @@ class BenchmarkRunner:
                 MixedPrecision,
             )
 
-            from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-
             if self.args.float16:
                 dtype = torch.float16
             elif self.args.bfloat16:
@@ -2234,10 +2272,6 @@ class BenchmarkRunner:
                 buffer_dtype=dtype,
             )
 
-            my_auto_wrap_policy = functools.partial(
-                size_based_auto_wrap_policy, recurse=True, min_num_params=int(1e5)
-            )
-
             model = FSDP(
                 model,
                 use_orig_params=True,
@@ -2246,7 +2280,7 @@ class BenchmarkRunner:
                 else None,
                 mixed_precision=mp_policy,
                 limit_all_gathers=True,
-                auto_wrap_policy=my_auto_wrap_policy,
+                auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
             if torch._inductor.config.triton.cudagraphs:
                 log.warning("Disabling cudagraphs for FSDP compatibility")
@@ -2294,40 +2328,44 @@ class BenchmarkRunner:
         if name in self.skip_accuracy_checks_large_models_dashboard:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-        # Collect the fp64 reference outputs to be used later for accuracy checking.
-        fp64_outputs = None
-        try:
-            model_fp64, inputs_fp64 = cast_to_fp64(
-                self.deepcopy_and_maybe_ddp(model),
-                clone_inputs(example_inputs),
-            )
-            self.init_optimizer(name, current_device, model_fp64.parameters())
-            fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
-            fp64_outputs = tree_map(
-                lambda x: x.to(torch.float64)
-                if isinstance(x, torch.Tensor) and x.is_floating_point()
-                else x,
-                fp64_outputs,
-            )
-        except Exception:
-            log.warning(
-                "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
-                name,
-            )
-            self.args.cosine = True
-            fp64_outputs = None
-
-        tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
-            self.args.training, current_device, name
-        )
-
-        # Cast the model to float16/float32 as necessary
-        model, example_inputs = self.maybe_cast(model, example_inputs)
-        accuracy_status = "pass"
-
         with self.pick_grad(name, self.args.training):
+            # Collect the fp64 reference outputs to be used later for accuracy checking.
+            fp64_outputs = None
+            model_fp64 = None
+            try:
+                model_fp64, inputs_fp64 = cast_to_fp64(
+                    self.deepcopy_and_maybe_ddp(model),
+                    clone_inputs(example_inputs),
+                )
+                self.init_optimizer(name, current_device, model_fp64.parameters())
+                fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+                fp64_outputs = tree_map(
+                    lambda x: x.to(torch.float64)
+                    if isinstance(x, torch.Tensor) and x.is_floating_point()
+                    else x,
+                    fp64_outputs,
+                )
+            except Exception:
+                log.warning(
+                    "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
+                    name,
+                )
+                self.args.cosine = True
+                fp64_outputs = None
+            finally:
+                del model_fp64
+
+            tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
+                self.args.training, current_device, name
+            )
+
+            # Cast the model to float16/float32 as necessary
+            model, example_inputs = self.maybe_cast(model, example_inputs)
+            accuracy_status = "pass"
+
             # Get results of native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2342,9 +2380,12 @@ class BenchmarkRunner:
                 )
                 log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Rerun native pytorch
             reset_rng_state()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2358,6 +2399,8 @@ class BenchmarkRunner:
                     else "eager_2nd_run_fail"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             # Two eager runs should have exactly same result
             is_same = True
@@ -2387,6 +2430,7 @@ class BenchmarkRunner:
             # Run with Dynamo
             reset_rng_state()
             torch._dynamo.reset()
+            model_copy = None
             try:
                 model_copy = self.deepcopy_and_maybe_ddp(model)
                 self.init_optimizer(name, current_device, model_copy.parameters())
@@ -2413,6 +2457,8 @@ class BenchmarkRunner:
                     else "fail_to_run"
                 )
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+            finally:
+                del model_copy
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
@@ -3344,7 +3390,7 @@ def run(runner, args, original_dir=None):
             args.repeat = 2
 
             # Set translation validation on by default on CI accuracy runs.
-            torch._dynamo.config.translation_validation = True
+            torch.fx.experimental._config.translation_validation = True
 
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
@@ -3666,7 +3712,7 @@ def run(runner, args, original_dir=None):
 
     if args.no_translation_validation:
         # Overwrite 'translation_validation' config, if specified.
-        torch._dynamo.config.translation_validation = False
+        torch.fx.experimental._config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
@@ -3839,6 +3885,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

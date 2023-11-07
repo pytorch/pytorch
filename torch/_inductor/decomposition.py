@@ -1,6 +1,7 @@
 import functools
 import logging
 import math
+import sys
 import typing
 from typing import Optional
 
@@ -269,6 +270,19 @@ def angle(x):
         return ret + nan
 
 
+@register_decomposition([aten.add])
+def add(x, y, *, alpha=None):
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+    z = y
+    if alpha is not None:
+        z = alpha * y
+    complex_type = torch.promote_types(x.dtype, y.dtype)
+    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
+
+
 @register_decomposition([aten.conj_physical])
 def conj_physical(self):
     assert not self.is_complex(), "TODO: implement this"
@@ -294,6 +308,20 @@ def fmin(self, other):
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition(aten.amax)
+def amax(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.any(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
+
+
+@register_decomposition(aten.amin)
+def amin(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.all(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
 
 
 @register_decomposition([aten.narrow_copy])
@@ -410,6 +438,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -439,6 +469,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -461,7 +493,10 @@ def dequantize_per_tensor_tensor_decomp_impl(
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
         x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
-        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        if sys.byteorder == "little":
+            return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        else:
+            return ((x << 24) + (y << 16) + (z << 8) + w).view(torch.float32)[..., None]
 
     scales = bitcast_u8_to_f32(packed[..., -8:-4])
     offsets = bitcast_u8_to_f32(packed[..., -4:])

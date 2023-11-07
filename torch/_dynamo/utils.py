@@ -28,7 +28,8 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
+
 
 try:
     import numpy as np
@@ -56,7 +57,7 @@ try:
         NP_SUPPORTED_MODULES = {}
 
         NP_TO_TNP_MODULE = {}
-    from torch._subclasses.fake_tensor import FakeTensor, is_fake
+    from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
     pass
 
@@ -69,7 +70,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map_only
 
 
 counters = collections.defaultdict(collections.Counter)
@@ -392,6 +393,14 @@ def identity(x):
     return x
 
 
+def hashable(x):
+    try:
+        hash(x)
+        return True
+    except TypeError:
+        return False
+
+
 def nothing(*args, **kwargs):
     pass
 
@@ -548,6 +557,7 @@ class CompilationMetrics:
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     fail_reason: Optional[str]
+    non_compliant_ops: Set[str]
 
 
 @dataclasses.dataclass
@@ -871,16 +881,6 @@ def check_numpy_ndarray_args(args, kwargs):
     )
 
 
-def specialize_args_kwargs(tx, args, kwargs):
-    specialized_args = []
-    specialized_kwargs = {}
-    for x in args:
-        specialized_args.append(x.as_specialized(tx))
-    for k, v in kwargs.items():
-        specialized_kwargs.update({k: v.as_specialized(tx)})
-    return specialized_args, specialized_kwargs
-
-
 dict_values = type(dict().values())
 odict_values = type(collections.OrderedDict().values())
 tuple_iterator = type(iter(tuple()))
@@ -911,6 +911,51 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def _get_fake_tensor(vt):
+    fake_tensor = vt.as_proxy().node.meta.get("example_value")
+    if not is_fake(fake_tensor):
+        from .exc import unimplemented
+
+        unimplemented("Cannot check Tensor object identity without its fake value")
+    return fake_tensor
+
+
+def iter_contains(items, search, tx, check_tensor_identity=False):
+    from .variables import BuiltinVariable, ConstantVariable, TensorVariable
+
+    if search.is_python_constant():
+        found = any(
+            x.is_python_constant()
+            and x.as_python_constant() == search.as_python_constant()
+            for x in items
+        )
+        return ConstantVariable.create(found)
+
+    must_check_tensor_id = False
+    if check_tensor_identity and isinstance(search, TensorVariable):
+        must_check_tensor_id = True
+        # Match of Tensor means match of FakeTensor
+        search = _get_fake_tensor(search)
+
+    found = None
+    for x in items:
+        if must_check_tensor_id:
+            if isinstance(x, TensorVariable):
+                if search is _get_fake_tensor(x):  # Object equivalence
+                    return ConstantVariable.create(True)
+        else:
+            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            if found is None:
+                found = check
+            else:
+                found = BuiltinVariable(operator.or_).call_function(
+                    tx, [check, found], {}
+                )
+    if found is None:
+        found = ConstantVariable.create(False)
+    return found
 
 
 def dict_param_key_ids(value):
@@ -1241,13 +1286,12 @@ class CompileProfiler:
                 self.op_count += 1
         return gm.forward
 
+    # no-op __enter__ and __exit__ to preserve BC
     def __enter__(self):
-        self.old_report_guard_failure = config.report_guard_failures
-        config.report_guard_failures = True
         return self
 
     def __exit__(self, typ, val, traceback):
-        config.report_guard_failures = self.old_report_guard_failure
+        pass
 
     def get_metrics(self):
         return {"guard_failures": guard_failures}
@@ -1346,9 +1390,29 @@ def extract_fake_example_value(node, required=True):
         return None
 
 
-def get_fake_value(node, tx):
+def ensure_graph_fake(e, tx):
+    assert maybe_get_fake_mode(e) is tx.fake_mode
+    return e
+
+
+def get_fake_values_from_nodes(tx, nodes):
+    def visit(n: torch.fx.Node):
+        return n.meta["example_value"]
+
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
+    )
+
+
+def get_fake_value(node, tx, allow_non_graph_fake=False):
     """
     Run the computation represented by `node` using fake tensors and return the result.
+
+    allow_non_graph_fake: whether to allow the return result to be:
+        1. non-fake or 2. fake that is not created by this instance of Dynamo.
+        If `True`, you must be prepared to deal with such return values, ideally
+        by further wrapping them as this graph's fakes.
     """
     from .exc import (
         TorchRuntimeError,
@@ -1360,21 +1424,11 @@ def get_fake_value(node, tx):
 
     op = node.op
 
-    # FX Node should always return the same value
+    # FX Node should always return the same fake value
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    def fake_wrapper(e):
-        if isinstance(e, torch.Tensor):
-            assert is_fake(e)
-        return e
-
-    def visit(n: torch.fx.Node):
-        return n.meta["example_value"]
-
-    args, kwargs = torch.fx.node.map_arg((node.args, node.kwargs), visit)
-    args = tree_map(fake_wrapper, args)
-    kwargs = tree_map(fake_wrapper, kwargs)
+    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -1396,7 +1450,7 @@ def get_fake_value(node, tx):
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
-            return wrap_fake_exception(
+            ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
     except Unsupported:
@@ -1436,6 +1490,12 @@ def get_fake_value(node, tx):
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+
+    if not allow_non_graph_fake:
+        _ = tree_map_only(
+            torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
+        )
+    return ret_val
 
 
 _current_node = threading.local()
@@ -2159,10 +2219,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
 
 
 def is_guard_failure_reporting_enabled():
-    return (
-        config.report_guard_failures
-        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
-    )
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
 def get_static_address_type(t):
@@ -2190,7 +2247,6 @@ def is_tensor_base_attr_getter(value):
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
-        and isinstance(value.__self__, types.GetSetDescriptorType)
         and value.__self__.__objclass__ is torch._C._TensorBase
     )
 

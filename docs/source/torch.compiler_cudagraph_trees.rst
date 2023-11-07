@@ -101,6 +101,7 @@ Let’s say we are benchmarking running inference with the following code:
 
     import torch
 
+    @torch.compile(mode="reduce-overhead")
     def my_model(x):
         y = torch.matmul(x, x)
         return y
@@ -108,8 +109,11 @@ Let’s say we are benchmarking running inference with the following code:
     x = torch.randn(10, 10)
     y1 = my_model(x)
     y2 = my_model(x)
+    print(y1)
+    # RuntimeError: Error: accessing tensor output of CUDAGraphs that has been overwritten by a subsequent run.
 
-In the Separate CUDA Graph implementation, the output from the first invocation will be overwritten by the second invocation. Similarly, in CUDA Graph Trees, naively, the live output of the first run would force a dependency between the first run and the second run, and we would never hit the optimized cudagraph replay invocation. CUDA Graph Trees will ignore outputs from a previous run of torch.compile and not force a memory dependency. In training, we will not ignore outputs from a previous run of torch.compile if we have pending backwards that have not been invoked. TODO - add API to increment generation manually, error on access of prior storage
+
+In the Separate CUDA Graph implementation, the output from the first invocation will be overwritten by the second invocation. In CUDA Graph Trees, we don’t want to add unintended dependencies between iterations that would cause us to not hit the hot path, nor do we want we want to prematurely free memory from a prior invocation. Our heuristics are in inference we start a new iteration on each invocation for torch.compile, and in training we do the same so long as there is not a pending backward that has not been invoked. If those heuristics are wrong, you can mark the start of a new iteration with torch.compiler.mark_step_begin(), or clone tensors of a prior iteration (outside of torch.compile) before you begin the next run.
 
 Comparisons
 -----------

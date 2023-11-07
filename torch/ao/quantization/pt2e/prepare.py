@@ -1,9 +1,6 @@
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (
-    _get_arg_as_input_act_obs_or_fq,
-    _get_output_act_obs_or_fq,
-    _get_dtype_and_is_dynamic,
     _insert_obs_or_fq,
     _save_state,
     _is_activation_post_process_node,
@@ -21,7 +18,6 @@ from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from typing import Dict, Tuple, Union, Any, Optional
 from torch.ao.quantization.quantizer import (
-    QuantizationAnnotation,
     EdgeOrNode,
     SharedQuantizationSpec,
     QuantizationSpecBase,
@@ -260,70 +256,56 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     # default (no observer)
     new_arg = arg
 
-    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
-    arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(arg, node, named_modules, obs_or_fq_map, is_qat)
-    arg_as_input_target_dtype, arg_as_input_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_input_act_obs_or_fq)
+    # find the original `arg` node to the current node, skipping inserted observer/fake_quant nodes
+    original_arg = arg
+    while _is_activation_post_process_node(original_arg, named_modules):
+        original_arg = original_arg.args[0]  # type: ignore[assignment]
+    assert isinstance(original_arg, Node), f"expect original argument to be a Node, but got: {type(original_arg)}"
 
-    arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(arg, named_modules, obs_or_fq_map, is_qat)
-    arg_as_output_target_dtype, arg_as_output_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq)
+    input_edge = (original_arg, node)
+    if input_edge not in obs_or_fq_map:
+        return new_arg
+    # input_edge needs to be observed
+    input_edge_obs_or_fq = obs_or_fq_map[input_edge]
+    if input_edge_obs_or_fq is None:
+        return new_arg
 
-    if arg_as_input_target_is_dynamic or arg_as_input_target_dtype not in [torch.float, None]:
-        if arg_as_input_target_dtype == arg_as_output_target_dtype and \
-           arg_as_input_target_is_dynamic == arg_as_output_target_is_dynamic:
-            assert _is_activation_post_process_node(arg, named_modules)
-            assert arg_as_input_act_obs_or_fq is not None
-            observed_arg = arg.args[0]
-            assert isinstance(observed_arg, Node), f"expect observed argument to be a Node, but got: {type(observed_arg)}"
-            assert observed_arg in obs_or_fq_map, \
-                f"can't find a sharing group for node: {observed_arg}"
-            # reuse the existing obs/fq
-            arg_as_input_act_obs_or_fq = obs_or_fq_map[observed_arg]
-            # we don't need to insert new observer node
-            new_arg = arg
-        else:
-            # skip inserting new observers if there is an observer inserted for the arg before
-            # that has the same dtype that we want to insert here
-            # alternatively we could have a dedup pass after we insert all observers to deduplicate
-            # observers
-            # Example:
-            # arg -> existing_obs -> conv1
-            #    \ -> conv2
-            #
-            # instead of inserting new observers we will have:
-            # arg -> existing_obs -> conv1
-            #                   \ -> conv2
-            existing_obs_node = None
-            for maybe_obs_node in arg.users.keys():
-                if maybe_obs_node.op == 'call_module':
-                    maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
-                    if (
-                        type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq) and
-                        maybe_obs_mod.dtype == arg_as_input_target_dtype
-                    ):
-                        arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
-                        existing_obs_node = maybe_obs_node
-                        break
+    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg, None)
+    # the arg is observed as the output and is using the same instance as the input_edge
+    # we'll reuse the inserted observer/fake_quant
+    if arg_as_output_obs_or_fq is not None and id(arg_as_output_obs_or_fq) == id(input_edge_obs_or_fq):
+        return new_arg
 
-            assert arg_as_input_act_obs_or_fq is not None
-            if existing_obs_node is None:
-                maybe_observed_arg = arg
-                # When quantizing two layers with different configs we can have
-                # conv2d (int8) -> avgpool(uint8)
-                # In this case observer insertion for avgpool will come here but the input
-                # to avgpool will be output observer of conv2d
-                # Now the obs map that we update must correspond to the original input of
-                # avgpool and not the output obs of conv2d
-                # This is because when referring to the edge, quantizer would refer to
-                # original input and not the observed one.
-                while _is_activation_post_process_node(arg, named_modules):
-                    arg = arg.args[0]  # type: ignore[assignment]
-                arg_as_input_act_obs_or_fq = obs_or_fq_map[(arg, node)]
-                new_obs_node = _insert_obs_or_fq(
-                    maybe_observed_arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)
-                # override this arg to be the observed arg
-                new_arg = new_obs_node
-            else:
-                new_arg = existing_obs_node
+    # otherwise, we'll insert a new observer/fake_quant node
+
+    existing_obs_node = None
+    # skip inserting new observers if there is an observer inserted for the arg before
+    # that has the same dtype that we want to insert here
+    # alternatively we could have a dedup pass after we insert all observers to deduplicate
+    # observers
+    # Example:
+    # conv1 -> obs1 -> existing_obs -> conv2
+    #             \ -> conv3
+    #
+    # instead of inserting new observers we will have:
+    # conv1 -> obs1 -> existing_obs -> conv2
+    #                            \ -> conv3
+    for maybe_obs_node in arg.users.keys():
+        if not _is_activation_post_process_node(maybe_obs_node, named_modules):
+            continue
+        maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
+        if (
+            type(maybe_obs_mod) == type(input_edge_obs_or_fq) and
+            maybe_obs_mod.dtype == input_edge_obs_or_fq.dtype
+        ):
+            input_edge_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
+            existing_obs_node = maybe_obs_node
+            break
+
+    if existing_obs_node is None:
+        new_arg = _insert_obs_or_fq(arg, input_edge_obs_or_fq, model, named_modules, model.graph)
+    else:
+        new_arg = existing_obs_node
 
     return new_arg
 
@@ -357,10 +339,12 @@ def _maybe_insert_input_observers_for_node(
         )
         new_args.append(new_arg)
 
-    # Clone has memory_format kwarg that persist in exported graph
-    # this is just a work around for that.
+    # Clone has a memory_format kwarg and zeros_like has a pin_memory kwarg
+    # that persist in exported graph. This is just a work around for these.
     assert (
-        node.target == torch.ops.aten.clone.default or len(node.kwargs) == 0
+        node.target == torch.ops.aten.clone.default or
+        node.target == torch.ops.aten.zeros_like.default or
+        len(node.kwargs) == 0
     ), " expecting kwargs for aten op IR to be empty"
 
     # assign the new args to the node, inplace
@@ -386,23 +370,10 @@ def _maybe_insert_input_and_output_observers_for_node(
     is_qat: bool,
 ):
     this_node_quantization_annotation = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
-    if "val" in node.meta:
-        output_is_a_tensor = (
-            this_node_quantization_annotation is not None and
-            isinstance(node.meta["val"], FakeTensor)
-        )
-    else:
-        output_is_a_tensor = this_node_quantization_annotation is not None
-
-    skip_inserting_input_and_output_observers = (
-        this_node_quantization_annotation is None
-    )
-
-    if skip_inserting_input_and_output_observers:
+    if this_node_quantization_annotation is None:
         return
 
     named_modules = dict(model.named_modules(remove_duplicate=False))
-
     _maybe_insert_input_observers_for_node(
         node,
         None,  # qconfig
@@ -412,11 +383,8 @@ def _maybe_insert_input_and_output_observers_for_node(
         is_qat,
     )
 
-    skip_inserting_output_observers = (
-        not output_is_a_tensor
-    )
-
-    if skip_inserting_output_observers:
+    output_is_a_tensor = "val" in node.meta and isinstance(node.meta["val"], FakeTensor)
+    if not output_is_a_tensor:
         return
 
     # this returns the new observer node if it was needed

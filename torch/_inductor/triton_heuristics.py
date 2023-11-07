@@ -12,7 +12,7 @@ import os.path
 import re
 import threading
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
@@ -42,11 +42,13 @@ log = logging.getLogger(__name__)
 if has_triton_package():
     import triton
     from triton import Config
+    from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 else:
     Config = object
     triton = None
     KernelInterface = object
+    OutOfResources = object
 
 if has_triton():
     from triton.runtime.jit import get_cuda_stream
@@ -62,6 +64,7 @@ class HeuristicType(Enum):
     REDUCTION = auto()
     PERSISTENT_REDUCTION = auto()
     TEMPLATE = auto()
+    USER_AUTOTUNE = auto()
 
 
 class AutotuneHint(Enum):
@@ -181,11 +184,20 @@ class CachingAutotuner(KernelInterface):
             self.launchers = []
             compiled_binaries = []
             for c in self.configs:
-                compiled_binary, launcher = self._precompile_config(
-                    c, warm_cache_only_with_cc
-                )
+                try:
+                    compiled_binary, launcher = self._precompile_config(
+                        c, warm_cache_only_with_cc
+                    )
+                except OutOfResources:
+                    # Skip the config if we run out of resource
+                    continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
+
+            if len(self.launchers) == 0:
+                raise RuntimeError(
+                    "No valid triton configs. Report a fatal compilation error"
+                )
 
             seen_configs = set(self.configs)
 
@@ -268,7 +280,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = (
-            config.triton.assert_indirect_indexing and torch.version.hip is None
+            config.assert_indirect_indexing and torch.version.hip is None
         )
 
         # Setting device_type="hip" required on ROCm to pass down to triton
@@ -339,14 +351,14 @@ class CachingAutotuner(KernelInterface):
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
         launcher.store_cubin = config.triton.store_cubin
-        # store this global varible to avoid the high overhead of reading it when calling run
+        # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
 
         return binary, launcher
 
-    def bench(self, launcher, *args, grid):
+    def bench(self, launcher, *args, grid, **kwargs):
         """Measure the performance of a given launcher"""
         if launcher.n_spills > config.triton.spill_threshold:
             log.debug(
@@ -364,16 +376,17 @@ class CachingAutotuner(KernelInterface):
                     {**dict(zip(self.arg_names, args)), **launcher.config.kwargs}
                 )
 
-            cloned_args = self.clone_args(*args)
+            cloned_args, cloned_kwargs = self.clone_args(*args, **kwargs)
             launcher(
                 *cloned_args,
+                **cloned_kwargs,
                 grid=grid,
                 stream=stream,
             )
 
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
-    def clone_args(self, *args):
+    def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
         from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -387,7 +400,15 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
-        return cloned_args
+        cloned_kwargs: Dict[str, Any] = {}
+        for name, arg in kwargs.items():
+            if name in self.mutated_arg_names:
+                assert isinstance(arg, torch.Tensor)
+                cloned_kwargs[name] = clone_preserve_strides(arg)
+            else:
+                cloned_kwargs[name] = arg
+
+        return cloned_args, cloned_kwargs
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
@@ -453,11 +474,14 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate descnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if self.heuristic_type == HeuristicType.TEMPLATE:
+        if (
+            self.heuristic_type == HeuristicType.TEMPLATE
+            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        ):
             # skip triton template
             return launcher
 
-        cloned_args = self.clone_args(*args)
+        cloned_args, _ = self.clone_args(*args)
         config2launcher = {launcher.config: launcher}
 
         def benchmark_one_config(config):
@@ -542,8 +566,9 @@ def _find_names(obj):
     import inspect
 
     frame = inspect.currentframe()
-    for frame in iter(lambda: frame.f_back, None):  # type: ignore[union-attr]
+    while frame is not None:
         frame.f_locals
+        frame = frame.f_back
     obj_names = []
     for referrer in gc.get_referrers(obj):
         if isinstance(referrer, dict):
@@ -668,6 +693,7 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
     save_cache_hook: Optional[Callable[[Any, Any], Any]]
+    inductor_meta = {} if inductor_meta is None else inductor_meta
 
     # on disk caching logic
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
@@ -888,7 +914,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    num_warps = next_power_of_2(min(max(num_warps, 2), 16))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -1170,6 +1196,40 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
+def user_autotune(configs, triton_meta, filename=None, inductor_meta=None):
+    """
+    Compile a user defined triton kernel
+    """
+    defaults = inspect.signature(triton.Config).parameters
+    default_num_stages = defaults["num_stages"].default
+    default_num_warps = defaults["num_warps"].default
+
+    if len(configs) == 0:
+        configs = [
+            triton.Config(
+                {}, num_stages=default_num_stages, num_warps=default_num_warps
+            )
+        ]
+    else:
+        configs = [
+            triton.Config(
+                c.get("kwargs", {}),
+                num_stages=c.get("num_stages", default_num_stages),
+                num_warps=c.get("num_warps", default_num_warps),
+            )
+            for c in configs
+        ]
+
+    return cached_autotune(
+        None,
+        configs,
+        triton_meta=triton_meta,
+        heuristic_type=HeuristicType.USER_AUTOTUNE,
+        filename=filename,
+        inductor_meta=inductor_meta,
+    )
+
+
 def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
     """
     Compile a triton foreach kernel
@@ -1186,10 +1246,6 @@ def foreach(triton_meta, num_warps, filename=None, inductor_meta=None):
 
 def grid(*numels):
     """Helper function to compute triton grids"""
-
-    if len(numels) == 1 and isinstance(numels[0], tuple):
-        numels = numels[0]
-
     if len(numels) == 1:
         xnumel, ynumel, znumel = numels[0], None, None
     elif len(numels) == 2:
@@ -1200,8 +1256,10 @@ def grid(*numels):
         raise AssertionError(f"invalid size for numels {len(numels)}")
 
     def get_grid_dim(numel, block):
-        if numel is None or block is None:
+        if numel is None:
             return 1
+        if block is None:
+            return numel
         return ceildiv(numel, block)
 
     def grid_fn(meta):

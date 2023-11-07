@@ -8,6 +8,7 @@ import itertools
 import logging
 import math
 import operator
+import os
 from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
 
 import sympy
@@ -20,14 +21,14 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import code_hash, get_path
+from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import MemoryDep, StarDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
 from ..utils import (
-    DeferredLineBase,
+    do_bench,
     get_fused_kernel_name,
     get_kernel_metadata,
     green_text,
@@ -52,6 +53,7 @@ from .common import (
     OpOverrides,
     PythonPrinter,
     SizeArg,
+    TensorArg,
 )
 from .triton_utils import config_of, signature_of, signature_to_meta
 
@@ -824,7 +826,6 @@ class TritonKernel(Kernel):
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
@@ -832,8 +833,6 @@ class TritonKernel(Kernel):
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         self.min_elem_per_thread = min_elem_per_thread
-        # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -1250,101 +1249,26 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def indirect_indexing(self, var, size, check=True):
-        # TODO(lezcano) This code should be lifted to codegen/common.py.
-        # This should be easy, as now CSE variables carry bounds info
-        class IndirectAssertLine(DeferredLineBase):
-            def __init__(self, line, var, mask, size_map):
-                self.var = var
-                self.mask = mask
-                self.line = line
-                self.size_map = size_map
+    def generate_assert(self, check):
+        return torch.version.hip is None and super().generate_assert(check)
 
-            def __call__(self):
-                size, size_str = self.size_map[(self.var, self.mask)]
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
 
-                # We assert if we've not been able to prove the bound
-                assert_min = (self.var.bounds.lower >= 0) != sympy.true
-                assert_max = (self.var.bounds.upper < size) != sympy.true
+        if mask_vars:
+            mask = (
+                f"{next(iter(mask_vars))}"
+                if len(mask_vars) == 1
+                else f"({' & '.join(str(v) for v in mask_vars)})"
+            )
+        return mask
 
-                # FooBar interview question
-                if not (assert_min or assert_max):
-                    return None
-                elif assert_min and assert_max:
-                    # The conditions need to be in parens because of Python's operator precedence.
-                    # It'd be less error-prone to use and/or/not, which is supported by triton
-                    cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-                    cond_print = f"0 <= {self.var} < {size_str}"
-                elif assert_min:
-                    cond = f"0 <= {self.var}"
-                    cond_print = cond
-                else:
-                    assert assert_max
-                    cond = f"{self.var} < {size_str}"
-                    cond_print = cond
-
-                if self.mask:
-                    cond = f"({cond}) | ~{self.mask}"
-                return self.line.format(cond=cond, cond_print=cond_print)
-
-            def _new_line(self, line):
-                return IndirectAssertLine(line, self.var, self.mask, self.size_map)
-
-        if var.bounds.lower < 0:
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
-                # Take the negative part of the bound and add size to it
-                # Then take union of that and the positive part
-                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
-                # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:
-                    pos = var.bounds & ValueRanges(0, sympy.oo)
-                    new_bounds = new_bounds | pos
-
-            stm = f"{var} + {self.index_to_str(size)}"
-            # Mixed negative and non-negative
-            if var.bounds.upper >= 0:
-                stm = f"tl.where({var} < 0, {stm}, {var})"
-            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-            new_var.update_on_args("index_wrap", (var,), {})
-            var = new_var
-
-        generate_assert = (
-            (check or config.debug_index_asserts)
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        )
-        if generate_assert:
-            mask_vars = set(var.mask_vars)
-            if self._load_mask:
-                mask_vars.add(self._load_mask)
-
-            mask = ""
-            if mask_vars:
-                mask = (
-                    f"{list(mask_vars)[0]}"
-                    if len(mask_vars) == 1
-                    else f"({' & '.join(str(v) for v in mask_vars)})"
-                )
-
-            # An assertion line may have been written already, if so just
-            # update the max size.
-            map_key = (var, mask)
-            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
-            if existing_size is not None:
-                size = sympy.Min(size, existing_size)
-            else:
-                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
-                self.compute.writeline(
-                    IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
-                )
-
-            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-
-        return sympy_symbol(str(var))
+    @property
+    def assert_function(self):
+        return "tl.device_assert"
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
@@ -1410,7 +1334,7 @@ class TritonKernel(Kernel):
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
         if ("tmp" in mask or "rmask" in mask) and V.graph.get_dtype(name) != torch.bool:
-            other = ", other=0"
+            other = ", other=0.0"
         else:
             other = ""
 
@@ -1623,7 +1547,7 @@ class TritonKernel(Kernel):
                 sum_ = ops.reduction(dtype, dtype, "sum", value)
                 self.inside_reduction = False
                 rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.div(sum_, rnumel)
+                mean = ops.truediv(sum_, rnumel)
 
                 self.inside_reduction = True
                 dx = ops.sub(value, mean)
@@ -2171,6 +2095,19 @@ class TritonKernel(Kernel):
             triton=True,
         )
 
+    def codegen_nan_check(self):
+        if not config.nan_asserts:
+            return
+
+        wrapper = V.graph.wrapper_code
+        _, call_args, arg_types = self.args.python_argdefs()
+        for arg, arg_type in zip(call_args, arg_types):
+            if isinstance(arg_type, TensorArg):
+                line = f"assert not {arg}.isnan().any().item()"
+                wrapper.writeline(line)
+                line = f"assert not {arg}.isinf().any().item()"
+                wrapper.writeline(line)
+
     def warn_mix_layout(self, kernel_name):
         """
         Print message if the kernel have mixed layout inputs.
@@ -2604,7 +2541,9 @@ class TritonScheduling(BaseScheduling):
         log.debug("Generating kernel code with kernel_name: %s", kernel_name)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        kernel.codegen_nan_check()
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2724,6 +2663,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
@@ -2761,6 +2701,7 @@ class TritonScheduling(BaseScheduling):
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
+                V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
@@ -2908,6 +2849,81 @@ class TritonScheduling(BaseScheduling):
 
     def flush(self):
         pass
+
+    def benchmark_fused_nodes(self, nodes):
+        _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
+        node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
+        tiled_groups = self.select_tiling(node_schedule, numel, rnumel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+            node_schedule, numel, rnumel
+        )
+
+        kernel = TritonKernel(
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
+        )
+
+        # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+        for n in nodes:
+            n.last_usage = set()
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
+            src_code = kernel.codegen_kernel()
+
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
+        mod = PyCodeCache.load(src_code)
+
+        def cache_file_path():
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"  # type: ignore[type-var,operator]
+
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return float(fd.read())
+            return None
+
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
+                fd.write(str(ms))
+
+        log.debug(
+            "kernel src code for %s written to: %s",
+            {n.get_name() for n in nodes},
+            mod.__file__,
+        )
+        ms = load_cache()
+        if ms is not None:
+            return ms, mod.__file__
+
+        args = mod.get_args()
+        call = mod.call
+        wrapped_jit_function = mod.triton_
+
+        # call once to trigger the compilation
+        call(wrapped_jit_function.clone_args(*args)[0])
+
+        launchers = wrapped_jit_function.launchers
+        assert len(launchers) == 1
+        if launchers[0].n_spills > 0:
+            # skip benchmarking the kernel if there are register spills
+            ms = float("inf")
+        else:
+            # We have to clone the inplace updated arguments to avoid earlier calls
+            # generating out of range indices for later calls.
+            ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
+
+        log.debug(
+            "The fused kernel for %s took %.3f ms to run",
+            {n.get_name() for n in nodes},
+            ms,
+        )
+        store_cache()
+        return ms, mod.__file__
 
 
 @dataclasses.dataclass

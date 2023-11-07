@@ -17,13 +17,8 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -39,7 +34,15 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    Pointwise,
+    Reduction,
+    StorageBox,
+    TensorBox,
+)
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -153,9 +156,10 @@ class GraphLowering(torch.fx.Interpreter):
             register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
 
         if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
+            from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+            # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
 
     def __init__(
         self,
@@ -168,6 +172,7 @@ class GraphLowering(torch.fx.Interpreter):
         user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
+        is_inference=False,
     ):
         super().__init__(gm)
 
@@ -175,6 +180,7 @@ class GraphLowering(torch.fx.Interpreter):
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
         self.num_channels_last_conv = 0
+        self.is_inference = is_inference
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -276,7 +282,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         if any(
-            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+            has_free_symbols(n.args[idx].meta["val"])
+            for n in conv_nodes
+            for idx in [0, 1]
         ):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
@@ -331,30 +339,6 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
-
-        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
-        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
-        # for more details.
-        #
-        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
-        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
-        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
-        #
-        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
-        #
-        # An alternative is to do necessary layout conversion to make sure aten._scaled_dot_product_flash_attention's
-        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
-        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
-        # bringing perf gains.
-        for n in gm.graph.nodes:
-            if n.target in (
-                torch.ops.aten._scaled_dot_product_flash_attention.default,
-                torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            ):
-                log.debug(
-                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
-                )
-                return False
 
         return True
 
@@ -626,6 +610,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
+            log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)
             return out
         except Exception as e:
@@ -727,7 +712,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.current_node = old
 
     def run_node(self, n: torch.fx.Node):
-        log.debug("lowering %s", LazyString(lambda: n.format_node()))
+        def debug(msg):
+            log.debug("lowering %s %s", LazyString(lambda: n.format_node()), msg)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -740,13 +727,16 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and fallback_node_due_to_unsupported_type(n)
             ):
+                debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
+                debug("layout_constraints")
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride:
+            elif n.target == torch.ops.aten.sym_stride.int:
+                debug("sym_stride")
                 # inductor graphs can occasionally return sizes/strides,
                 # e.g. if we need to save symints for the backward graph.
                 if isinstance(n.meta["val"], torch.SymInt):
@@ -754,11 +744,13 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     result = super().run_node(n)
             elif is_magic_method(n.target):
+                debug("is_magic_method")
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
             else:
+                debug("")
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
@@ -852,6 +844,15 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
+            # Realize if a Pointwise has too much stuff to be inlined.
+            # As this may cause RecursionError during Inductor's evaluation.
+            if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+                curr = result.data.data
+                if isinstance(curr, Pointwise):
+                    # Use inner fn as a rough proxy. Good enough.
+                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                        result.realize()
+
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct
         # TensorBox -> StorageBox denoting a non-view; we don't bother trying
@@ -922,6 +923,7 @@ class GraphLowering(torch.fx.Interpreter):
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
@@ -934,7 +936,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        return self.wrapper_code.generate(self.is_inference)
 
     def count_bytes(self):
         from .scheduler import Scheduler
