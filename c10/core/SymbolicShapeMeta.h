@@ -118,28 +118,28 @@ class C10_API SymbolicShapeMeta {
 
   // Assumptions so we can short-circuit computation
   // NOTE: Don't need to lock mutables_ since these aren't const
-  void assume_contiguous() {
-    is_contiguous_ = true;
+  void assume_contiguous(SymBool val=true) {
+    is_contiguous_ = std::move(val);
     available_.fetch_or(is_contiguous_avail);
   }
-  void assume_channels_last_contiguous() {
-    is_channels_last_contiguous_ = true;
+  void assume_channels_last_contiguous(SymBool val=true) {
+    is_contiguous_ = std::move(val);
     available_.fetch_or(is_channels_last_contiguous_avail);
   }
-  void assume_channels_last_3d_contiguous() {
-    is_channels_last_3d_contiguous_ = true;
+  void assume_channels_last_3d_contiguous(SymBool val=true) {
+    is_channels_last_3d_contiguous_ = std::move(val);
     available_.fetch_or(is_channels_last_3d_contiguous_avail);
   }
-  void assume_channels_last() {
-    is_channels_last_ = true;
+  void assume_channels_last(SymBool val=true) {
+    is_channels_last_ = std::move(val);
     available_.fetch_or(is_channels_last_avail);
   }
-  void assume_channels_last_3d() {
-    is_channels_last_3d_ = true;
+  void assume_channels_last_3d(SymBool val=true) {
+    is_channels_last_3d_ = std::move(val);
     available_.fetch_or(is_channels_last_3d_avail);
   }
-  void assume_non_overlapping_and_dense() {
-    is_non_overlapping_and_dense_ = true;
+  void assume_non_overlapping_and_dense(SymBool val=true) {
+    is_non_overlapping_and_dense_ = std::move(val);
     available_.fetch_or(is_non_overlapping_and_dense_avail);
   }
 
@@ -159,14 +159,13 @@ class C10_API SymbolicShapeMeta {
   // if its correct, and reason if the simpler expressions are better for
   // analysis (maybe not!)
 
-  SymBool compute_channels_last_contiguous_3d_dim5_locked() const;
-  SymBool compute_channels_last_2d_dim5_locked() const;
-  SymBool compute_channels_last_3d_dim5_locked() const;
-  SymBool compute_is_non_overlapping_and_dense_dim4_locked() const;
-  SymBool compute_is_non_overlapping_and_dense_dim5_locked() const;
-  SymBool compute_is_non_overlapping_and_dense_anydim_locked() const;
+  SymBool compute_channels_last_contiguous_3d_dim5() const;
+  SymBool compute_channels_last_2d_dim5() const;
+  SymBool compute_channels_last_3d_dim5() const;
+  SymBool compute_is_non_overlapping_and_dense_dim4() const;
+  SymBool compute_is_non_overlapping_and_dense_dim5() const;
+  SymBool compute_is_non_overlapping_and_dense_anydim() const;
 
-  // Versions which lock, called by the public API
   void init_numel() const;
   void init_is_contiguous() const;
   void init_is_channels_last_contiguous() const;
@@ -175,18 +174,17 @@ class C10_API SymbolicShapeMeta {
   void init_is_channels_last_3d() const;
   void init_is_non_overlapping_and_dense() const;
 
-  // Verions callend when the mutex is already locked (to prevent recursive locking)
-  void init_numel_locked() const;
-  void init_is_contiguous_locked() const;
-  void init_is_channels_last_contiguous_locked() const;
-  void init_is_channels_last_3d_contiguous_locked() const;
-  void init_is_channels_last_locked() const;
-  void init_is_channels_last_3d_locked() const;
-  void init_is_non_overlapping_and_dense_locked() const;
+  // NOTE: These only set if !has_foo()
+  void set_numel(SymInt val) const;
+  void set_is_contiguous(SymBool val) const;
+  void set_is_channels_last_contiguous(SymBool val) const;
+  void set_is_channels_last_3d_contiguous(SymBool val) const;
+  void set_is_channels_last(SymBool val) const;
+  void set_is_channels_last_3d(SymBool val) const;
+  void set_is_non_overlapping_and_dense(SymBool val) const;
 
   // Lazily initialized variables, with the corresponding available_ flag
   // indicating whether the value has been initialized
-  // During intialization, the variable may only be accessed with the mutables_ lock held
   mutable std::atomic<int> available_{0};
   enum avail {
     numel_avail = 1 << 0,
@@ -198,7 +196,7 @@ class C10_API SymbolicShapeMeta {
     is_non_overlapping_and_dense_avail = 1 << 6,
   };
 
-  // Mutex to prevent races on const accesses
+  // Mutex to prevent races when initializing the variable from const accessors
   mutable std::mutex mutables_;
   mutable SymInt numel_ = 1;
   mutable SymBool is_contiguous_{true};
