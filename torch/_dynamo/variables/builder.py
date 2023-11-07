@@ -1267,8 +1267,8 @@ def _dataclasses_fields_lambda(obj):
             source = GetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
-        items.append(UserDefinedObjectVariable(field, source=source).add_options(obj))
-    return TupleVariable(items).add_options(obj)
+        items.append(UserDefinedObjectVariable(field, source=source))
+    return TupleVariable(items)
 
 
 def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
