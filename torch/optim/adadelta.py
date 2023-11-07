@@ -164,8 +164,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
             result in a slower average, which can be helpful for preventing 
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-6). The `eps` parameter is a small value that is added to the denominator to
-            improve numerical stability.
+            numerical stability (default: 1e-6).
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0). The `lr` parameter controls the overall
             learning rate of the optimizer. A higher value of `lr` will result in
