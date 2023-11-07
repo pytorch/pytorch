@@ -4112,9 +4112,11 @@ def scaled_dot_product_flash_attention(
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
-        lambda: "q, k, v must be a 4 dimensional tensor",
+        lambda: f"q, k, v must be a 4 dimensional tensor, got {query.dim()}, {key.dim()}, {value.dim()}",
     )
-    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        dropout_p == 0.0, lambda: f"dropout probability must be zero, got {dropout_p}"
+    )
     torch._check(
         query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
         lambda: "q, k, v should have the same head size",
