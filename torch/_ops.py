@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -127,6 +128,46 @@ class OperatorBase:
 
         return inner
 
+    # Registers an implementation to all **3** variants of functionalization that we have:
+    # - DispatchKey.Functionalize
+    # - functorch.TransformType.Functionalize
+    # - FunctionalTensorMode
+    # Example:
+    #   @py_functionalize_impl
+    #   def functionalize_rule(ctx, inner_f, *args):
+    #       args_unwrapped = ctx.unwrap_tensors(args)
+    #       with ctx.redispatch_to_next():
+    #           out = ctx.functionalize(inner_f)(*args_unwrapped)
+    #           return ctx.wrap_tensors(out)
+    def py_functionalize_impl(self, fn):
+        from torch._subclasses.functional_tensor import (
+            CppFunctionalizeAPI as _CppFunctionalizeAPI,
+            FunctorchFunctionalizeAPI as _FunctorchFunctionalizeAPI,
+            PythonFunctionalizeAPI as _PythonFunctionalizeAPI,
+        )
+
+        # Construct our three flavors of functionalization,
+        # each of which have slightly different wrap/unwrap/redispatch policies
+        def functionalize_dk_fn(*args, **kwargs):
+            return fn(_CppFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
+            # Mode is unused (there's a global FunctionalTensorMode that we can access)
+            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+
+        def functionalize_functorch_fn(interpreter, *args, **kwargs):
+            return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
+
+        self.py_impl(torch._C.DispatchKey.Functionalize)(functionalize_dk_fn)
+        self.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)(
+            functionalize_dispatch_mode_fn
+        )
+        self.py_impl(torch._C._functorch.TransformType.Functionalize)(
+            functionalize_functorch_fn
+        )
+
+        return fn
+
     def name(self):
         raise NotImplementedError()
 
@@ -190,18 +231,60 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-pyop_namespace = {}
+_global_higher_order_ops = {}
+_higher_order_ops = {}
+
+_HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.ADInplaceOrView,
+    DispatchKey.BackendSelect,
+    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+]
 
 
 class HigherOrderOperator(OperatorBase):
-    def __init__(self, name):
+    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
+    # (True) torch.ops.{name}
+    # (False) torch.ops.higher_order.{name}
+    #
+    # If you're creating a new HigherOrderOperator, please do not change the
+    # default. Adding operators to the global torch.ops namespace is a bad
+    # practice due to name collisions.
+    def __init__(self, name, *, _deprecated_global_ns=False):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        pyop_namespace[name] = self
+        if _deprecated_global_ns:
+            _global_higher_order_ops[name] = self
+            self._ns = None
+        else:
+            _higher_order_ops[name] = self
+            self._ns = "higher_order"
+
+        # For a normal HigherOrderOperator instance, we will change its __module__ from torch._ops to
+        # torch._ops.higher_order.
+        # For an instance of subclass of HigherOrderOperator (e.g. customized higher order op),
+        # the __module__ attribute will be kept unchanged.
+        if self.__class__ is HigherOrderOperator:
+            self_name_space = "." + self.namespace if self.namespace else ""
+            self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.fallthrough(dispatch_key)
+
+    def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+        return super().py_impl(k)
+
+    @property
+    def namespace(self):
+        return self._ns
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -218,7 +301,9 @@ class HigherOrderOperator(OperatorBase):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
-            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
+            from torch.utils._python_dispatch import _pop_mode_temporarily
+
             curr_mode = _get_current_dispatch_mode()
             assert (
                 curr_mode is not None
@@ -226,8 +311,29 @@ class HigherOrderOperator(OperatorBase):
             assert (
                 type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
-            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            handler = self.python_key_mode_table[type(curr_mode)]
+            with _pop_mode_temporarily() as mode:
+                return handler(mode, *args, **kwargs)
+
+        functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
+        if functionality_key in mode_stack_per_key():
+            # The place to handle DispatchKey.PreDispatch
+            curr_stack = mode_stack_per_key()[functionality_key]
+            # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+            # calls inside of a mode.
+            if len(
+                curr_stack
+            ) > 0 and not torch._C._dispatch_tls_is_dispatch_key_excluded(
+                DispatchKey.Python
+            ):
+                curr_mode = curr_stack[-1]
+                pre_dispatch_modes = mode_stack_per_key().get(
+                    DispatchKey.PreDispatch, []  # type: ignore[attr-defined]
+                )
+                handler = self.python_key_mode_table[type(curr_mode)]
+                if len(pre_dispatch_modes) > 0:
+                    with temporarily_pop_mode(pre_dispatch_modes) as mode:
+                        return handler(mode, *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 
@@ -242,17 +348,31 @@ class HigherOrderOperator(OperatorBase):
         return kernel(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        flat_args = _to_flat_tuple(args, kwargs)
-        if torch.overrides.has_torch_function(flat_args):
-            return torch.overrides.handle_torch_function(
-                self, flat_args, *args, **kwargs
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo
+        from torch._dynamo import disable
+
+        @disable
+        def wrapper():
+            flat_args = _to_flat_tuple(args, kwargs)
+            if torch.overrides.has_torch_function(flat_args):
+                return torch.overrides.handle_torch_function(
+                    self, flat_args, *args, **kwargs
+                )
+
+            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            return self.dispatch(
+                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
-        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
+        return wrapper()
+
+    def __str__(self):
+        return f"{self.name()}"
 
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):
@@ -364,9 +484,7 @@ class OpOverload(OperatorBase):
         self._name = self._schema.name
         if schema.overload_name:
             self._name += "." + schema.overload_name
-        self.__name__ = "{}.{}".format(
-            self._schema.name.split("::")[1], self._overloadname
-        )
+        self.__name__ = f"{self._schema.name.split('::')[1]}.{self._overloadname}"
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
@@ -609,10 +727,8 @@ class OpOverloadPacket:
             # an object name different from the one the attribute
             # query was performed on.
             raise AttributeError(
-                "'{}' can't have an overload name beginning with '__' and the "
-                "underlying op {} has no attribute {} either.".format(
-                    str(self), str(self._op), key
-                )
+                f"'{str(self)}' can't have an overload name beginning with '__' and the "
+                f"underlying op {str(self._op)} has no attribute {key} either."
             ) from None
 
         try:
@@ -630,9 +746,7 @@ class OpOverloadPacket:
             return overload
         except RuntimeError:
             raise AttributeError(
-                "The underlying op of '{}' has no overload name '{}'".format(
-                    str(self), key
-                )
+                f"The underlying op of '{str(self)}' has no overload name '{key}'"
             ) from None
 
     def __iter__(self):
@@ -658,7 +772,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -698,13 +812,15 @@ class _OpNamespace(types.ModuleType):
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
-        elif op_name == "__origin__":
-            raise AttributeError()
+        elif op_name in ["__origin__", "__self__"]:
+            raise AttributeError(
+                f"Invalid attribute '{op_name}' for '_OpNamespace' '{self.name}'"
+            )
 
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
-        qualified_op_name = "{}::{}".format(namespace_name, op_name)
+        qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
         except RuntimeError as e:
@@ -730,9 +846,19 @@ class _OpNamespace(types.ModuleType):
 
 
 class _PyOpNamespace(_OpNamespace):
-    def __init__(self):
-        super().__init__("torch.ops")
-        self.pyop_namespace = pyop_namespace
+    def __init__(self, name, ops):
+        super().__init__(name)
+        self._ops = ops
+
+    def __getattr__(self, name):
+        # Following _OpNamespace.__getattr__, we cache the op on the _PyOpNamespace object.
+        op = self._ops.get(name, None)
+        if op is None:
+            raise AttributeError(
+                f"'_PyOpNamespace' '{self.name}' object has no attribute '{name}'"
+            )
+        setattr(self, name, op)
+        return op
 
 
 class _Ops(types.ModuleType):
@@ -741,13 +867,20 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self.pyops = _PyOpNamespace()
+        self._global_higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops", _global_higher_order_ops
+        )
+        self._higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops.higher_order", _higher_order_ops
+        )
         self._dir = []
 
     def __getattr__(self, name):
-        # Check if the name is a pyop
-        if name in self.pyops.pyop_namespace:
-            return self.pyops.pyop_namespace[name]
+        # Check if the name is a HigherOrderOperator
+        if name in self._global_higher_order_op_namespace._ops:
+            return getattr(self._global_higher_order_op_namespace, name)
+        if name == "higher_order":
+            return self._higher_order_op_namespace
 
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
@@ -757,6 +890,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """
@@ -776,7 +928,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)

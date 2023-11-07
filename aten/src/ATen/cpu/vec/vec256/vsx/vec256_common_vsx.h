@@ -127,6 +127,30 @@ inline void convert(const int64_t* src, double* dst, int64_t n) {
     dst[i] = static_cast<double>(src[i]);
   }
 }
+//Generic implementation to fix compiler error
+//TO-DO : Add optimized version for ppc64
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(
+    const Vectorized<Half>& a) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float arr[K];
+  __at_align__ Half arr2[K];
+  a.store(arr2);
+  convert(arr2, arr, K);
+  return std::make_tuple(
+       Vectorized<float>::loadu(arr),
+       Vectorized<float>::loadu(arr + Vectorized<float>::size()));
+}
+
+inline Vectorized<Half> convert_float_half(
+    const Vectorized<float>& a, const Vectorized<float>& b) {
+  constexpr int64_t K = Vectorized<Half>::size();
+  __at_align__ float arr[K];
+  __at_align__ Half arr2[K];
+  a.store(arr);
+  b.store(arr + Vectorized<float>::size());
+  convert(arr, arr2, K);
+  return Vectorized<Half>::loadu(arr2);
+};
 
 template <>
 std::pair<Vectorized<double>, Vectorized<double>> inline interleave2<double>(

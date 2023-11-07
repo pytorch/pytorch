@@ -250,12 +250,7 @@ def _build_rpc_profiling_key(
     Returns:
         String representing profiling key
     """
-    profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
-        rpc_type=exec_type.value,
-        func_name=func_name,
-        current_worker=current_worker_name,
-        dst_worker=dst_worker_name,
-    )
+    profile_key = f"rpc_{exec_type.value}#{func_name}({current_worker_name} -> {dst_worker_name})"
     return profile_key
 
 
@@ -276,9 +271,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
         An instance of `torch.autograd._RecordFunction`.
     """
     assert torch.autograd._profiler_enabled(), "Autograd profiler should be enabled."
-    profile_key = "rpc_{}#{}({} -> {})".format(
-        exec_type.value, str(func_name), current_worker_name, dest_worker_name
-    )
+    profile_key = f"rpc_{exec_type.value}#{str(func_name)}({current_worker_name} -> {dest_worker_name})"
     rf = torch.autograd._RecordFunction()  # type: ignore[attr-defined]
     torch.autograd._run_before_callbacks(rf, profile_key)  # type: ignore[attr-defined]
     return rf

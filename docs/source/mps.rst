@@ -16,3 +16,27 @@ torch.mps
     set_per_process_memory_fraction
     current_allocated_memory
     driver_allocated_memory
+
+MPS Profiler
+------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    profiler.start
+    profiler.stop
+    profiler.profile
+
+MPS Event
+------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    event.Event
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.mps.event
+.. py:module:: torch.mps.profiler

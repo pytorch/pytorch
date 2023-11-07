@@ -156,7 +156,7 @@ def generate_data(transform):
         x /= x.norm(dim=-1, keepdim=True)
         x.diagonal(dim1=-1).copy_(x.diagonal(dim1=-1).abs())
         return x
-    raise ValueError('Unsupported domain: {}'.format(domain))
+    raise ValueError(f'Unsupported domain: {domain}')
 
 
 TRANSFORMS_CACHE_ACTIVE = get_transforms(cache_size=1)
@@ -215,19 +215,19 @@ def test_forward_inverse(transform, test_cached):
     if transform.bijective:
         # verify function inverse
         assert torch.allclose(x2, x, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t.inv(t(-)) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
+            f'{transform} t.inv(t(-)) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
         ])
     else:
         # verify weaker function pseudo-inverse
         assert torch.allclose(y2, y, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t(t.inv(t(-))) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
-            'y2 = t(x2) = {}'.format(y2),
+            f'{transform} t(t.inv(t(-))) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
+            f'y2 = t(x2) = {y2}',
         ])
 
 
@@ -252,7 +252,7 @@ base_dist1 = Dirichlet(torch.ones(4, 4))
 base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
 
 
-@pytest.mark.parametrize('batch_shape, event_shape, dist', [
+@pytest.mark.parametrize(('batch_shape', 'event_shape', 'dist'), [
     ((4, 4), (), base_dist0),
     ((4,), (4,), base_dist1),
     ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
@@ -418,7 +418,7 @@ def test_compose_affine(event_dims):
     if transform.domain.event_dim > 1:
         base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
     dist = TransformedDistribution(base_dist, transforms)
-    assert dist.support.event_dim == max(1, max(event_dims))
+    assert dist.support.event_dim == max(1, *event_dims)
 
 
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)

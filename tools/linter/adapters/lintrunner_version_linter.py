@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from enum import Enum
 from typing import NamedTuple, Optional, Tuple
 
@@ -53,7 +54,7 @@ if __name__ == "__main__":
             replacement=None,
             description="Lintrunner is not installed, did you forget to run `make setup_lint && make lint`?",
         )
-        exit(0)
+        sys.exit(0)
 
     curr_version = int(version_match[1]), int(version_match[2]), int(version_match[3])
     min_version = (0, 10, 7)

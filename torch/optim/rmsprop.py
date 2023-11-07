@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["RMSprop", "rmsprop"]
 
@@ -23,15 +22,15 @@ class RMSprop(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= momentum:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
+            raise ValueError(f"Invalid momentum value: {momentum}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
         if not 0.0 <= alpha:
-            raise ValueError("Invalid alpha value: {}".format(alpha))
+            raise ValueError(f"Invalid alpha value: {alpha}")
 
         defaults = dict(
             lr=lr,
@@ -177,7 +176,7 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
     learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -189,11 +188,11 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def rmsprop(
@@ -284,7 +283,7 @@ def _single_tensor_rmsprop(
             grad_avg = grad_avgs[i]
             if is_complex_param:
                 grad_avg = torch.view_as_real(grad_avg)
-            grad_avg.mul_(alpha).add_(grad, alpha=1 - alpha)
+            grad_avg.lerp_(grad, 1 - alpha)
             avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_()
         else:
             avg = square_avg.sqrt()
@@ -326,31 +325,35 @@ def _multi_tensor_rmsprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
-    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
-         grouped_momentum_buffer_list) in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
+    for (((grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
+         grouped_momentum_buffer_list)), _) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
         if weight_decay != 0:
-            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+            else:
+                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        def _view_complex_as_real(tensor_list):
-            return [
-                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-            ]
-
-        grouped_grads = _view_complex_as_real(grouped_grads)
-        grouped_params = _view_complex_as_real(grouped_params)
-        grouped_square_avgs = _view_complex_as_real(grouped_square_avgs)
+        grouped_grads = list(grouped_grads)
+        for i in range(len(grouped_params)):
+            if torch.is_complex(grouped_params[i]):
+                grouped_params[i] = torch.view_as_real(grouped_params[i])
+                grouped_grads[i] = torch.view_as_real(grouped_grads[i])
+                grouped_square_avgs[i] = torch.view_as_real(grouped_square_avgs[i])
+                if momentum > 0:
+                    grouped_momentum_buffer_list[i] = torch.view_as_real(grouped_momentum_buffer_list[i])
+                if centered:
+                    grouped_grad_avgs[i] = torch.view_as_real(grouped_grad_avgs[i])
 
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
         if centered:
-            grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
-            torch._foreach_mul_(grouped_grad_avgs, alpha)
-            torch._foreach_add_(grouped_grad_avgs, grouped_grads, alpha=1 - alpha)
+            torch._foreach_lerp_(grouped_grad_avgs, grouped_grads, 1 - alpha)
             avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
             torch._foreach_sqrt_(avg)
             torch._foreach_add_(avg, eps)
@@ -359,7 +362,6 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(avg, eps)
 
         if momentum > 0:
-            grouped_momentum_buffer_list = _view_complex_as_real(grouped_momentum_buffer_list)
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
             torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)

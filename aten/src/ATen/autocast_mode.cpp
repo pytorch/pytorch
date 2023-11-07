@@ -1,12 +1,10 @@
 #include <ATen/autocast_mode.h>
 
-#include <iostream>
-#include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <c10/util/flat_hash_map.h>
 
-namespace at {
-namespace autocast {
+namespace at::autocast {
 
 bool is_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
@@ -32,12 +30,28 @@ void set_xpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
 }
 
+bool is_ipu_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
+}
+
+void set_ipu_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
+}
+
 bool is_hpu_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
 }
 
 void set_hpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
+}
+
+bool is_xla_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
+}
+
+void set_xla_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
 }
 
 bool is_privateuseone_enabled() {
@@ -83,8 +97,14 @@ thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
 // autocast_xpu_dtype is the lower_precision_fp used by AutocastXPU.
 thread_local at::ScalarType autocast_xpu_dtype = at::kBFloat16;
 
+// autocast_ipu_dtype is the lower_precision_fp used by AutocastIPU.
+thread_local at::ScalarType autocast_ipu_dtype = at::kHalf;
+
 // autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
 thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
+
+// autocast_xla_dtype is the lower_precision_fp used by AutocastXLA.
+thread_local at::ScalarType autocast_xla_dtype = at::kBFloat16;
 
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
@@ -121,8 +141,16 @@ at::ScalarType get_autocast_xpu_dtype() {
   return autocast_xpu_dtype;
 }
 
+at::ScalarType get_autocast_ipu_dtype() {
+  return autocast_ipu_dtype;
+}
+
 at::ScalarType get_autocast_hpu_dtype() {
   return autocast_hpu_dtype;
+}
+
+at::ScalarType get_autocast_xla_dtype() {
+  return autocast_xla_dtype;
 }
 
 at::ScalarType get_autocast_privateuseone_dtype() {
@@ -130,9 +158,6 @@ at::ScalarType get_autocast_privateuseone_dtype() {
 }
 
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
-  TORCH_CHECK(
-      dtype == at::kBFloat16,
-      "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
 }
 
@@ -144,8 +169,16 @@ void set_autocast_xpu_dtype(at::ScalarType dtype) {
   autocast_xpu_dtype = dtype;
 }
 
+void set_autocast_ipu_dtype(at::ScalarType dtype) {
+  autocast_ipu_dtype = dtype;
+}
+
 void set_autocast_hpu_dtype(at::ScalarType dtype) {
   autocast_hpu_dtype = dtype;
+}
+
+void set_autocast_xla_dtype(at::ScalarType dtype) {
+  autocast_xla_dtype = dtype;
 }
 
 void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
@@ -234,6 +267,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_CUDA(einsum, lower_precision_fp)
   KERNEL_CUDA(mm, lower_precision_fp)
   KERNEL_CUDA(mv, lower_precision_fp)
+  KERNEL_CUDA(linalg_vecdot, lower_precision_fp)
   KERNEL_CUDA(linear, lower_precision_fp)
   KERNEL_CUDA(addbmm, lower_precision_fp)
   KERNEL_CUDA(baddbmm, lower_precision_fp)
@@ -356,6 +390,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(conv3d, padding, lower_precision_fp)
   KERNEL_CPU(bmm, lower_precision_fp)
   KERNEL_CPU(mm, lower_precision_fp)
+  KERNEL_CPU(linalg_vecdot, lower_precision_fp)
   KERNEL_CPU(baddbmm, lower_precision_fp)
   KERNEL_CPU(addmm, lower_precision_fp)
   KERNEL_CPU(addbmm, lower_precision_fp)
@@ -368,6 +403,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(conv_transpose2d, input, lower_precision_fp)
   KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
   KERNEL_CPU(prelu, lower_precision_fp)
+  KERNEL_CPU(scaled_dot_product_attention, lower_precision_fp)
+  KERNEL_CPU(_native_multi_head_attention, lower_precision_fp)
 
   // fp32 cast policy
   KERNEL_CPU(avg_pool3d, fp32)
@@ -481,5 +518,4 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 }
 
 } // namespace
-} // namespace autocast
-} // namespace at
+} // namespace at::autocast

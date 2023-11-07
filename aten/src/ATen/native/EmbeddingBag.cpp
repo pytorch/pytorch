@@ -234,7 +234,7 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
               ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
@@ -245,7 +245,8 @@ index_select_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -290,7 +291,7 @@ index_select_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same<data_t, at::Half>::value) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -607,8 +608,8 @@ index_select_scale_add(
     auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
-    bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
-    if (isbf16) {
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
+    if constexpr (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
           reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
           scale_data_fp32,
@@ -629,7 +630,8 @@ index_select_scale_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -678,7 +680,7 @@ index_select_scale_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if (std::is_same<data_t, at::Half>::value) {
+            if constexpr (std::is_same<data_t, at::Half>::value) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -1189,7 +1191,7 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
 
 // Assumes all input tensors except for `weight` are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
+static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
     const Tensor& weight,
     const Tensor& indices_,
     const Tensor& offsets_,
@@ -1752,15 +1754,6 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu(
             scalar_t>(
             grad, weight, indices, offsets, offset2bag, mode, padding_idx);
       });
-}
-
-Tensor _embedding_bag_sparse_backward(
-    const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
-    const Tensor &offset2bag, const Tensor &bag_size_, SymInt num_weights,
-    bool scale_grad_by_freq, int64_t mode, const c10::optional<Tensor>& per_sample_weights_opt,
-    int64_t padding_idx) {
-    return at::native::_embedding_bag_sparse_backward_symint(grad_, indices, offsets, offset2bag, bag_size_, std::move(num_weights),
-        scale_grad_by_freq, mode, per_sample_weights_opt, padding_idx);
 }
 
 Tensor _embedding_bag_sparse_backward_symint(

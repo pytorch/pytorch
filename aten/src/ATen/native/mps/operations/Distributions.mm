@@ -13,10 +13,17 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/argmax.h>
+#include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/div.h>
+#include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/multinomial_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
+#include <ATen/ops/randperm_native.h>
 #include <ATen/ops/topk.h>
+#include <ATen/ops/uniform_native.h>
 #endif
 
 namespace at::native {
@@ -54,7 +61,8 @@ Tensor& random_mps_impl(Tensor& self,
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self}) + ":" + to_string(val1) + ":" + to_string(val2);
+    string key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
+        to_string(val1) + ":" + to_string(val2);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
@@ -62,12 +70,12 @@ Tensor& random_mps_impl(Tensor& self,
       // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
-        if (std::is_same<scalar_t, int64_t>::value)
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
-        else
-          return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        }
+        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
       }();
-      const MPSDataType outputDataType = (std::is_same<scalar_t, bool>::value) ? MPSDataTypeBool : inputDataType;
+      const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
       MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:distribution
                                                                                        dataType:inputDataType];
@@ -134,13 +142,13 @@ Tensor& random_mps_impl(Tensor& self,
   return self;
 }
 
-Tensor& normal_mps_impl(Tensor& self,
-                        double mean_s,
-                        double std_s,
-                        const c10::optional<Tensor>& mean_opt,
-                        const c10::optional<Tensor>& std_opt,
-                        c10::optional<Generator> gen,
-                        std::string op_name) {
+static Tensor& normal_mps_impl(Tensor& self,
+                               double mean_s,
+                               double std_s,
+                               const c10::optional<Tensor>& mean_opt,
+                               const c10::optional<Tensor>& std_opt,
+                               c10::optional<Generator> gen,
+                               std::string op_name) {
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
 
@@ -178,13 +186,20 @@ Tensor& normal_mps_impl(Tensor& self,
                                  random_op_block);
 }
 
-Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Generator> gen, std::string op_name) {
-  TORCH_CHECK(prob_t.is_same_size(self), op_name, ": probability and self tensor should be of the same shape")
+static Tensor& bernoulli_mps_impl(Tensor& self,
+                                  const Tensor& prob_t,
+                                  c10::optional<Generator> gen,
+                                  std::string op_name) {
+  TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
+              op_name,
+              ": probability and self tensor should be of the same shape")
 
   RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob_t);
-    return [mpsGraph lessThanWithPrimaryTensor:randomTensor secondaryTensor:cachedGraph->stdTensor name:nil];
+    return [mpsGraph lessThanWithPrimaryTensor:randomTensor
+                               secondaryTensor:castMPSTensor(mpsGraph, cachedGraph->stdTensor, [randomTensor dataType])
+                                          name:nil];
   };
   // Bernoulli generates binary output so we use bool type
   return mps::random_mps_impl<bool>(self,
@@ -267,7 +282,7 @@ Tensor& bernoulli_out_mps(const Tensor& p_, c10::optional<Generator> gen, Tensor
 
 Tensor& bernoulli_mps_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
-  Tensor prob_t = at::full_like(self, Scalar(p));
+  Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
   return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
 }
 
@@ -407,8 +422,8 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
   };
 
   return mps::random_mps_impl<int64_t>(result,
-                                       0.0,
-                                       1.0,
+                                       std::numeric_limits<int64_t>::min(),
+                                       std::numeric_limits<int64_t>::max(),
                                        c10::nullopt,
                                        c10::nullopt,
                                        MPSGraphRandomDistributionUniform,
@@ -417,10 +432,10 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
                                        random_op_block);
 }
 
-Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
-                                                const int64_t n_sample,
-                                                c10::optional<Generator> generator,
-                                                Tensor& result) {
+static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
+                                                       const int64_t n_sample,
+                                                       c10::optional<Generator> generator,
+                                                       Tensor& result) {
   using namespace mps;
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());

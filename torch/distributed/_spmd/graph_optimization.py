@@ -549,7 +549,7 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
 )
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
     """
-    Erase the the orphant copy_ that generated when tracing optimizer.
+    Erase the orphant copy_ that generated when tracing optimizer.
     Two reasons why we could not simply use the DCE of fx.Graph.
     1. fx.Graph treats copy_ as a side-effect node and does not erase it.
     2. Users may want to preserve some orphan `copy_` that is not from the
@@ -968,16 +968,32 @@ def iter_move_grads_and_optimizers(
 
     move_optim, _ = split_fused_optimizer(gm, optim_block, comm_block.outputs)
 
-    # TODO(@fegin): Extract this logic as a generic find_all_descendants API.
-    output = get_output(gm.graph)
-    nodes = collections.deque([comm_block.comm_node, move_optim.step.add_node])
-    move_node_set = set()
-    while nodes:
-        node = nodes.popleft()
-        move_node_set.add(node)
-        nodes += [u for u in node.users if isinstance(u, fx.Node) and u != output]
-    move_nodes = [node for node in gm.graph.nodes if node in move_node_set]
+    move_nodes = find_all_descendants(
+        gm, [comm_block.comm_node, move_optim.step.add_node]
+    )
 
     stop_node = find_node(gm.graph, lambda n: n.name == target_dest_node)[0]
 
     gm.graph.move_to_next_iter_before(move_nodes, stop_node)
+
+
+def find_all_descendants(
+    gm: IterGraphModule,
+    parent_nodes: List[fx.Node],
+) -> List[fx.Node]:
+    """identifying list of nodes to move during FX graph transformation"""
+
+    assert len(parent_nodes) > 0, "No parent nodes are given."
+
+    output = get_output(gm.graph)
+    dq_parent_nodes = collections.deque(parent_nodes)
+    move_node_set = set()
+    while dq_parent_nodes:
+        node = dq_parent_nodes.popleft()
+        move_node_set.add(node)
+        dq_parent_nodes += [
+            u for u in node.users if isinstance(u, fx.Node) and u != output
+        ]
+    move_nodes = [node for node in gm.graph.nodes if node in move_node_set]
+
+    return move_nodes

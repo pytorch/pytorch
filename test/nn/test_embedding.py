@@ -139,6 +139,9 @@ class TestEmbeddingNN(NNTestCase):
 
         embed_old = torch.nn.Embedding(4, 3)
         embed_old.weight.data = embeddings.data
+        # A silly test for eager, this test is useful for when we run under PYTORCH_TEST_WITH_DYNAMO=1
+        # as it ensures that setattr correctly works.
+        self.assertEqual(embed_old.weight.data, embeddings.data)
         res_old = embed_old(a)
 
         res_F = F.embedding(a, embeddings)
@@ -941,10 +944,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                                  atol=dtype2prec_DONTUSE[dtypes[2]], rtol=0)
 
         trainable_scale = (True, False)
-        include_last_offset = (True, False)
+        include_last_offset_list = (True, False)
         modes = (('sum', False), ('sum', True), ('max', False), ('mean', False))
         for (mode, has_weight), trainable, include_last_offset in itertools.product(
-            modes, trainable_scale, include_last_offset
+            modes, trainable_scale, include_last_offset_list
         ):
             test_per_sample_weights_new_offsets(
                 mode, trainable, include_last_offset, has_weight

@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: tests"]
 
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_JETSON
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta,
+    instantiate_device_type_tests, onlyCUDA, dtypes, skipMeta, skipCUDAIfRocm,
     onlyNativeDeviceTypes)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -16,16 +15,15 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_capsule_conversion(self, device, dtype):
-        # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
         x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_protocol_conversion(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(x)
@@ -41,7 +39,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
         stream = torch.cuda.Stream()
@@ -64,7 +62,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_from_dlpack(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
@@ -72,7 +70,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_from_dlpack_noncontinguous(self, device, dtype):
         x = make_tensor((25,), dtype=dtype, device=device).reshape(5, 5)
 
@@ -98,7 +96,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
@@ -115,7 +113,7 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_from_dlpack_dtype(self, device, dtype):
         x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
@@ -145,18 +143,31 @@ class TestTorchDlPack(TestCase):
             from_dlpack(x)
 
     @skipMeta
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_dlpack_convert_default_stream(self, device):
+        # tests run on non-default stream, so _sleep call
+        # below will run on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        torch.cuda.default_stream().synchronize()
+        # run _sleep call on a non-default stream, causing
+        # default stream to wait due to inserted syncs
+        side_stream = torch.cuda.Stream()
+        with torch.cuda.stream(side_stream):
+            x = torch.zeros(1, device=device)
+            torch.cuda._sleep(2**20)
+            self.assertTrue(torch.cuda.default_stream().query())
+            d = x.__dlpack__(1)
+        # check that the default stream has work (a pending cudaStreamWaitEvent)
+        self.assertFalse(torch.cuda.default_stream().query())
+
+    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
             x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
-
-    @skipMeta
-    def test_dlpack_error_on_bool_tensor(self):
-        x = torch.tensor([True], dtype=torch.bool)
-        with self.assertRaises(RuntimeError):
-            to_dlpack(x)
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
     @skipMeta

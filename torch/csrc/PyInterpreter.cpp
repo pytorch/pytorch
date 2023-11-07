@@ -35,7 +35,7 @@ struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
-  void decref(PyObject* pyobj, bool is_tensor) const override;
+  void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
@@ -44,6 +44,7 @@ struct ConcretePyInterpreterVTable final
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
+  void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet,
@@ -55,6 +56,15 @@ struct ConcretePyInterpreterVTable final
       torch::jit::Stack* stack) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
         op, key, stack);
+  }
+  void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const override {
+    py::gil_scoped_acquire gil;
+    pybind11::module::import("torch._utils_internal")
+        .attr("throw_abstract_impl_not_imported_error")(
+            opname, pymodule, context);
   }
 
   bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
@@ -116,10 +126,10 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {
-    is_main_interpreter_ =
-        at::impl::PythonOpRegistrationTrampoline::registerInterpreter(impl_);
-  }
+            ConcretePyInterpreterVTable::instance())),
+        is_main_interpreter_(
+            at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
+                impl_)) {}
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
@@ -152,19 +162,20 @@ py::object torchDispatchFromTensorImpl(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   // TODO: there should be a shorter way to spell this
   // TODO: fix the constness of target
   at::Tensor self_t = at::Tensor(
       c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p =
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args =
-      py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
+  auto args = py::reinterpret_steal<py::object>(
+      PyTuple_New(static_cast<Py_ssize_t>(1 + extra_args.size())));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
   int64_t i = 1;
   for (auto& a : extra_args) {
@@ -187,15 +198,15 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [PyInterpreter::decref takes an `is_tensor` arg]
+// NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
 // Before calling PyInterpreter::decref, we must statically know if the
-// pyobj is a Tensor or not.
-// - If it is a tensor, we need to be careful about PyObject resurrection
-// - If it is not a tensor, we can freely decref
+// pyobj has a PyObjectSlot or not.
+// - If it has a PyObjectSlot, we need to be careful about PyObject resurrection
+// - If it does not have a PyObjectSlot, we can freely decref
 // One alternative to this is using PyObject_IsInstance
 // to get at this information. However, we don't want to risk an incorrect
 // `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
@@ -205,23 +216,33 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
 
   pybind11::gil_scoped_acquire gil;
   // Two possibilities:
-  // 1. We are decref-ing a tensor. Then we must be careful about
-  // PyObject resurrection (this only applies to Tensors, see
+  // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
+  // Storage. Then we must be careful about PyObject resurrection (see
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (is_tensor && Py_REFCNT(pyobj) > 1) {
-    // It's still alive!  This can happen if a weak ref resurrected
-    // the PyObject without flipping ownership.  At this point it is
-    // too late to rescue the object, so just stub out the PyObject
-    // so that it fails on subsequent uses.  Don't raise an error here;
-    // you're probably in a destructor.
-    TORCH_WARN(
-        "Deallocating Tensor that still has live PyObject references.  "
-        "This probably happened because you took out a weak reference to "
-        "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-        "Subsequent accesses to this tensor via the PyObject will now fail.");
-    ((THPVariable*)pyobj)->cdata = c10::MaybeOwned<torch::autograd::Variable>();
+  if (has_pyobj_slot && Py_REFCNT(pyobj) > 1) {
+    if (THPVariable_Check(pyobj)) {
+      // It's still alive!  This can happen if a weak ref resurrected
+      // the PyObject without flipping ownership.  At this point it is
+      // too late to rescue the object, so just stub out the PyObject
+      // so that it fails on subsequent uses.  Don't raise an error here;
+      // you're probably in a destructor.
+      TORCH_WARN(
+          "Deallocating Tensor that still has live PyObject references.  "
+          "This probably happened because you took out a weak reference to "
+          "Tensor and didn't call _fix_weakref() after dereferencing it.  "
+          "Subsequent accesses to this tensor via the PyObject will now fail.");
+      ((THPVariable*)pyobj)->cdata =
+          c10::MaybeOwned<torch::autograd::Variable>();
+    } else if (THPStorage_Check(pyobj)) {
+      TORCH_WARN(
+          "Deallocating UntypedStorage that still has live PyObject references.  "
+          "This probably happened because you took out a weak reference to "
+          "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
+          "Subsequent accesses to this storage via the PyObject will now fail.");
+      ((THPStorage*)pyobj)->cdata = c10::MaybeOwned<c10::Storage>();
+    }
   }
   Py_DECREF(pyobj);
 };
@@ -254,6 +275,16 @@ bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
+void ConcretePyInterpreterVTable::reportErrorCallback(
+    PyObject* callback,
+    DispatchKey key) const {
+  py::gil_scoped_acquire g;
+  auto func = py::reinterpret_borrow<py::object>(callback);
+  // Not all DispatchKeys are pybind'ed into Python and we do not have infra
+  // to ensure this, so just pass a string back to Python.
+  func(c10::toString(key));
+}
+
 void ConcretePyInterpreterVTable::dispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
@@ -269,7 +300,7 @@ void ConcretePyInterpreterVTable::dispatch(
 
   py::gil_scoped_acquire g;
 
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
@@ -532,6 +563,142 @@ c10::Device ConcretePyInterpreterVTable::device(
   return toDevice(out.ptr());
 }
 
+static void set_tensor_attr_with_capsule(
+    const c10::TensorImpl* tensor,
+    py::capsule& capsule,
+    const char* attr_name) {
+  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  auto obj = mb_obj.value();
+  py::handle(obj).attr(attr_name) = capsule;
+}
+
+// Note [Tensor Subclass custom size/stride caching strategy]
+// Tensor subclasses can use __torch_dispatch__ to override size/stride calls.
+// However, this presents a problem:
+// (1) When you return a custom (maybe symbolic) size/stride
+//     from python, we need to stash this fresh vector of ints/symints
+//     somewhere so that it has the same lifetime as the tensor.
+// (2) If the subclass experiences a metadata mutation,
+//     this stashed vector is no longer valid, so we need to allocate a fresh
+//     buffer to store the new sizes the next time someone asks for them.
+//
+// We handle this in the same way that `TensorImpl::sizes_default()`
+// handles its buffer: we simply reallocate the buffer whenever
+// the number of dimensions changes due to a resize.
+// Notable, we do *not* reallocate the buffer if the values changed,
+// but the number of dimensions stayed the same (e.g. `.transpose_()`).
+template <typename T>
+static c10::ArrayRef<T> get_set_cached_attr(
+    const c10::TensorImpl* tensor,
+    const char* base_attr_name,
+    const py::object& obj) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  auto tensor_obj = mb_obj.value();
+  auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
+
+  bool is_buffer_allocated = false;
+  size_t curr_size = 0;
+  if (PyObject_HasAttrString(tensor_obj, buffer_len_attr_name.c_str())) {
+    auto len_pyobj = py::handle(tensor_obj).attr(buffer_len_attr_name.c_str());
+    curr_size = py::cast<size_t>(len_pyobj);
+    is_buffer_allocated = true;
+  }
+
+  size_t new_size = py::len(obj);
+
+  // We do the smallvector optimization here: any time the new_size is <=5,
+  // we always allocate our buffer to size 5, so that if the next resize
+  // is also to <=5 elements, we don't need to reallocate.
+  // Note: I tried removing this optimization and tripped ASAN
+  // in a batchnorm kernel here:
+  // https://pipelinesghubeus21.actions.githubusercontent.com/mBh68xKhi8LyM7tp3vECvYXNFvuV4gyVGgmYCteuEZP9JH92QN/_apis/pipelines/1/runs/3373307/signedlogcontent/790?urlExpires=2023-09-15T21%3A13%3A51.4327798Z&urlSigningMethod=HMACV1&urlSignature=tDeX7ZqaARVU5NNwyr5yYqqkWq3A2j4z8FFdqYwGr0Q%3D
+  // We should fix this instead.
+  bool needs_resize = false;
+  // We need to resize if:
+  // (1) we haven't allocated our buffer at all yet
+  // (2) Our buffer size is different from the new size
+  //     (note: we use the small vector optimization, where our buffer
+  //     is always allocated to at least size 5, and any resizes
+  //     within the <= 5 regime to not require a reallocation).
+  auto is_smallvector = curr_size <= 5;
+  needs_resize = !is_buffer_allocated || (is_smallvector && new_size > 5) ||
+      (!is_smallvector && curr_size != new_size);
+  if (needs_resize) {
+    // If our current buffer is not the right size (either because we haven't
+    // allocated it yet, or there was a metadata mutation that changed the
+    // number of dims of the tensor), allocate a fresh buffer. Note that this
+    // will trash the previous buffer if there already was one, invalidating any
+    // existing SymIntArrayRef's from an old .sym_size() call.
+    auto new_buffer_size = new_size;
+    if (new_size <= 5) {
+      // This is the smallvector optimization
+      new_buffer_size = 5;
+    }
+    T* ptr = new T[new_buffer_size];
+    auto capsule =
+        py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<T*>(p); });
+    int64_t idx = 0;
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      ptr[idx] = py::cast<T>(*it);
+    }
+    // Set the buffer
+    set_tensor_attr_with_capsule(tensor, capsule, base_attr_name);
+    // Set the len buffer
+    py::handle(tensor_obj).attr(buffer_len_attr_name.c_str()) = new_size;
+  } else {
+    TORCH_INTERNAL_ASSERT(PyObject_HasAttrString(tensor_obj, base_attr_name));
+    auto curr_buffer_pyobj = py::handle(tensor_obj).attr(base_attr_name);
+    void* buffer_pycapsule =
+        PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+    auto curr_buffer = reinterpret_cast<T*>(buffer_pycapsule);
+
+    // Overwrite the buffer with our new values, but only if any of them changed
+    // (due to a metadata mutation).
+    // This is technically not thread safe, because the update happens lazily.
+    // The original metadata mutation call on the tensor might have been thread
+    // safe (e.g. a .resize_() call), but we won't actually mutate the size
+    // buffer until the first call to .sizes() which the user might not access
+    // in a thread-safe way. For now we are not explicitly locking, but maybe we
+    // should.
+    int64_t idx = 0;
+    // Quick sanity assert that our buffer size is large enough
+    // to compare against all the elements in the new buffer.
+    size_t curr_buffer_size = 5;
+    if (curr_buffer_size < curr_size) {
+      curr_buffer_size = curr_size;
+    }
+    TORCH_INTERNAL_ASSERT(curr_buffer_size >= new_size);
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      auto actual_val = py::cast<T>(*it);
+      if constexpr (std::is_same_v<T, c10::SymInt>) {
+        // if our SymInts are symbolic, we are *not* doing an equality check on
+        // the symints. we just want to see if the nodes are the same. this is
+        // because we don't want to introduce any guards here.
+        if (!curr_buffer[idx].is_same(actual_val)) {
+          curr_buffer[idx] = actual_val;
+        }
+      } else {
+        if (curr_buffer[idx] != actual_val) {
+          curr_buffer[idx] = actual_val;
+        }
+      }
+    }
+  }
+
+  // The correct data is now stored at the buffer - read and return it.
+  auto curr_buffer_pyobj = py::handle(tensor_obj).attr(base_attr_name);
+  void* buffer_pycapsule =
+      PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+  auto curr_buffer = reinterpret_cast<T*>(buffer_pycapsule);
+  return c10::ArrayRef<T>(curr_buffer, new_size);
+}
+
 c10::IntArrayRef ConcretePyInterpreterVTable::strides(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
@@ -554,50 +721,19 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
         "Cannot call strides on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::optional<PyObject*> mb_obj =
-      self->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "stride");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
-}
-
-static std::vector<int64_t> values_from_buffer(
-    const c10::TensorImpl* self,
-    py::handle values) {
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj =
-      ptr->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
-  return result;
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "strides must be a list or a tuple");
+  auto updated_strides =
+      get_set_cached_attr<int64_t>(self, "_strides_capsule", out);
+  return updated_strides;
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
+  HANDLE_TH_ERRORS
   auto out = torchDispatchFromTensorImpl(
       self,
       "size",
@@ -608,20 +744,20 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .attr("default")
           .ptr(),
       "torch.ops.aten");
-
   if (out.is_none()) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
     return self->sizes_default();
   }
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "sizes must be a list or a tuple");
 
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
-  auto result = values_from_buffer(self, values);
-  int64_t* start = (int64_t*)result[0];
-  int64_t len = result[1];
-
-  return c10::IntArrayRef(start, len);
+  auto updated_sizes =
+      get_set_cached_attr<int64_t>(self, "_sizes_capsule", out);
+  return updated_sizes;
+  END_HANDLE_TH_ERRORS_PYBIND
 }
 
 c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
@@ -643,24 +779,14 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   if (out.is_none()) {
     return self->sym_sizes_default();
   }
-  // We need to squeeze SymIntNodes and ints into `SymInts`
-  // since it's a format `sym_sizes()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = py::cast<c10::SymInt>(elm);
-    // TODO: the buffer will need to be made owning later
-    symints.append(si.as_int_unchecked());
-  }
+      "sym_size must be a list or a tuple");
 
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  // See Note [Tensor Subclass custom size/stride caching strategy]
+  auto updated_sym_sizes =
+      get_set_cached_attr<c10::SymInt>(self, "_sym_sizes_capsule", out);
+  return updated_sym_sizes;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -758,38 +884,30 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   // since it's a format `sym_strides()` are stored in
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
-      "Symshape must be a list or a tuple");
-  py::list symints;
-  for (auto it = out.begin(); it != out.end(); it++) {
-    auto elm = *it;
-    auto si = torch::is_symint(elm) ? elm.cast<c10::SymInt>()
-                                    : c10::SymInt{py::cast<int64_t>(elm)};
-    symints.append(si.as_int_unchecked());
-  }
+      "sym_strides must be a list or a tuple");
 
-  auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];
-  int64_t len = result[1];
-
-  return c10::SymIntArrayRef(start, len);
+  auto updated_sym_strides =
+      get_set_cached_attr<c10::SymInt>(self, "_sym_strides_capsule", out);
+  return updated_sym_strides;
   END_HANDLE_TH_ERRORS_PYBIND
 }
-
-PyInterpreterHolder self_interpreter;
 
 void ConcretePyInterpreterVTable::reset_backward_hooks(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   HANDLE_TH_ERRORS
-  Tensor self_t = Tensor(
-      c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
-          unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
+  Tensor self_t =
+      Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::
+                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+             unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p =
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
 }
+
+PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 

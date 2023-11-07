@@ -5,12 +5,15 @@ from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Tuple
 
 import torch
+
+import torch.distributed.distributed_c10d as c10d
 import torch.fx as fx
 import torch.library
 import torch.nn as nn
 
 import torch.utils._pytree as pytree
 
+from torch.distributed._spmd.batch_dim_utils import BatchDimAnalyzer
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 
 from torch.distributed._tensor._utils import compute_local_shape
@@ -21,12 +24,11 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
-from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
-
 
 aten = torch.ops.aten
 
@@ -130,131 +132,6 @@ def gradients_tagging(params: Dict[str, torch.Tensor]):
             h.remove()
 
 
-class BatchDimAnalyzer:
-    """
-    This class is used to analyze the batch dimension of each tensor/node in the
-    graph. We need to know the batch dimension of each tensor/node so that we know
-    exactly the sharding layout of intermediate tensors.
-
-    We possibly should evaluate using symbolic shapes to track the batch dimension.
-    We can experiment it later with dynamo integration (as dynamo have mark_dynamic
-    API which allows marking batch dimension only) or try to use FakeTensorMode to
-    mark the batch dimension. For now, let's just use the batch dimension of the first
-    input tensor as the hint to track the batch dimension of all tensors/nodes in
-    the graph.
-    """
-
-    def __init__(self, batch_dim: int = 0) -> None:
-        self.batch_dim = batch_dim
-
-        if batch_dim != 0:
-            # TODO: see if this make sense or not
-            raise RuntimeError("Data Parallel only supports batch dim on dimension 0!")
-
-        self.batch_dim_map: Dict[fx.Node, int] = {}
-        # batch dim size is used to track the batch dim size of the input tensor
-        self.batch_dim_size = -1
-
-        # reduction ops that is used to detect whether there's a reduction over batch
-        # dimension operation, if there is, we mark the output as sharded instead of
-        # partial placement
-        self.reduction_ops = [
-            aten.binary_cross_entropy.default,
-            aten.binary_cross_entropy_with_logits.default,
-            aten.mean.default,
-            aten.mse_loss.default,
-            aten.nll_loss_forward.default,
-            aten.soft_margin_loss.default,
-            aten.sum.default,
-        ]
-
-    def init_batch_dim_size(self, batch_dim_size: int) -> None:
-        """
-        initialize batch dim size base on the first input batch size
-        """
-        if self.batch_dim_size != -1 and self.batch_dim_size != batch_dim_size:
-            raise RuntimeError(
-                f"batch dim size is already initialized! "
-                f"Found new batch size: {batch_dim_size} not "
-                f"matching existing batch dim size: {self.batch_dim_size}!"
-            )
-        self.batch_dim_size = batch_dim_size
-
-    def set_batch_dim(self, node: fx.Node, batch_dim: int) -> None:
-        self.batch_dim_map[node] = batch_dim
-
-    def get_batch_dim(self, node: fx.Node) -> int:
-        if node not in self.batch_dim_map:
-            raise RuntimeError(f"batch dim analysis failed on node: {node}!")
-        return self.batch_dim_map[node]
-
-    def compute_batch_dim(self, node: fx.Node, full_reduction=False) -> int:
-        """
-        compute the batch dimension for the `node`
-        """
-        assert self.batch_dim_size != -1, "batch dim size is not initialized!"
-
-        if node in self.batch_dim_map:
-            # if batch dim already computed, simply return it
-            return self.batch_dim_map[node]
-
-        shape = node.meta["val"].shape
-
-        if full_reduction:
-            # if it's a full reduction then we use operand batch dim as
-            # the node's batch dim
-            operand = node.all_input_nodes[0]
-            assert (
-                operand in self.batch_dim_map
-            ), "input have full reduction but not in dim map!"
-            operand_batch_dim = self.get_batch_dim(operand)
-            self.set_batch_dim(node, operand_batch_dim)
-            return operand_batch_dim
-        else:
-            # loop through the dim size to find the batch dim
-            for i, dim_size in enumerate(shape):
-                if dim_size == self.batch_dim_size:
-                    self.set_batch_dim(node, i)
-                    return i
-
-        # if we reach here, it means we failed to find the batch dim
-        raise RuntimeError(f"batch dim analysis failed on node: {node}!")
-
-    def compute_batch_dim_shard_spec(
-        self, node: fx.Node, mesh: DeviceMesh, input_full_reduction: bool = False
-    ) -> Tuple[DTensorSpec, bool]:
-        """
-        This function first compute the batch dimension for the current node,
-        then generate the sharding spec that shards on the batch dimension.
-        """
-        # for reduction op that reduces over the sharded batch dim
-        # we don't generate partial, but rather, we generate shard
-        # This is because the intention of data parallel is to never
-        # do full reduction across batch dimension, it would still
-        # keep the reduction activation as sharded.
-        reduction_over_batch = False
-        shape = node.meta["val"].shape
-        if node.target in self.reduction_ops and len(shape) == 0:
-            operand = node.all_input_nodes[0]
-            if operand in self.batch_dim_map:
-                operand_batch_dim = self.get_batch_dim(operand)
-                if operand_batch_dim == self.batch_dim:
-                    reduction_over_batch = True
-            else:
-                raise RuntimeError(f"batch dim analysis failed on node: {node}!")
-
-        full_reduction = reduction_over_batch or input_full_reduction
-        node_batch_dim = self.compute_batch_dim(node, full_reduction)
-        batch_dim_shard_spec = DTensorSpec(
-            mesh=mesh, placements=[Shard(node_batch_dim)]
-        )
-
-        if full_reduction:
-            batch_dim_shard_spec.from_local = True  # type: ignore[attr-defined]
-
-        return batch_dim_shard_spec, reduction_over_batch
-
-
 def _gen_shard_strategy(
     mesh: DeviceMesh, shard_dim: int, input_specs: Optional[List[DTensorSpec]] = None
 ) -> PlacementStrategy:
@@ -262,7 +139,7 @@ def _gen_shard_strategy(
     util function to generate a shard strategy on shard_dim
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Shard(shard_dim)]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
         input_specs=input_specs,
     )
 
@@ -274,7 +151,7 @@ def _gen_replicate_strategy(
     util function to generate a replicate strategy
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Replicate()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
         input_specs=input_specs,
     )
 
@@ -283,8 +160,16 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     """
     util function to generate a partial strategy
     """
+    # NOTE: we use AVG by default, avg reduction is needed depending on
+    # the loss function, for most loss function it should do
+    # gradient averaging. There might be certain cases it should
+    # not do gradient averaging (i.e. sum) but it's pretty rare.
+    # TODO: Only NCCL supports AVG so using backend like Gloo would
+    # crash, we should figure out a way to support avg reduction
+    # for non-NCCL backend
+    reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(_Partial(reduce_op),)),
     )
 
 
@@ -421,7 +306,6 @@ def build_data_parallel_strategies(
                 else:
                     assert isinstance(arg_strategy, DataParallelStrategy)
                     arg_node_type = arg_strategy.node_type
-                    input_full_reduction = arg_strategy.reduction_over_batch
                     if arg_node_type == NodeType.PARAM:
                         replica_strategy = _gen_replicate_strategy(mesh)
                         dp_strategy_map[node] = DataParallelStrategy(
@@ -433,19 +317,11 @@ def build_data_parallel_strategies(
                             NodeType.GRAD, [partial_sig]
                         )
                     elif arg_node_type == NodeType.ACT:
-                        (
-                            arg_node_spec,
-                            _,
-                        ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
+                        arg_node_spec = batch_dim_analyzer.compute_act_spec(
                             input_nodes[0], mesh
                         )
 
-                        (
-                            output_spec,
-                            _,
-                        ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                            node, mesh, input_full_reduction
-                        )
+                        output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
 
                         shard_strategy = PlacementStrategy(
                             output_spec=output_spec, input_specs=[arg_node_spec]
@@ -480,9 +356,7 @@ def build_data_parallel_strategies(
                     if arg_node_type == NodeType.ACT:
                         # activation sharded
                         has_activation = True
-                        act_spec, _ = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                            arg, mesh
-                        )
+                        act_spec = batch_dim_analyzer.compute_act_spec(arg, mesh)
 
                         input_specs.append(act_spec)
 
@@ -529,46 +403,7 @@ def build_data_parallel_strategies(
                     for arg in input_args
                     if isinstance(dp_strategy_map[arg], DataParallelStrategy)
                 ]
-                if NodeType.ACT in input_node_types:
-                    # param + activation, build up acceptable strategy
-                    # param must be replicated, activation must be sharded
-                    for arg in input_args:
-                        arg_strategy = dp_strategy_map[arg]
-                        assert isinstance(arg_strategy, DataParallelStrategy)
-                        node_type = arg_strategy.node_type
-                        if node_type == NodeType.ACT:
-                            # activation must stay sharded
-                            (
-                                act_spec,
-                                _,
-                            ) = batch_dim_analyzer.compute_batch_dim_shard_spec(
-                                arg, mesh
-                            )
-
-                            input_specs.append(act_spec)
-                        elif node_type == NodeType.PARAM:
-                            # param must be replicated
-                            input_specs.append(
-                                DTensorSpec(mesh=mesh, placements=[Replicate()])
-                            )
-                        else:
-                            raise RuntimeError(
-                                f"Expecting node with parameter and activation, but found {input_node_types}! "
-                            )
-                    # produce activation type sharding for output
-                    (
-                        output_spec,
-                        reduction_over_batch,
-                    ) = batch_dim_analyzer.compute_batch_dim_shard_spec(node, mesh)
-
-                    shard_strategy = PlacementStrategy(
-                        output_spec=output_spec, input_specs=input_specs
-                    )
-
-                    dp_strategy_map[node] = DataParallelStrategy(
-                        NodeType.ACT, [shard_strategy], reduction_over_batch
-                    )
-                elif NodeType.GRAD in input_node_types:
+                if NodeType.GRAD in input_node_types:
                     # param/state + grad, build up acceptable strategy
                     # the strategy should be the same for all the inputs/outputs
                     # TODO: optimizer parts should follow the dtensor prop logic
@@ -607,12 +442,65 @@ def build_data_parallel_strategies(
                         output_node_type, [replica_strategy, shard_strategy]
                     )
                 elif NodeType.PARAM in input_node_types:
-                    # at this point, inputs should only have parameters, the
-                    # strategy of this node would be the same as the input
-                    dp_strategy_map[node] = dp_strategy_map[input_args[0]]
+                    if NodeType.ACT in input_node_types:
+                        # param + activation, build up acceptable strategy
+                        # param must be replicated, activation must be sharded
+                        for arg in input_args:
+                            arg_strategy = dp_strategy_map[arg]
+                            assert isinstance(arg_strategy, DataParallelStrategy)
+                            node_type = arg_strategy.node_type
+                            if node_type == NodeType.ACT:
+                                # compute activation spec
+                                act_spec = batch_dim_analyzer.compute_act_spec(
+                                    arg, mesh
+                                )
+
+                                input_specs.append(act_spec)
+                            elif node_type == NodeType.PARAM:
+                                # param must be replicated
+                                input_specs.append(
+                                    DTensorSpec(mesh=mesh, placements=(Replicate(),))
+                                )
+                            else:
+                                raise RuntimeError(
+                                    f"Expecting node with parameter and activation, but found {input_node_types}! "
+                                )
+                        # produce activation type sharding for output
+                        output_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
+
+                        act_strategy = PlacementStrategy(
+                            output_spec=output_spec, input_specs=input_specs
+                        )
+
+                        dp_strategy_map[node] = DataParallelStrategy(
+                            NodeType.ACT, [act_strategy]
+                        )
+                    else:
+                        # If inputs only have parameters, the
+                        # strategy of this node should follow input
+                        dp_strategy_map[node] = dp_strategy_map[input_args[0]]
                 else:
-                    raise RuntimeError(
-                        f"Unrecognized node: {node} with input node types: {input_node_types}."
+                    # If input nodes does not have PARAM/GRAD/STATE, then
+                    # it should be a pure activation computation, it should
+                    # produce activation output.
+                    # Activations are usually sharded unless model creates
+                    # new tensors during computation, which depend on whether
+                    # the new tensor associate with a batch dim or not, it could
+                    # be shard/replicate/partial, batch dim analyzer should tell
+                    # us the correct sharding.
+                    for arg in input_args:
+                        arg_strategy = dp_strategy_map[arg]
+                        assert isinstance(arg_strategy, DataParallelStrategy)
+                        input_spec = batch_dim_analyzer.compute_act_spec(arg, mesh)
+
+                        input_specs.append(input_spec)
+
+                    act_spec = batch_dim_analyzer.compute_act_spec(node, mesh)
+                    op_strategy = PlacementStrategy(
+                        output_spec=act_spec, input_specs=input_specs
+                    )
+                    dp_strategy_map[node] = DataParallelStrategy(
+                        NodeType.ACT, [op_strategy]
                     )
 
         elif node.op == "output":
@@ -731,7 +619,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
                 local_shard = placement._split_tensor(
-                    local_shard, num_chunks, contiguous=False
+                    local_shard, num_chunks, with_padding=False, contiguous=False
                 )[0][my_coord_on_mesh_dim]
         return local_shard
     elif isinstance(val, (tuple, list)):
@@ -745,11 +633,15 @@ def partitioner(graph: GraphModule) -> GraphModule:
     Graph partitioner that partitions the single device graph
     to distributed graph
     """
-    shape_adjustment_ops = [
-        aten.view.default,
-        aten.reshape.default,
-        aten.expand.default,
-    ]
+    shape_adjustment_ops = {
+        aten._unsafe_view.default: 1,
+        aten.expand.default: 1,
+        aten.new_zeros.default: 1,
+        aten.ones.default: 0,
+        aten.reshape.default: 1,
+        aten.view.default: 1,
+        aten.zeros.default: 0,
+    }
     # partition the graph to distributed
     for node in graph.graph.nodes:
         node_sharding = node.meta["sharding"]
@@ -778,17 +670,16 @@ def partitioner(graph: GraphModule) -> GraphModule:
                     else expected_input_specs[idx]
                 )
                 if input_arg_spec != desired_spec:
-                    input_full_shape = input_arg.meta["tensor_meta"].shape
+                    input_arg_spec.tensor_meta = input_arg.meta["tensor_meta"]
+                    desired_spec.tensor_meta = input_arg.meta["tensor_meta"]
                     input_arg_tensor = input_arg.meta["val"]
 
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
-                        return _redistribute_with_local_tensor(
+                        return redistribute_local_tensor(
                             local_tensor,
-                            input_full_shape,
-                            out_spec.mesh,
-                            input_arg_spec.placements,
-                            desired_spec.placements,
+                            input_arg_spec,
+                            desired_spec,
                         )
 
                     reshard_gm = make_fx(reshard_fn)(input_arg_tensor)
@@ -805,13 +696,37 @@ def partitioner(graph: GraphModule) -> GraphModule:
 
             output_val = node.meta["val"]
 
-            if node.target in shape_adjustment_ops:
+            if node.target == torch.ops.aten.repeat.default:
+                # for repeat op, we need to infer the repeat sizes
+                assert isinstance(output_val, torch.Tensor)
+                local_shape = compute_local_shape(
+                    output_val.shape, out_spec.mesh, out_spec.placements
+                )
+                input_shape = node.args[0].meta["val"].shape
+
+                def infer_repeat_sizes(repeated_shape, input_shape):
+                    repeated_size = [1] * len(repeated_shape)
+                    padded_length = len(repeated_shape) - len(input_shape)
+                    for i in range(len(repeated_shape)):
+                        if i < padded_length:
+                            repeated_size[i] = repeated_shape[i]
+                        else:
+                            repeated_size[i] = (
+                                repeated_shape[i] // input_shape[i - padded_length]
+                            )
+
+                    return repeated_size
+
+                node.update_arg(1, infer_repeat_sizes(local_shape, input_shape))
+
+            elif node.target in shape_adjustment_ops:
                 # for view related op that needs shape, adjust shape to local shape if needed
                 assert isinstance(output_val, torch.Tensor)
                 local_shape = compute_local_shape(
                     output_val.shape, out_spec.mesh, out_spec.placements
                 )
-                node.update_arg(1, local_shape)
+                shape_arg_num = shape_adjustment_ops[node.target]
+                node.update_arg(shape_arg_num, local_shape)
 
             # convert output val to its local component
             node.meta["val"] = _partition_val(output_val, out_spec)
@@ -877,6 +792,22 @@ def partition_data_parallel(
     # 3. Partition the single machine graph to the distribute graph
     partitioned_graph = partitioner(graph)
 
+    # preserve node types for the expanded graph
+    for node in partitioned_graph.graph.nodes:
+        if node in strategy_map:
+            node_strategy = strategy_map[node]
+            if isinstance(node_strategy, DataParallelStrategy):
+                node.meta["node_type"] = node_strategy.node_type
+            elif isinstance(node_strategy, TupleStrategy):
+                node.meta["node_type"] = NodeType.NON_TENSOR
+            else:
+                raise RuntimeError(f"Unknown node strategy {node_strategy}")
+        else:
+            # if the nodes are expanded nodes (collectives), we mark them
+            # the same type as the input node.
+            input_node = node.all_input_nodes[0]
+            node.meta["node_type"] = input_node.meta["node_type"]
+
     # 4. Last, inplace partition the weights and optim states to
     #    DTensors base on the parallel style
     accessor = NamedMemberAccessor(model)
@@ -894,11 +825,7 @@ def partition_data_parallel(
         accessor.set_tensor(param_key, dtensor_param)
 
         # update the optimizer state key and values to DTensor
-        if param_key in named_states:
-            assert optimizer is not None, "Can't find optimizer!"
-            assert (
-                param in optimizer.state
-            ), f"param {param_key} not in optimizer state!"
+        if optimizer is not None and param in optimizer.state:
             param_states = named_states[param_key]
             param_dtensor_states = {}
             for state_key, state_val in param_states.items():

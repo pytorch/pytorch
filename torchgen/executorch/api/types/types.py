@@ -25,7 +25,7 @@ scalarT = BaseCppType("torch::executor", "Scalar")
 memoryFormatT = BaseCppType("torch::executor", "MemoryFormat")
 intArrayRefT = BaseCppType("torch::executor", "IntArrayRef")
 optionalT = BaseCppType("torch::executor", "optional")
-contextT = BaseCppType("torch::executor", "RuntimeContext")
+contextT = BaseCppType("torch::executor", "KernelRuntimeContext")
 
 contextExpr = Expr(
     expr="context",

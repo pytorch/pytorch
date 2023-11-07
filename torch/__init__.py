@@ -16,19 +16,25 @@ import platform
 import textwrap
 import ctypes
 import inspect
-if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+
+# multipy/deploy is setting this import before importing torch, this is the most
+# reliable way we have to detect if we're running within deploy.
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+def _running_with_deploy():
+    return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if sys.executable == 'torch_deploy':
+if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
 import builtins
 
 __all__ = [
@@ -48,8 +54,9 @@ __all__ = [
     'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_float32_matmul_precision', 'get_float32_matmul_precision',
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'SymBool', 'sym_not',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
+    'SymBool', 'sym_not', 'unravel_index',
+    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
+    'export', 'autocast', 'cond',
 ]
 
 ################################################################################
@@ -156,8 +163,8 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 
 # See Note [Global dependencies]
-def _load_global_deps():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+def _load_global_deps() -> None:
+    if _running_with_deploy() or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -168,13 +175,13 @@ def _load_global_deps():
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
             'cublas': 'libcublas.so.*[0-9]',
             'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9]',
             'cufft': 'libcufft.so.*[0-9]',
             'curand': 'libcurand.so.*[0-9]',
             'cusolver': 'libcusolver.so.*[0-9]',
@@ -191,7 +198,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
+        (_running_with_deploy() or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -282,6 +289,14 @@ class SymInt:
 
     def __repr__(self):
         return str(self.node)
+
+    def __hash__(self) -> builtins.int:
+        ret = self.node.singleton_int()
+        if ret is not None:
+            return hash(ret)
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-singleton SymInt")
 
 class SymFloat:
     """
@@ -375,8 +390,20 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __sym_ite__(self, then_val, else_val):
+        raise AssertionError("type stub not overridden")
+
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.bool_())
+        else:
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
@@ -410,7 +437,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type]
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -431,6 +458,12 @@ def sym_min(a, b):
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
+
+def sym_ite(b, t, f):
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    if isinstance(b, SymBool):
+        return b.__sym_ite__(t, f)
+    return t if b else f
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -465,6 +498,9 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
+    elif name == 'TensorBase':
+        # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -654,7 +690,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(mode, *, warn_only=False):
+def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.bool = False) -> None:
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
@@ -728,12 +764,19 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.put_` when ``accumulate=False``
         * :func:`torch.Tensor.put_` when ``accumulate=True`` and called on a CUDA tensor
         * :func:`torch.histc` when called on a CUDA tensor
-        * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
+          tensor is given
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_` when called with a quantized tensor
+
+    In addition, several operations fill uninitialized memory when this setting
+    is turned on and when
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
+    See the documentation for that attribute for more information.
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
@@ -773,7 +816,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(0)
+        >>> torch.randn(10, device='cuda').kthvalue(1)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
@@ -784,13 +827,13 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     """
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
-def are_deterministic_algorithms_enabled():
+def are_deterministic_algorithms_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
 
-def is_deterministic_algorithms_warn_only_enabled():
+def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is set to warn only.
     Refer to :func:`torch.use_deterministic_algorithms` documentation for more
     details.
@@ -859,7 +902,7 @@ def get_float32_matmul_precision() -> builtins.str:
     """
     return _C._get_float32_matmul_precision()
 
-def set_float32_matmul_precision(precision):
+def set_float32_matmul_precision(precision: str) -> None:
     r"""Sets the internal precision of float32 matrix multiplications.
 
     Running float32 matrix multiplications in lower precision may significantly increase
@@ -867,16 +910,36 @@ def set_float32_matmul_precision(precision):
 
     Supports three settings:
 
-        * "highest", float32 matrix multiplications use the float32 datatype for
-          internal computations.
-        * "high", float32 matrix multiplications use the TensorFloat32 or bfloat16_3x
-          datatypes for internal computations, if fast matrix multiplication algorithms
-          using those datatypes internally are available. Otherwise float32
-          matrix multiplications are computed as if the precision is "highest".
-        * "medium", float32 matrix multiplications use the bfloat16 datatype for
-          internal computations, if a fast matrix multiplication algorithm
+        * "highest", float32 matrix multiplications use the float32 datatype (24 mantissa
+          bits) for internal computations.
+        * "high", float32 matrix multiplications either use the TensorFloat32 datatype (10
+          mantissa bits) or treat each float32 number as the sum of two bfloat16 numbers
+          (approximately 16 mantissa bits), if the appropriate fast matrix multiplication
+          algorithms are available.  Otherwise float32 matrix multiplications are computed
+          as if the precision is "highest".  See below for more information on the bfloat16
+          approach.
+        * "medium", float32 matrix multiplications use the bfloat16 datatype (8 mantissa
+          bits) for internal computations, if a fast matrix multiplication algorithm
           using that datatype internally is available. Otherwise float32
           matrix multiplications are computed as if the precision is "high".
+
+    When using "high" precision, float32 multiplications may use a bfloat16-based algorithm
+    that is more complicated than simply truncating to some smaller number mantissa bits
+    (e.g. 10 for TensorFloat32, 8 for bfloat16).  Refer to [Henry2019]_ for a complete
+    description of this algorithm.  To briefly explain here, the first step is to realize
+    that we can perfectly encode a single float32 number as the sum of three bfloat16
+    numbers (because float32 has 24 mantissa bits while bfloat16 has 8, and both have the
+    same number of exponent bits).  This means that the product of two float32 numbers can
+    be exactly given by the sum of nine products of bfloat16 numbers.  We can then trade
+    accuracy for speed by dropping some of these products.  The "high" precision algorithm
+    specifically keeps only the three most significant products, which conveniently excludes
+    all of the products involving the last 8 mantissa bits of either input.  This means that
+    we can represent our inputs as the sum of two bfloat16 numbers rather than three.
+    Because bfloat16 fused-multiply-add (FMA) instructions are typically >10x faster than
+    float32 ones, it's faster to do three multiplications and 2 additions with bfloat16
+    precision than it is to do a single multiplication with float32 precision.
+
+    .. [Henry2019] http://arxiv.org/abs/1904.06376
 
     .. note::
 
@@ -904,7 +967,7 @@ def set_float32_matmul_precision(precision):
     """
     _C._set_float32_matmul_precision(precision)
 
-def set_warn_always(b):
+def set_warn_always(b: builtins.bool) -> None:
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.
     Setting it to True causes these warnings to always appear, which may be
@@ -916,7 +979,7 @@ def set_warn_always(b):
     """
     _C._set_warnAlways(b)
 
-def is_warn_always_enabled():
+def is_warn_always_enabled() -> builtins.bool:
     r"""Returns True if the global warn_always flag is turned on. Refer to
     :func:`torch.set_warn_always` documentation for more details.
     """
@@ -929,11 +992,11 @@ def is_warn_always_enabled():
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):  # noqa: F811
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
-    if cond:
+    if torch.fx.experimental.symbolic_shapes.expect_true(cond):
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
@@ -953,7 +1016,7 @@ def _check_with(error_type, cond, message):
 
     raise error_type(message_evaluated)
 
-def _check(cond, message=None):
+def _check(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -970,7 +1033,21 @@ def _check(cond, message=None):
     """
     _check_with(RuntimeError, cond, message)
 
-def _check_index(cond, message=None):
+def _check_is_size(i, message=None):
+    """Checks that a given integer is a valid size (i.e., is non-negative).
+    You should use this over _check(i >= 0) because we can use the semantic
+    information (that i is a size) to make some further inferences in case
+    i is an unbacked SymInt.
+
+    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
+    to infer the size from context, or if you should wrap-around or truncate).
+    Only use this if the only valid value is an honest to goodness size.
+    """
+    # This is responsible for the expect_true
+    _check(i >= 0, message)
+    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
+
+def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -987,7 +1064,7 @@ def _check_index(cond, message=None):
     """
     _check_with(IndexError, cond, message)
 
-def _check_value(cond, message=None):
+def _check_value(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1004,7 +1081,7 @@ def _check_value(cond, message=None):
     """
     _check_with(ValueError, cond, message)
 
-def _check_type(cond, message=None):
+def _check_type(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1021,7 +1098,7 @@ def _check_type(cond, message=None):
     """
     _check_with(TypeError, cond, message)
 
-def _check_not_implemented(cond, message=None):
+def _check_not_implemented(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1038,7 +1115,7 @@ def _check_not_implemented(cond, message=None):
     """
     _check_with(NotImplementedError, cond, message)
 
-def _check_tensor_all_with(error_type, cond, message=None):
+def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
     if not torch.is_tensor(cond):
         raise TypeError(f'cond must be a tensor, but got {type(cond)}')
 
@@ -1049,7 +1126,7 @@ def _check_tensor_all_with(error_type, cond, message=None):
     _check_with(error_type, cond._is_all_true().item(), message)
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
-def _check_tensor_all(cond, message=None):
+def _check_tensor_all(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
 
@@ -1277,7 +1354,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1304,7 +1381,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce
@@ -1328,6 +1405,15 @@ for name in dir(_C._VariableFunctions):
     globals()[name] = obj
     if not name.startswith("_"):
         __all__.append(name)
+
+
+
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python
@@ -1393,14 +1479,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-import torch.backends.cpu
-import torch.backends.cuda
-import torch.backends.mps
-import torch.backends.cudnn
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
+from torch import backends as backends
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1422,7 +1501,7 @@ from . import _torch_docs, _tensor_docs, _storage_docs
 del _torch_docs, _tensor_docs, _storage_docs
 
 
-def compiled_with_cxx11_abi():
+def compiled_with_cxx11_abi() -> builtins.bool:
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return _C._GLIBCXX_USE_CXX11_ABI
 
@@ -1430,6 +1509,7 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+import torch._library
 
 # quantization depends on torch.fx
 # Import quantization
@@ -1478,16 +1558,14 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
+
+        # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+        if self.config.get("triton.cudagraphs", False):
+            os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1498,7 +1576,8 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            self.apply_options(torch._inductor.list_mode_options(mode))
+            from torch._inductor import list_mode_options
+            self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1509,7 +1588,7 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
-        current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
+        current_config: Dict[str, Any] = config.shallow_copy_dict()  # type: ignore[attr-defined]
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -1529,6 +1608,10 @@ class _TorchCompileInductorWrapper:
         from torch._inductor.compile_fx import compile_fx
 
         return compile_fx(model_, inputs_, config_patches=self.config)
+
+    def get_compiler_config(self):
+        from torch._inductor.compile_fx import get_patched_config_dict
+        return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config
@@ -1568,7 +1651,7 @@ class _TorchCompileWrapper:
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
-            dynamic: builtins.bool = False,
+            dynamic: Optional[builtins.bool] = None,
             backend: Union[str, Callable] = "inductor",
             mode: Union[str, None] = None,
             options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
@@ -1576,28 +1659,71 @@ def compile(model: Optional[Callable] = None, *,
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
+    Concretely, for every frame executed within the compiled region, we will attempt
+    to compile it and cache the compiled result on the code object for future
+    use.  A single frame may be compiled multiple times if previous compiled
+    results are not applicable for subsequent calls (this is called a "guard
+    failure), you can use TORCH_LOGS=guards to debug these situations.
+    Multiple compiled results can be associated with a frame up to
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    point we will fall back to eager.  Note that compile caches are per
+    *code object*, not frame; if you dynamically create multiple copies of a
+    function, they will all share the same code cache.
+
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing
+       dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
+        to generate a kernel that is as dynamic as possible to avoid recompilations when
+        sizes change.  This may not always work as some operations/optimizations will
+        force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
+        When this is False, we will NEVER generate dynamic kernels, we will always specialize.
+        By default (None), we automatically detect if dynamism has occurred and compile a more
+        dynamic kernel upon recompile.
        backend (str or Callable): backend to be used
+
         - "inductor" is the default backend, which is a good balance between performance and overhead
+
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
-       mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
+
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/compile/custom-backends.html
+       mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
+
         - "default" is the default mode, which is a good balance between performance and overhead
-        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
-        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
+          useful for small batches.  Reduction of overhead can come at the cost of more memory
+          usage, as we will cache the workspace memory required for the invocation so that we
+          do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
+          to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          to debug.
+
+        - "max-autotune" is a mode that leverages Triton based matrix multiplications and convolutions
+          It enables CUDA graphs by default.
+
+        - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+
         - `max_autotune` which will profile to pick the best matmul configuration
+
         - `fallback_random` which is useful when debugging accuracy issues
+
         - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+
         - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+
         - `trace.enabled` which is the most useful debugging flag to turn on
+
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
@@ -1609,6 +1735,10 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
+    # Temporary until we get proper support for python 3.12
+    if sys.version_info >= (3, 12):
+        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+
     # Decorator mode
     if model is None:
         def fn(model: Callable):
@@ -1623,7 +1753,6 @@ def compile(model: Optional[Callable] = None, *,
                            disable=disable)
         return fn
 
-    import torch._dynamo
     if mode is not None and options is not None:
         raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
     if mode is None and options is None:
@@ -1636,6 +1765,10 @@ def compile(model: Optional[Callable] = None, *,
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
+from torch import export as export
+
+from torch._higher_order_ops import cond
+
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
     supported by torch.
@@ -1647,8 +1780,8 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError("The runtime module of '{}' has already "
-                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+        raise RuntimeError(f"The runtime module of '{device_type}' has already "
+                           f"been registered with '{getattr(m, device_type)}'")
     setattr(m, device_type, module)
     torch_module_name = '.'.join([__name__, device_type])
     sys.modules[torch_module_name] = module
@@ -1671,8 +1804,6 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 from torch.func import vmap
 
-# ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
@@ -1684,6 +1815,119 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
                   'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
+
+# Register MPS specific decomps
+torch.backends.mps._init()
+
+if not _running_with_deploy():
+    from torch import compiler as compiler
+
+    class _TritonLibrary:
+        lib = torch.library.Library("triton", "DEF")
+        ops_table: Dict[Tuple[str, str], Callable] = {}
+
+        @classmethod
+        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if (op_key, dispatch_key) not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+            return cls.ops_table[(op_key, dispatch_key)]
+
+
+# Deprecated attributes
+_deprecated_attrs = {
+    "has_mps": torch.backends.mps.is_built,
+    "has_cuda": torch.backends.cuda.is_built,
+    "has_cudnn": torch.backends.cudnn.is_available,
+    "has_mkldnn": torch.backends.mkldnn.is_available,
+}
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+    from torch import _dynamo as _dynamo
+    from torch import _inductor as _inductor
+    from torch import onnx as onnx
+
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        "_export",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
+
+    def __getattr__(name):
+        # Deprecated attrs
+        replacement = _deprecated_attrs.get(name)
+        if replacement is not None:
+            import warnings
+            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+            return replacement()
+
+        # Lazy modules
+        if name in _lazy_modules:
+            import importlib
+            return importlib.import_module(f".{name}", __name__)
+
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+    """
+    Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
+    it will still check if the input value is within the specified range.
+    """
+    torch.sym_constrain_range(symbol, min=min, max=max)
+
+
+def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+    """
+    This indicates that a given int is size-like, and can be used in any context where a size is expected.
+    You will typically use this when reading out integers from Tensors, e.g., max.item() or lengths.tolist()
+    which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
+      GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
+
+    This function has unusual semantics which distinguish it from constrain_as_value.
+    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
+    As a result, max value you pass in should always be greater than 2.
+    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
+    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
+    report False to these tests. Although this is technically unsound,
+    in practice we observe that if your program works for all sizes >= 2,
+    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
+    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
+    At runtime, we only assert that the user provided min/max values are respected.
+
+    To demonstrate in a scenario, suppose you do
+    ```
+    # Case 1
+    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
+    constrain_as_size(symbol, min=0)
+
+    # Case 2
+    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
+    constrain_as_size(symbol, min=0, max=N)
+
+    # Case 3
+    # This is not valid case as max is <= 2
+    constrain_as_size(symbol, min=0, max=1)
+
+    # Case 4
+    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
+    constrain_as_size(symbol, min=2)
+
+    # Case 5
+    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
+    constrain_as_size(symbol, min=1)
+    ```
+    """
+    torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
 from . import _logging

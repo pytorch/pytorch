@@ -1,6 +1,11 @@
+# NOTE: This file is referenced by name at
+#       /opt/pytorch/torch/_dynamo/eval_frame.py::DONT_WRAP_FILES.
+#       introduced by https://github.com/pytorch/pytorch/pull/98894.
+#       If this file is renamed, moved, etc please update the reference there!
+
 from __future__ import annotations
 
-import copy
+import contextlib
 import functools
 import inspect
 from typing import (
@@ -19,8 +24,7 @@ from typing import (
 import torch._dynamo
 import torch.fx
 import torch.onnx
-from torch.onnx._internal import _beartype, exporter
-from torch.onnx._internal.fx import fx_exporter
+from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.utils import _pytree as pytree
 
 
@@ -60,10 +64,11 @@ class _PyTreeExtensionContext:
         Raises:
             AssertionError: If the custom python type is already registered.
         """
-        assert (
-            class_type not in pytree.SUPPORTED_NODES
-            and class_type not in self._extensions
-        ), "PyTree node already registered"
+        if class_type in pytree.SUPPORTED_NODES or class_type in self._extensions:
+            # PyTree node already registered.
+            # E.g., `huggingface/transformer` registers `ModelOutput` as PyTree node after
+            # https://github.com/huggingface/transformers/pull/25358.
+            return
         self._extensions[class_type] = (flatten_func, unflatten_func)
 
     def _register_huggingface_model_output_extension(self):
@@ -98,10 +103,10 @@ class _PyTreeExtensionContext:
             )
 
 
-class DynamoFlattenOutputStep(fx_exporter.FlattenOutputStep):
+class DynamoFlattenOutputStep(io_adapter.FlattenOutputStep):
     """Flatten nested collection and custom python types and return a flat list of elements.
 
-    Extended from :class:`fx_exporter.FlattenOutputStep` to support flattening arbitrary
+    Extended from :class:`io_adapter.FlattenOutputStep` to support flattening arbitrary
     types via pytree extension. By default this supports many common user defined python
     types such as :class:`ModelOutput` from HuggingFace transformers.
 
@@ -171,11 +176,7 @@ class DynamoExport(exporter.FXGraphExtractor):
         model: Union[torch.nn.Module, Callable],
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-    ) -> Tuple[torch.fx.GraphModule, Tuple[Any]]:
-        # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-        args = copy.deepcopy(model_args)
-        kwargs = copy.deepcopy(model_kwargs)
-
+    ) -> torch.fx.GraphModule:
         # `dynamo.export` does not recognize custom user defined classes as output type.
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
         # i.e. :class:`torch.Tensor`.
@@ -188,18 +189,40 @@ class DynamoExport(exporter.FXGraphExtractor):
 
         # Translate callable to FX graph.
         #
-        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
-        graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *args, tracing_mode=fx_mode, **kwargs
+        fake_mode = (
+            options.fake_context.fake_mode
+            if options.fake_context
+            else contextlib.nullcontext()
         )
+        fx_mode = "symbolic" if options.dynamic_shapes else "fake"
+        with fake_mode:  # type: ignore[attr-defined]
+            graph_module, graph_guard = torch._dynamo.export(
+                wrapped_model,
+                tracing_mode=fx_mode,
+            )(
+                *model_args,
+                **model_kwargs,
+            )
         del graph_guard  # Unused
         torch._dynamo.reset()
 
         # Export FX graph to ONNX ModelProto.
-        #
-        # `args` and `kwargs` are merged and flattened by `dynamo.export`.
-        # Apply and record this input adapt step.
-        merged_args, _ = self.adapt_input(
-            fx_exporter.FlattenInputWithTreeSpecValidationStep, args, kwargs
+        self.input_adapter.append_step(
+            io_adapter.FlattenInputWithTreeSpecValidationInputStep()
         )
-        return graph_module, merged_args  # type: ignore[return-value]
+
+        updated_model_args = self.input_adapter.apply(*model_args, **model_kwargs)
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    @_beartype.beartype
+    def pre_export_passes(
+        self,
+        options: exporter.ResolvedExportOptions,
+        original_model: Union[torch.nn.Module, Callable],
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return exporter.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )

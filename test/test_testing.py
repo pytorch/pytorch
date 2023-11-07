@@ -19,7 +19,7 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
@@ -1483,7 +1483,7 @@ class TestMakeTensor(TestCase):
     @parametrize("value_types", list(itertools.product([int, float], repeat=2)))
     @supported_dtypes
     def test_low_ge_high(self, dtype, device, low_high, value_types):
-        low, high = [value_type(value) for value, value_type in zip(low_high, value_types)]
+        low, high = (value_type(value) for value, value_type in zip(low_high, value_types))
 
         if low == high and (dtype.is_floating_point or dtype.is_complex):
             with self.assertWarnsRegex(
@@ -1561,7 +1561,7 @@ instantiate_device_type_tests(TestMakeTensor, globals())
 
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """
-    test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
+    test_names = [f'{test_cls.__name__}.{key}' for key in test_cls.__dict__
                   if key.startswith('test_')]
     return sorted(test_names)
 
@@ -1612,7 +1612,7 @@ class TestTestParametrization(TestCase):
             def test_three_things_composition_custom_names(self, x, y, z):
                 pass
 
-            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: f'{x}__{y}')
             def test_two_things_custom_names_alternate(self, x, y):
                 pass
 
@@ -1767,7 +1767,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_device_dtype_specific_{}_float32',
             '{}.test_device_dtype_specific_{}_float64',
@@ -1791,7 +1791,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_bar_{}',
             '{}.test_foo_{}')
@@ -1834,7 +1834,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_default_names_x_0_{}',
             '{}.test_default_names_x_1_{}',
@@ -1862,13 +1862,13 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_three_things_composition_custom_names(self, device, x, y, z):
                 pass
 
-            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: '{}__{}'.format(x, y))
+            @parametrize("x,y", [(1, 2), (1, 3), (1, 4)], name_fn=lambda x, y: f'{x}__{y}')
             def test_two_things_custom_names_alternate(self, device, x, y):
                 pass
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -1904,7 +1904,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_custom_names_bias_{}',
             '{}.test_custom_names_no_bias_{}',
@@ -1926,7 +1926,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = []
         for op in op_db:
             for dtype in op.supported_dtypes(torch.device(device).type):
@@ -1949,7 +1949,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = []
         for module_info in module_db:
             for dtype in module_info.dtypes:
@@ -2001,13 +2001,19 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, op, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.int16)
+            @ops(op_db)
+            def test_three(self, device, dtype, op):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
@@ -2048,13 +2054,40 @@ class TestTestParametrizationDeviceType(TestCase):
             def test_other(self, device, dtype, module_info, training, y):
                 pass
 
+            @decorateIf(test_dec, lambda p: p['dtype'] == torch.float64)
+            @modules(module_db)
+            def test_three(self, device, dtype, module_info):
+                pass
+
         device = self.device_type
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
 
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
-                            ('test_other' in name and 'y_5' in name))
+                            ('test_other' in name and 'y_5' in name) or
+                            ('test_three' in name and name.endswith('float64')))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
+    def test_param_specific_decoration(self, device):
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @decorateIf(test_dec, lambda params: params["x"] == 1 and params["y"])
+            @parametrize("x", range(5))
+            @parametrize("y", [False, True])
+            def test_param(self, x, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()[f'TestParametrized{device.upper()}']
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = ('test_param_x_1_y_True' in name)
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_dtypes_composition_valid(self, device):
@@ -2071,7 +2104,7 @@ class TestTestParametrizationDeviceType(TestCase):
 
         instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
-        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        device_cls = locals()[f'TestParametrized{device.upper()}']
         expected_test_names = [name.format(device_cls.__name__, device) for name in (
             '{}.test_parametrized_x_0_{}_float32',
             '{}.test_parametrized_x_0_{}_float64',
@@ -2139,6 +2172,15 @@ instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
 
 
 class TestImports(TestCase):
+    @classmethod
+    def _check_python_output(cls, program) -> str:
+        return subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", program],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2150,6 +2192,7 @@ class TestImports(TestCase):
                            "torch.ao.pruning._experimental.",  # depends on pytorch_lightning, not user-facing
                            "torch.onnx._internal.fx",  # depends on onnx-script
                            "torch._inductor.triton_helpers",  # depends on triton
+                           "torch._inductor.codegen.cuda",  # depends on cutlass
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801
         if not sys.version_info >= (3, 9):
@@ -2187,14 +2230,14 @@ class TestImports(TestCase):
                     raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
                 self.assertTrue(inspect.ismodule(mod))
 
+    @unittest.skipIf(IS_WINDOWS, "TODO enable on Windows")
+    def test_lazy_imports_are_lazy(self) -> None:
+        out = self._check_python_output("import sys;import torch;print(all(x not in sys.modules for x in torch._lazy_modules))")
+        self.assertEqual(out.strip(), "True")
+
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
     def test_no_warning_on_import(self) -> None:
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "import torch"],
-            stderr=subprocess.STDOUT,
-            # On Windows, opening the subprocess with the default CWD makes `import torch`
-            # fail, so just set CWD to this script's directory
-            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        out = self._check_python_output("import torch")
         self.assertEqual(out, "")
 
     @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
@@ -2212,15 +2255,12 @@ class TestImports(TestCase):
             'logging.root.setLevel(logging.INFO)',
             f'_logger.info("{expected}")'
         ]
-        out = subprocess.check_output(
-            [sys.executable, "-W", "all", "-c", "; ".join(commands)],
-            stderr=subprocess.STDOUT,
-        ).decode("utf-8")
+        out = self._check_python_output("; ".join(commands))
         self.assertEqual(out.strip(), expected)
 
 class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
-        a, b, c, d, e = [object() for _ in range(5)]
+        a, b, c, d, e = (object() for _ in range(5))
 
         # Construction with natural syntax
         s = SampleInput(a, b, c, d=d, e=e)
@@ -2264,7 +2304,7 @@ class TestOpInfos(TestCase):
         assert s.broadcasts_input
 
     def test_sample_input_metadata(self) -> None:
-        a, b = [object() for _ in range(2)]
+        a, b = (object() for _ in range(2))
         s1 = SampleInput(a, b=b)
         self.assertIs(s1.output_process_fn_grad(None), None)
         self.assertFalse(s1.broadcasts_input)

@@ -4,7 +4,7 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -41,8 +41,7 @@ class TestAutocastCPU(TestCase):
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(out_type == output.dtype,
-                                    "autocast for torch.{} produced {}, should produce {}"
-                                    .format(op, output.dtype, out_type))
+                                    f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}")
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
@@ -52,8 +51,7 @@ class TestAutocastCPU(TestCase):
                                     .format(op, output_method.dtype, out_type))
 
             self.assertTrue((output is not None) or (output_method is not None),
-                            "{} not found as an attribute on either Tensor or the requested module {}".format(
-                            op, module))
+                            f"{op} not found as an attribute on either Tensor or the requested module {module}")
 
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
@@ -69,7 +67,7 @@ class TestAutocastCPU(TestCase):
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = compare(output, output_method)
-                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match Tensor.{op} result")
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.
@@ -83,7 +81,7 @@ class TestAutocastCPU(TestCase):
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
-                self.assertTrue(comparison, "torch.{} result did not match control".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match control")
             self.assertTrue(torch.is_autocast_cpu_enabled())
         self.assertFalse(torch.is_autocast_cpu_enabled())
 
@@ -125,6 +123,26 @@ class TestAutocastCPU(TestCase):
         for op, args in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args, torch.float32)
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_autocast_rnn(self):
+        if torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            x = torch.randn(1, 2, 1)
+            hx = torch.randn(2, 2, 1)
+            cx = torch.randn(2, 2, 1)
+
+            m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
+
+            # Raise ValueError when autocast is not enabled
+            with self.assertRaisesRegex(ValueError, "input must have the type"):
+                m(x, (hx, cx))
+
+            # Should be able to run the below case with autocast
+            with torch.cpu.amp.autocast():
+                m(x, (hx, cx))
+
+    def test_autocast_disabled_with_fp32_dtype(self):
+        with torch.autocast(device_type='cpu', dtype=torch.float32, enabled=False):
+            _ = torch.ones(10)
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod
@@ -214,6 +232,13 @@ class TestTorchAutocast(TestCase):
         cpu_fast_dtype = torch.get_autocast_cpu_dtype()
         self.assertEqual(gpu_fast_dtype, torch.half)
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
+
+    def test_invalid_device(self):
+        dev = 'not a real device'
+        msg = f'unsupported autocast device_type \'{dev}\''
+        with self.assertRaisesRegex(RuntimeError, msg):
+            with torch.autocast(device_type=dev):
+                _ = torch.tensor(1)
 
 
 if __name__ == '__main__':

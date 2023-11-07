@@ -5,6 +5,7 @@ import itertools
 import os
 import os.path
 import pickle
+import pydoc
 import random
 import sys
 import tempfile
@@ -17,14 +18,20 @@ from typing import (
     Generic,
     Iterator,
     List,
-    NamedTuple,
     Optional,
     Set,
     Tuple,
     Type,
     TypeVar,
     Union,
+    TYPE_CHECKING
 )
+if not TYPE_CHECKING:
+    # pyre isn't treating this the same as a typing.NamedTuple
+    from typing_extensions import NamedTuple
+else:
+    from typing import NamedTuple
+
 from unittest import skipIf
 
 import numpy as np
@@ -199,7 +206,7 @@ class TestStreamWrapper(TestCase):
             if self.opened:
                 return "".join(self)
             else:
-                raise IOError("Cannot read from un-opened file descriptor")
+                raise OSError("Cannot read from un-opened file descriptor")
 
         def __iter__(self):
             for i in range(5):
@@ -278,7 +285,7 @@ class TestIterableDataPipeBasic(TestCase):
             self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
         except Exception as e:
-            warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
+            warnings.warn(f"TestIterableDatasetBasic was not able to cleanup temp dir due to {str(e)}")
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -831,6 +838,43 @@ class TestFunctionalIterDataPipe(TestCase):
                     with self.assertRaises((pickle.PicklingError, AttributeError)):
                         pickle.dumps(datapipe)
 
+    def test_docstring(self):
+        """
+        Ensure functional form of IterDataPipe has the correct docstring from
+        the class form.
+
+        Regression test for https://github.com/pytorch/data/issues/792.
+        """
+        input_dp = dp.iter.IterableWrapper(range(10))
+
+        for dp_funcname in [
+            "batch",
+            "collate",
+            "concat",
+            "demux",
+            "filter",
+            "fork",
+            "map",
+            "mux",
+            "read_from_stream",
+            # "sampler",
+            "shuffle",
+            "unbatch",
+            "zip",
+        ]:
+            if sys.version_info >= (3, 9):
+                docstring = pydoc.render_doc(
+                    thing=getattr(input_dp, dp_funcname), forceload=True
+                )
+            elif sys.version_info < (3, 9):
+                # pydoc works differently on Python 3.8, see
+                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
+                docstring = getattr(input_dp, dp_funcname).__doc__
+
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
+
     def test_iterable_wrapper_datapipe(self):
 
         input_ls = list(range(10))
@@ -1363,6 +1407,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
+    @skipIfTorchDynamo
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
             return -d
@@ -1893,6 +1938,34 @@ class TestFunctionalMapDataPipe(TestCase):
                         datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     with self.assertRaises((pickle.PicklingError, AttributeError)):
                         pickle.dumps(datapipe)
+
+    def test_docstring(self):
+        """
+        Ensure functional form of MapDataPipe has the correct docstring from
+        the class form.
+
+        Regression test for https://github.com/pytorch/data/issues/792.
+        """
+        input_dp = dp.map.SequenceWrapper(range(10))
+
+        for dp_funcname in [
+            "batch",
+            "concat",
+            "map",
+            "shuffle",
+            "zip",
+        ]:
+            if sys.version_info >= (3, 9):
+                docstring = pydoc.render_doc(
+                    thing=getattr(input_dp, dp_funcname), forceload=True
+                )
+            elif sys.version_info < (3, 9):
+                # pydoc works differently on Python 3.8, see
+                # https://docs.python.org/3/whatsnew/3.9.html#pydoc
+                docstring = getattr(input_dp, dp_funcname).__doc__
+            assert f"(functional name: ``{dp_funcname}``)" in docstring
+            assert "Args:" in docstring
+            assert "Example:" in docstring or "Examples:" in docstring
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))

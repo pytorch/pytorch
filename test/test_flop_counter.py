@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 import torch.utils.flop_counter
 import torch.nn.functional as F
 import unittest
@@ -155,13 +155,24 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
+        def count(*args, out):
+            return out.numel()
+        count._get_raw = True
+
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})
+        with mode:
+            a = T(4, 5)
+            a + a
+
+        self.assertExpectedInline(get_total_flops(mode), """20""")
+
     def test_noop(self):
         mode = FlopCounterMode()
         with mode:
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8
@@ -210,18 +221,63 @@ class TestFlopCounter(TestCase):
 
 
         run_nonuniform_flops = functools.partial(get_flops, batch_size, n_heads, seq_len_q, seq_len_k, head_dim, head_dim_v, dtype)
-
-        flops = [run_nonuniform_flops(backend, with_backward=False) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_math, flops_fw_flash, flops_fw_efficient = flops
-        self.assertEqual(flops_fw_math, flops_fw_flash, flops_fw_efficient)
+        # Flash does not support non-uniform attention, i.e. seq_len_q != seq_len_k or dim_q != dim_v"
+        non_uniform_backends = ["math", "mem_efficient"]
+        flops = [run_nonuniform_flops(backend, with_backward=False) for backend in non_uniform_backends]
+        flops_fw_math, flops_fw_efficient = flops
+        self.assertEqual(flops_fw_math, flops_fw_efficient)
 
         self.assertExpectedInline(str(flops_fw_math), """268435456""")
 
-        flops = [run_nonuniform_flops(backend, with_backward=True) for backend in ["math", "flash", "mem_efficient"]]
-        flops_fw_bw_math, flops_fw_bw_flash, flops_fw_bw_efficient = flops
+        flops = [run_nonuniform_flops(backend, with_backward=True) for backend in non_uniform_backends]
+        flops_fw_bw_math, flops_fw_bw_efficient = flops
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
-        self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
-        self.assertExpectedInline(str(flops_fw_bw_flash), """939524096""")
+        self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
+
+    def test_hook_registration(self):
+        model = torch.nn.Linear(100, 100)
+        x = torch.randn(3, 100)
+
+        flop_counter = FlopCounterMode(model)
+        with flop_counter:
+            self.assertEqual(len(model._forward_pre_hooks), 1)
+            self.assertEqual(len(model._forward_hooks), 1)
+            model(x).sum().backward()
+
+        self.assertEqual(len(model._forward_pre_hooks), 0)
+        self.assertEqual(len(model._forward_hooks), 0)
+
+    def test_pytrees(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x = x['a'].relu_()
+                return {'a': torch.mm(x, x)}
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = Foo()
+                self.b = Foo()
+
+            def forward(self, x):
+                return self.b(self.a(x))
+
+        mod = Mod()
+        mode = FlopCounterMode(mod)
+        with mode:
+            mod({'a': torch.randn(10, 10, requires_grad=True).clone()})['a'].sum().backward()
+        self.assertExpectedInline((mode.flop_counts['Mod'][torch.ops.aten.mm]), """12000""")
+
+        class Mod2(torch.nn.Module):
+            def forward(self, x):
+                return (torch.mm(x, x),)
+
+        mod = Mod2()
+        mode = FlopCounterMode(mod)
+        with mode:
+            mod(torch.randn(10, 10, requires_grad=True))[0].sum().backward()
+        self.assertExpectedInline((mode.flop_counts['Mod2'][torch.ops.aten.mm]), """6000""")
+
 
 
 

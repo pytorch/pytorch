@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <iostream>
 #include <random>
 #include <stdexcept>
 #include <typeinfo>
@@ -10,12 +11,13 @@
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 
 namespace torch::jit::tensorexpr {
 
 namespace randomization_helper {
 
-int64_t max_transformations(int n_max_transforms) {
+static int64_t max_transformations(int n_max_transforms) {
   // Reuse the env variable PYTORCH_JIT_OPT_LIMIT to control the max number of
   // transformations.  Example - set the env variable
   // PYTORCH_JIT_OPT_LIMIT="loopnest_randomization=10" to set max
@@ -31,7 +33,7 @@ int64_t max_transformations(int n_max_transforms) {
   return max_transforms;
 }
 
-std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
+static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
     std::vector<ForPtr> loops) {
   // Find the first set of loops that can be reordered
   std::vector<std::vector<ForPtr>> all_nested_loops;
@@ -79,7 +81,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   return std::make_tuple(selected_objects, selected_indices);
 }
 
-int find_factor(ForPtr loop) {
+static int find_factor(ForPtr loop) {
   // Find valid factors
   ExprPtr loop_stop = loop->stop();
   auto loop_imm = intValue(loop_stop);
@@ -91,7 +93,7 @@ int find_factor(ForPtr loop) {
   return -1;
 }
 
-void printHistory(int index, std::string message) {
+static void printHistory(int index, std::string message) {
   message = "Random Transform Sequence - Transformations[" +
       std::to_string(index) + "] = " + message;
   GRAPH_DEBUG(message);
@@ -106,7 +108,7 @@ std::string join(std::vector<T> indices, char sep = ',') {
   return s;
 }
 
-std::string join(std::vector<std::string> indices, char sep = ',') {
+static std::string join(std::vector<std::string> indices, char sep = ',') {
   std::string s = "";
   for (const auto& index : indices) {
     s += index + sep;

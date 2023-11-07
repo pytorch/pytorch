@@ -1,6 +1,7 @@
 import copy
 import functools
 import getpass
+import itertools
 import logging
 import os
 import subprocess
@@ -8,14 +9,23 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
+from typing import Callable, Optional, Sequence, TypeVar
 
 import torch
+import torch._prims_common as utils
+import torch._subclasses.meta_utils
+
+from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 inductor_config = import_module("torch._inductor.config")
@@ -254,7 +264,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning("Writing minified repro to %s", minified_repro_path)
+    log.warning("Writing minified repro to:\n%s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
@@ -284,16 +294,20 @@ def clone_inputs_retaining_gradness(example_inputs):
     return cloned_inputs
 
 
-def run_fwd_maybe_bwd(gm, args, only_fwd=False):
+def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
+
+    When disable_clone is True, we will use args as-is without cloning.
+    This is higher fidelity but we may destroy the args in the process.
     """
     from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    args = clone_inputs_retaining_gradness(args)
+    if not disable_clone:
+        args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -362,7 +376,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
             log.warning("Could not generate fp64 outputs")
 
     try:
@@ -371,11 +385,9 @@ def same_two_models(
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
-            (
-                "While minifying the program in accuracy minification mode, "
-                "ran into a runtime exception which is likely an unrelated issue."
-                " Skipping this graph."
-            )
+            "While minifying the program in accuracy minification mode, "
+            "ran into a runtime exception which is likely an unrelated issue."
+            " Skipping this graph."
         )
         return True
 
@@ -390,7 +402,7 @@ def same_two_models(
     return passing
 
 
-def cast_convert_element_type_to_fp64(model):
+def cast_dtype_args_to_fp64(model):
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
@@ -399,6 +411,13 @@ def cast_convert_element_type_to_fp64(model):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
                 node.args = (node.args[0], torch.float64)
+        if node.op == "call_function":
+            dtype = node.kwargs.get("dtype")
+            if dtype is not None and is_float_dtype(dtype):
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["dtype"] = torch.float64
+                node.kwargs = new_kwargs
+
     model.graph.lint()
     model.recompile()
     return model
@@ -410,8 +429,8 @@ def cast_to(dtype, model, inputs):
     model = model.to(dtype)
     if dtype == torch.float64:
         # If casting to fp64 for accuracy comparison, we need to
-        # take care of convert_element_type explicitly
-        model = cast_convert_element_type_to_fp64(model)
+        # replace dtype arguments embedded in the graph with fp64
+        model = cast_dtype_args_to_fp64(model)
 
     inputs = tree_map(
         lambda x: x.to(dtype)
@@ -448,13 +467,226 @@ def backend_accuracy_fails(
             ignore_non_fp=ignore_non_fp,
         )
     except Exception as e:
-        # This means that the the minified graph is bad/exposes a different problem.
+        # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
-            (
-                "While minifying the program in accuracy minification mode, "
-                "ran into a runtime exception which is likely an unrelated issue."
-                " Skipping this graph"
-            )
+            "While minifying the program in accuracy minification mode, "
+            "ran into a runtime exception which is likely an unrelated issue."
+            " Skipping this graph"
         )
         return False
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                       REPRO SUPPORT CODE
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+# Helper functions for computing what the default values of tensor
+# values should be.  These all coincide with factory functions, e.g., torch.empty
+
+
+def _stride_or_default(
+    stride: Optional[Sequence[int]], *, shape: Sequence[int]
+) -> Sequence[int]:
+    return stride if stride is not None else utils.make_contiguous_strides_for(shape)
+
+
+def _mk_defaulter(d: T) -> Callable[[Optional[T]], T]:
+    return lambda x: x if x is not None else d
+
+
+_dtype_or_default = _mk_defaulter(torch.float32)
+_device_or_default = _mk_defaulter(torch.device("cpu"))
+_storage_offset_or_default = _mk_defaulter(0)
+_requires_grad_or_default = _mk_defaulter(False)
+_is_leaf_or_default = _mk_defaulter(False)
+
+
+class NopInputReader:
+    def __init__(self):
+        self.total = 0
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        self.total += 1
+
+    def tensor(self, *args, **kwargs):
+        pass
+
+    def symint(self, *args, **kwargs):
+        pass
+
+
+# TODO: Support bundling the entire repro into a zip file for ease of
+# transferring around
+class InputReader:
+    def __init__(self, save_dir=None, *, pbar=None):
+        # If None, we will generate random data instead.  It's important
+        # to natively support this use case as it will allow people to
+        # share repros without including the real data, if the problem
+        # reproduces even on random data.
+        if save_dir is None:
+            log.warning("no save_dir specified, will generate random data")
+        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+        self.args = []
+        self.pbar = pbar
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        if self.pbar is not None:
+            self.pbar.update(1)
+        device = _device_or_default(device)
+        dtype_hint = _dtype_or_default(dtype_hint)
+        if self.store is not None and storage_hash is not None:
+            try:
+                storage = self.store.read_storage(storage_hash)
+            except FileNotFoundError:
+                pass
+            else:
+                if device != storage.device:
+                    log.warning("device mismatch: %s != %s", device, storage.device)
+                    # TODO: transfer it to the right device?  But failing this
+                    # way would be very mysterious!  Would have been better
+                    # not to store device in the serialized format...
+                return storage
+        log.warning("could not load %s, generating random data instead", storage_hash)
+        shape = (nbytes // dtype_hint.itemsize,)
+        stride = _stride_or_default(None, shape=shape)
+        return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
+
+    def tensor(
+        self,
+        storage,
+        shape,
+        stride=None,
+        *,
+        storage_offset=None,
+        dtype=None,
+        requires_grad=None,
+        is_leaf=None,
+        **metadata,
+    ):
+        stride = _stride_or_default(stride, shape=shape)
+        storage_offset = _storage_offset_or_default(storage_offset)
+        dtype = _dtype_or_default(dtype)
+        is_leaf = _is_leaf_or_default(is_leaf)
+        requires_grad = _requires_grad_or_default(requires_grad)
+        t = torch.tensor(
+            [], dtype=dtype, device=storage.device, requires_grad=requires_grad
+        )
+        with torch.no_grad():
+            t.set_(storage, storage_offset, shape, stride)
+        if not is_leaf:
+            # Fake up some autograd history in a very naughty way
+            with torch.enable_grad():
+                t = t.clone(memory_format=torch.preserve_format)
+            with torch.no_grad():
+                t.set_(storage, storage_offset, shape, stride)
+        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
+        torch._utils.set_tensor_metadata(t, metadata)
+        self.args.append(t)
+        return t  # for BC
+
+    def symint(self, val):
+        self.args.append(val)
+        return val  # for BC
+
+
+# Here is our writer strategy:
+#  1. We will stream all of the inputs to disk
+#  2. You can now deterministically randomize the inputs, or reload
+#     the inputs from disk
+#  3. You can YOLO run the script without the inputs, in which case
+#     we'll fill the inputs with random data and pray.  This is the
+#     legacy behavior, but it's also useful if you want to find out
+#     if we're so broken even random inputs trigger it
+#  4. We could offer an in process "check if the randomized thing
+#     works too" but this is delicate so we don't do it
+
+
+class InputWriter:
+    def __init__(self, save_dir, *, stable_hash=False):
+        self._lines = []
+        # TODO: consider ensuring tensor and storage counters line up?
+        self.storage_counter = itertools.count()
+        self.save_dir = save_dir
+        self.store = (
+            ContentStoreWriter(save_dir, stable_hash=stable_hash)
+            if save_dir is not None
+            else None
+        )
+        self.seen_storages = {}
+
+    def lines(self):
+        r = [
+            "def load_args(reader):",
+        ]
+        r.extend(f"    {l}" for l in self._lines)
+        # In case we need to change the internal format of load_args
+        # in an FC-breaking way
+        r.append("load_args._version = 0")
+        return r
+
+    # Storages are untyped, but we need to initialize them with data if
+    # we don't have the real data, so we give a hint saying what kind
+    # of initialization may be appropriate
+    #
+    # If we had a FakeTensor, device_hint tells us what device should be
+    def storage(self, untyped_storage, *, dtype_hint=None, device_hint=None) -> str:
+        ws = StorageWeakRef(untyped_storage)
+        v = self.seen_storages.get(ws)
+        if v is not None:
+            return v
+        v = f"buf{next(self.storage_counter)}"
+        maybe_dtype_hint = ""
+        if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
+            maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
+        # TODO: being optional on device is kind of pointless as the default
+        # is CPU but most repros we care about are CUDA
+        maybe_device = ""
+        device = untyped_storage.device
+        if device.type == "meta":
+            assert device_hint is not None
+            device = device_hint
+        if _device_or_default(None) != device:
+            maybe_device = f", device={device!r}"
+        nbytes = untyped_storage.nbytes()
+        storage_hash = None
+        if self.store is not None and untyped_storage.device.type != "meta":
+            storage_hash = self.store.write_storage(untyped_storage)
+        self._lines.append(
+            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+        )
+        self.seen_storages[ws] = v
+        return v
+
+    def tensor(self, name, t) -> None:
+        storage = self.storage(
+            t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
+        )
+        args = []
+        # NB: this is positional, must come first
+        if _stride_or_default(None, shape=t.shape) != t.stride():
+            args.append(str(tuple(t.stride())))
+        if _dtype_or_default(None) != t.dtype:
+            args.append(f"dtype={t.dtype!r}")
+        if _storage_offset_or_default(None) != t.storage_offset():
+            args.append(f"storage_offset={t.storage_offset()!r}")
+        tensor_metadata = torch._utils.get_tensor_metadata(t)
+        if tensor_metadata:
+            args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+        if _requires_grad_or_default(None) != t.requires_grad:
+            args.append(f"requires_grad={t.requires_grad!r}")
+        is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)
+        if _is_leaf_or_default(None) != is_leaf:
+            args.append(f"is_leaf={is_leaf!r}")
+        self._lines.append(
+            "reader.tensor("
+            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + f")  # {name}"
+        )
+
+    # TODO: this doesn't actually symint atm
+    def symint(self, name, val) -> None:
+        if isinstance(val, torch.SymInt):
+            val = val.node.hint
+        self._lines.append(f"reader.symint({val!r})  # {name}")

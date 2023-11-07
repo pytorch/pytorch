@@ -2,7 +2,6 @@ import argparse
 import copy
 import functools
 import io
-import itertools
 import logging
 import os
 import shutil
@@ -12,10 +11,9 @@ import textwrap
 import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Union
 
 import torch
-import torch._prims_common as utils
 import torch.fx as fx
 import torch.nn as nn
 from torch._dynamo.debug_utils import (
@@ -27,19 +25,18 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
+    InputReader,
+    InputWriter,
     MAX_CONSTANT_NUMEL_INLINE,
     minifier_dir,
     NNModuleToString,
+    NopInputReader,
     same_two_models,
 )
-from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
+from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
 from torch.hub import tqdm
-from torch.multiprocessing.reductions import StorageWeakRef
-
-from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from .. import config
 
@@ -192,206 +189,6 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-#                       REPRO SUPPORT CODE
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-
-# Helper functions for computing what the default values of tensor
-# values should be.  These all coincide with factory functions, e.g., torch.empty
-
-
-def _stride_or_default(
-    stride: Optional[Sequence[int]], *, shape: Sequence[int]
-) -> Sequence[int]:
-    return stride if stride is not None else utils.make_contiguous_strides_for(shape)
-
-
-def _dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
-    return dtype if dtype is not None else torch.float32
-
-
-def _device_or_default(device: Optional[torch.device]) -> torch.device:
-    return device if device is not None else torch.device("cpu")
-
-
-def _storage_offset_or_default(storage_offset: Optional[int]) -> int:
-    return storage_offset if storage_offset is not None else 0
-
-
-class NopInputReader:
-    def __init__(self):
-        self.total = 0
-
-    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
-        self.total += 1
-
-    def tensor(self, *args, **kwargs):
-        pass
-
-    def symint(self, *args, **kwargs):
-        pass
-
-
-# TODO: Support bundling the entire repro into a zip file for ease of
-# transferring around
-class InputReader:
-    def __init__(self, save_dir=None, *, pbar=None):
-        # If None, we will generate random data instead.  It's important
-        # to natively support this use case as it will allow people to
-        # share repros without including the real data, if the problem
-        # reproduces even on random data.
-        if save_dir is None:
-            log.warning("no save_dir specified, will generate random data")
-        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
-        self.args = []
-        self.pbar = pbar
-
-    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
-        if self.pbar is not None:
-            self.pbar.update(1)
-        device = _device_or_default(device)
-        dtype_hint = _dtype_or_default(dtype_hint)
-        if self.store is not None and storage_hash is not None:
-            try:
-                storage = self.store.read_storage(storage_hash)
-            except FileNotFoundError:
-                pass
-            else:
-                if device != storage.device:
-                    log.warning("device mismatch: %s != %s", device, storage.device)
-                    # TODO: transfer it to the right device?  But failing this
-                    # way would be very mysterious!  Would have been better
-                    # not to store device in the serialized format...
-                return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
-        shape = (nbytes // dtype_hint.itemsize,)
-        stride = _stride_or_default(None, shape=shape)
-        return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
-
-    def tensor(
-        self,
-        storage,
-        shape,
-        stride=None,
-        *,
-        storage_offset=None,
-        dtype=None,
-        **metadata,
-    ):
-        stride = _stride_or_default(stride, shape=shape)
-        storage_offset = _storage_offset_or_default(storage_offset)
-        dtype = _dtype_or_default(dtype)
-        t = torch.tensor([], dtype=dtype, device=storage.device)
-        t.set_(storage, storage_offset, shape, stride)
-        torch._utils.set_tensor_metadata(t, metadata)
-        self.args.append(t)
-        return t  # for BC
-
-    def symint(self, val):
-        self.args.append(val)
-        return val  # for BC
-
-
-# Here is our writer strategy:
-#  1. We will stream all of the inputs to disk
-#  2. You can now deterministically randomize the inputs, or reload
-#     the inputs from disk
-#  3. You can YOLO run the script without the inputs, in which case
-#     we'll fill the inputs with random data and pray.  This is the
-#     legacy behavior, but it's also useful if you want to find out
-#     if we're so broken even random inputs trigger it
-#  4. We could offer an in process "check if the randomized thing
-#     works too" but this is delicate so we don't do it
-
-
-class InputWriter:
-    def __init__(self, save_dir, *, stable_hash=False):
-        self._lines = []
-        # TODO: consider ensuring tensor and storage counters line up?
-        self.storage_counter = itertools.count()
-        self.save_dir = save_dir
-        self.store = (
-            ContentStoreWriter(save_dir, stable_hash=stable_hash)
-            if save_dir is not None
-            else None
-        )
-        self.seen_storages = {}
-
-    def lines(self):
-        r = [
-            "def load_args(reader):",
-        ]
-        r.extend(f"    {l}" for l in self._lines)
-        # In case we need to change the internal format of load_args
-        # in an FC-breaking way
-        r.append("load_args._version = 0")
-        return r
-
-    # Storages are untyped, but we need to initialize them with data if
-    # we don't have the real data, so we give a hint saying what kind
-    # of initialization may be appropriate
-    #
-    # If we had a FakeTensor, device_hint tells us what device should be
-    def storage(self, untyped_storage, *, dtype_hint=None, device_hint=None) -> str:
-        ws = StorageWeakRef(untyped_storage)
-        v = self.seen_storages.get(ws)
-        if v is not None:
-            return v
-        v = f"buf{next(self.storage_counter)}"
-        maybe_dtype_hint = ""
-        if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
-            maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
-        # TODO: being optional on device is kind of pointless as the default
-        # is CPU but most repros we care about are CUDA
-        maybe_device = ""
-        device = untyped_storage.device
-        if device.type == "meta":
-            assert device_hint is not None
-            device = device_hint
-        if _device_or_default(None) != device:
-            maybe_device = f", device={device!r}"
-        nbytes = untyped_storage.nbytes()
-        storage_hash = None
-        if self.store is not None and untyped_storage.device.type != "meta":
-            storage_hash = self.store.write_storage(untyped_storage)
-        self._lines.append(
-            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
-        )
-        self.seen_storages[ws] = v
-        return v
-
-    def tensor(self, name, t) -> None:
-        storage = self.storage(
-            t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
-        )
-        maybe_stride = ""
-        if _stride_or_default(None, shape=t.shape) != t.stride():
-            maybe_stride = f", {tuple(t.stride())}"
-        maybe_dtype = ""
-        if _dtype_or_default(None) != t.dtype:
-            maybe_dtype = f", dtype={t.dtype!r}"
-        maybe_storage_offset = ""
-        if _storage_offset_or_default(None) != t.storage_offset():
-            maybe_storage_offset = f", storage_offset={t.storage_offset()!r}"
-        maybe_tensor_metadata = ""
-        tensor_metadata = torch._utils.get_tensor_metadata(t)
-        if tensor_metadata:
-            maybe_tensor_metadata = ", " + ", ".join(
-                f"{k}={v!r}" for k, v in tensor_metadata.items()
-            )
-        self._lines.append(
-            f"reader.tensor({storage}, {tuple(t.shape)}"
-            f"{maybe_stride}{maybe_storage_offset}{maybe_dtype}{maybe_tensor_metadata})  # {name}"
-        )
-
-    # TODO: this doesn't actually symint atm
-    def symint(self, name, val) -> None:
-        if isinstance(val, torch.SymInt):
-            val = val.node.hint
-        self._lines.append(f"reader.symint({val!r})  # {name}")
-
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           DUMP REPROS
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
@@ -404,6 +201,7 @@ from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
+import torch._inductor.inductor_prims
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -453,6 +251,8 @@ def save_graph_repro(
     save_dir=None,
     command="run",
     accuracy=None,
+    tracing_mode=None,
+    check_str=None,
 ):
     fd.write(
         generate_compiler_repro_string(
@@ -464,14 +264,16 @@ def save_graph_repro(
     )
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
-    tracing_mode = "real"
-    if config.dynamic_shapes:
-        tracing_mode = "symbolic"
+    if tracing_mode is None:
+        tracing_mode = "real"
+        if any(free_symbols(a) for a in args):
+            tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}"
+        f"    with torch.no_grad():"
+        f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
     )
 
@@ -522,6 +324,8 @@ def isolate_fails(
     env=None,
     save_dir=None,
     accuracy=None,
+    tracing_mode=None,
+    check_str=None,
 ):
     if env is None:
         env = {}
@@ -538,6 +342,8 @@ def isolate_fails(
             save_dir=save_dir,
             command="minifier-query",
             accuracy=accuracy,
+            tracing_mode=tracing_mode,
+            check_str=check_str,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -579,7 +385,7 @@ def isolate_fails(
 def inductor_fails(fx_g, args, check_str=None):
     has_cuda = False
     for arg in args:
-        if arg.is_cuda:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
             has_cuda = True
             break
 
@@ -691,7 +497,9 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
-    fail_fn = ACCURACY_FAILS[options.accuracy]
+    fail_fn = functools.partial(
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+    )
     if fail_fn(mod, args):
         sys.exit(1)
     else:
@@ -710,11 +518,12 @@ def repro_minify(options, mod, load_args):
     module_fails: Any
     if options.isolate:
         module_fails = functools.partial(
-            functools.partial(isolate_fails, accuracy=options.accuracy),
+            isolate_fails,
             env=env_variables,
             compiler_name=compiler_name,
             save_dir=options.save_dir,
             accuracy=options.accuracy,
+            tracing_mode=options.tracing_mode,
         )
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
@@ -722,10 +531,15 @@ def repro_minify(options, mod, load_args):
     minifier(
         mod,
         args,
-        module_fails=module_fails,
+        module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state, compiler_name=compiler_name
         ),
+        save_dir=options.save_dir,
+        offload_to_disk=options.offload_to_disk,
+        skip_offload=options.skip_saving_eager_intermediates,
+        skip_sanity=options.skip_sanity,
+        max_granularity=options.max_granularity,
     )
 
 
@@ -751,7 +565,7 @@ def repro_analyze(options, mod, load_args):
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)
+        pbar.update(1)  # type: ignore[has-type]
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
@@ -806,7 +620,7 @@ def repro_analyze(options, mod, load_args):
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         assert not new_args
@@ -827,7 +641,7 @@ def repro_analyze(options, mod, load_args):
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args
@@ -900,6 +714,7 @@ def run_repro(
     save_dir=None,
     tracing_mode=None,
     patch_code=None,
+    check_str=None,
     **kwargs,
 ):
     for k in kwargs:
@@ -929,6 +744,7 @@ default settings on this script:
   {accuracy=}
   {tracing_mode=}
   {save_dir=}
+  {check_str=}
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -991,6 +807,13 @@ divergences--you just might not end up with a useful repro in the end.""",
             help="directory where saved inputs live",
         )
         parser.add_argument(
+            "--no-save-dir",
+            dest="save_dir",
+            action="store_const",
+            const=None,
+            help="don't use any directory for saved inputs",
+        )
+        parser.add_argument(
             "--tracing-mode",
             type=str,
             metavar="{real,fake,symbolic}",
@@ -1025,6 +848,34 @@ divergences--you just might not end up with a useful repro in the end.""",
         action="store_false",
         help="speed up by running all compilation in same process",
     )
+    parser_minify.add_argument(
+        "--skip-saving-eager-intermediates",
+        action="store_true",
+        help="skip saving eager intermediates on --minify",
+    )
+    # TODO: make this an option for --analyze too
+    parser_minify.add_argument(
+        "--offload-to-disk",
+        action="store_true",
+        help="during minification, offload delta debugging intermediates to disk.  Use if you're OOMing",
+    )
+    parser_minify.add_argument(
+        "--skip-sanity",
+        action="store_true",
+        help="skip sanity check at beginning of minification on original graph",
+    )
+    parser_minify.add_argument(
+        "--max-granularity",
+        type=int,
+        default=None,
+        help="start at this granularity and work down; must be power of 2",
+    )
+    parser_minify.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     parser_analyze = subparsers.add_parser(
         "analyze", help="run the accuracy analyzer on the repro"
@@ -1056,6 +907,12 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minifier-query",
     )
     common_flags(parser_minifier_query)
+    parser_minifier_query.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     args = None
     if len(sys.argv) <= 1:

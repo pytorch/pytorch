@@ -186,9 +186,7 @@ def third_party(name):
 
 def get_pt_compiler_flags():
     return select({
-        "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accommodate for eigen
-        ],
+        "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
@@ -901,7 +899,6 @@ def define_buck_targets(
                 # Don't need on mobile.
                 "torch/csrc/Exceptions.h",
                 "torch/csrc/python_headers.h",
-                "torch/csrc/utils/auto_gil.h",
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
         ),
@@ -1051,9 +1048,6 @@ def define_buck_targets(
             "--replace",
             "@AT_MKL_SEQUENTIAL@",
             "ATEN_MKL_SEQUENTIAL_FBXPLAT",
-            "--replace",
-            "@AT_FFTW_ENABLED@",
-            "0",
             "--replace",
             "@AT_POCKETFFT_ENABLED@",
             "1",
@@ -1998,6 +1992,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/python/*.h"),
                 ("", "torch/csrc/jit/frontend/*.h"),
                 ("", "torch/csrc/jit/serialization/*.h"),
+                ("", "torch/csrc/profiler/**/*.h"),
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
@@ -2041,6 +2036,7 @@ def define_buck_targets(
             "aten/src/ATen/EmptyTensor.cpp",
             "aten/src/ATen/Utils.cpp",
             "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+            "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
             ":gen_aten[Operators_0.cpp]",
             ":gen_aten[Operators_1.cpp]",
             ":gen_aten[Operators_2.cpp]",
@@ -2090,6 +2086,7 @@ def define_buck_targets(
             "aten/src/ATen/core/dispatch/Dispatcher.cpp",
             "aten/src/ATen/core/dispatch/ObservedOperators.cpp",
             "aten/src/ATen/core/dispatch/OperatorEntry.cpp",
+            "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",

@@ -220,8 +220,8 @@ void slow_conv_dilated_all_cpu_template(
   std::vector<int64_t> dims(dim);
   std::iota(dims.begin(), dims.end(), 1);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Long, at::ScalarType::BFloat16, input.scalar_type(), "slow_conv_dilated<>", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND3(
+        at::ScalarType::Long, at::ScalarType::BFloat16, at::ScalarType::Half, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
     for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
@@ -628,7 +628,7 @@ Tensor slow_conv_dilated3d_cpu(
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
@@ -687,7 +687,7 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
   return std::tie(grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,

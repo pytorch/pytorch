@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
 #include <iostream>
@@ -46,7 +47,7 @@ static_assert(
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -247,6 +248,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofSymInts() {
+  static auto value = ListType::create(SymIntType::get());
+  return value;
+}
 ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexType::get());
   return value;
@@ -263,6 +268,10 @@ ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
   return value;
 }
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
+  return value;
+}
 
 TypePtr OptionalType::get(TypePtr inner) {
   static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
@@ -277,7 +286,7 @@ TypePtr OptionalType::get(TypePtr inner) {
   return containerTypePtrs[inner];
 }
 
-TypePtr ListType::get(std::string identifier, TypePtr inner) {
+TypePtr ListType::get(const std::string& identifier, TypePtr inner) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -291,7 +300,7 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
   return containerTypePtrs[key];
 }
 
-TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
+TypePtr DictType::get(const std::string& identifier, TypePtr key, TypePtr value) {
   static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
@@ -355,7 +364,7 @@ SymBoolTypePtr SymBoolType::get() {
   return value;
 }
 
-static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
+static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, const TypePtr& type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
     return t2;
@@ -437,8 +446,8 @@ static c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
-  auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, const TypePtr& type_hint) {
+  auto unified = unifyTypesImpl(t1, t2, default_to_union, type_hint);
 
   if (default_to_union && !unified) {
     return UnionType::create({t1, t2});
@@ -451,7 +460,7 @@ c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
     bool default_to_union,
-    TypePtr type_hint) {
+    const TypePtr& type_hint) {
   if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;

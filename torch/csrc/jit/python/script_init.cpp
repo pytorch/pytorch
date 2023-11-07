@@ -648,7 +648,7 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-static constexpr std::array<const char*, 47> magic_method_names = {
+static constexpr std::array<const char*, 48> magic_method_names = {
     "__lt__",      "__le__",      "__eq__",        "__ne__",
     "__ge__",      "__gt__",      "__not__",       "__abs__",
     "__add__",     "__and__",     "__floordiv__",  "__index__",
@@ -660,7 +660,7 @@ static constexpr std::array<const char*, 47> magic_method_names = {
     "__iand__",    "__iconcat__", "__ifloordiv__", "__ilshift__",
     "__imod__",    "__imul__",    "__imatmul__",   "__ior__",
     "__ipow__",    "__irshift__", "__isub__",      "__itruediv__",
-    "__ixor__",    "__str__",     "__len__",
+    "__ixor__",    "__str__",     "__len__",       "__repr__",
 };
 
 struct DeepCopyMemoTable {
@@ -925,24 +925,43 @@ void initJitScriptBindings(PyObject* module) {
         return self.setter_func;
       });
 
-  // Special case __str__ to make sure we can print Objects/Modules
-  // regardless of if the user defined a __str__
+  // Special case __str__ and __repr__ to make sure we can print Objects/Modules
+  // regardless of if the user defined __str__/__repr__
   using MagicMethodImplType = std::function<py::object(
       const Object& self, py::args args, py::kwargs kwargs)>;
-  std::unordered_map<std::string, MagicMethodImplType> special_magic_methods{
-      {"__str__",
-       [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
-         auto method = self.find_method("__str__");
-         if (!method) {
-           return py::str("ScriptObject");
-         }
-         return invokeScriptMethodFromPython(
-             *method,
-             // NOLINTNEXTLINE(performance-move-const-arg)
-             std::move(args),
-             // NOLINTNEXTLINE(performance-move-const-arg)
-             std::move(kwargs));
-       }}};
+
+  std::unordered_map<std::string, MagicMethodImplType> special_magic_methods;
+  special_magic_methods.emplace(
+      "__str__",
+      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+        auto method = self.find_method("__str__");
+        if (!method) {
+          return py::str("ScriptObject <" + self.type()->str() + ">");
+        }
+        return invokeScriptMethodFromPython(
+            *method,
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            std::move(args),
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            std::move(kwargs));
+      });
+
+  special_magic_methods.emplace(
+      "__repr__",
+      [](const Object& self, py::args args, py::kwargs kwargs) -> py::object {
+        auto method = self.find_method("__repr__");
+        if (!method) {
+          std::stringstream ss;
+          ss << std::hex << static_cast<const void*>(&self);
+          return py::str("<torch.ScriptObject object at " + ss.str() + ">");
+        }
+        return invokeScriptMethodFromPython(
+            *method,
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            std::move(args),
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            std::move(kwargs));
+      });
 
   for (const char* mm_name : magic_method_names) {
     if (special_magic_methods.count(mm_name)) {
@@ -953,7 +972,10 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw NotImplementedError();
+              throw NotImplementedError(
+                  "'%s' is not implemented for %s",
+                  mm_name,
+                  self.type()->str().c_str());
             }
             return invokeScriptMethodFromPython(
                 *method,
@@ -1813,6 +1835,7 @@ void initJitScriptBindings(PyObject* module) {
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgraders_entry_map", &get_upgraders_entry_map);
   m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
   m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
@@ -2050,6 +2073,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "check_source_highlighted",
           &testing::FileCheck::check_source_highlighted)
+      .def("check_regex", &testing::FileCheck::check_regex)
       .def(
           "check_count",
           [](testing::FileCheck& f,

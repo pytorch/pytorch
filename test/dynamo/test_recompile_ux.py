@@ -12,7 +12,7 @@ import torch._dynamo.testing
 
 
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
-    # TODO(whc) dynamo actualy recompiles one more time than the cache limit
+    # TODO(whc) dynamo actually recompiles one more time than the cache limit
     cache_limit = 1
 
     @classmethod
@@ -76,6 +76,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         # counters["frames"]["ok"] includes frames not containing torch ops?
         self.assertEqual(compile_counter.frame_count, self.cache_limit)
 
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     def test_dynamic_input(self):
         def model(input):
             return input + input

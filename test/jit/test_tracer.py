@@ -35,6 +35,7 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTracer(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
@@ -136,6 +137,16 @@ class TestTracer(JitTestCase):
             return (x,)
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
+
+    def test_trace_out_operator_with_two_output(self):
+        example_input = torch.rand(2, 8)
+        out_1, out_2 = torch.cummax(example_input, 1)
+
+        def run_cummax(example_input, out_1, out_2):
+            output_1, output_2 = torch.cummax(example_input, 1, out=(out_1, out_2))
+            return output_1, output_2
+
+        trace_model = torch.jit.trace(run_cummax, (example_input, out_1, out_2))
 
     def test_trace_namedtuple(self):
         Point = namedtuple('point', ['x', 'y'])
@@ -986,7 +997,7 @@ class TestTracer(JitTestCase):
         traced_model.to('cpu')
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
-        traced_model.double()
+        traced_model.to(torch.get_default_dtype())
 
         # state_dict + load_state_dict
         state = {k: v.clone() for k, v in traced_model.state_dict().items()}
@@ -998,6 +1009,21 @@ class TestTracer(JitTestCase):
         out_state = traced_model(x)
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
+
+    @unittest.skipIf(not RUN_CUDA, "uses cuda")
+    def test_type_same_device(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dtype = torch.float16
+
+            def forward(self, x=None):
+                h = x.type(self.dtype)
+                return h
+
+        a = Model()
+        b = torch.jit.trace(a, example_inputs=(torch.ones([1], device=torch.device("cuda")),))
+        FileCheck().check_not("device").run(b.code)
 
     def test_export_no_reorder(self):
         def func(a, b):
@@ -1989,7 +2015,50 @@ class TestTracer(JitTestCase):
                                        'x': torch.ones(1), "y": (torch.ones(1), torch.ones(1))})
         self.assertEqual(model(**input_dict), traced_model(**input_dict))
 
+    def test_trace_no_duplicated_lifted_input_output(self):
+        class Normalize(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = nn.GroupNorm(num_groups=32, num_channels=32)
 
+            def forward(self, x, y):
+                if y is None:
+                    y = x
+                else:
+                    y = self.norm(y)
+                y = y * 2
+                return y
+
+        class G(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = Normalize()
+
+            def forward(self, x):
+                A = self.norm(x, None)
+                B = F.relu(A)
+                return A, B
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.g = G()
+                self.norm_1 = Normalize()
+
+            def forward(self, x):
+                hs = self.g(x)
+                A, B = hs
+                h = self.norm_1(B, A)
+                return h
+
+        net = Net()
+        net = net.eval()
+        x = torch.randn(1, 32, 16, 16)
+        traced = torch.jit.trace(net, x)
+        FileCheck().check_not("prim::TupleUnpack").run(str(traced.graph))
+
+
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
         @torch.jit.script
@@ -2329,7 +2398,7 @@ class TestMixTracingScripting(JitTestCase):
 
             def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
                 output = []
-                for i, j in feature_map.items():
+                for j in feature_map.values():
                     output.append(self.linear(j[0]))
 
                 return torch.stack(output)

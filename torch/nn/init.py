@@ -3,7 +3,7 @@ import warnings
 
 from torch import Tensor
 import torch
-
+from typing import Optional as _Optional
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
@@ -19,7 +19,7 @@ def _no_grad_normal_(tensor, mean, std):
         return tensor.normal_(mean, std)
 
 
-def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+def _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=None):
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x):
         # Computes standard normal cumulative distribution function
@@ -39,7 +39,7 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
         # Uniformly fill tensor with values from [l, u], then translate to
         # [2l-1, 2u-1].
-        tensor.uniform_(2 * l - 1, 2 * u - 1)
+        tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
 
         # Use inverse cdf transform for normal distribution to get truncated
         # standard normal
@@ -111,12 +111,12 @@ def calculate_gain(nonlinearity, param=None):
             # True/False are instances of int, hence check above
             negative_slope = param
         else:
-            raise ValueError("negative_slope {} not a valid number".format(param))
+            raise ValueError(f"negative_slope {param} not a valid number")
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
     elif nonlinearity == 'selu':
         return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
-        raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
+        raise ValueError(f"Unsupported nonlinearity {nonlinearity}")
 
 
 def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
@@ -154,7 +154,14 @@ def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
         return torch.overrides.handle_torch_function(normal_, (tensor,), tensor=tensor, mean=mean, std=std)
     return _no_grad_normal_(tensor, mean, std)
 
-def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
+def trunc_normal_(
+    tensor: Tensor,
+    mean: float = 0.,
+    std: float = 1.,
+    a: float = -2.,
+    b: float = 2.,
+    generator: _Optional[torch.Generator] = None
+) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
@@ -173,7 +180,7 @@ def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = 
         >>> w = torch.empty(3, 5)
         >>> nn.init.trunc_normal_(w)
     """
-    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=generator)
 
 
 def constant_(tensor: Tensor, val: float) -> Tensor:
@@ -357,7 +364,7 @@ def _calculate_correct_fan(tensor, mode):
     mode = mode.lower()
     valid_modes = ['fan_in', 'fan_out']
     if mode not in valid_modes:
-        raise ValueError("Mode {} not supported, please use one of {}".format(mode, valid_modes))
+        raise ValueError(f"Mode {mode} not supported, please use one of {valid_modes}")
 
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     return fan_in if mode == 'fan_in' else fan_out
@@ -533,18 +540,16 @@ def _make_deprecate(meth):
     old_name = new_name[:-1]
 
     def deprecated_init(*args, **kwargs):
-        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
-                      .format(old_name, new_name), stacklevel=2)
+        warnings.warn(f"nn.init.{old_name} is now deprecated in favor of nn.init.{new_name}.", stacklevel=2)
         return meth(*args, **kwargs)
 
-    deprecated_init.__doc__ = r"""
+    deprecated_init.__doc__ = fr"""
     {old_name}(...)
 
     .. warning::
         This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
 
-    See :func:`~torch.nn.init.{new_name}` for details.""".format(
-        old_name=old_name, new_name=new_name)
+    See :func:`~torch.nn.init.{new_name}` for details."""
     deprecated_init.__name__ = old_name
     return deprecated_init
 

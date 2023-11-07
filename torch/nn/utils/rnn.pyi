@@ -1,6 +1,6 @@
 from typing import (
     Any,
-    List,
+    Iterable,
     NamedTuple,
     Optional,
     overload,
@@ -9,6 +9,8 @@ from typing import (
     TypeVar,
     Union,
 )
+
+from typing_extensions import Self
 
 from torch import Tensor
 from torch.types import _device, _dtype
@@ -30,7 +32,7 @@ class PackedSequence(PackedSequence_):
         batch_sizes: Optional[Tensor] = ...,
         sorted_indices: Optional[Tensor] = ...,
         unsorted_indices: Optional[Tensor] = ...,
-    ) -> PackedSequence: ...
+    ) -> Self: ...
     def pin_memory(self: T) -> T: ...
     def cuda(self: T, *args: Any, **kwargs: Any) -> T: ...
     def cpu(self: T) -> T: ...
@@ -59,7 +61,7 @@ class PackedSequence(PackedSequence_):
     ) -> T: ...
     @overload
     def to(
-        self,
+        self: T,
         other: Tensor,
         non_blocking: bool = False,
         copy: bool = False,
@@ -82,7 +84,7 @@ def pad_packed_sequence(
     total_length: Optional[int] = ...,
 ) -> Tuple[Tensor, ...]: ...
 def pad_sequence(
-    sequences: List[Tensor],
+    sequences: Union[Tensor, Iterable[Tensor]],
     batch_first: bool = False,
     padding_value: float = ...,
 ) -> Tensor: ...

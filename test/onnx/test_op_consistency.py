@@ -56,16 +56,27 @@ TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
+        # "atleast_1d",  # How to support list input?
+        # "atleast_2d",  # How to support list input?
+        # "atleast_3d",  # How to support list input?
+        "broadcast_to",
         "ceil",
+        "expand",
         "flatten",
+        "hstack",
         "logical_not",
+        # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
         "repeat",
+        "round",
+        # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "sqrt",
         "stft",
         "t",
         "tile",
         "unflatten",
+        "vstack",
     ]
 )
 
@@ -94,12 +105,70 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
+    skip("hstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
+    xfail(
+        "logit",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
+    ),
     skip("nn.functional.scaled_dot_product_attention", opsets=[onnx_test_common.opsets_before(14)], reason="Need Trilu."),
     skip("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
+    xfail("round", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_0", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_neg_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    skip("scatter_reduce", variant_name="amin", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    skip("scatter_reduce", variant_name="amax", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    skip("scatter_reduce", variant_name="prod", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    xfail("scatter_reduce", variant_name="mean",
+          reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction=mean")),
+    skip("scatter_reduce", variant_name="sum", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    xfail(
+        "scatter_reduce",
+        variant_name="sum",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="prod",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=prod", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amin",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amin", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amax",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amax", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="mean",
+        reason="ONNX doesn't support reduce='mean' option",
+    ),
     skip("sqrt", dtypes=onnx_test_common.BOOL_TYPES, reason=onnx_test_common.reason_onnx_does_not_support("Sqrt")),
     skip("stft", opsets=[onnx_test_common.opsets_before(17)], reason=onnx_test_common.reason_onnx_does_not_support("STFT")),
+    xfail("stft",
+          reason=onnx_test_common.reason_onnx_runtime_does_not_support("STFT", "Regression on ORT=1.15 4 percent difference")),
     skip("tile", opsets=[onnx_test_common.opsets_before(13)], reason=onnx_test_common.reason_onnx_does_not_support("Tile")),
     xfail("unflatten", opsets=[onnx_test_common.opsets_before(13)], reason="Helper function is needed to support legacy ops."),
+    skip("vstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
 )
 # fmt: on
 
@@ -113,6 +182,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "repeat",
         reason="Empty repeats value leads to an invalid graph",
         matcher=lambda sample: not sample.args[0],
+    ),
+    skip(
+        "scatter_reduce",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
     ),
     skip(
         "stft",

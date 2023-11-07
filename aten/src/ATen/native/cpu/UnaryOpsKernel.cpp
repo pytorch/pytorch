@@ -139,7 +139,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 
 #endif // AT_MKL_ENABLED
 
-void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
+static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
@@ -179,6 +179,18 @@ void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
       });
 }
 
+#if !defined(C10_MOBILE)
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+            TYPE, NAME, __VA_ARGS__)
+#else
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(          \
+            kHalf, kBFloat16,                            \
+            TYPE, NAME, __VA_ARGS__)
+#endif
+
 static void abs_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (dtype == kComplexHalf) {
@@ -186,7 +198,7 @@ static void abs_kernel(TensorIteratorBase& iter) {
     using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t { return abs_impl(opmath_t{a}); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
+    _AT_DISPATCH_ABS_TYPES(iter.dtype(), "abs_cpu", [&]() {
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) -> scalar_t { return abs_impl(a); },
@@ -243,7 +255,7 @@ static void bitwise_not_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void frac_kernel(TensorIteratorBase& iter) {
+static void frac_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "frac_cpu", [&]() {
     cpu_kernel_vec(
         iter,
@@ -252,7 +264,7 @@ void frac_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void logical_not_kernel(TensorIteratorBase& iter) {
+static void logical_not_kernel(TensorIteratorBase& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
@@ -283,7 +295,7 @@ void neg_kernel(TensorIteratorBase& iter) {
   });
 }
 
-void sign_kernel(TensorIteratorBase& iter){
+static void sign_kernel(TensorIteratorBase& iter){
   if(iter.dtype() == ScalarType::Bool){
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
   } else {
@@ -337,7 +349,7 @@ static void sgn_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinc_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "sinc_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t {
@@ -352,7 +364,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
@@ -361,7 +373,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void cosh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
@@ -370,7 +382,7 @@ static void cosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void acosh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -378,7 +390,7 @@ static void acosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void asinh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -386,23 +398,25 @@ static void asinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void atanh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "atanh_cpu", [&]() {
-      cpu_kernel(
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "atanh_cpu", [&]() {
+      cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::atanh(a); });
+        [=](scalar_t a) -> scalar_t { return std::atanh(a); },
+        [=](Vectorized<scalar_t> self_vec){return self_vec.atanh();});
     });
 }
 
 static void digamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "digamma", [&]() {
-    cpu_kernel(
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "digamma", [&]() {
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); },
+        [=](Vectorized<scalar_t> x) { return x.digamma(); });
   });
 }
 
 static void trigamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "trigamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "trigamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return trigamma(a); });
@@ -425,11 +439,59 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else if (n == 1) {
     trigamma_kernel(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
           iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
   }
+}
+
+template <typename scalar_t>
+inline scalar_t _nan_to_num_replace(
+    scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
+  if (at::_isnan(a)) {
+    return nan_replacement;
+  } else if (a == std::numeric_limits<scalar_t>::infinity()) {
+    return pos_inf_replacement;
+  } else if (a == -std::numeric_limits<scalar_t>::infinity()) {
+    return neg_inf_replacement;
+  } else {
+    return a;
+  }
+}
+
+template <typename scalar_t>
+inline c10::complex<scalar_t> _nan_to_num_replace(
+    c10::complex<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  return c10::complex<scalar_t>(
+      _nan_to_num_replace(a.real(), nan, posinf, neginf),
+      _nan_to_num_replace(a.imag(), nan, posinf, neginf)
+  );
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _nan_to_num_replace(
+    Vectorized<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  using vec_t = Vectorized<scalar_t>;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  vec_t result;
+  result = vec_t::blendv(a, vec_t(nan), a.isnan());
+  result = vec_t::blendv(result, vec_t(posinf), a == inf);
+  return vec_t::blendv(result, vec_t(neginf), a == inf.neg());
+}
+
+template <typename scalar_t>
+inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
+    Vectorized<c10::complex<scalar_t>> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+#if !defined(_MSC_VER) && (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))
+  return {_nan_to_num_replace(Vectorized<scalar_t>(a), nan, posinf, neginf)};
+#else
+  __at_align__ c10::complex<scalar_t> buffer[a.size()];
+  a.store(buffer);
+  auto asreal = Vectorized<scalar_t>::loadu(buffer);
+  _nan_to_num_replace(asreal, nan, posinf, neginf).store(buffer);
+  return Vectorized<c10::complex<scalar_t>>::loadu(buffer);
+#endif
 }
 
 static void nan_to_num_kernel(
@@ -437,39 +499,38 @@ static void nan_to_num_kernel(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
-    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-    scalar_t pos_inf_replacement = pos_inf.has_value()
-        ? static_cast<scalar_t>(pos_inf.value())
-        : std::numeric_limits<scalar_t>::max();
-    scalar_t neg_inf_replacement = neg_inf.has_value()
-        ? static_cast<scalar_t>(neg_inf.value())
-        : std::numeric_limits<scalar_t>::lowest();
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
+    using value_t = c10::scalar_value_type<scalar_t>::type;
+    value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
+    value_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<value_t>(pos_inf.value())
+        : std::numeric_limits<value_t>::max();
+    value_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<value_t>(neg_inf.value())
+        : std::numeric_limits<value_t>::lowest();
+    using vec_t = Vectorized<scalar_t>;
 
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return (
-          at::_isnan(a)
-              ? nan_replacement
-              : (a == std::numeric_limits<scalar_t>::infinity()
-                     ? pos_inf_replacement
-                     : (a == -std::numeric_limits<scalar_t>::infinity()
-                            ? neg_inf_replacement
-                            : a)));
+    cpu_kernel_vec(iter, [=](scalar_t a) -> scalar_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+    }, [=](vec_t a) -> vec_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
     });
   });
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
-    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "kaiser_window_cpu", [&](){
+    using opmath_t = at::opmath_type<scalar_t>;
+    const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
+    const opmath_t beta_ = static_cast<opmath_t>(beta);
     cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
     });
   });
 }
 
 void rsqrt_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
@@ -480,8 +541,8 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
 }
 
 static void entr_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "entr_cpu", [&] {
         cpu_kernel(iter, [](scalar_t x) -> scalar_t {
           if (at::_isnan(x)) {
             return x;
@@ -528,8 +589,8 @@ static void log_ndtr_kernel(TensorIteratorBase& iter) {
 
 static void i0e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "i0e_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "i0e_cpu", [&]() {
         cpu_kernel_vec(
             iter,
             [](scalar_t x) { return calc_i0e(x); },
@@ -559,19 +620,20 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
-void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+static void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         bool neg_flag = false;
-        scalar_t ten_pow_decimals;
+        opmath_t ten_pow_decimals;
         if (decimals < 0) {
           decimals = -decimals;
           neg_flag = true;
         }
-        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        ten_pow_decimals = static_cast<opmath_t>(std::pow(10, decimals));
         cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
-          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+          return neg_flag ? std::nearbyint(static_cast<opmath_t>(a) / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(static_cast<opmath_t>(a) * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }
@@ -688,121 +750,138 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
   inline namespace CPU_CAPABILITY {                                                 \
-  void op##_kernel(TensorIteratorBase& iter) {                                      \
+  static void op##_kernel(TensorIteratorBase& iter) {                               \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
       constexpr int64_t grain_size = 2048;                                          \
       iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                     \
     });                                                                             \
     iter.cast_outputs();                                                            \
   }                                                                                 \
-  }                                                                                 \
+  }
+
+#define IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(op)                                   \
+  IMPLEMENT_FLOAT_KERNEL(op)                                                        \
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(op)                                      \
+  IMPLEMENT_FLOAT_KERNEL(op)                                                        \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
         constexpr int64_t grain_size = 2048;                                                     \
         iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
     });                                                                                          \
     iter.cast_outputs();                                                                         \
   }                                                                                              \
-  }                                                                                              \
+  }
+
+#define IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(op)                            \
+  IMPLEMENT_COMPLEX_KERNEL(op)                                                 \
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(op)                               \
+  IMPLEMENT_COMPLEX_KERNEL(op)                                                 \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
+  inline namespace CPU_CAPABILITY {                                                              \
+  static void op##_kernel(TensorIteratorBase& iter) {                                            \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), #op "_vml_cpu", [&]() { \
+        constexpr int64_t grain_size = 2048;                                                     \
+        iter.for_each(IMPLEMENT_ITERATOR_LAMBDA(op), grain_size);                                \
+    });                                                                                          \
+    iter.cast_outputs();                                                                         \
+  }                                                                                              \
+  }
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(op)                     \
+  STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                          \
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(op)                        \
+  STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                          \
+  ALSO_REGISTER_AVX512_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 } // CPU_CAPABILITY namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
-REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
-REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+// The following kernels are slower with AVX512
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
-REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
+REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
+REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
+REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
-REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
-REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
-REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
-REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
-REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
-REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
-REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
-REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
-REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
+REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
+REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
+REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
+REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
+REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
+REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(ceil);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(floor);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(round);
+IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(sqrt);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(trunc);
+IMPLEMENT_FLOAT_KERNEL_WITHOUT_AVX512(i0);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(sin);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(cos);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITHOUT_AVX512(tan);
+
+// The following kernels are compute-intensive & are compiled with both AVX512
+// & AVX2
+ALSO_REGISTER_AVX512_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
+
+// Might enable AVX512 dispatch after enabling explicit vectorization for them
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
-REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
-REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);
 REGISTER_DISPATCH(frexp_stub, &CPU_CAPABILITY::frexp_kernel);
-REGISTER_DISPATCH(special_i0e_stub, &CPU_CAPABILITY::i0e_kernel);
-REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
-REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
 REGISTER_DISPATCH(special_bessel_j1_stub, &CPU_CAPABILITY::bessel_j1_kernel);
 REGISTER_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0_kernel);
 REGISTER_DISPATCH(special_bessel_y1_stub, &CPU_CAPABILITY::bessel_y1_kernel);
 REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
-REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
-REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(acos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(asin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(atan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(ceil)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(cos)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(erf)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(erfc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(erfinv)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(exp)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(expm1)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(floor)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log10)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log1p)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(log2)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(i0)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(round)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(sin)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(sqrt)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tan)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_COMPLEX_KERNEL(tanh)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(trunc)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-IMPLEMENT_FLOAT_KERNEL(lgamma)
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(acos);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(asin);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(atan);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erf);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erfc);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(erfinv);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(exp);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(expm1);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log10);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log1p);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(log2);
+STATIC_IMPLEMENT_COMPLEX_KERNEL_WITH_AVX512(tanh);
+IMPLEMENT_FLOAT_KERNEL_WITH_AVX512(lgamma);
 
 } // namespace at::native

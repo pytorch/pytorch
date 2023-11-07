@@ -1,4 +1,5 @@
 import itertools
+import random
 import unittest
 from functools import partial
 from itertools import chain, product
@@ -22,6 +23,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
     tol,
     toleranceOverride,
@@ -533,7 +535,7 @@ def sample_inputs_linalg_pinv_singular(
     size = [0, 3, 50]
 
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, min(m, n))):
+        for k in range(min(3, m, n)):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
             a = (
@@ -932,7 +934,9 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     # Samples do not need to be Hermitian, as we're using gradcheck_wrapper_hermitian_input
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
-        sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+        # Note: we cannot use np.random.choice here as TorchDynamo
+        # does not support tensors of strings.
+        sample.kwargs = {"UPLO": random.choice(["L", "U"])}
         sample.output_process_fn_grad = out_fn
         yield sample
 
@@ -1006,7 +1010,7 @@ def sample_inputs_linalg_solve(
         nrhs = [(1,), (3,)]
 
     for n, batch, rhs in product(ns, batches, nrhs):
-        yield SampleInput(make_a(*batch, n, n), args=(make_b((batch + (n,) + rhs)),))
+        yield SampleInput(make_a(*batch, n, n), args=(make_b(batch + (n,) + rhs),))
 
 
 def sample_inputs_linalg_solve_triangular(
@@ -1170,7 +1174,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, y, dim=-1: np.cross(x, y, axis=dim),
         op=torch.linalg.cross,
         dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.half),
+        dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
         aten_name="linalg_cross",
         sample_inputs_func=sample_inputs_cross,
         error_inputs_func=error_inputs_cross,
@@ -1319,8 +1323,7 @@ op_db: List[OpInfo] = [
         "linalg.vecdot",
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
-        dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1423,12 +1426,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
-            # exits early on eager extremal value test
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCudaFuserOpInfo",
-                "test_nvfuser_extremal_values",
-            ),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",
@@ -1561,7 +1558,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_factor_ex",
@@ -1569,7 +1566,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_solve",
@@ -1670,7 +1667,7 @@ op_db: List[OpInfo] = [
         "linalg.multi_dot",
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
@@ -2405,22 +2402,30 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,
-        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.vecdot",
+        torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
     ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",
         supports_out=True,
-        supports_nvfuser=False,  # clone_default
         op_db=op_db,
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.matrix_norm",
         torch_opinfo_name="linalg.matrix_norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2430,8 +2435,6 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.norm",
         torch_opinfo_name="linalg.norm",
         supports_out=True,
-        # Uses svdvals which does not support nvfuser
-        supports_nvfuser=False,
         # Uses vector_norm inside and vector_norm is affected by
         # https://github.com/pytorch/pytorch/issues/77216
         validate_view_consistency=False,
@@ -2441,14 +2444,12 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.svd",
         torch_opinfo_name="linalg.svd",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
         torch_opinfo_name="linalg.svdvals",
         supports_out=True,
-        supports_nvfuser=False,
         op_db=op_db,
     ),
 ]

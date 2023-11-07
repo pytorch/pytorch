@@ -37,9 +37,11 @@ from torch.distributed._tensor import (
     redistribute,
 )
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed._tensor.placement_types import Placement, DTensorSpec
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
+PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
+
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -48,6 +50,22 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
     NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
 
 T = TypeVar("T")
+
+
+class MLPModule(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        torch.manual_seed(5)
+        self.net1 = torch.nn.Linear(10, 16, device=device)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(16, 10, device=device)
+
+    def forward(self, x):
+        return self.net2(self.relu(self.net1(x)))
+
+    def reset_parameters(self):
+        self.net1.reset_parameters()
+        self.net2.reset_parameters()
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -71,25 +89,25 @@ class RedistributeProfile:
 @contextmanager
 def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
 
-    orig_redistribute_dtensor = redistribute.redistribute_dtensor
+    orig_redistribute_local_tensor = redistribute.redistribute_local_tensor
     profile: RedistributeProfile = RedistributeProfile(num_calls=0)
 
     # pyre-ignore[53]
-    def patched_redistribute_dtensor(
-        input: DTensor,
-        device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+    def patched_redistribute_local_tensor(
+        local_tensor: torch.Tensor,
+        current_spec: DTensorSpec,
+        target_spec: DTensorSpec,
     ) -> DTensor:
-        result = orig_redistribute_dtensor(input, device_mesh, placements)
+        result = orig_redistribute_local_tensor(local_tensor, current_spec, target_spec)
         profile.num_calls += 1
         return result
 
     try:
         # pyre-ignore[9]
-        redistribute.redistribute_dtensor = patched_redistribute_dtensor
+        redistribute.redistribute_local_tensor = patched_redistribute_local_tensor
         yield profile
     finally:
-        redistribute.redistribute_dtensor = orig_redistribute_dtensor
+        redistribute.redistribute_local_tensor = orig_redistribute_local_tensor
 
 
 class DTensorTestBase(MultiProcessTestCase):
@@ -97,25 +115,29 @@ class DTensorTestBase(MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
+    @property
+    def backend(self) -> str:
+        return PG_BACKEND
+
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(DEVICE_TYPE, list(range(NUM_DEVICES)))
 
-    def init_pg(self, backend: str = "nccl") -> None:
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
+    def init_pg(self) -> None:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
-        if backend not in ["nccl", "gloo", "mpi"]:
+        if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
             raise RuntimeError(f"Backend {backend} not supported!")
 
         dist.init_process_group(
-            backend=backend,
+            backend=self.backend,
             world_size=self.world_size,
             rank=self.rank,  # pyre-ignore[16]
             init_method=f"file://{self.file_name}",  # pyre-ignore[16]
         )
 
         # set device for nccl pg for collectives
-        if backend == "nccl":
+        if "nccl" in self.backend:
             torch.cuda.set_device(self.rank)
 
     def destroy_pg(self) -> None:
@@ -164,14 +186,8 @@ def with_comms(func: TestFunc) -> TestFunc:
         else:
             self.device_type = "cpu"
 
-        pg_backend = (
-            "nccl" if self.device_type == "cuda" else "gloo"
-        )
-        if pg_backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[misc]
+        self.init_pg()
+        func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
@@ -320,21 +336,11 @@ class DTensorConverter:
         if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
             if self.is_supported_tensor(t):
                 self.hit += 1
-                # We cannot use distribute_tensor for bool tensors as c10d
-                # collectives does not support the dtype, we assume op with
-                # bool tensor args the same tensor so we don't need to broadcast
-                # TODO: add bool tensor dtype support in c10d collective
-                if t.dtype == torch.bool:
-                    r = DTensor(
-                        t,
-                        mesh,
-                        placements,
-                        size=t.size(),
-                        dtype=torch.bool,
-                        requires_grad=t.requires_grad,
-                        stride=t.stride()
-                    )
+                if t.ndim == 0:
+                    # scalar tensor by default will be replicated
+                    r = distribute_tensor(t, mesh, [Replicate()] * mesh.ndim)
                 else:
+                    # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(  # type: ignore[assignment]

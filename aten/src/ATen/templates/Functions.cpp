@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <c10/core/Allocator.h>
 
 namespace at {
 
@@ -36,7 +37,8 @@ Tensor TensorMaker::make_tensor() {
      data_ptr = makeDataPtrFromContext();
    }
 
-   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr)};
+   TORCH_CHECK(!resizeable_ || allocator_ != nullptr, "Must specify an allocator with allocator() if you want to use resizeable_storage()");
+   Storage storage{Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr), /*allocator=*/allocator_, /*resizeable=*/resizeable_};
 
    Tensor tensor = detail::make_tensor<TensorImpl>(
        std::move(storage), opts_.computeDispatchKey(), opts_.dtype());

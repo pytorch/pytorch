@@ -13,7 +13,7 @@
 
 namespace c10d {
 
-ProcessGroup::BackendType strToBackendType(std::string backend) {
+static ProcessGroup::BackendType strToBackendType(std::string backend) {
   if (backend == "undefined") {
     return ProcessGroup::BackendType::UNDEFINED;
   } else if (backend == "gloo") {
@@ -29,7 +29,7 @@ ProcessGroup::BackendType strToBackendType(std::string backend) {
   }
 }
 
-std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
+static std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
   switch (backendType) {
     case ProcessGroup::BackendType::UNDEFINED:
       return "undefined";
@@ -153,4 +153,28 @@ void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
       fmt::format("c10d.process_group_{}", getBackendName()));
 }
+
+const std::string& ProcessGroup::getGroupName() const {
+  TORCH_CHECK(deviceTypeToBackend_.size(), "ProcessGroup name not set");
+  return deviceTypeToBackend_.begin()->second->getGroupName();
+}
+
+void ProcessGroup::setGroupName(const std::string& name) {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->setGroupName(name);
+  }
+}
+
+void ProcessGroup::enableCollectivesTiming() {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->enableCollectivesTiming();
+  }
+}
+
+void ProcessGroup::release_resources() {
+  store_.reset();
+  deviceTypeToBackend_.clear();
+  backendTypeToBackend_.clear();
+}
+
 } // namespace c10d

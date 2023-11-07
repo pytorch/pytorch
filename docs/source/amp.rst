@@ -6,7 +6,6 @@ Automatic Mixed Precision package - torch.amp
 
 .. Both modules below are missing doc entry. Adding them here for now.
 .. This does not add anything to the rendered page
-.. py:module:: torch.cpu
 .. py:module:: torch.cpu.amp
 .. py:module:: torch.cuda.amp
 
@@ -30,6 +29,8 @@ For CUDA and CPU, APIs are also provided separately:
 
 * ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
 * ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
+
+:class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
 .. contents:: :local:
 
@@ -73,6 +74,15 @@ so they don't flush to zero.
 
 Each parameter's gradient (``.grad`` attribute) should be unscaled before the optimizer
 updates the parameters, so the scale factor does not interfere with the learning rate.
+
+.. note::
+
+  AMP/fp16 may not work for every model! For example, most bf16-pretrained models cannot operate in
+  the fp16 numerical range of max 65504 and will cause gradients to overflow instead of underflow. In
+  this case, the scale factor may decrease under 1 as an attempt to bring gradients to a number
+  representable in the fp16 dynamic range. While one may expect the scale to always be above 1, our
+  GradScaler does NOT make this guarantee to maintain performance. If you encounter NaNs in your loss
+  or gradients when running with AMP/fp16, verify your model is compatible.
 
 .. currentmodule:: torch.cuda.amp
 
@@ -374,3 +384,12 @@ Some ops not listed here (e.g., binary ops like ``add``) natively promote
 inputs without autocasting's intervention.  If inputs are a mixture of ``bfloat16``
 and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
 regardless of whether autocast is enabled.
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.amp.autocast_mode
+.. py:module:: torch.cpu.amp.autocast_mode
+.. py:module:: torch.cuda.amp.autocast_mode
+.. py:module:: torch.cuda.amp.common
+.. py:module:: torch.cuda.amp.grad_scaler

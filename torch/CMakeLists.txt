@@ -13,10 +13,6 @@ if(NOT BUILD_PYTHON)
   return()
 endif()
 
-if(USE_TBB)
-  include_directories(${TBB_INCLUDE_DIR})
-endif()
-
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
 
@@ -87,9 +83,17 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
 
-set(TORCH_PYTHON_COMPILE_DEFINITIONS)
+if(USE_ASAN AND TARGET Sanitizer::address)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::address)
+endif()
+if(USE_ASAN AND TARGET Sanitizer::undefined)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
+endif()
+if(USE_TSAN AND TARGET Sanitizer::thread)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
+endif()
 
-set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
+set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
@@ -136,7 +140,7 @@ if(USE_ROCM)
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
-      __HIP_PLATFORM_HCC__
+      __HIP_PLATFORM_AMD__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
 endif()
@@ -258,7 +262,7 @@ if(USE_DISTRIBUTED)
     endif()
     # Same for MPI.
     if(USE_MPI)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES MPI::MPI_CXX)
     endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 
@@ -307,10 +311,6 @@ if(USE_PRECOMPILED_HEADERS)
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
 endif()
 
-if(NOT MSVC)
-  target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-endif()
-
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
@@ -344,8 +344,6 @@ target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIB
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
-target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
-
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
@@ -375,10 +373,9 @@ endif()
 
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
+  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
-  COMMAND
-    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
+    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}

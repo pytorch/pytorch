@@ -89,6 +89,10 @@ using steady_clock_t = std::conditional<
     std::chrono::high_resolution_clock,
     std::chrono::steady_clock>::type;
 
+using shape =
+    std::variant<std::vector<int64_t>, std::vector<std::vector<int64_t>>>;
+constexpr int TENSOR_LIST_DISPLAY_LENGTH_LIMIT = 30;
+
 inline time_t getTimeSinceEpoch() {
   auto now = std::chrono::system_clock::now().time_since_epoch();
   return std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
@@ -186,19 +190,25 @@ TORCH_API std::string stacksToStr(
 TORCH_API std::vector<std::vector<int64_t>> inputSizes(
     const at::RecordFunction& fn,
     const bool flatten_list_enabled = false);
+TORCH_API std::string variantShapesToStr(const std::vector<shape>& shapes);
 TORCH_API std::string shapesToStr(
     const std::vector<std::vector<int64_t>>& shapes);
-TORCH_API std::string dtypesToStr(const std::vector<std::string>& types);
+TORCH_API std::string strListToStr(const std::vector<std::string>& types);
 TORCH_API std::string inputOpIdsToStr(
     const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids);
+TORCH_API std::string ivalueListToStr(const std::vector<c10::IValue>& list);
 TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
+std::unordered_map<std::string, std::string> TORCH_API
+saveNcclMeta(const at::RecordFunction& fn);
 
 uint64_t TORCH_API computeFlops(
     const std::string& op_name,
     const std::unordered_map<std::string, c10::IValue>& extra_args);
+
+std::string shapeToStr(const std::vector<int64_t>& shape);
 
 template <typename T>
 class TORCH_API GlobalStateManager {

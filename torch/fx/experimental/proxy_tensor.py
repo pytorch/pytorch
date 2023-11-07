@@ -9,8 +9,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
+from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
@@ -19,14 +19,16 @@ from dataclasses import dataclass
 import weakref
 import operator
 from torch.utils._stats import count
+import logging
+
+from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
-    _pop_mode_temporarily,
-    _get_current_dispatch_mode,
+    _pop_mode,
+    _push_mode,
 )
 
-from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
@@ -37,7 +39,10 @@ __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpr
 aten = torch.ops.aten
 prim = torch.ops.prim
 
-CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+log = logging.getLogger(__name__)
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+
+CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OperatorBase, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -108,16 +113,8 @@ def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
 def snapshot_fake(val):
     return val.detach()
 
-def unwrap_proxy(proxy_mode, e):
-    if isinstance(e, torch.Tensor):
-        return get_proxy_slot(e, proxy_mode.tracer, e, lambda e: e.proxy)
-    elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        return get_proxy_slot(e.node, proxy_mode.tracer, e, lambda e: e())
-    else:
-        return e
-
 def extract_val(val):
-    if isinstance(val, FakeTensor):
+    if is_fake(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
@@ -146,7 +143,7 @@ def extract_val(val):
 def set_meta(proxy, val):
     proxy.node.meta['val'] = extract_val(val)
     # Best effort tensor_meta setting; prefer using val!
-    if isinstance(val, FakeTensor):
+    if is_fake(val):
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     elif isinstance(val, torch.Tensor) and not val.is_sparse:
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -197,6 +194,23 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # example use case: allreduce_ returns ([tensor], work)
             for idx, ee in enumerate(e):
                 wrap_with_proxy(ee, proxy[idx], get_constant(idx))
+        elif isinstance(e, dict):
+            # In theory we could support const-prop when proxy-tensor-tracing
+            # operators that returns dicts of tensors, but we have no use case
+            # for it today (since the only op we currently trace that can
+            # return a dict is triton_kernel_wrapper_functional/mutation,
+            # which does not participate in const-prop)
+            assert constant is None
+
+            if isinstance(proxy, fx.Proxy):
+                set_meta(proxy, e)
+
+            # example use case: triton_kernel_wrapper takes arguments as kwargs
+            for key, val in e.items():
+                wrap_with_proxy(val, proxy[key], None)
+        else:
+            # intentionally pass on primitives
+            pass
 
 
     def get_constant(idx):
@@ -213,11 +227,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mb_fake_mode = _get_current_dispatch_mode()
-    if isinstance(mb_fake_mode, FakeTensorMode):
-        return _pop_mode_temporarily()
-    else:
-        return nullcontext()
+    return unset_fake_temporarily()
 
 
 @dataclass
@@ -240,34 +250,33 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
-@contextlib.contextmanager
-def inside_mode(proxy_mode):
-    old = proxy_mode.is_inside_mode
-    proxy_mode.is_inside_mode = True
-    try:
-        yield
-    finally:
-        proxy_mode.is_inside_mode = old
+def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
+    unrecognized_types = []
 
-def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     def can_handle_tensor(x):
-        return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        if proxy_mode._allow_fake_constant:
+            r = r or type(x) in (torch._subclasses.FakeTensor,)
+        if not r:
+            unrecognized_types.append(type(x))
+        return r
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+        not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
         return NotImplemented
 
-    if func in CURRENT_DECOMPOSITION_TABLE:
-        with proxy_mode:
-            r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+    r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
+    if r is not NotImplemented:
+        return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_autograd:
+    if not pre_dispatch and func not in [
+        torch.ops.aten.size.default, torch.ops.aten.stride.default, torch.ops.aten.storage_offset.default
+    ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -286,7 +295,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
     )
 
-    if torch.Tag.data_dependent_output in func.tags:  # type: ignore[attr-defined]
+    if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
         if all_constant:
             const_args, const_kwargs = pytree.tree_map_only(
@@ -297,7 +306,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
         # incorrectly burn in constants by allowing this access.  Raise
         # an error in this case
-        if pytree.tree_all_only(torch.Tensor, lambda t: not isinstance(t, FakeTensor), (args, kwargs)):
+        if pytree.tree_all_only(torch.Tensor, lambda t: not is_fake(t), (args, kwargs)):
             raise RuntimeError(
                 f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
                 "It's likely that this is caused by data-dependent control flow or similar.  "
@@ -335,7 +344,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     #
     # If lift_fresh returns t directly, the subsequent add_ call will
     # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the the argument to lift is fresh.  So what we should
+    # the invariant the argument to lift is fresh.  So what we should
     # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
     #
     #       t = self._tensor_constant0  # initialized to torch.tensor(1)
@@ -345,12 +354,6 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     # This is what the overload modification does.
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
-
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    if proxy_mode.is_inside_mode:
-        return func(*args, **kwargs)
 
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
@@ -367,8 +370,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         else:
             args[0].proxy = proxy_out
 
-    with inside_mode(proxy_mode):
-        out = func(*args, **kwargs)
+    out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -402,7 +404,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         with maybe_disable_fake_tensor_mode():
             constant = args[0].clone()
     elif (
-        torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
+        torch.Tag.nondeterministic_seeded not in func.tags
         and all_constant
         and any_constant
         and pytree.tree_all_only(torch.Tensor, lambda t: t.numel() <= CONSTANT_NUMEL_LIMIT, out)
@@ -416,12 +418,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    # In particular, track_tensor_tree can call detach().
-    with inside_mode(proxy_mode):
-        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 
@@ -465,7 +462,16 @@ class PythonKeyTracer(Tracer):
             return a.node.constant
         return super().create_arg(a)
 
+    def unwrap_proxy(self, e):
+        if isinstance(e, torch.Tensor):
+            return get_proxy_slot(e, self, e, lambda e: e.proxy)
+        elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            return get_proxy_slot(e.node, self, e, lambda e: e())
+        else:
+            return e
 
+
+@torch._disable_dynamo
 def dispatch_trace(
         root: Union[torch.nn.Module, Callable],
         tracer: Tracer,
@@ -476,15 +482,34 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, tensors, tracer, pre_autograd: bool):
+@contextlib.contextmanager
+def _pop_proxy_mode_temporarily(dk):
+    # This is a shim around the existng per-dispatch-key-mode logic.
+    # I'll delete the per-dispatch-key-mode logic in a followup PR
+    if dk is not None:
+        # During pre_dispatch, pop off of the PreDispatch mode stack
+        old = _pop_mode(dk)
+        try:
+            yield old
+        finally:
+            _push_mode(old, dk)
+    else:
+        # During normal tracing, pop off of the dedicated proxy mode stack
+        old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+        try:
+            yield old
+        finally:
+            torch._C._set_dispatch_mode(old)
+
+def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
-    dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
+    dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
 
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        with _pop_mode_temporarily(dk) as m:
+        with _pop_proxy_mode_temporarily(dk) as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
@@ -520,19 +545,47 @@ def set_original_aten_op(func):
 
 
 
+# This mode is **only** used for pre_dispatch tracing.
+# In particular, we need to make sure that autograd/autocast API's
+# that do not desugar into dispatcher operators stay in the graph.
+class PreDispatchTorchFunctionMode(TorchFunctionMode):
+
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        pre_dispatch_ops = [
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        ]
+        if func in pre_dispatch_ops:
+            return self.tracer.create_node("call_function", func, args, {})
+            # Don't actually run the function! We just want to trace the calls
+            # into a graph. We don't actualy want to change global autograd state.
+        return func(*args, **kwargs)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_autograd=False):
-        dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
+    def __init__(self, tracer, tracing_mode, pre_dispatch=False, _allow_fake_constant=False):
+        dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
-        self.pre_autograd = pre_autograd
+        self.pre_dispatch = pre_dispatch
+        self._allow_fake_constant = _allow_fake_constant
         self.is_inside_mode = False
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
+        # Indicates to our torch_dispatch dispatching infra that
+        # this is an "infra" mode with lower dispatching precedence.
+        self._mode_key = torch._C._TorchDispatchModeKey.PROXY
+        # Every time we enter a mode, we maintain a stack telling us what the previous
+        # ProxyTorchDispatchMode state was (if there was any).
+        # This lets us properly reset the state on exit.
+        self.enter_stack: List[Optional[ProxyTorchDispatchMode]] = []
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -544,16 +597,26 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         m = self.sym_mode.enable(True)
         self._managers.append(m)
         m.__enter__()
+        # Stash and store the previous proxy mode (there may or may not be one)
+        maybe_prev_proxy_mode = torch._C._unset_dispatch_mode(self._mode_key)
+        self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
     def __exit__(self, exc_type, exc_value, traceback):
         m = self._managers.pop()
         # ...exit us first, then sym mode
         b = super().__exit__(exc_type, exc_value, traceback)
+
+        # Re-enable the previous proxy mode, if there was one.
+        mb_previous_proxy_mode = self.enter_stack.pop()
+        if mb_previous_proxy_mode is not None:
+            torch._C._set_dispatch_mode(mb_previous_proxy_mode)
+
         if not b:
             return m.__exit__(exc_type, exc_value, traceback)
         else:
             return m.__exit__(None, None, None)
+
 
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
         if not self.enable_tracing:
@@ -562,7 +625,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        return proxy_call(self, func, self.pre_autograd, args, kwargs)
+        return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -691,7 +754,13 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
+def make_fx(f,
+            decomposition_table=None,
+            tracing_mode="real",
+            _allow_non_fake_inputs=False,
+            *,
+            pre_dispatch=False,
+            _allow_fake_constant=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -710,7 +779,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             if fake_tensor_mode is None:
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=True,
-                    allow_non_fake_inputs=_allow_non_fake_inputs)
+                    allow_non_fake_inputs=_allow_non_fake_inputs,
+                    shape_env=ShapeEnv(),
+                    static_shapes=True,
+                )
         elif tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
@@ -728,12 +800,22 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
+        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
-        if tracing_mode == "symbolic" or pre_autograd:
+        if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
+        if pre_dispatch:
+            pre_dispatch_mode = enable_pre_dispatch()
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_autograd=pre_autograd)
+        proxy_function_mode: Any = nullcontext()
+        if pre_dispatch:
+            proxy_function_mode = PreDispatchTorchFunctionMode(fx_tracer)
+
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer,
+                                            tracing_mode,
+                                            pre_dispatch=pre_dispatch,
+                                            _allow_fake_constant=_allow_fake_constant)
 
         arg_count = 0
 
@@ -773,9 +855,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing(enable_current=True):
-            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_autograd), tracer=fx_tracer, concrete_args=tuple(phs))
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
+             sym_mode, proxy_mode, disable_autocast_cache():
+            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":
@@ -790,28 +872,31 @@ def get_torch_dispatch_modes():
 
 
 def get_innermost_proxy_mode():
-    for m in reversed(torch.utils._python_dispatch._get_current_dispatch_mode_stack()):
-        if isinstance(m, ProxyTorchDispatchMode):
-            return m
-    return None
+    return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 @contextlib.contextmanager
 def disable_proxy_modes_tracing(enable_current=False):
-    modes = get_torch_dispatch_modes()
-    proxy_tensor_modes = [m for m in modes if isinstance(m, ProxyTorchDispatchMode)]
-    if enable_current:
-        proxy_tensor_modes = proxy_tensor_modes[:-1]
-    olds = [(m.enable_tracing, m.sym_mode.enable_tracing) for m in proxy_tensor_modes]
-    for proxy_mode in proxy_tensor_modes:
-        proxy_mode.enable_tracing = False
-        proxy_mode.sym_mode.enable_tracing = False
+    # enable_current=True is now a no-op, since only one proxy mode
+    # can live on the stack at a time.
+    # We should kill this API in a future PR.
+    maybe_old = None
+    if not enable_current:
+        # Only one proxy_mode can be "active" at a time.
+        # So we simply remove our active mode.
+        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     try:
         yield
     finally:
-        for proxy_mode, (old, old_sym) in zip(proxy_tensor_modes, olds):
-            proxy_mode.enable_tracing = old
-            proxy_mode.sym_mode.enable_tracing = old_sym
+        if maybe_old is not None:
+            torch._C._set_dispatch_mode(maybe_old)
+
+
+def maybe_handle_decomp(proxy_mode, op, args, kwargs):
+    if op in CURRENT_DECOMPOSITION_TABLE:
+        with proxy_mode:
+            return CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
+    return NotImplemented
 
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):

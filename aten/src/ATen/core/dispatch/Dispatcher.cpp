@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <chrono>
 #include <list>
 #include <sstream>
@@ -52,11 +53,14 @@ Dispatcher::Dispatcher()
 , operatorLookupTable_()
 , backendFallbackKernels_()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
-, mutex_()
 , cond_var_()
+, guard_(std::make_shared<Guard>())
 {}
 
-Dispatcher::~Dispatcher() = default;
+Dispatcher::~Dispatcher() {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  guard_->alive.store(false);
+}
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
@@ -78,7 +82,7 @@ c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_na
 
 void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
     return findOp(schema.operator_name()) != c10::nullopt;
   });
@@ -92,7 +96,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
 
 void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
   using namespace std::chrono_literals;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(guard_->mutex);
   auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
   auto op = findOrRegisterName_(op_name);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
@@ -172,7 +176,7 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 OperatorHandle::~OperatorHandle() = default;
 
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
   auto found = libraries_.find(ns);
   TORCH_CHECK(
     found == libraries_.end(),
@@ -186,20 +190,23 @@ RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string d
     found->second, "; latest registration was ", debug
   );
   libraries_.emplace(ns, std::move(debug));
-  return RegistrationHandleRAII([this, ns] {
+  return RegistrationHandleRAII([guard = this->guard_, this, ns] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterLibrary_(ns);
   });
 }
 
 void Dispatcher::deregisterLibrary_(const std::string& ns) {
   // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
   libraries_.erase(ns);
 }
 
 RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::string debug, std::vector<at::Tag> tags) {
   // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   OperatorName op_name = schema.operator_name();
   auto op = findOrRegisterName_(op_name);
@@ -216,15 +223,19 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema, std::strin
 
   cond_var_.notify_all();
 
-  return RegistrationHandleRAII([this, op, op_name] {
+  return RegistrationHandleRAII([guard = this->guard_, this, op, op_name] {
+    // we need a lock to avoid concurrent writes
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterDef_(op, op_name);
   });
 }
 
-void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
-  // we need a lock to avoid concurrent writes
-  std::lock_guard<std::mutex> lock(mutex_);
-
+void Dispatcher::deregisterDef_(
+    const OperatorHandle& op,
+    const OperatorName& op_name) {
   TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
   // reduce def_count and actually deregister if no references left
@@ -244,6 +255,62 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
   cleanup(op, op_name);
 }
 
+namespace {
+
+using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
+  static AbstractImplPyStubsType _data;
+  return _data;
+}
+
+}
+
+RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+  const OperatorName& op_name,
+  const char* pymodule,
+  const char* context
+) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  // If there are duplicates, we just let it through and warn about it.
+  // Throwing an error during static initialization causes a crash that
+  // doesn't give any sign of what happened.
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found != abstractImplPyStubsSingleton().end()) {
+    TORCH_WARN(
+        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "that specifies the Python module ", pymodule, " "
+        "but there already was a pystub that specifies the Python module ",
+        found->second.first, ". We will override the existing pystub.");
+  }
+  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
+  return RegistrationHandleRAII([guard = this->guard_, op_name] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    abstractImplPyStubsSingleton().erase(op_name);
+  });
+}
+
+void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto elt = abstractImplPyStubsSingleton().find(op_name);
+  if (elt == abstractImplPyStubsSingleton().end()) {
+    return;
+  }
+  const char* pymodule = elt->second.first;
+  const char* context = elt->second.second;
+  auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
+  TORCH_CHECK(
+      interpreter != nullptr,
+      op_name,
+      ": while attempting to run this operator with Meta Tensors: "
+      "the abstract impl for this operator (necessary for Meta Tensors) "
+      "was declared to exist in the Python module ", pymodule,
+      " but Python is not available.");
+  (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
+}
+
 RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
   c10::optional<DispatchKey> dispatch_key,
@@ -252,7 +319,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   auto op = findOrRegisterName_(op_name);
 
@@ -269,14 +336,16 @@ RegistrationHandleRAII Dispatcher::registerImpl(
 
   cond_var_.notify_all();
 
-  return RegistrationHandleRAII([this, op, op_name, dispatch_key, handle] {
+  return RegistrationHandleRAII([guard = this->guard_, this, op, op_name, dispatch_key, handle] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterImpl_(op, op_name, dispatch_key, handle);
   });
 }
 
 void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
@@ -288,18 +357,24 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
 }
 
 RegistrationHandleRAII Dispatcher::registerName(OperatorName op_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
   auto op = findOrRegisterName_(op_name);
   ++op.operatorDef_->def_and_impl_count;
 
   return RegistrationHandleRAII(
-      [this, op, op_name] { deregisterName_(op, op_name); });
+      [guard = this->guard_, this, op, op_name] {
+        std::lock_guard<std::mutex> lock(guard->mutex);
+        if (!guard->alive.load()) {
+          return;
+        }
+        deregisterName_(op, op_name);
+      }
+  );
 }
 
 void Dispatcher::deregisterName_(
     const OperatorHandle& op,
     const OperatorName& op_name) {
-  std::lock_guard<std::mutex> lock(mutex_);
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
   TORCH_INTERNAL_ASSERT(op.operatorDef_->def_and_impl_count > 0);
   --op.operatorDef_->def_and_impl_count;
@@ -319,7 +394,7 @@ void Dispatcher::cleanup(const OperatorHandle& op, const OperatorName& op_name) 
 }
 
 RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel, std::string debug) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   TORCH_CHECK(idx >= 0 && static_cast<uint64_t>(idx) < backendFallbackKernels_.size(), "idx=", idx);
@@ -336,14 +411,16 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
     op.op.updateFallback(*this, dispatchKey);
   }
 
-  return RegistrationHandleRAII([this, dispatchKey] {
+  return RegistrationHandleRAII([guard = this->guard_, this, dispatchKey] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
     deregisterFallback_(dispatchKey);
   });
 }
 
 void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
-  std::lock_guard<std::mutex> lock(mutex_);
-
   auto idx = getDispatchTableIndexForDispatchKey(dispatchKey);
   backendFallbackKernels_[idx] = {};
 
@@ -354,7 +431,7 @@ void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
 
 
 RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(guard_->mutex);
 
   for (auto iter = operators_.begin(); iter != operators_.end(); ++iter) {
     if (iter->def_count > 0) {
@@ -363,8 +440,11 @@ RegistrationHandleRAII Dispatcher::addRegistrationListener(std::unique_ptr<OpReg
   }
 
   auto removeListener = listeners_->addListener(std::move(listener));
-  return RegistrationHandleRAII([this, removeListener] {
-      std::lock_guard<std::mutex> lock(mutex_);
+  return RegistrationHandleRAII([guard = this->guard_, this, removeListener] {
+      std::lock_guard<std::mutex> lock(guard_->mutex);
+      if (!guard->alive.load()) {
+        return;
+      }
       removeListener();
   });
 }

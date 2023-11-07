@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: serialization"]
 
 import torch
@@ -15,12 +14,14 @@ import copy
 import pickle
 import shutil
 import pathlib
+import platform
 from copy import deepcopy
 from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
-from torch.serialization import check_module_version_greater_or_equal
+from torch.serialization import check_module_version_greater_or_equal, get_default_load_endianness, \
+    set_default_load_endianness, LoadEndianness
 
 from torch.testing._internal.common_utils import IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName, \
     TestCase, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName, \
@@ -316,7 +317,7 @@ class SerializationMixin:
                 torch.save({"tensor": x}, f)
                 f.seek(0)
                 y = torch.load(f, weights_only=weights_only)
-                self.assertEqual(x, y["tensor"])
+                self.assertEqual(x, y["tensor"], exact_is_coalesced=True)
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
         _test_serialization(lambda x: x.to_sparse_csc())
@@ -507,7 +508,7 @@ class SerializationMixin:
             torch.device('cuda', 0)
         ]
         gpu_last_map_locations = [
-            'cuda:{}'.format(torch.cuda.device_count() - 1),
+            f'cuda:{torch.cuda.device_count() - 1}',
         ]
 
         def check_map_locations(map_locations, tensor_class, intended_device):
@@ -814,7 +815,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
 
-        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
+        tmpmodule_name = f'tmpmodule{unique_key}'
 
         def import_module(name, filename):
             import importlib.util
@@ -970,6 +971,23 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
+    def test_lr_scheduler_serialization(self):
+        sgd = torch.optim.SGD([
+            torch.tensor(torch.randn(100, 100, 2000), requires_grad=True)
+        ], lr=0.1, momentum=0.9)
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(sgd, 6.0, total_steps=10)
+
+        with BytesIOContext() as f:
+            torch.save(lr_scheduler.state_dict(), f)
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(0)
+            lr_scheduler_state = torch.load(f)
+
+        self.assertEqual(lr_scheduler_state['base_lrs'], lr_scheduler.base_lrs)
+        self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
+
     def test_serialization_python_attr(self):
         def _test_save_load_attr(t):
             t.foo = 'foo'
@@ -1040,9 +1058,7 @@ class TestSerialization(TestCase, SerializationMixin):
 
         # NOTE: `torch.save` fails before we hit the TORCH_CHECK in `getTensoMetadata`
         #       as nullptr storage is disabled.
-        err_msg = (r'python bindings to nullptr storage \(e.g., from torch.Tensor._make_wrapper_subclass\)'
-                   ' are currently unsafe and thus disabled')
-        with self.assertRaisesRegex(RuntimeError, err_msg):
+        with self.assertRaisesRegex(RuntimeError, 'ZeroTensor is not serializable'):
             _save_load_check(t)
 
     def test_serialization_byteorder_mark(self):
@@ -1351,6 +1367,8 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x07\x00\x07\x00\xb8\x01\x00'
                        b'\x00\xd2\x05\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
@@ -1361,13 +1379,47 @@ class TestSerialization(TestCase, SerializationMixin):
         lstm_be_no_bom = torch.nn.LSTM(3, 3)
         lstm_be_bom = torch.nn.LSTM(3, 3)
 
-        lstm_le_no_bom.load_state_dict(torch.load(buf_le_no_bom), strict=True)
+        lstm_le_no_bom_little = torch.nn.LSTM(3, 3)
+        lstm_be_no_bom_little = torch.nn.LSTM(3, 3)
+        lstm_le_no_bom_big = torch.nn.LSTM(3, 3)
+        lstm_be_no_bom_big = torch.nn.LSTM(3, 3)
+
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            lstm_le_no_bom.load_state_dict(torch.load(buf_le_no_bom), strict=True)
+            lstm_be_no_bom.load_state_dict(torch.load(buf_be_no_bom), strict=True)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         lstm_le_bom.load_state_dict(torch.load(buf_le_bom), strict=True)
-        lstm_be_no_bom.load_state_dict(torch.load(buf_be_no_bom), strict=True)
         lstm_be_bom.load_state_dict(torch.load(buf_be_bom), strict=True)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            lstm_le_no_bom_little.load_state_dict(torch.load(buf_le_no_bom), strict=True)
+            lstm_be_no_bom_little.load_state_dict(torch.load(buf_be_no_bom), strict=True)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            lstm_le_no_bom_big.load_state_dict(torch.load(buf_le_no_bom), strict=True)
+            lstm_be_no_bom_big.load_state_dict(torch.load(buf_be_no_bom), strict=True)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertEqual(lstm_le_bom.state_dict(), lstm_be_bom.state_dict())
         self.assertNotEqual(lstm_le_no_bom.state_dict(), lstm_be_no_bom.state_dict())
+        self.assertEqual(lstm_le_no_bom_little.state_dict(), lstm_le_bom.state_dict())
+        self.assertNotEqual(lstm_be_no_bom_little.state_dict(), lstm_be_bom.state_dict())
+        self.assertNotEqual(lstm_le_no_bom_big.state_dict(), lstm_le_bom.state_dict())
+        self.assertEqual(lstm_be_no_bom_big.state_dict(), lstm_be_bom.state_dict())
 
         if (sys.byteorder == 'little'):
             self.assertEqual(lstm_le_no_bom.state_dict(), lstm_le_bom.state_dict())
@@ -1528,18 +1580,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00*\x01\x00\x00R\x02\x00\x00'
                        b'\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -1696,18 +1779,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00x\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04'
                        b'\x00\x04\x00&\x01\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -1864,18 +1978,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00t\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00'
                        b'\x04\x00\x04\x00"\x01\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -2056,18 +2201,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00"\x01\x00\x00\xd2\x02\x00\x00'
                        b'\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -2232,18 +2408,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b"\xb0\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00"
                        b"\x04\x00\x1e\x01\x00\x00\x92\x02\x00\x00\x00\x00")
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -2404,18 +2611,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00&\x01\x00\x00R\x02\x00'
                        b'\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -2572,15 +2810,42 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x00t\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00'
                        b'\x00\x04\x00\x04\x00"\x01\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         # 1-byte types are same on BE and LE
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
@@ -2589,6 +2854,10 @@ class TestSerialization(TestCase, SerializationMixin):
         self.assertTrue(torch.equal(tensor_le_no_bom, tensor_be_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_le_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
     def test_serialization_load_bom_data_uint8(self):
         # 1. Generated on LE system using following commands:
@@ -2736,15 +3005,42 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00PK\x06\x07\x00\x00\x00\x00x\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05'
                        b'\x06\x00\x00\x00\x00\x04\x00\x04\x00&\x01\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         # 1-byte types are same on BE and LE
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
@@ -2753,6 +3049,10 @@ class TestSerialization(TestCase, SerializationMixin):
         self.assertTrue(torch.equal(tensor_le_no_bom, tensor_be_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_le_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
     def test_serialization_load_bom_data_bool(self):
         # 1. Generated on LE system using following commands:
@@ -2900,15 +3200,42 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'PK\x06\x07\x00\x00\x00\x00t\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05'
                        b'\x06\x00\x00\x00\x00\x04\x00\x04\x00"\x01\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         # 1-byte types are same on BE and LE
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
@@ -2917,6 +3244,10 @@ class TestSerialization(TestCase, SerializationMixin):
         self.assertTrue(torch.equal(tensor_le_no_bom, tensor_be_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_le_bom))
         self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
     def test_serialization_load_bom_data_bfloat16(self):
         # 1. Generated on LE system using following commands:
@@ -3065,18 +3396,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00\x04\x00'
                        b'2\x01\x00\x00\x92\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -3243,18 +3605,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x00\x00\xc0\x03\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00'
                        b'\x00\x00\x04\x00\x04\x00.\x01\x00\x00\x92\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -3412,18 +3805,49 @@ class TestSerialization(TestCase, SerializationMixin):
                        b'\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x04\x00\x04'
                        b'\x00\xfe\x00\x00\x00R\x02\x00\x00\x00\x00')
 
+        current_load_endian = get_default_load_endianness()
+
         buf_le_no_bom = io.BytesIO(data_le_no_bom)
         buf_le_bom = io.BytesIO(data_le_bom)
         buf_be_no_bom = io.BytesIO(data_be_no_bom)
         buf_be_bom = io.BytesIO(data_be_bom)
 
-        tensor_le_no_bom = torch.load(buf_le_no_bom)
+        try:
+            set_default_load_endianness(LoadEndianness.NATIVE)
+            tensor_le_no_bom = torch.load(buf_le_no_bom)
+            tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
         tensor_le_bom = torch.load(buf_le_bom)
-        tensor_be_no_bom = torch.load(buf_be_no_bom)
         tensor_be_bom = torch.load(buf_be_bom)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.LITTLE)
+            tensor_le_no_bom_little = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_little = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+        buf_le_no_bom.seek(0)
+        buf_be_no_bom.seek(0)
+
+        try:
+            set_default_load_endianness(LoadEndianness.BIG)
+            tensor_le_no_bom_big = torch.load(buf_le_no_bom)
+            tensor_be_no_bom_big = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
 
         self.assertTrue(torch.equal(tensor_le_bom, tensor_be_bom))
         self.assertFalse(torch.equal(tensor_le_no_bom, tensor_be_no_bom))
+        self.assertTrue(torch.equal(tensor_le_no_bom_little, tensor_le_bom))
+        self.assertFalse(torch.equal(tensor_be_no_bom_little, tensor_be_bom))
+        self.assertFalse(torch.equal(tensor_le_no_bom_big, tensor_le_bom))
+        self.assertTrue(torch.equal(tensor_be_no_bom_big, tensor_be_bom))
 
         if (sys.byteorder == 'little'):
             self.assertTrue(torch.equal(tensor_le_no_bom, tensor_le_bom))
@@ -3436,10 +3860,100 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertTrue(torch.equal(tensor_be_no_bom, tensor_le_bom))
             self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
 
+    @unittest.skipIf(platform.machine() != 's390x', "s390x-specific test")
+    def test_serialization_warning_s390x(self):
+        data_be_no_bom = (b'PK\x03\x04\x00\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x19\x00\t\x00tensor.double.BE/data.pklFB\x05\x00ZZZZZ\x80\x02'
+                          b'ctorch._utils\n_rebuild_tensor_v2\nq\x00((X\x07\x00\x00\x00storageq\x01ctorch\n'
+                          b'DoubleStorage\nq\x02X\x01\x00\x00\x000q\x03X\x03\x00\x00\x00cpuq\x04K\x04tq\x05'
+                          b'QK\x00K\x02K\x02\x86q\x06K\x02K\x01\x86q\x07\x89ccollections\nOrderedDict\nq\x08'
+                          b')Rq\ttq\nRq\x0b.PK\x07\x08S\xd3\xba&\x9b\x00\x00\x00\x9b\x00\x00\x00PK\x03\x04\x00'
+                          b'\x00\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x00\x17\x00 \x00tensor.double.BE/data/0FB\x1c\x00ZZZZZZZZZZZZZZZZZZZZZZZZZZZZ'
+                          b'?\xc9^|\xff\xa4v\x97\xbf\xe9\xb0\x8dP\x8c\xbc\xce\xbf\xd3\xdb\xb7[\xef\x0e\xdc?\xde'
+                          b'\x00\xf9Q\x08\xb14PK\x07\x083@\x82/ \x00\x00\x00 \x00\x00\x00PK\x03\x04\x00\x00'
+                          b'\x08\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\x18\x00\x1a\x00tensor.double.BE/versionFB\x16\x00ZZZZZZZZZZZZZZZZZZZZZZ3\nPK\x07'
+                          b'\x08\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00PK\x01\x02\x00\x00\x00\x00\x08\x08'
+                          b'\x00\x00\x00\x00\x00\x00S\xd3\xba&\x9b\x00\x00\x00\x9b\x00\x00\x00\x19\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00tensor.double.BE/da'
+                          b'ta.pklPK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00\x00\x00\x00\x003@\x82/ '
+                          b'\x00\x00\x00 \x00\x00\x00\x17\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                          b'\xeb\x00\x00\x00tensor.double.BE/data/0PK\x01\x02\x00\x00\x00\x00\x08\x08\x00\x00'
+                          b'\x00\x00\x00\x00\xd1\x9egU\x02\x00\x00\x00\x02\x00\x00\x00\x18\x00\x00\x00\x00'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x00\x00p\x01\x00\x00tensor.double.BE/versionPK\x06\x06'
+                          b',\x00\x00\x00\x00\x00\x00\x00\x1e\x03-\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03'
+                          b'\x00\x00\x00\x00\x00\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00\xd2\x00\x00\x00\x00'
+                          b'\x00\x00\x00\xd2\x01\x00\x00\x00\x00\x00\x00PK\x06\x07\x00\x00\x00\x00\xa4\x02\x00'
+                          b'\x00\x00\x00\x00\x00\x01\x00\x00\x00PK\x05\x06\x00\x00\x00\x00\x03\x00\x03\x00'
+                          b'\xd2\x00\x00\x00\xd2\x01\x00\x00\x00\x00')
+
+        current_load_endian = get_default_load_endianness()
+
+        buf_be_no_bom = io.BytesIO(data_be_no_bom)
+
+        try:
+            set_default_load_endianness(None)
+            with self.assertWarnsRegex(UserWarning, "The default load endianness for checkpoints "
+                                       "without a byteorder mark on big endian machines "
+                                       "was changed from 'native' to 'little' endian"):
+                tensor_be_no_bom = torch.load(buf_be_no_bom)
+        finally:
+            set_default_load_endianness(current_load_endian)
+
+    @parametrize('weights_only', (True, False))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_mmap_loading(self, weights_only):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 1024)
+                self.fc2 = torch.nn.Linear(1024, 5)
+
+            def forward(self, input):
+                return self.fc2(self.fc1(input))
+
+        with TemporaryFileName() as f:
+            state_dict = DummyModel().state_dict()
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True, weights_only=weights_only)
+            result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
+
+        model_mmap_state_dict = DummyModel()
+        model_mmap_state_dict.load_state_dict(result)
+        model_non_mmap_state_dict = DummyModel()
+        model_non_mmap_state_dict.load_state_dict(result_non_mmap)
+        input = torch.randn(4, 3)
+        self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
+
+    @unittest.skipIf(not torch.cuda.is_available() or IS_WINDOWS,
+                     "CUDA is unavailable or NamedTemporaryFile on Windows")
+    def test_serialization_mmap_loading_with_map_location(self):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 1024)
+                self.fc2 = torch.nn.Linear(1024, 5)
+
+            def forward(self, input):
+                return self.fc2(self.fc1(input))
+
+        # make sure mmap where tensors' location tags are not CPU does not crash
+        # zipfile will first be mmap-ed on CPU and storages are extracted using
+        # overall_storage[start_offset:end_offset] before running
+        # _{device}_deserialize, which moves the storage to device
+        with TemporaryFileName() as f:
+            with torch.device('cuda'):
+                m = DummyModel()
+            state_dict = m.state_dict()
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True)
+            for v in result.values():
+                self.assertTrue(v.is_cuda)
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
-
 
 class TestWrapperSubclass(torch.Tensor):
     elem: torch.Tensor

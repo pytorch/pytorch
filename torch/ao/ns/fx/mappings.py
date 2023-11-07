@@ -336,9 +336,15 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         },
         # pixel shuffle
         {
+            nn.PixelShuffle,
+        },
+        {
             F.pixel_shuffle,
         },
         # pixel unshuffle
+        {
+            nn.PixelUnshuffle,
+        },
         {
             F.pixel_unshuffle,
         },
@@ -465,7 +471,7 @@ def add_op_to_sets_of_related_ops(
     related_op: Optional[NSNodeTargetType],
 ) -> None:
     if related_op is not None:
-        for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
+        for set_of_related_ops in base_name_to_sets_of_related_ops.values():
             if related_op in set_of_related_ops:
                 set_of_related_ops.add(op)
                 return
@@ -684,6 +690,8 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.MaxPool1d,
         nn.MaxPool2d,
         nn.MaxPool3d,
+        nn.PixelShuffle,
+        nn.PixelUnshuffle,
         nn.ReLU6,
     }
 

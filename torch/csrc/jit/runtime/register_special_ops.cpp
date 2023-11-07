@@ -18,8 +18,7 @@
 #include <regex>
 #include <sstream>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -457,7 +456,10 @@ RegisterOperators reg({
         "aten::set_grad_enabled(bool val) -> ()",
         [](Stack& stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
+    Operator(
+        "aten::_get_cpu_capability() -> str",
+        [](Stack& stack) { push(stack, at::get_cpu_capability()); },
+        aliasAnalysisConservative()),
 });
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

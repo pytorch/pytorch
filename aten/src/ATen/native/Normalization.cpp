@@ -17,6 +17,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
 #include <c10/util/irange.h>
+#include <ATen/OpMathType.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -25,6 +26,9 @@
 #include <ATen/ops/_batch_norm_impl_index.h>
 #include <ATen/ops/_batch_norm_impl_index_backward_native.h>
 #include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
@@ -111,14 +115,16 @@ struct Var {
 };
 
 static inline bool is_contiguous(const Tensor& t) {
-  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
+  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast) || t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 }
 
 // For some ambiguous cases, it is possible a channels last contiguous Tensor has
 //   `suggest_memory_format` of Contiguous.
 // See https://github.com/pytorch/pytorch/issues/63224 for details.
 static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
-  return t.is_contiguous() ? at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  return t.is_contiguous() ?
+    at::MemoryFormat::Contiguous : (t.is_contiguous(at::MemoryFormat::ChannelsLast3d) ?
+    at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast);
 }
 
 template<typename scalar_t, typename param_t>
@@ -163,7 +169,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       return 1 / at::sqrt(running_var + eps);
     }
   }());
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   auto w = weight.defined() ? as_nd(weight) :
       at::detail::scalar_tensor_static(1, dtype, kCPU);
@@ -197,7 +203,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous(input);
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   auto save_mean_a = save_mean.accessor<param_t, 1>();
@@ -281,7 +287,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     reduce_dims[i - 1] = i;
   }
 
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
   Tensor save_mean = is_contiguous(input) ? at::empty({n_input}, input.options().dtype(dtype)) : at::mean(input, /*dim=*/reduce_dims, /*keepdim=*/false, dtype);
   Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
@@ -296,7 +302,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 
   using accscalar_t = at::acc_type<scalar_t, false>;
 
-  const bool mixed_type = !std::is_same<scalar_t, param_t>::value;
+  constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   Tensor grad_input;
@@ -383,7 +389,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto in_channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
-  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
   auto grad_out_data = grad_out_.data_ptr<scalar_t>();
 
@@ -690,10 +696,11 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
   const bool mixed_type = is_mixed_type(self, running_mean, running_var);
-  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
     if (mixed_type) {
       check_mixed_data_type(self, running_mean, running_var);
-      return batch_norm_cpu_update_stats_template<BFloat16, float, Var>(self, running_mean, running_var, momentum, 0);
+      return batch_norm_cpu_update_stats_template<scalar_t, opmath_t, Var>(self, running_mean, running_var, momentum, 0);
     } else {
       return batch_norm_cpu_update_stats_template<scalar_t, scalar_t, Var>(self, running_mean, running_var, momentum, 0);
     }
@@ -714,17 +721,18 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   at::native::resize_output(out, self.sizes());
 
   const bool mixed_type = is_mixed_type(self, weight, bias, running_mean, running_var);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "batch_norm", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
     if (mixed_type) {
       check_mixed_data_type(self, weight, bias, running_mean, running_var);
       if (!train) {
-        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps, out);
+        return batch_norm_cpu_transform_input_template<scalar_t, opmath_t>(self, weight, bias, save_mean, save_var, running_mean, running_var, train, eps, out);
       } else {
         // Resize save_mean and save_var
         at::native::resize_output(save_mean, {self.size(1)});
         at::native::resize_output(save_var, {self.size(1)});
-        auto save_stats = batch_norm_cpu_update_stats_template<BFloat16, float, InvStd>(self, running_mean, running_var, momentum, eps, save_mean, save_var);
-        return batch_norm_cpu_transform_input_template<BFloat16, float>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps, out);
+        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, opmath_t, InvStd>(self, running_mean, running_var, momentum, eps, save_mean, save_var);
+        return batch_norm_cpu_transform_input_template<scalar_t, opmath_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps, out);
       }
     } else {
       if (!train) {
@@ -831,10 +839,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
   const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
 
   const bool mixed_type = is_mixed_type(self, weight, running_mean, running_var, save_mean, save_invstd);
-  return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm_backward_cpu", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "batch_norm_backward_cpu", [&] {
+    using opmath_t = at::opmath_type<scalar_t>;
     if (mixed_type) {
       check_mixed_data_type(self, weight, running_mean, running_var, save_mean, save_invstd);
-      return batch_norm_backward_cpu_template<BFloat16, float>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
+      return batch_norm_backward_cpu_template<scalar_t, opmath_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     } else {
       return batch_norm_backward_cpu_template<scalar_t, scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     }

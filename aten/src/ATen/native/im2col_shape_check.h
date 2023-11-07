@@ -3,8 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/div_rtn.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static inline void col2im_shape_check(
     const Tensor& input,
@@ -230,5 +229,4 @@ static inline void im2col_shape_check(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

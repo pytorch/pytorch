@@ -38,7 +38,8 @@ void start_manager() {
     std::string msg("ERROR: execl failed: ");
     msg += std::strerror(errno);
     msg += '\n';
-    write(1, msg.c_str(), msg.size());
+    auto res = write(1, msg.c_str(), msg.size());
+    (void)res;
 
     exit(1);
   }
@@ -120,7 +121,7 @@ THManagedMapAllocator::THManagedMapAllocator(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size)
+    size_t size)
     : THManagedMapAllocatorInit(manager_handle, filename),
       at::RefcountedMapAllocator(filename, flags, size) {}
 
@@ -142,7 +143,7 @@ at::DataPtr THManagedMapAllocator::makeDataPtr(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size) {
+    size_t size) {
   auto* context =
       new THManagedMapAllocator(manager_handle, filename, flags, size);
   return {

@@ -146,7 +146,7 @@ def test_forward_backward(unit_test_class, test_params):
     script_module.save(module_file_path)
     serialize_arg_dict_as_script_module(test_params.arg_dict).save(arg_dict_file_path)
 
-    cpp_test_name = '{}_test_forward_backward'.format(test_params.module_variant_name)
+    cpp_test_name = f'{test_params.module_variant_name}_test_forward_backward'
     cpp_test_fn = getattr(unit_test_class.module_impl_check_cpp_module, cpp_test_name)
 
     def run_cpp_test_fn_and_check_output():
@@ -177,12 +177,12 @@ def test_forward_backward(unit_test_class, test_params):
             unit_test_class.assertTrue(
                 key in cpp_grad_dict,
                 msg=generate_error_msg(
-                    "\"Does module have a parameter named `{}` with {} gradient?\"".format(param_name, sparsity_str),
+                    f"\"Does module have a parameter named `{param_name}` with {sparsity_str} gradient?\"",
                     False, True))
             unit_test_class.assertEqual(
                 python_grad_dict[key], cpp_grad_dict[key],
                 msg=generate_error_msg(
-                    "`{}`'s {} gradient (`{}`)".format(param_name, sparsity_str, key),
+                    f"`{param_name}`'s {sparsity_str} gradient (`{key}`)",
                     cpp_grad_dict[key], python_grad_dict[key]))
 
     run_cpp_test_fn_and_check_output()
@@ -209,11 +209,11 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
     if 'constructor_args' in test_params_dict:
         assert 'cpp_constructor_args' in test_params_dict, (
             "If `constructor_args` is present in test params dict, to enable C++ API parity test, "
-            "`cpp_constructor_args` must be present in:\n{}"
+            f"`cpp_constructor_args` must be present in:\n{pprint.pformat(test_params_dict)}"
             "If you are interested in adding the C++ API parity test, please see:\n"
             "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
             "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
-        ).format(pprint.pformat(test_params_dict))
+        )
 
     return TorchNNModuleTestParams(
         module_name=module_name,
@@ -233,16 +233,16 @@ def write_test_to_test_class(
     module_name = compute_module_name(test_params_dict)
 
     assert hasattr(torch.nn, module_name), (
-        "`torch.nn` doesn't have module `{}`. "
+        f"`torch.nn` doesn't have module `{module_name}`. "
         "If you are adding a new test, please set `fullname` using format `ModuleName_desc` "
-        "or set `module_name` using format `ModuleName` in the module test dict:\n{}"
-    ).format(module_name, pprint.pformat(test_params_dict))
+        f"or set `module_name` using format `ModuleName` in the module test dict:\n{pprint.pformat(test_params_dict)}"
+    )
 
     module_full_name = 'torch::nn::' + module_name
 
     assert module_full_name in parity_table['torch::nn'], (
-        "Please add `{}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
-        "(Discovered while processing\n{}.)").format(module_full_name, pprint.pformat(test_params_dict))
+        f"Please add `{module_full_name}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
+        f"(Discovered while processing\n{pprint.pformat(test_params_dict)}.)")
 
     for device in devices:
         test_params = process_test_params_for_module(
@@ -251,7 +251,7 @@ def write_test_to_test_class(
             test_instance_class=test_instance_class,
         )
         try_remove_folder(test_params.cpp_tmp_folder)
-        unit_test_name = 'test_torch_nn_{}'.format(test_params.module_variant_name)
+        unit_test_name = f'test_torch_nn_{test_params.module_variant_name}'
         unit_test_class.module_test_params_map[unit_test_name] = test_params
 
         def test_fn(self):
@@ -272,14 +272,14 @@ def generate_test_cpp_sources(test_params, template):
 
     cpp_constructor_args = test_params.cpp_constructor_args
     if cpp_constructor_args != '':
-        cpp_constructor_args = '({})'.format(cpp_constructor_args)
+        cpp_constructor_args = f'({cpp_constructor_args})'
 
     cpp_args_construction_stmts, cpp_forward_args_symbols = \
         compute_cpp_args_construction_stmts_and_forward_arg_symbols(test_params)
 
     test_cpp_sources = template.substitute(
         module_variant_name=test_params.module_variant_name,
-        module_qualified_name='torch::nn::{}'.format(test_params.module_name),
+        module_qualified_name=f'torch::nn::{test_params.module_name}',
         cpp_args_construction_stmts=";\n  ".join(cpp_args_construction_stmts),
         cpp_constructor_args=cpp_constructor_args,
         cpp_forward_args_symbols=", ".join(cpp_forward_args_symbols),
@@ -292,10 +292,10 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.module_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_MODULE_CPP_SOURCE
     functions = []
-    for test_name, test_params in unit_test_class.module_test_params_map.items():
+    for test_params in unit_test_class.module_test_params_map.values():
         cpp_sources += generate_test_cpp_sources(
             test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
-        functions.append('{}_test_forward_backward'.format(test_params.module_variant_name))
+        functions.append(f'{test_params.module_variant_name}_test_forward_backward')
     if print_cpp_source:
         print(cpp_sources)
 

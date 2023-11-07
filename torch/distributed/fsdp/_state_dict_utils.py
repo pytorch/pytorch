@@ -1,34 +1,41 @@
-import functools
+import contextlib
+import logging
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Iterator, List, no_type_check, Tuple
+from typing import Any, Callable, cast, Dict, Generator, Iterator, no_type_check, Tuple
 
 import torch
 import torch.distributed as dist
+
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
 
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
     ShardedTensor,
 )
+from torch.distributed._tensor import DTensor
+from torch.distributed._tensor.device_mesh import mesh_resources
+
+from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_module_fsdp_state_if_fully_sharded_module,
     _has_fsdp_params,
     _is_composable,
-    _module_handles,
+    _module_handle,
     clean_tensor_name,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
 )
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
-    _clear_grads_if_needed,
     _get_orig_buffer_dtypes,
     _lazy_init,
+    _reset_flat_param_grad_info_if_needed,
 )
 from torch.distributed.fsdp.api import (
     FullStateDictConfig,
@@ -38,17 +45,16 @@ from torch.distributed.fsdp.api import (
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
+    _ext_all_gather_dtensor,
+    _ext_chunk_dtensor,
     _ext_chunk_tensor,
+    _ext_post_unflatten_transform,
     _ext_pre_load_state_dict_transform,
-    _extensions as _user_extensions,
 )
-from ._unshard_param_utils import (
-    _deregister_orig_params,
-    _register_orig_params,
-    _unshard_fsdp_state_params,
-    FLAT_PARAM,
-)
-from .flat_param import FlatParamHandle
+from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
+
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -66,9 +72,9 @@ def _param_name_infos(
 ) -> Iterator[Tuple[str, str, str]]:
     if not _has_fsdp_params(fsdp_state, module):
         return
-    for param_name, module_name in _module_handles(fsdp_state, module)[
-        0
-    ].param_module_names():
+    for param_name, module_name in _module_handle(
+        fsdp_state, module
+    ).param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -77,9 +83,9 @@ def _param_name_infos(
 def _shared_param_name_infos(
     module: nn.Module, fsdp_state
 ) -> Iterator[Tuple[str, str, str]]:
-    for param_name, module_name in _module_handles(fsdp_state, module)[
-        0
-    ].shared_param_module_names():
+    for param_name, module_name in _module_handle(
+        fsdp_state, module
+    ).shared_param_module_names():
         module_name = _convert_to_wrapped_module_name(module_name)
         fqn = f"{module_name}{param_name}"
         yield fqn, param_name, module_name
@@ -130,9 +136,8 @@ def _common_pre_state_dict_hook(
         fsdp_state._device_handle.synchronize()
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
-    # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(fsdp_state._all_handles)
+        _reset_flat_param_grad_info_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -145,6 +150,12 @@ def _common_unshard_pre_state_dict_hook(
     Performs the pre-state_dict tasks shared by all state_dict types that require
     ``_unshard_fsdp_state_params()``. FULL_STATE_DICT and SHARDED_STATE_DICT use this hook.
     """
+    # For composable `fully_shard`, it does not need to unshard parameters for `NO_SHARD` cases.
+    if (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        return
     _enter_unshard_params_ctx(
         module,
         fsdp_state,
@@ -154,7 +165,6 @@ def _common_unshard_pre_state_dict_hook(
     )
 
 
-# TODO: change to the decorator style. See ``_full_pre_state_dict_hook``.
 @no_type_check
 def _common_unshard_post_state_dict_hook(
     module: nn.Module,
@@ -171,7 +181,11 @@ def _common_unshard_post_state_dict_hook(
     _replace_by_prefix(state_dict, prefix + f"{FSDP_PREFIX}", prefix)
     # Return early for trivial cases
     if not state_dict or not _has_fsdp_params(fsdp_state, module):
-        _exit_unshard_params_ctx(module, fsdp_state)
+        if not (
+            _is_composable(fsdp_state)
+            and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+        ):
+            _exit_unshard_params_ctx(module, fsdp_state)
         return state_dict
 
     # If a rank does not have unsharded parameters(when `rank0_only=True`
@@ -214,7 +228,12 @@ def _common_unshard_post_state_dict_hook(
         )
 
         param_hook(state_dict, prefix, fqn)
-    _exit_unshard_params_ctx(module, fsdp_state)
+
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        _exit_unshard_params_ctx(module, fsdp_state)
 
     cpu_device = torch.device("cpu")
     buffer_clean_fqns = []
@@ -235,9 +254,11 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
-            buffer_clean_fqns.append(clean_key)
-            buffers.append(state_dict[fqn])
+            # skip upcasting for ignored buffers
+            if clean_key not in fsdp_state._ignored_buffer_names:
+                buffer_clean_fqns.append(clean_key)
+                buffers.append(state_dict[fqn])
+
     if buffers:
         mixed_precision_enabled_for_buffers = (
             fsdp_state._mixed_precision_enabled_for_buffers()
@@ -251,6 +272,7 @@ def _common_unshard_post_state_dict_hook(
             )
             for buffer, clean_fqn in zip(buffers, buffer_clean_fqns):
                 fqn = f"{prefix}{clean_fqn}"
+                logger.info("FSDP is casting the dtype of %s to %s", fqn, buffer.dtype)
                 state_dict[fqn] = buffer.clone()
     return state_dict
 
@@ -268,10 +290,15 @@ def _full_pre_state_dict_hook(
     from ``_full_post_state_dict_hook()`` to simulate the case. Once pre-state_dict
     is supported in ``nn.Module``, this hook will be registered as a hook in
     ``nn.Module``.
-
-    TODO: clean the callsites and hacks after ``pre_state_dict_hook` ` is supported
-    in ``nn.Module``.
     """
+    if getattr(fsdp_state, "_device_mesh", False):
+        parent_mesh = mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+        if parent_mesh:
+            raise RuntimeError(
+                f"Found FSDP's device_mesh {fsdp_state._device_mesh} has a parent device_mesh {parent_mesh}.",
+                "We do not support FULL_STATE_DICT for 2D FSDP + TP. Please use FSDP SHARDED_STATE_DICT instead.",
+            )
+
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
         module,
@@ -334,7 +361,12 @@ def _full_pre_load_state_dict_hook(
     prefix: str,
 ) -> None:
     _lazy_init(fsdp_state, module)
-    _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        with SimpleProfiler.profile("_enter_unshard_params_ctx"):
+            _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
     # Add FSDP_PREFIX only for wrapper-based FSDP.
     if not _is_composable(fsdp_state):
         _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
@@ -343,7 +375,12 @@ def _full_pre_load_state_dict_hook(
 def _full_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    _exit_unshard_params_ctx(module, fsdp_state)
+    if not (
+        _is_composable(fsdp_state)
+        and fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD
+    ):
+        with SimpleProfiler.profile("_exit_unshard_params_ctx"):
+            _exit_unshard_params_ctx(module, fsdp_state)
 
 
 def _local_pre_state_dict_hook(
@@ -359,7 +396,7 @@ def _local_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``local_state_dict`` can only be used when parameters are flatten "
@@ -389,8 +426,8 @@ def _local_post_state_dict_hook(
     # value as the flat_param but it is a pure Tensor because
     # nn.Module.state_dict() will detach the parameter. Therefore, we need
     # to get flat_param to get the metadata.
-    assert _module_handles(fsdp_state, module), "Should have returned early"
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    assert _module_handle(fsdp_state, module), "Should have returned early"
+    flat_param = _module_handle(fsdp_state, module).flat_param
     # Constructs a ShardedTensor from the flat_param "without" padding.
     # Removing the padding allows users to change the number of ranks
     # when loading the local_state_dict.
@@ -411,6 +448,7 @@ def _local_post_state_dict_hook(
     sharded_tensor = init_from_local_shards(
         local_shards, full_numel, process_group=fsdp_state.process_group
     )  # type: ignore[assignment]
+    # TODO: Add DTensor state_dict support for LOCAL_STATE_DICT.
     if fsdp_state._state_dict_config.offload_to_cpu:
         sharded_tensor = sharded_tensor.cpu()
     state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
@@ -449,7 +487,7 @@ def _local_pre_load_state_dict_hook(
     ), "Tensors in local_state_dict should be ShardedTensor."
 
     # Convert the ShardedTensor to a Tensor.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    flat_param = _module_handle(fsdp_state, module).flat_param
     assert flat_param is not None
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     shards = load_tensor.local_shards()
@@ -467,6 +505,7 @@ def _local_pre_load_state_dict_hook(
             load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
     else:
         load_tensor = flat_param
+    # TODO: Add DTensor state_dict support for LOCAL_STATE_DICT.
     state_dict[fqn] = load_tensor
 
 
@@ -482,7 +521,7 @@ def _sharded_pre_state_dict_hook(
     """
     if (
         _has_fsdp_params(fsdp_state, module)
-        and not _module_handles(fsdp_state, module)[0].uses_sharded_strategy
+        and not _module_handle(fsdp_state, module).uses_sharded_strategy
     ):
         raise RuntimeError(
             "``sharded_state_dict`` can only be used when parameters are flatten "
@@ -513,13 +552,20 @@ def _sharded_post_state_dict_hook(
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
-        sharded_tensor = _ext_chunk_tensor(
-            tensor=param,
-            rank=fsdp_state.rank,
-            world_size=fsdp_state.world_size,
-            num_devices_per_node=fsdp_state._device_handle.device_count(),
-            pg=fsdp_state.process_group,
-        )
+        if not fsdp_state._state_dict_config._use_dtensor:
+            sharded_tensor = _ext_chunk_tensor(
+                tensor=param,
+                rank=fsdp_state.rank,
+                world_size=fsdp_state.world_size,
+                num_devices_per_node=fsdp_state._device_handle.device_count(),
+                pg=fsdp_state.process_group,
+            )
+        else:
+            sharded_tensor = _ext_chunk_dtensor(
+                tensor=param,
+                rank=fsdp_state.rank,
+                device_mesh=fsdp_state._device_mesh,
+            )
         if fsdp_state._state_dict_config.offload_to_cpu:
             sharded_tensor = sharded_tensor.cpu()
         state_dict[fqn] = sharded_tensor
@@ -533,8 +579,9 @@ def _sharded_post_state_dict_hook(
 def _sharded_post_load_state_dict_hook(
     module: nn.Module, fsdp_state: _FSDPState, *args, **kwargs
 ) -> None:
-    if fsdp_state._use_orig_params:
-        _register_orig_params(module, fsdp_state)
+    if _has_fsdp_params(fsdp_state, module):
+        with SimpleProfiler.profile("_exit_unshard_params_ctx"):
+            _exit_unshard_params_ctx(module, fsdp_state)
 
 
 @no_type_check
@@ -549,96 +596,120 @@ def _sharded_pre_load_state_dict_hook(
     a new FlatParameter and shards the new FlatParameter to the local chunk.
     """
     _lazy_init(fsdp_state, module)
-    _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
+    if not _is_composable(fsdp_state):
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_PREFIX}")
     if not _has_fsdp_params(fsdp_state, module):
         return
 
-    handle = _module_handles(fsdp_state, module)[0]
+    handle = _module_handle(fsdp_state, module)
     if not handle.uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
+    fqn_to_param_ext = dict(
+        zip(handle.flat_param._fqns, handle.flat_param._param_extensions)
+    )
 
-    tensors_to_flatten: List[torch.Tensor] = []
-    shared_param_fqns = [
-        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
-    ]
-    loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
-        fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
-        param = state_dict.pop(fqn_from_global_root)
-        if fqn in shared_param_fqns:
-            # This shared parameter does not own the storage, so there is no
-            # need to flatten it into the `FlatParameter`
-            continue
-        # All-gather the param (ShardedTensor)
-        param, shards = _ext_pre_load_state_dict_transform(param)
-        loaded_shapes.append(param.size())
-        assert len(shards) < 2, (
-            "Expects 0 or 1 shard per rank "
-            f"but got {len(shards)} shards on rank {fsdp_state.rank}."
-        )
-        param_numel = param.size().numel()
-        dim_0_size = param.size()[0]
-        chunk_size = (
-            math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
-        )
-        if len(shards) == 1:
-            local_tensor = shards[0].tensor.flatten()
-            if not local_tensor.is_cuda:
-                local_tensor = local_tensor.cuda()
-            num_padding = chunk_size - local_tensor.numel()
-            if num_padding > 0:
-                local_tensor = F.pad(local_tensor, [0, num_padding])
+        if not _is_composable(fsdp_state):
+            fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
         else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
-        tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
-        )
-        dist.all_gather_into_tensor(
-            tensor, local_tensor, group=fsdp_state.process_group
-        )
-        tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        tensors_to_flatten.append(tensor)
+            fqn_from_global_root = f"{prefix}{fqn}"
+        try:
+            param = state_dict.pop(fqn_from_global_root)
+        except KeyError:
+            logger.warning(
+                f"Did not find param with FQN {fqn_from_global_root}, skipping it. "  # noqa: G004
+                "The weight will not be filled if you expect it to be."
+            )
+            continue  # TODO: Improve unittesting for state_dict finetuning
+            # cases: https://github.com/pytorch/pytorch/issues/109134
 
-    # Create a new flat_param from the loaded, non-sharded tensors.
-    loaded_flat_param = handle.flatten_tensors_into_flat_param(
-        tensors_to_flatten, handle._aligned_numel, requires_grad=False
-    )
+        if not fsdp_state._state_dict_config._use_dtensor:
+            # All-gather the param (ShardedTensor)
+            param, shards = _ext_pre_load_state_dict_transform(param)
 
-    # Get the chunk from the loaded flat_param for the local rank.
-    loaded_flat_tensor, num_to_pad = FlatParamHandle._get_shard(
-        loaded_flat_param,
-        fsdp_state.rank,
-        fsdp_state.world_size,
-    )
-    flat_param = handle.flat_param
-    loaded_flat_tensor.to(flat_param.device)
-    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
-        f"The original shapes in FSDP are {expected_shapes}. "
-        f"The loaded shapes are {loaded_shapes}. "
-        f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
-    )
-    assert flat_param.numel() == loaded_flat_tensor.numel(), (
-        f"The loaded local chunk has different numel({loaded_flat_tensor.numel()}) "
-        f"from the local chunk {flat_param.numel()}."
-    )
-    assert flat_param._shard_numel_padded == num_to_pad, (
-        f"The loaded local chunk has different padding({num_to_pad}) "
-        f"from the local chunk {flat_param._shard_numel_padded}."
-    )
-    state_dict[f"{prefix}{FSDP_PREFIX}{FLAT_PARAM}"] = loaded_flat_tensor
-    if fsdp_state._use_orig_params:
-        _deregister_orig_params(module, fsdp_state)
+            assert len(shards) < 2, (
+                "Expects 0 or 1 shard per rank "
+                f"but got {len(shards)} shards on rank {fsdp_state.rank}."
+            )
+            param_numel = param.size().numel()
+            dim_0_size = param.size()[0]
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size)
+                * param_numel
+                // dim_0_size
+            )
+            if len(shards) == 1:
+                local_tensor = shards[0].tensor.flatten()
+                pg_device = _get_pg_default_device(fsdp_state.process_group)
+                if local_tensor.device.type != pg_device.type:
+                    with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                        local_tensor = local_tensor.to(pg_device)
+                num_padding = chunk_size - local_tensor.numel()
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+            tensor = torch.empty(
+                chunk_size * fsdp_state.world_size,
+                dtype=local_tensor.dtype,
+                device=device,
+            )
+            if local_tensor.is_cpu:
+                # Tensor could be on FSDP GPU compute device, while local_tensor is on CPU.
+                # Convert to CPU so all_gather can work.
+                tensor_dev = tensor.device
+                with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                    tensor = tensor.cpu()
+                tensor_list = list(
+                    torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+                )
+                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                    dist.all_gather(
+                        tensor_list, local_tensor, group=fsdp_state.process_group
+                    )
+                with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+                    tensor.to(tensor_dev)
+            else:
+                with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
+                    dist.all_gather_into_tensor(
+                        tensor, local_tensor, group=fsdp_state.process_group
+                    )
+            tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
+            state_dict[fqn_from_global_root] = tensor
+        else:
+            if param.device != fsdp_state._device_mesh.device_type:
+                param = param.to(fsdp_state._device_mesh.device_type)
+
+            parent_mesh = mesh_resources.get_parent_mesh(fsdp_state._device_mesh)
+            local_tensor = _ext_all_gather_dtensor(param, parent_mesh)
+
+            if fqn_to_param_ext.get(fqn) is not None:
+                ext = fqn_to_param_ext[fqn]
+                local_tensor = _ext_post_unflatten_transform(local_tensor, ext)
+            state_dict[fqn_from_global_root] = local_tensor
+
+    with SimpleProfiler.profile("_enter_unshard_params_ctx"):
+        _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
+
+
+@contextlib.contextmanager
+def _replace_with_full_state_dict_type(fsdp_state: _FSDPState) -> Generator:
+    old_state_dict_config = fsdp_state._state_dict_config
+    old_state_dict_type = fsdp_state._state_dict_type
+    fsdp_state._state_dict_config = FullStateDictConfig()
+    fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+    yield
+    fsdp_state._state_dict_config = old_state_dict_config
+    fsdp_state._state_dict_type = old_state_dict_type
 
 
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -649,25 +720,54 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        context = contextlib.nullcontext()
 
-    _post_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_post_state_dict_hook,
-    }
-    processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
-        module, fsdp_state, state_dict, prefix
-    )
+    with context:
+        _post_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_post_state_dict_hook,
+        }
+        processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
+            module, fsdp_state, state_dict, prefix
+        )
+
+    if fsdp_state._is_root:
+        logger.info("FSDP finished processing state_dict(), prefix=%s", prefix)
+        for key, tensor in sorted(processed_state_dict.items()):
+            if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
+                local_shape = tensor.shape
+                if isinstance(tensor, ShardedTensor):
+                    local_shape = None
+                    shards = tensor.local_shards()
+                    if shards:
+                        local_shape = shards[0].tensor.shape
+                elif isinstance(tensor, DTensor):
+                    local_shape = tensor.to_local().shape
+                logger.info(
+                    "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
+                    key,
+                    type(tensor),
+                    tensor.shape,
+                    local_shape,
+                    tensor.dtype,
+                    tensor.device,
+                )
+
     return processed_state_dict
 
 
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     *args,
     **kwargs,
@@ -677,31 +777,45 @@ def _pre_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
     be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
             "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
             "be returned."
         )
+    else:
+        _set_use_dtensor(module, fsdp_state)
+        context = contextlib.nullcontext()
 
-    _pre_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
-    }
-    _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
-        fsdp_state,
-        module,
-        *args,
-        **kwargs,
-    )
+    with context:
+        _pre_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
+        }
+        _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
+            fsdp_state,
+            module,
+            *args,
+            **kwargs,
+        )
+
+
+@no_type_check
+def _set_use_dtensor(fsdp_state: _FSDPState, module: nn.Module) -> None:
+    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # _use_dtensor flag to be true for ShardedStateDictConfig().
+    if (
+        getattr(module, "device_mesh", None)
+        and fsdp_state._state_dict_type == StateDictType.SHARDED_STATE_DICT
+    ):
+        fsdp_state._state_dict_config._use_dtensor = True
 
 
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -712,44 +826,65 @@ def _pre_load_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
     be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        _set_use_dtensor(module, fsdp_state)
+        context = contextlib.nullcontext()
 
-    _pre_load_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
-    }
-    # Code that is common for all state_dict impls
-    if fsdp_state._device_handle.is_available():
-        fsdp_state._device_handle.synchronize()
-    # Dispatch into state_dict specific implementation of pre-hook.
-    _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
-        module, fsdp_state, state_dict, prefix
-    )
+    _lazy_init(fsdp_state, module)
+    if fsdp_state._is_root:
+        SimpleProfiler.reset()
+
+    with context:
+        _pre_load_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
+        }
+        # Code that is common for all state_dict impls
+        if fsdp_state._device_handle.is_available():
+            fsdp_state._device_handle.synchronize()
+        # Dispatch into state_dict specific implementation of pre-hook.
+        _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
+            module, fsdp_state, state_dict, prefix
+        )
 
 
 @no_type_check
 @torch.no_grad()
 def _post_load_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     *args: Any,
 ) -> None:
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        context = _replace_with_full_state_dict_type(fsdp_state)
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+    else:
+        context = contextlib.nullcontext()
 
-    _post_load_state_dict_hook_fn = {
-        StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
-        StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
-        StateDictType.SHARDED_STATE_DICT: _sharded_post_load_state_dict_hook,
-    }
-    # Code that is common for all state_dict impls
-    # Dispatch into state_dict type specific implementation of post-hook for
-    # loading state_dict.
-    _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+    with context:
+        _post_load_state_dict_hook_fn = {
+            StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
+            StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,
+            StateDictType.SHARDED_STATE_DICT: _sharded_post_load_state_dict_hook,
+        }
+        # Code that is common for all state_dict impls
+        # Dispatch into state_dict type specific implementation of post-hook for
+        # loading state_dict.
+        _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+
+    if fsdp_state._is_root:
+        SimpleProfiler.dump_and_reset("FSDP model load_state_dict profiling: ")
 
 
 def _register_all_state_dict_hooks(state: _FSDPState):
@@ -779,15 +914,11 @@ def _register_state_dict_hooks_base(
     hook_registration_fn_kwargs: Dict[str, Any],
 ) -> None:
     """Registers ``hook`` using ``hook_registration_fn``."""
-    # TODO: Use `_get_submodule_state(module)` in each hook instead of
-    # `partial`: https://github.com/pytorch/pytorch/issues/90788
-    hook_with_state = functools.partial(hook, state)
     if not _is_composable(state):
-        getattr(state, hook_registration_fn_name)(
-            hook_with_state, **hook_registration_fn_kwargs
-        )
+        getattr(state, hook_registration_fn_name)(hook, **hook_registration_fn_kwargs)
     else:
-        for handle in state._handles:
+        handle = state._handle
+        if handle:
             getattr(handle._fully_sharded_module, hook_registration_fn_name)(
-                hook_with_state, **hook_registration_fn_kwargs
+                hook, **hook_registration_fn_kwargs
             )

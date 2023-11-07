@@ -9,6 +9,11 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
 
 namespace torch {
 namespace profiler {
@@ -228,9 +233,8 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::vector<std::vector<int64_t>> flattenList(
-    c10::List<c10::IValue> list,
-    std::string fn_name) {
+static std::vector<std::vector<int64_t>> flattenList(
+    const c10::List<c10::IValue>& list) {
   std::vector<std::vector<int64_t>> tensor_dims;
   for (const c10::IValue& input : list) {
     if (input.isTensor()) {
@@ -259,7 +263,7 @@ std::vector<std::vector<int64_t>> inputSizes(
     } else if (input.isList()) {
       std::vector<std::vector<int64_t>> tmp_sizes;
       if (flatten_list_enabled) {
-        tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
+        tmp_sizes = flattenList(input.toList());
       }
       // Extend the current sizes array by the array returned from input sizes
       if (!tmp_sizes.empty()) {
@@ -280,14 +284,51 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
     if (t_idx > 0) {
       str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}[", str);
-    for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
-      if (s_idx > 0) {
-        str = fmt::format("{}, ", str);
-      }
-      str = fmt::format("{}{}", str, shapes[t_idx][s_idx]);
+    str = fmt::format("{}{}", str, shapeToStr(shapes[t_idx]));
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string variantShapesToStr(const std::vector<shape>& shapes) {
+  std::string str("[");
+  for (const auto t_idx : c10::irange(shapes.size())) {
+    if (t_idx > 0) {
+      str = fmt::format("{}, ", str);
     }
-    str = fmt::format("{}]", str);
+    if (std::holds_alternative<std::vector<int64_t>>(shapes[t_idx])) {
+      const auto& shape = std::get<std::vector<int64_t>>(shapes[t_idx]);
+      str = fmt::format("{}{}", str, shapeToStr(shape));
+    } else if (std::holds_alternative<std::vector<std::vector<int64_t>>>(
+                   shapes[t_idx])) {
+      const auto& tensor_shape =
+          std::get<std::vector<std::vector<int64_t>>>(shapes[t_idx]);
+      if (tensor_shape.size() > TENSOR_LIST_DISPLAY_LENGTH_LIMIT) {
+        // skip if the tensor list is too long
+        str = fmt::format("{}[]", str);
+        continue;
+      }
+      str = fmt::format("{}[", str);
+      for (const auto s_idx : c10::irange(tensor_shape.size())) {
+        if (s_idx > 0) {
+          str = fmt::format("{}, ", str);
+        }
+        str = fmt::format("{}{}", str, shapeToStr(tensor_shape[s_idx]));
+      }
+      str = fmt::format("{}]", str);
+    }
+  }
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string shapeToStr(const std::vector<int64_t>& shape) {
+  std::string str("[");
+  for (const auto s_idx : c10::irange(shape.size())) {
+    if (s_idx > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    str = fmt::format("{}{}", str, shape[s_idx]);
   }
   str = fmt::format("{}]", str);
   return str;
@@ -310,7 +351,7 @@ std::string inputOpIdsToStr(
   return str;
 }
 
-std::string dtypesToStr(const std::vector<std::string>& types) {
+std::string strListToStr(const std::vector<std::string>& types) {
   if (types.empty()) {
     return "[]";
   } else {
@@ -319,11 +360,26 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
         types.begin(),
         types.end(),
         std::ostream_iterator<std::string>(oss, ", "),
-        [](std::string s) -> std::string { return "\"" + s + "\""; });
+        [](const std::string& s) -> std::string { return "\"" + s + "\""; });
     auto rc = oss.str();
     rc.erase(rc.length() - 2); // remove last ", "
     return "[" + rc + "]";
   }
+}
+
+std::string ivalueListToStr(const std::vector<c10::IValue>& list) {
+  std::vector<std::string> concrete_str_inputs;
+  std::stringstream ss;
+  for (const auto& val : list) {
+    if (val.isNone()) {
+      concrete_str_inputs.emplace_back("");
+    } else {
+      ss.str("");
+      ss << val;
+      concrete_str_inputs.emplace_back(ss.str());
+    }
+  }
+  return strListToStr(concrete_str_inputs);
 }
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -345,6 +401,51 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
     }
   }
   return types;
+}
+
+// ----------------------------------------------------------------------------
+// -- NCCL Metadata -----------------------------------------------------------
+// ----------------------------------------------------------------------------
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+static constexpr auto kCommuName = "Collective name";
+static constexpr auto kDtype = "dtype";
+static constexpr auto kInMsgSize = "In msg size";
+static constexpr auto kOutMsgSize = "Out msg size";
+static constexpr auto kInSplit = "In split size";
+static constexpr auto kOutSplit = "Out split size";
+static constexpr auto kGroupSize = "Group size";
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+
+std::unordered_map<std::string, std::string> saveNcclMeta(
+    const at::RecordFunction& fn) {
+  std::unordered_map<std::string, std::string> map;
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
+  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
+  if (debugInfo == nullptr) {
+    LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
+                 << fn.name();
+    return map;
+  }
+
+  map.emplace(kCommuName, fmt::format("\"{}\"", debugInfo->getColumnName()));
+  map.emplace(
+      kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
+  map.emplace(kInMsgSize, std::to_string(debugInfo->getInMessageSize()));
+  map.emplace(kOutMsgSize, std::to_string(debugInfo->getOutMessageSize()));
+  map.emplace(
+      kInSplit,
+      fmt::format("[{}]", fmt::join(debugInfo->getInputSplitSizes(), ", ")));
+  map.emplace(
+      kOutSplit,
+      fmt::format("[{}]", fmt::join(debugInfo->getOutputSplitSizes(), ", ")));
+  map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
+#endif // USE_C10D
+#endif // USE_DISTRIBUTED
+  return map;
 }
 
 // ----------------------------------------------------------------------------

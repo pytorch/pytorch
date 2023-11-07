@@ -38,11 +38,13 @@ namespace {
     }
     return "(unknown)";
   }
-}
+
+  constexpr auto CatchAll = c10::DispatchKey::CatchAll;
+} // anonymous namespace
 
 CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
-  , cpp_signature_(std::move(cpp_signature))
+  , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
   , debug_()
   {}
@@ -54,7 +56,7 @@ CppFunction::~CppFunction() = default;
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_((!k.has_value() || *k == c10::DispatchKey::CatchAll) ? c10::nullopt : k)
+  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::nullopt : k)
   , file_(file)
   , line_(line)
   {
@@ -67,7 +69,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
             *ns_, debugString(file_, line_)
           )
         );
-        // fallthrough
+        [[fallthrough]];
       case FRAGMENT:
         TORCH_CHECK(
           ns_.has_value(),
@@ -142,13 +144,13 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
-Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   c10::FunctionSchema schema = [&] {
-    if (name_or_schema.is_right()) {
-      return std::move(name_or_schema).right();
+    if (std::holds_alternative<c10::FunctionSchema>(name_or_schema)){
+      return std::get<c10::FunctionSchema>(std::move(name_or_schema));
     } else {
       // it's a name; use the inferred schema
-      c10::OperatorName name = std::move(name_or_schema).left();
+      c10::OperatorName name = std::get<c10::OperatorName>(std::move(name_or_schema));
       TORCH_CHECK(f.schema_,
         "def(\"", name, "\"): "
         "Full schema string was not specified, and we couldn't infer schema either.  ",
@@ -170,7 +172,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
       std::move(name),
       dispatch_key,
       std::move(f.func_),
-      std::move(f.cpp_signature_),
+      f.cpp_signature_,
       std::move(f.schema_),
       debugString(std::move(f.debug_), file_, line_)
     )
@@ -221,7 +223,7 @@ Library& Library::_impl(const char* name_str, CppFunction&& f, _RegisterOrVerify
           std::move(name),
           dispatch_key,
           std::move(f.func_),
-          std::move(f.cpp_signature_),
+          f.cpp_signature_,
           std::move(f.schema_),
           debugString(std::move(f.debug_), file_, line_)
         )

@@ -141,6 +141,7 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
 
 PyRRef::~PyRRef() {
   if (type_.has_value()) {
+    pybind11::gil_scoped_acquire ag;
     (*type_).dec_ref();
     // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
     // decref on the PyObject again.

@@ -124,7 +124,7 @@ def valuetype_type(
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
@@ -226,7 +226,9 @@ def argument_type(a: Argument, *, binds: ArgName, symint: bool = False) -> Named
 # and a function with a return type of 'std::tuple' has >1 return name.
 def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
     # placeholder is ignored
-    r = valuetype_type(t, binds="__placeholder__", symint=symint)
+    # NB: symint is ALWAYS respected for return types.  So symint argument
+    # here is IGNORED
+    r = valuetype_type(t, binds="__placeholder__", symint=True)
     if r is not None:
         return r.type
 
@@ -249,7 +251,7 @@ def returntype_type(t: Type, *, mutable: bool, symint: bool = False) -> CType:
         assert (
             not mutable
         ), "Native functions should never return a mutable tensor list. They should return void."
-        elem = returntype_type(t.elem, mutable=False, symint=symint)
+        elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
 

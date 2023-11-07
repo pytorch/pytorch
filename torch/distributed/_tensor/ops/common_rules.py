@@ -1,32 +1,20 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Tuple
 
 import torch
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpSchema,
+    OutputSharding,
+)
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
     return string[:idx] + new_char + string[idx + 1 :]
-
-
-def _inplace_rewrap_schema_suggestion(
-    suggestion: OpSchema, input_schema: OpSchema
-) -> None:
-    suggestion_args_spec = suggestion.args_spec
-    new_arg_schema: List[object] = []
-    idx_of_args_spec = 0
-    for arg in input_schema.args_schema:
-        if isinstance(arg, DTensorSpec):
-            new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
-            idx_of_args_spec += 1
-        else:
-            new_arg_schema.append(arg)
-    suggestion.args_schema = tuple(new_arg_schema)
-    suggestion.kwargs_schema = input_schema.kwargs_schema
 
 
 def _gen_reshard_suggestions(
@@ -47,8 +35,8 @@ def _gen_reshard_suggestions(
                 tensor_meta=input_spec.tensor_meta,
             )
         )
-    suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
-    _inplace_rewrap_schema_suggestion(suggested_schema, op_schema)
+    suggested_schema = OpSchema(op_schema.op, tuple(suggested_arg_specs), {})
+    suggested_schema._inplace_rewrap_schema_suggestion(op_schema)
     return OutputSharding(
         None,
         schema_suggestions=[suggested_schema],
@@ -224,14 +212,10 @@ def einop_rule(
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
     assert input_specs[0].tensor_meta is not None
-    tensor_meta = TensorMetadata(
+    tensor_meta = TensorMeta(
         torch.Size(output_shape),
-        input_specs[0].tensor_meta.dtype,
-        input_specs[0].tensor_meta.requires_grad,
         input_specs[0].tensor_meta.stride,
-        input_specs[0].tensor_meta.memory_format,
-        input_specs[0].tensor_meta.is_quantized,
-        input_specs[0].tensor_meta.qparams,
+        input_specs[0].tensor_meta.dtype,
     )
     return OutputSharding(
         DTensorSpec.from_dim_map(
@@ -286,11 +270,11 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
     enforce_sharding: Dict[str, int] = {}
-    if op_schema.is_inplace:
+    if _is_inplace_op(op_schema.op):
         # inplace op should keep the input sharding it writes to
         for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map):
             enforce_sharding[out_dimchar] = mesh_dim
-    elif op_schema.is_out_variant:
+    elif _is_out_variant_op(op_schema.op):
         out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
         for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map):
             enforce_sharding[out_dimchar] = mesh_dim
@@ -310,74 +294,3 @@ def linear_pointwise_rule(op_schema: OpSchema) -> OutputSharding:
     pending sum as well without any communication overhead.
     """
     return pointwise_rule(op_schema, linearity=True)
-
-
-def reduction_rule(
-    op_schema: OpSchema,
-    *,
-    dims: Optional[Sequence[int]] = None,
-    keep_dim: bool = False,
-    reduction_linear: bool = False,
-) -> OutputSharding:
-    """
-    Propagate the sharding for reduction operations. Examples:
-        ij->i - sum on dim
-
-    reduction_linear means that the reduction `f` follows this rule:
-        f([f(a), f(b)]) = f([a, b])
-
-    reduction linear should be super set of linearity.
-    """
-    alphabet = "abcdefghijklmnopqrstuvwxyz"
-    # reduction op usually begin with a single tensor
-    input_spec = cast(DTensorSpec, op_schema.args_schema[0])
-    reduce_dims = range(input_spec.ndim) if dims is None else dims
-
-    if not reduction_linear:
-        # if the reduction is not linear, we need to clear the pending sum
-        # on the input spec, also replicate the reducing dimension if the
-        # reducing dimension is sharded, then suggest a resharding
-        reshard_dim_map = input_spec.dim_map
-        needs_reshard = False
-        for dim in reduce_dims:
-            if input_spec.dim_map[dim] != -1:
-                needs_reshard = True
-                reshard_dim_map[dim] = -1
-        needs_reshard = needs_reshard or len(input_spec.sums) > 0
-
-        if needs_reshard:
-            no_partial_spec = DTensorSpec.from_dim_map(
-                input_spec.mesh, reshard_dim_map, [], tensor_meta=input_spec.tensor_meta
-            )
-            schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
-            _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
-            return OutputSharding(
-                output_spec=None, schema_suggestions=[schema_suggestion]
-            )
-
-    input_chars = alphabet[: input_spec.ndim]
-
-    if dims is None and not keep_dim:
-        # reducing to a single scalar tensor, we just mark output as empty
-        out_dimchars = ""
-    else:
-        # if keep the reduction dim, we need to keep the dim char by marking
-        # it as a singleton "1" in the out_dimchars
-        reduce_dim_char = ord("1") if keep_dim else None
-        out_dimchars = input_chars.translate(
-            {ord(alphabet[dim]): reduce_dim_char for dim in reduce_dims}
-        )
-    fmt = f"{input_chars}->{out_dimchars}"
-
-    enforce_sharding: Dict[str, int] = {}
-    if op_schema.is_out_variant:
-        out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
-        for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map):
-            enforce_sharding[out_dimchar] = mesh_dim
-
-    return einop_rule(
-        fmt,
-        op_schema,
-        linearity=reduction_linear,
-        enforce_sharding=enforce_sharding,
-    )

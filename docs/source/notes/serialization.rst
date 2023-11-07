@@ -341,3 +341,16 @@ torch.full return float tensors by default, even when given bool or
 integer fill values. ScriptModules using :func:`torch.full` and serialized on PyTorch 1.6
 and later cannot be loaded in earlier versions of PyTorch, however, since those
 earlier versions do not understand the new behavior.
+
+.. _utility functions:
+
+Utility functions
+-----------------
+
+The following utility functions are related to serialization:
+
+.. currentmodule:: torch.serialization
+
+.. autofunction:: register_package
+.. autofunction:: get_default_load_endianness
+.. autofunction:: set_default_load_endianness

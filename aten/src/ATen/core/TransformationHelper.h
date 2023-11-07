@@ -55,13 +55,13 @@ C10_HOST_DEVICE inline T uniform_int_full_range(V val) {
  */
 template <typename T, typename V>
 C10_HOST_DEVICE inline typename std::enable_if<!(std::is_floating_point<T>::value), T>::type uniform_int(V val) {
-  if (std::is_same<T, bool>::value) {
+  if constexpr (std::is_same_v<T, bool>) {
     return static_cast<bool>(val & 1);
-  } else if (std::is_same<T, int64_t>::value) {
+  } else if constexpr (std::is_same_v<T, int64_t>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
-  } else if (std::is_same<T, at::Half>::value || std::is_same<T, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<T, at::Half> || std::is_same<T, at::BFloat16>::value) {
     return static_cast<T>(val % static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1));
-  } else if (std::is_integral<T>::value) {
+  } else if constexpr (std::is_integral_v<T>) {
     return static_cast<T>(val % (static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1));
   } else {
     assert(false);
@@ -120,7 +120,7 @@ C10_HOST_DEVICE inline double cauchy(double val, double median, double sigma) {
 
 /**
  * Transforms uniformly distributed `val` between 0.0 and 1.0 to
- * exponentialy distributed with `lambda` parameter of the distribution.
+ * exponentially distributed with `lambda` parameter of the distribution.
  */
 template <typename T>
 C10_HOST_DEVICE inline T exponential(T val, T lambda) {
@@ -144,7 +144,7 @@ C10_HOST_DEVICE inline T exponential(T val, T lambda) {
 
 /**
  * Transforms uniformly distributed `val` between 0.0 and 1.0 to
- * geometricaly distributed with success probability `p`.
+ * geometrically distributed with success probability `p`.
  */
 template <typename T>
 C10_HOST_DEVICE inline T geometric(T val, T p) {

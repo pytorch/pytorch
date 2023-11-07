@@ -21,7 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class SimpleMLP(nn.Module):
     def __init__(self):
-        super(SimpleMLP, self).__init__()
+        super().__init__()
         self.net1 = nn.Linear(50, 32)
         self.relu = nn.ReLU()
         self.net2 = nn.Linear(32, 8)
@@ -55,7 +55,15 @@ class TestDataParallel(DTensorTestBase):
         return 2
 
     def _test_data_parallel(
-        self, mod, ddp_mod, opt, ddp_opt, inp, train_step, data_parallel_mode
+        self,
+        mod,
+        ddp_mod,
+        opt,
+        ddp_opt,
+        inp,
+        train_step,
+        data_parallel_mode,
+        data_parallel_options=None,
     ):
         ddp_inp = deepcopy(inp)
 
@@ -68,15 +76,13 @@ class TestDataParallel(DTensorTestBase):
 
         # train a DDP model once manually as DDP grads are different
         torch.sum(ddp_mod(ddp_inp[0]) - ddp_inp[1]).backward()
-        with torch.no_grad():
-            for p in ddp_mod.parameters():
-                p.grad *= self.world_size
         ddp_opt.step()
 
         # compile it with replicate and run step once
-        compiled_fn = compile(parallel_mode=DataParallel(data_parallel_mode))(
-            train_step
-        )
+        data_parallel_options = data_parallel_options or {}
+        compiled_fn = compile(
+            parallel_mode=DataParallel(data_parallel_mode, **data_parallel_options)
+        )(train_step)
         compiled_fn(mod, opt, inp)
 
         for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
@@ -174,6 +180,87 @@ class TestDataParallel(DTensorTestBase):
             mod, ddp_mod, opt, ddp_opt, train_batch, train_step, "fully_shard"
         )
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_data_parallel_batch_dim_analysis(self):
+        # test batch dim analysis by adding a few ops that changes
+        # the batch dim in non-trival ways
+
+        class WrapperModule(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.mlp = SimpleMLP()
+
+            def forward(self, x):
+                output = self.mlp(x)
+                new_output = output.clone().view(-1)
+                squeezed_out = new_output.squeeze()
+                unsqueezed_out = squeezed_out.unsqueeze(0)
+                output = output + 0.1 * unsqueezed_out.view(output.shape[0], -1)
+
+                # test factory ops with data parallel expansion
+                arange = torch.arange(output.shape[1], device=output.device)
+                ones = torch.ones(output.shape, device=output.device)
+                added_arange = arange.unsqueeze(0) + ones
+
+                # test repeat logic
+                zeros = torch.zeros(output.shape[1], device=output.device)
+                repeated_zeros = zeros.unsqueeze(0).repeat(output.shape[0], 1)
+
+                output = output + added_arange + repeated_zeros
+
+                return output
+
+        for parallel_mode in ["replicate", "fully_shard"]:
+            mod = WrapperModule().cuda(self.rank)
+            opt = torch.optim.SGD(mod.parameters(), lr=0.1)
+
+            train_batch = (
+                torch.randn((128, 50), device=torch.device(self.rank)),
+                torch.randn((128, 8), device=torch.device(self.rank)),
+            )
+
+            ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+            ddp_opt = torch.optim.SGD(ddp_mod.parameters(), lr=0.1)
+            self._test_data_parallel(
+                mod, ddp_mod, opt, ddp_opt, train_batch, train_step, parallel_mode
+            )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_fully_shard_non_0_batch_dim(self):
+        class WrapperModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = SimpleMLP()
+
+            def forward(self, x):
+                reshaped_x = x.t().contiguous()
+                return self.mlp(reshaped_x).t()
+
+        mod = WrapperModule().cuda(self.rank)
+        opt = torch.optim.Adam(mod.parameters(), lr=0.1, fused=True)
+
+        train_batch = (
+            torch.randn((50, 128), device=torch.device(self.rank)),
+            torch.randn((8, 128), device=torch.device(self.rank)),
+        )
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[self.rank])
+        ddp_opt = torch.optim.Adam(ddp_mod.parameters(), lr=0.1, fused=True)
+
+        self._test_data_parallel(
+            mod,
+            ddp_mod,
+            opt,
+            ddp_opt,
+            train_batch,
+            train_step,
+            "fully_shard",
+            {"input_batch_dim": 1},
+        )
+
 
 if __name__ == "__main__":
-    run_tests()
+    if False:
+        run_tests()

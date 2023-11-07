@@ -4,19 +4,26 @@
   - .ci/onnx/*
   - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
+  - benchmarks/dynamo/**
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
+  - docs/source/_static/img/onnx/**
   - scripts/onnx/**
   - test/onnx/**
+  - test/onnx_caffe2/**
   - tools/onnx/**
+  - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
+  - torch/_C/_onnx.pyi
+  - torch/_logging/**
   - torch/csrc/jit/passes/onnx.*
   - torch/csrc/jit/passes/onnx/**
   - torch/csrc/jit/serialization/export.*
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
   approved_by:
@@ -72,6 +79,7 @@
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
+  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -82,11 +90,12 @@
   - .github/ci_commit_pins/xla.txt
   approved_by:
   - pytorchbot
+  ignore_flaky_failures: false
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)
+  - pull / linux-focal-py3_8-clang9-xla / build
+  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -109,6 +118,20 @@
   - IvanKobzarev
   - dreiss
   - raziel
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: PrimTorch
+  patterns:
+  - torch/_meta_registrations.py
+  - torch/_decomp/**
+  - torch/_refs/**
+  - torch/_prims/**
+  - torch/_prims_common/**
+  approved_by:
+  - nkaretnikov
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -198,6 +221,7 @@
   - EasyCLA
   - Lint
   - pull
+
 - name: Distributions
   patterns:
   - torch/distributions/**
@@ -293,6 +317,7 @@
   - mingfeima
   - XiaobingSuper
   - jgong5
+  - vfdev-5
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -408,6 +433,8 @@
   - mruberry
   - lezcano
   - Skylion007
+  - ngimel
+  - peterbell10
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -5,7 +5,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
-#include <fmt/format.h>
 
 #include <os/signpost.h>
 #include <os/log.h>
@@ -51,15 +50,7 @@ struct BaseInfo {
   // handle used to identify the profile info's instance (usually the pointer)
   const uintptr_t handle;
 
-  virtual const std::string toString(double gpuTime = 0, double schedulingTime = 0) const {
-    // the gpuTime will be non-zero mainly for event-based signposts.
-    // The interval-based signposts will have "duration" as well as accumulated
-    // total GPU time, up to the point of execution.
-    return fmt::format("{}{}",
-                       gpuTime > 0.0 ? fmt::format(", gpu={:.3f} ms", gpuTime) : "",
-                       schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
-  }
-
+  virtual const std::string toString(double gpuTime = 0, double schedulingTime = 0) const;
   // builds a string for a tensor (format: Device:ScalarType[tensor.sizes()])
   static std::string buildTensorString(const Tensor& tensor, bool includeBufferId = false) {
     if (tensor.defined()) {
@@ -91,11 +82,7 @@ struct OperationInfo : BaseInfo {
   uint64_t runCount = 0;
   std::string strKey;
 
-  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override {
-    return fmt::format("aten::{} (id={}{}, run={}{})",
-                       strKey, type == Type::GRAPH ? "G" : "K", profileId, runCount,
-                       BaseInfo::toString(gpuTime, schedulingTime));
-  }
+  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override;
 
   // builds a string for a kernel
   static std::string buildKernelString(const std::string& kernelName,
@@ -123,12 +110,7 @@ struct CpuFbInfo : BaseInfo {
   std::string strKey;
   uint64_t startTime = 0;
 
-  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override {
-    return fmt::format("CPU Fallback::{} (id={}, run={}, CopyOverhead={}{})",
-                       strKey, profileId, runCount,
-                       getIMPSAllocator()->formatSize(currentCopyOverhead),
-                       BaseInfo::toString(0.0, schedulingTime));
-  }
+  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override;
 
   void updateCopyOverhead(const TensorList& tensors) {
     currentCopyOverhead = 0;
@@ -161,27 +143,9 @@ struct CopyInfo : BaseInfo {
   // for copies that don't use blitters, we measure CPU time
   uint64_t startTime = 0;
 
-  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override {
-    return fmt::format("{}Copy{}: {} --> {} (len={}{})",
-                       // Copies could be using Blit Encoder, or using regular
-                       // memcpy() on Unified memory
-                       usesBlitter ? "Blit" : "Mem",
-                       // CopySync indicates COMMIT_AND_WAIT was used to synchronize
-                       // the GPU stream with CPU after the blocking copy
-                       isNonBlocking ? "" : "Sync", srcStrKey, dstStrKey,
-                       getIMPSAllocator()->formatSize(length),
-                       BaseInfo::toString(gpuTime, schedulingTime));
-  }
+  const std::string toString(double gpuTime = 0, double schedulingTime = 0) const override;
 
-  static std::string buildTensorString(const void* buffer, const OptionalTensorRef tensor, bool includeBufferId = false) {
-    if (tensor.has_value()) {
-      return BaseInfo::buildTensorString(*tensor, includeBufferId);
-    }
-    // if tensor is not defined (e.g., copy_blit_mps()), then use buffer
-    // pointer to build the string.
-    const bool isBufferOnMPS = isStorageOnMPS(buffer, tensor);
-    return fmt::format("{}:{:p}", isBufferOnMPS ? "MPS" : "CPU", buffer);
-  }
+  static std::string buildTensorString(const void* buffer, const OptionalTensorRef tensor, bool includeBufferId = false);
 
   static bool isStorageOnMPS(const void* buffer, const OptionalTensorRef tensor) {
     if (tensor.has_value()) {

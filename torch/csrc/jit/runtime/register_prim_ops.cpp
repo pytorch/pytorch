@@ -27,8 +27,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -292,7 +291,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          int64_t val = static_cast<int64_t>(c10::stoll(s->string(), &sz));
+          int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
           if (sz == s->string().size()) {
             push(stack, val);
           } else {
@@ -349,7 +348,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           auto s = pop(stack).toString();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type sz;
-          double b = c10::stod(s->string(), &sz);
+          double b = std::stod(s->string(), &sz);
           if (sz == s->string().size()) {
             push(stack, b);
           } else {
@@ -416,30 +415,11 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         sym_size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
-        sym_size_int,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_stride.int(Tensor self, int dim) -> SymInt"),
-        sym_stride_int,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
         [](Stack& stack) {
           at::Tensor arg = pop(stack).toTensor();
           push(stack, arg.strides());
         },
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
-        sym_numel,
-        aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA(
-            "aten::sym_storage_offset(Tensor self) -> SymInt"),
-        sym_storage_offset,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
@@ -1079,6 +1059,21 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "aten::_unsafe_index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
+        [](Stack& stack) {
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
+          auto self = pop(stack).toTensor();
+          auto result = at::_unsafe_index(self, opt_list_indices);
+          push(stack, std::move(result));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)"),
         [](Stack& stack) {
           auto unsafe = pop(stack).toBool();
@@ -1132,6 +1127,24 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::_unsafe_index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"),
+        [](Stack& stack) {
+          auto accumulate = pop(stack).toBool();
+          auto values = pop(stack).toTensor();
+          auto indices = pop(stack).to<c10::List<at::Tensor>>();
+          c10::List<c10::optional<at::Tensor>> opt_list_indices;
+          opt_list_indices.reserve(indices.size());
+          for (const auto& ten : indices) {
+            opt_list_indices.push_back(ten);
+          }
+          auto self = pop(stack).toTensor();
+          auto result =
+              at::_unsafe_index_put(self, opt_list_indices, values, accumulate);
+          push(stack, std::move(result));
+        },
+        aliasAnalysisFromSchema()),
     // reference function parse_to_conversion in python_arg_parsing.h
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
@@ -1166,6 +1179,22 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           at::Tensor a;
           pop(stack, a);
           push(stack, a.is_cpu());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_xla(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_xla());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_mtia(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_mtia());
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -2534,7 +2563,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
           pop(stack, input, shape);
           shape = shape.contiguous();
           AT_ASSERT(shape.ndimension() == 1);
-          at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
+          at::IntArrayRef shape_list(
+              shape.const_data_ptr<int64_t>(), shape.size(0));
           push(stack, input.reshape(shape_list));
         },
         aliasAnalysisSpecialCase()),
@@ -3034,7 +3064,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
           c10::List<int64_t> elems;
           elems.reserve(t.size(0));
           for (const auto i : c10::irange(t.size(0))) {
-            elems.push_back(*t[i].data_ptr<int32_t>());
+            elems.push_back(*t[i].const_data_ptr<int32_t>());
           }
           push(stack, std::move(elems));
         },
@@ -3337,5 +3367,4 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
 RegisterOperators reg2(createOperators(opGenArgs2));
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

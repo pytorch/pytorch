@@ -11,10 +11,10 @@ from torch._C._functorch import (
 from torch._functorch.vmap import (
     wrap_batched,
     unwrap_batched,
-    vmap,
     restore_vmap,
     _add_batch_dim,
 )
+from torch._functorch.apis import vmap
 from torch._functorch.vmap import _broadcast_to_and_flatten
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
 from typing import Any, NamedTuple, Tuple
@@ -211,7 +211,7 @@ def wrap_outputs_maintaining_identity(
 # that will eventually be fixed by mode-only functorch.
 # The TL;DR is that there's no way to unwrap a dead GradTensorWrapper,
 # so we (the framework) need to do it manually. Regular PyTorch operators
-# automatically do so this is consisent.
+# automatically do so this is consistent.
 #
 # class MyExp(torch.autograd.Function):
 #     @staticmethod
@@ -349,9 +349,10 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     #   vmap(vmap( but not completely sure if it is a problem. If we
     #   assigned those fields to the ctx object, the worry is that they
     #   get overwritten.
-    out_dims = "not populated"
-    input_shapes: Any = "not populated"
-    saved_tensors_bdims: Any = "not populated"
+    init_val = "not populated"
+    out_dims = init_val
+    input_shapes: Any = init_val
+    saved_tensors_bdims: Any = init_val
 
     def forward(*operands):
         nonlocal out_dims
@@ -395,8 +396,8 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         saved_tensors_bdims = saved_tensors_bdims_
 
     def jvp(ctx, *tangents):
-        assert out_dims != "not populated"
-        assert saved_tensors_bdims != "not populated"
+        assert out_dims != init_val
+        assert saved_tensors_bdims != init_val
 
         def jvp_no_context(saved_tensors, tangents):
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -411,9 +412,9 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         return result
 
     def backward(ctx, *grad_outputs):
-        assert out_dims != "not populated"
-        assert input_shapes != "not populated"
-        assert saved_tensors_bdims != "not populated"
+        assert out_dims != init_val
+        assert input_shapes != init_val
+        assert saved_tensors_bdims != init_val
 
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
@@ -440,7 +441,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     )
 
     def get_out_dims():
-        assert out_dims != "not populated"
+        assert out_dims != init_val
         return out_dims
 
     return Generated, get_out_dims

@@ -91,6 +91,8 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
+        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
+        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -222,6 +224,14 @@ def parse_args():
         action="store_true",
         default=False,
         help="Log operator inputs",
+    )
+    parser.add_argument(
+        "--include-slowdowns",
+        "--include_slowdowns",
+        action="store_true",
+        default=False,
+        help="Include slowdowns in geomean performance speedup report. By default, slowdowns are ignored. "
+        "This is because one can always use eager if compile is not speeding things up",
     )
 
     parser.add_argument(
@@ -359,7 +369,7 @@ def get_mode(args):
     return "training"
 
 
-def get_skip_tests(suite):
+def get_skip_tests(suite, is_training: bool):
     """
     Generate -x seperated string to skip the unusual setup training tests
     """
@@ -370,7 +380,7 @@ def get_skip_tests(suite):
 
     if hasattr(module, "SKIP"):
         skip_tests.update(module.SKIP)
-    if hasattr(module, "SKIP_TRAIN"):
+    if is_training and hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
@@ -389,8 +399,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     devices_str = "_".join(devices)
     dtypes_str = "_".join(dtypes)
     compilers_str = "_".join(compilers)
-    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
-        mode, devices_str, dtypes_str, suites_str, compilers_str
+    generated_file = (
+        f"run_{mode}_{devices_str}_{dtypes_str}_{suites_str}_{compilers_str}.sh"
     )
     with open(generated_file, "w") as runfile:
         lines = []
@@ -419,7 +429,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-                    skip_tests_str = get_skip_tests(suite)
+                    skip_tests_str = get_skip_tests(suite, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
                     if args.log_operator_inputs:
@@ -606,7 +616,7 @@ class Parser:
 
     def has_header(self, output_filename):
         header_present = False
-        with open(output_filename, "r") as f:
+        with open(output_filename) as f:
             line = f.readline()
             if "dev" in line:
                 header_present = True
@@ -615,10 +625,24 @@ class Parser:
 
 class ParsePerformanceLogs(Parser):
     def __init__(
-        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        self,
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns=False,
     ):
         super().__init__(
-            suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+            suites,
+            devices,
+            dtypes,
+            compilers,
+            flag_compilers,
+            mode,
+            output_dir,
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
@@ -630,6 +654,7 @@ class ParsePerformanceLogs(Parser):
         ]
         self.bottom_k = 50
         self.parse()
+        self.include_slowdowns = include_slowdowns
 
     def plot_graph(self, df, title):
         labels = df.columns.values.tolist()
@@ -715,6 +740,12 @@ class ParsePerformanceLogs(Parser):
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+            if testing == "performance":
+                for compiler in self.compilers:
+                    df[compiler] = pd.to_numeric(df[compiler], errors="coerce").fillna(
+                        0
+                    )
+
             df_copy = df.copy()
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False
@@ -758,7 +789,9 @@ class ParsePerformanceLogs(Parser):
         return f"{df.mean():.2f}"
 
     def geomean(self, compiler, df):
-        cleaned_df = self.get_passing_entries(compiler, df).clip(1)
+        cleaned_df = self.get_passing_entries(compiler, df)
+        if not self.include_slowdowns:
+            cleaned_df = cleaned_df.clip(1)
         if cleaned_df.empty:
             return "0.0x"
         return f"{gmean(cleaned_df):.2f}x"
@@ -971,10 +1004,18 @@ class ParsePerformanceLogs(Parser):
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
     build_summary(args)
+    include_slowdowns = args.include_slowdowns
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
-        suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns,
     )
     parser.gen_summary_files()
     return
@@ -1018,7 +1059,7 @@ class SummaryStatDiffer:
         assert os.path.exists(self.lookup_file)
 
     def generate_diff(self, last2, filename, caption):
-        df_cur, df_prev = [pd.read_csv(os.path.join(path, filename)) for path in last2]
+        df_cur, df_prev = (pd.read_csv(os.path.join(path, filename)) for path in last2)
         df_merge = df_cur.merge(df_prev, on="Compiler", suffixes=("_cur", "_prev"))
         data = {col: [] for col in ("compiler", "suite", "prev_value", "cur_value")}
         for _, row in df_merge.iterrows():
@@ -1137,10 +1178,10 @@ class RegressionDetector:
                     if last2[compiler] is None:
                         continue
 
-                    df_cur, df_prev = [
+                    df_cur, df_prev = (
                         last2[compiler][i].untouched_parsed_frames[suite][metric]
                         for i in (0, 1)
-                    ]
+                    )
                     df_merge = df_cur.merge(
                         df_prev, on="name", suffixes=("_cur", "_prev")
                     )
@@ -1359,7 +1400,7 @@ class DashboardUpdater:
         all_lines = []
         for f in files:
             try:
-                with open(os.path.join(self.output_dir, f), "r") as fh:
+                with open(os.path.join(self.output_dir, f)) as fh:
                     all_lines.extend(fh.readlines())
             except FileNotFoundError:
                 pass

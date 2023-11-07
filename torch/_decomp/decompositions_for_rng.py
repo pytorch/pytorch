@@ -64,7 +64,7 @@ class PhiloxState:
     """
     Represents a PhiloxRngState - (seed, offset) where offset = base_offset +
     relative_offset. seed and base_offset basically point to the rng state just
-    before tracing starts. relative offset tracks the totaly consumed offset at
+    before tracing starts. relative offset tracks the totally consumed offset at
     trace time.
     """
 
@@ -75,11 +75,13 @@ class PhiloxState:
         self.seed = torch.tensor(())
         self.base_offset = torch.tensor(())
         self.relative_offset = 0
+        self.offset_advanced_alteast_once = False
 
     def validate_state(self):
         assert self.seed.numel() != 0 and self.base_offset.numel() != 0
 
     def advance_offset(self, consumed_offset):
+        self.offset_advanced_alteast_once = True
         self.relative_offset = self.relative_offset + consumed_offset
 
     def set_state(self, seed, base_offset, relative_offset=0):
@@ -98,7 +100,7 @@ class PhiloxState:
 
     def set_state_from_tensor(self, state):
         # Only needed because we override set_rng_state.
-        self.seed, self.base_offset = torch.split(state, 1)
+        self.seed, self.base_offset = torch.unbind(state)
         self.relative_offset = 0
 
 
@@ -194,25 +196,31 @@ class PhiloxStateTracker:
 
     @classmethod
     def get_updated_fwd_offset(cls):
+        # Short circuit if no rand ops were observed
+        if not cls.fwd_state.offset_advanced_alteast_once:
+            return cls.fwd_state.base_offset
         return cls.multiple_of_4(
             cls.fwd_state.base_offset + cls.fwd_state.relative_offset
         )
 
     @classmethod
     def get_updated_bwd_offset(cls):
+        # Short circuit if no rand ops were observed
+        if not cls.bwd_state.offset_advanced_alteast_once:
+            return cls.bwd_state.base_offset
         return cls.multiple_of_4(
             cls.bwd_state.base_offset + cls.bwd_state.relative_offset
         )
 
 
 # Adding more decompositions which eventually use rand_like inside decomps.
-# Adding these in rng_decompositins ensures the functionalization of rand_like
+# Adding these in rng_decompositions ensures the functionalization of rand_like
 # ops used in these decomps. The list is copied from inductor codebase, which
 # uses it for similar purpose.
 #
 # Caution - These decomps do not have same accuracy as that of eager. However,
 # we can't just disable them with a config flag like fallback_random, because
-# for fuctionalization of rng ops, we have to decompose these ops.
+# for functionalization of rng ops, we have to decompose these ops.
 extra_random_decomps = get_decompositions(
     [
         aten.cauchy,
@@ -227,6 +235,8 @@ extra_random_decomps = get_decompositions(
         aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
+        aten.rrelu_with_noise,
+        aten.rrelu_with_noise_,
         aten.uniform_,
     ]
 )

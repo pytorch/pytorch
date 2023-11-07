@@ -2,12 +2,12 @@ from dataclasses import dataclass, field
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Any, Type
+from typing import Dict, List, Any, Type, Optional, Callable
 import logging
 import os
 
 
-__all__ = ['get_source_partitions', 'check_subgraphs_connected']
+__all__ = ['get_source_partitions', 'check_subgraphs_connected', 'SourcePartition']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger():
@@ -29,7 +29,7 @@ logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
-class SourcePartition():
+class SourcePartition:
     # Nodes in a particular partition
     nodes: List[Node]
 
@@ -44,13 +44,14 @@ class SourcePartition():
     output_nodes: List[Node] = field(default_factory=list)
 
     # Parameters that are being used
-    params: List[str] = field(default_factory=list)
+    params: List[Node] = field(default_factory=list)
 
 
 @compatibility(is_backward_compatible=False)
 def get_source_partitions(
     graph: Graph,
-    wanted_sources: List[Any]
+    wanted_sources: List[Any],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Dict[Any, List[SourcePartition]]:
     """
     Args:
@@ -72,9 +73,10 @@ def get_source_partitions(
         # function, or the type of module if the node is decomposed from a leaf
         # module
 
-        if (source_fn := node.meta.get("source_fn", None)) is None:
+        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None:
             continue
 
+        source_fn = source_fn_st[-1]
         if source_fn[1] not in wanted_sources:
             continue
 
@@ -92,7 +94,7 @@ def get_source_partitions(
                     input_nodes.add(arg)
 
             if node.op == "get_attr":
-                params.add(node.target)
+                params.add(node)
 
             for user in node.users.keys():
                 if user not in nodes:
@@ -107,6 +109,20 @@ def get_source_partitions(
         )
 
     ret: Dict[Type[Any], List[SourcePartition]] = {}
+
+    if filter_fn:
+        # for each partition, we apply filter_fn to filter out all partitions that doesn't satisfy the
+        # filter condition
+        filtered_modules = {}
+        for tp, name_to_partition in modules.items():
+            filtered_name_to_partition = {
+                name: partition
+                for name, partition in name_to_partition.items()
+                if all(map(filter_fn, partition))
+            }
+            filtered_modules[tp] = filtered_name_to_partition
+        modules = filtered_modules
+
     for k, v in modules.items():
         ret[k] = [make_partition(partition, k) for partition in v.values()]
 

@@ -11,7 +11,7 @@ from torchgen.selective_build.selector import SelectiveBuilder
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
@@ -149,7 +149,7 @@ def main() -> None:
         "--yaml_file_path",
         type=str,
         required=True,
-        help="Path to the yaml" " file with a list of operators used by the model.",
+        help="Path to the yaml file with a list of operators used by the model.",
     )
     parser.add_argument(
         "-o",

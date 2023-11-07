@@ -114,11 +114,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"shape", "prim"},
            {"is_cuda", "prim"},
            {"is_cpu", "prim"},
+           {"is_xla", "prim"},
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
            {"is_mps", "prim"},
+           {"is_mtia", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_ipu", "prim"},
@@ -506,7 +508,7 @@ RangeValue::RangeValue(
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
           << "all inputs of range must be ints, found " << typ->repr_str()
-          << " in argument " << c10::guts::to_string(i);
+          << " in argument " << std::to_string(i);
     }
   }
 

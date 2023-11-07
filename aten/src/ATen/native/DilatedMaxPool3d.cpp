@@ -1,11 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <c10/util/irange.h>
-#include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -22,135 +20,11 @@ namespace native {
 
 namespace {
 
-template <typename scalar_t>
-static void max_pool3d_with_indices_single_out_frame(
-          scalar_t *input_p,
-          scalar_t *output_p,
-          int64_t *indz_p,
-          int64_t nslices,
-          int64_t itime,
-          int64_t iwidth,
-          int64_t iheight,
-          int64_t otime,
-          int64_t owidth,
-          int64_t oheight,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH)
-{
-  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (const auto k : c10::irange(start, end)) {
-      /* loop over output */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t i, j, ti;
-      scalar_t *ip = input_p + k * itime * iwidth * iheight;
-      for (ti = 0; ti < otime; ti++)
-      {
-        for (i = 0; i < oheight; i++)
-        {
-          for (j = 0; j < owidth; j++)
-          {
-            /* local pointers */
-
-            int64_t start_t = ti * dT - pT;
-            int64_t start_h = i * dH - pH;
-            int64_t start_w = j * dW - pW;
-
-            int64_t end_t = std::min(start_t + (kT - 1) * dilationT + 1, itime);
-            int64_t end_h = std::min(start_h + (kH - 1) * dilationH + 1, iheight);
-            int64_t end_w = std::min(start_w + (kW - 1) * dilationW + 1, iwidth);
-
-            while(start_t < 0)
-              start_t += dilationT;
-            while(start_h < 0)
-              start_h += dilationH;
-            while(start_w < 0)
-              start_w += dilationW;
-
-            scalar_t *op = output_p + k * otime * owidth * oheight
-              + ti * owidth * oheight + i * owidth + j;
-            int64_t *indzp = indz_p + k * otime * owidth * oheight
-              + ti * owidth * oheight + i * owidth + j;
-
-            /* compute local max: */
-            int64_t maxindex = start_t * iwidth * iheight + start_h * iwidth + start_w;
-            scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
-
-            for (int64_t z = start_t; z < end_t; z += dilationT)
-            {
-              for (int64_t y = start_h; y < end_h; y += dilationH)
-              {
-                for (int64_t x = start_w; x < end_w; x += dilationW)
-                {
-                  int64_t index = z * iwidth * iheight + y * iwidth + x;
-                  scalar_t val = ip[index];
-                  if ((val > maxval) || std::isnan(val))
-                  {
-                    maxval = val;
-                    maxindex = index;
-                  }
-                }
-              }
-            }
-
-            // store location of max
-            *indzp = maxindex;
-
-            /* set output to local max */
-            *op = maxval;
-          }
-        }
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-static void max_pool3d_with_indices_out_frame(
-          scalar_t *input_data,
-          scalar_t *output_data,
-          int64_t *indices_data,
-          int64_t nbatch,
-          int64_t nslices,
-          int64_t istride, int64_t ostride,
-          int64_t itime, int64_t iwidth, int64_t iheight,
-          int64_t otime, int64_t owidth, int64_t oheight,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH)
-{
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      max_pool3d_with_indices_single_out_frame(
-        input_data   + p * istride,
-        output_data  + p * ostride,
-        indices_data + p * ostride,
-        nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        kT, kW, kH,
-        dT, dW, dH,
-        pT, pW, pH,
-        dilationT, dilationW, dilationH
-      );
-    }
-  });
-}
 
 void max_pool3d_with_indices_out_cpu_template(
           Tensor& output,
           Tensor& indices,
-          const Tensor& input_,
+          const Tensor& input,
           IntArrayRef kernel_size,
           IntArrayRef stride,
           IntArrayRef padding,
@@ -173,7 +47,7 @@ void max_pool3d_with_indices_out_cpu_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
@@ -184,20 +58,28 @@ void max_pool3d_with_indices_out_cpu_template(
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
-  TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
+  const auto memory_format = input.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    TORCH_CHECK(input.ndimension() == 5,
+      "non-empty 5D (batch mode) tensor expected for input with channels_last_3d layout");
+  } else if (memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+      "non-empty 4D or 5D (batch mode) tensor expected for input");
+  } else {
+    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 
-  const int64_t nslices = input_.size(-4);
-  const int64_t itime = input_.size(-3);
-  const int64_t iheight = input_.size(-2);
-  const int64_t iwidth = input_.size(-1);
+  const int64_t nslices = input.size(-4);
+  const int64_t itime = input.size(-3);
+  const int64_t iheight = input.size(-2);
+  const int64_t iwidth = input.size(-1);
 
   const int64_t otime = pooling_output_shape<int64_t>(itime, kT, pT, dT, dilationT, ceil_mode);
   const int64_t oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceil_mode);
   const int64_t owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceil_mode);
 
   pool3d_shape_check(
-    input_,
+    input,
     nslices,
     kT, kH, kW,
     dT, dH, dW,
@@ -207,156 +89,32 @@ void max_pool3d_with_indices_out_cpu_template(
     otime, oheight, owidth,
     "max_pool3d_with_indices_out_cpu_template()");
 
-  /* get contiguous input */
-  Tensor input = input_.contiguous();
 
   if (input.dim() == 4) { /* non-batch mode */
     /* resize output */
     output.resize_({nslices, otime, oheight, owidth});
     /* indices will contain ti,i,j locations for each output point */
     indices.resize_({nslices, otime, oheight, owidth});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "max_pool3d_with_indices_cpu",
-      [&] {
-        scalar_t *input_data = input.data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        max_pool3d_with_indices_single_out_frame(
-          input_data, output_data,
-          indices_data,
-          nslices,
-          itime, iwidth, iheight,
-          otime, owidth, oheight,
-          kT, kW, kH,
-          dT, dW, dH,
-          pT, pW, pH,
-          dilationT, dilationW, dilationH);
-      }
-    );
   }
   else { /* batch mode */
     const int64_t nbatch = input.size(0);
-    const int64_t istride = nslices * itime * iwidth * iheight;
-    const int64_t ostride = nslices * otime * owidth * oheight;
 
     /* resize output */
-    output.resize_({nbatch, nslices, otime, oheight, owidth});
+    output.resize_({nbatch, nslices, otime, oheight, owidth}, memory_format);
     /* indices will contain ti,i,j locations for each output point */
-    indices.resize_({nbatch, nslices, otime, oheight, owidth});
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "max_pool3d_with_indices_cpu",
-      [&] {
-        scalar_t *input_data = input.data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        max_pool3d_with_indices_out_frame(
-          input_data,
-          output_data,
-          indices_data,
-          nbatch,
-          nslices,
-          istride, ostride,
-          itime, iwidth, iheight,
-          otime, owidth, oheight,
-          kT, kW, kH,
-          dT, dW, dH,
-          pT, pW, pH,
-          dilationT, dilationW, dilationH);
-     }
-   );
+    indices.resize_({nbatch, nslices, otime, oheight, owidth}, memory_format);
   }
-}
-
-template <typename scalar_t>
-static void max_pool3d_with_indices_backward_single_out_frame(
-          scalar_t *gradInput_p,
-          scalar_t *gradOutput_p,
-          int64_t *indz_p,
-          int64_t nslices,
-          int64_t itime,
-          int64_t iwidth,
-          int64_t iheight,
-          int64_t otime,
-          int64_t owidth,
-          int64_t oheight,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH)
-{
-  at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (const auto k : c10::irange(start, end)) {
-      scalar_t *gradInput_p_k  = gradInput_p  + k * itime * iwidth * iheight;
-      scalar_t *gradOutput_p_k = gradOutput_p + k * otime * owidth * oheight;
-      int64_t *indz_p_k = indz_p + k * otime * owidth * oheight;
-
-      /* calculate max points */
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t ti, i, j;
-      for (ti = 0; ti < otime; ti++)
-      {
-        for (i = 0; i < oheight; i++)
-        {
-          for (j = 0; j < owidth; j++)
-          {
-            /* retrieve position of max */
-            int64_t index = ti * oheight * owidth + i * owidth + j;
-            int64_t maxp = indz_p_k[index];
-
-            if (maxp != -1) {
-              /* update gradient */
-              gradInput_p_k[maxp] += gradOutput_p_k[index];
-            }
-          }
-        }
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-static void max_pool3d_with_indices_backward_out_frame(
-          scalar_t *gradInput_data,
-          scalar_t *gradOutput_data,
-          int64_t *indices_data,
-          int64_t nbatch,
-          int64_t nslices,
-          int64_t istride, int64_t ostride,
-          int64_t itime, int64_t iwidth, int64_t iheight,
-          int64_t otime, int64_t owidth, int64_t oheight,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
-          int dilationT, int dilationW, int dilationH)
-{
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      max_pool3d_with_indices_backward_single_out_frame<scalar_t>(
-        gradInput_data + p * istride,
-        gradOutput_data + p * ostride,
-        indices_data + p * ostride,
-        nslices,
-        itime, iwidth, iheight,
-        otime, owidth, oheight,
-        dT, dW, dH,
-        pT, pW, pH,
-        dilationT, dilationW, dilationH
-      );
-    }
-  });
+  max_pool3d_kernel(
+      kCPU, output, indices, input,
+      kW, kH, kT,
+      dW, dH, dT,
+      pW, pH, pT,
+      dilationW, dilationH, dilationT);
 }
 
 Tensor& max_pool3d_with_indices_backward_out_cpu_template(
           Tensor& gradInput,
-          const Tensor& gradOutput_,
+          const Tensor& gradOutput,
           const Tensor& input,
           const Tensor& indices,
           IntArrayRef kernel_size,
@@ -381,7 +139,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
                  stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
-    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
+    "max_pool3d: padding must either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
@@ -392,19 +150,28 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
 
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
+  TORCH_CHECK(input.dtype() == gradOutput.dtype(),
+    "expected dtype ", input.dtype(), " for `gradOutput` but got dtype ", gradOutput.dtype());
+
+  const auto memory_format = input.suggest_memory_format();
+  if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+    TORCH_CHECK(input.ndimension() == 5,
+      "non-empty 5D (batch mode) tensor expected for input with channels_last_3d layout");
+  } else if (memory_format == at::MemoryFormat::Contiguous) {
+    TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+      "non-empty 4D or 5D (batch mode) tensor expected for input");
+  } else {
+    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast3d, Contiguous");
+  }
 
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
   const int64_t iheight = input.size(-2);
   const int64_t iwidth = input.size(-1);
 
-  /* get contiguous gradOutput */
-  Tensor gradOutput = gradOutput_.contiguous();
 
   /* resize */
-  gradInput.resize_as_(input);
+  gradInput.resize_(input.sizes(), memory_format);
   gradInput.zero_();
 
   const int64_t otime = gradOutput.size(-3);
@@ -424,57 +191,9 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     otime, oheight, owidth,
     "max_pool3d_with_indices_backward_out_cpu_template()");
 
-  /* backprop */
-  if (input.ndimension() == 4) /* non-batch mode*/
-  {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "max_pool3d_with_indices_backward",
-      [&] {
-        /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        max_pool3d_with_indices_backward_single_out_frame(
-          gradInput_data, gradOutput_data,
-          indices_data,
-          nslices,
-          itime, iwidth, iheight,
-          otime, owidth, oheight,
-          dT, dW, dH,
-          pT, pW, pH,
-          dilationT, dilationW, dilationH);
-      }
-    );
-  }
-  else /* batch mode */
-  {
-    const int64_t nbatch = input.size(0);
-    const int64_t istride = nslices * itime * iwidth * iheight;
-    const int64_t ostride = nslices * otime * owidth * oheight;
-
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
-      "max_pool3d_with_indices_backward",
-      [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
-
-        max_pool3d_with_indices_backward_out_frame<scalar_t>(
-          gradInput_data,
-          gradOutput_data,
-          indices_data,
-          nbatch,
-          nslices,
-          istride, ostride,
-          itime, iwidth, iheight,
-          otime, owidth, oheight,
-          dT, dW, dH,
-          pT, pW, pH,
-          dilationT, dilationW, dilationH);
-      }
-    );
-  }
+  max_pool3d_backward_kernel(
+      kCPU, gradInput,
+      gradOutput, indices);
 
   return gradInput;
 }
@@ -564,7 +283,7 @@ Tensor max_pool3d_with_indices_backward_cpu(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto gradInput = at::empty({0}, input.options());
   max_pool3d_with_indices_backward_out_cpu_template(
     gradInput,
     gradOutput_,
@@ -578,5 +297,7 @@ Tensor max_pool3d_with_indices_backward_cpu(
   return gradInput;
 }
 
+DEFINE_DISPATCH(max_pool3d_kernel);
+DEFINE_DISPATCH(max_pool3d_backward_kernel);
 } // at::native
 } // at

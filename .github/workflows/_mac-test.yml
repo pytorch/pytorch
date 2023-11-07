@@ -49,7 +49,7 @@ jobs:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -81,26 +81,6 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Disable XProtect and MDS
-        continue-on-error: true
-        run: |
-          # Like Windows Defender, XProtect could interfere with the test
-          set +e
-          set -x
-
-          SERVICES=(
-            "com.apple.XProtect.daemon.scan"
-            "com.apple.XprotectFramework.PluginService"
-            "com.apple.XprotectFramework.scan"
-            "com.apple.metadata.mds"
-            "com.apple.metadata.mds.index"
-          )
-          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
-          for SERVICE in "${SERVICES[@]}"; do
-            sudo launchctl stop "${SERVICE}"
-            sudo launchctl disable "system/${SERVICE}"
-          done
-
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
@@ -119,15 +99,23 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Pre-process arm64 wheels
         if: inputs.build-environment == 'macos-12-py3-arm64'
@@ -139,7 +127,7 @@ jobs:
         id: test-timeout
         shell: bash
         env:
-          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
@@ -151,23 +139,17 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         run: |
           # shellcheck disable=SC1090
           set -ex
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
           if [[ -n "$CONDA_ENV" ]]; then
@@ -204,14 +186,7 @@ jobs:
         shell: bash
         if: always() && steps.test.conclusion
         run: |
-          cat test/**/*.log || true
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
         if: always() && ${{ steps.monitor-script.outputs.monitor-script-pid }}
@@ -227,21 +202,6 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
-
-      - name: Archive conda environments
-        if: failure()
-        shell: bash
-        run: |
-          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
-
-      - name: Store conda environments on GHA for debugging
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
-          retention-days: 14
-          if-no-files-found: warn
-          path: runner_temp.zip
 
       - name: Clean up disk space
         if: always()

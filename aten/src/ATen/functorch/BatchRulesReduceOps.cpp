@@ -405,7 +405,7 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-Tensor bucketize_decomp_Tensor(
+static Tensor bucketize_decomp_Tensor(
     const Tensor& self,
     const Tensor& boundaries,
     bool out_int32,
@@ -415,7 +415,7 @@ Tensor bucketize_decomp_Tensor(
   return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
 }
 
-Tensor bucketize_decomp_Scalar(
+static Tensor bucketize_decomp_Scalar(
     const Scalar& self,
     const Tensor& boundaries,
     bool out_int32,
@@ -458,8 +458,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(aminmax);
   m.impl("all", all_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dims);
   m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(any.dims);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
@@ -472,7 +474,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2, KEEPDIM_CASE_VARIABLE, 3);
-  REDUCTION_NO_KEEPDIM_ARG(log_softmax.int);
   REDUCTION_NO_KEEPDIM_ARG(logcumsumexp);
   REDUCTION_WITH_KEEPDIM_ARG(logsumexp);
   m.impl("max", max_decomp);

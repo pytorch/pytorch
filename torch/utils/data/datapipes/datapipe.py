@@ -96,7 +96,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             [2, 4, 6, 8, 10]
         Single Iterator Constraint Example:
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
-            >>> dp = IterableWrapper(range(10))
+            >>> source_dp = IterableWrapper(range(10))
             >>> it1 = iter(source_dp)
             >>> list(it1)
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
@@ -116,15 +116,20 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
     _fast_forward_iterator: Optional[Iterator] = None
 
+    def __iter__(self) -> Iterator[T_co]:
+        return self
+
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
             if attribute_name in _iter_deprecated_functional_names:
                 kwargs = _iter_deprecated_functional_names[attribute_name]
                 _deprecation_warning(**kwargs)
-            function = functools.partial(IterDataPipe.functions[attribute_name], self)
+            f = IterDataPipe.functions[attribute_name]
+            function = functools.partial(f, self)
+            functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
-            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attribute_name}")
 
     @classmethod
     def register_function(cls, function_name, function):
@@ -133,7 +138,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
 
         def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
@@ -144,7 +149,12 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
             return result_pipe
 
-        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
+        function = functools.partial(
+            class_function, cls_to_register, enable_df_api_tracing
+        )
+        functools.update_wrapper(
+            wrapper=function, wrapped=cls_to_register, assigned=("__doc__",)
+        )
         cls.functions[function_name] = function
 
     def __getstate__(self):
@@ -253,10 +263,12 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
             if attribute_name in _map_deprecated_functional_names:
                 kwargs = _map_deprecated_functional_names[attribute_name]
                 _deprecation_warning(**kwargs)
-            function = functools.partial(MapDataPipe.functions[attribute_name], self)
+            f = MapDataPipe.functions[attribute_name]
+            function = functools.partial(f, self)
+            functools.update_wrapper(wrapper=function, wrapped=f, assigned=("__doc__",))
             return function
         else:
-            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{attribute_name}")
 
     @classmethod
     def register_function(cls, function_name, function):
@@ -265,13 +277,16 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name, cls_to_register):
         if function_name in cls.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
+            raise Exception(f"Unable to add DataPipe function name {function_name} as it is already taken")
 
         def class_function(cls, source_dp, *args, **kwargs):
             result_pipe = cls(source_dp, *args, **kwargs)
             return result_pipe
 
         function = functools.partial(class_function, cls_to_register)
+        functools.update_wrapper(
+            wrapper=function, wrapped=cls_to_register, assigned=("__doc__",)
+        )
         cls.functions[function_name] = function
 
     def __getstate__(self):
@@ -351,7 +366,7 @@ class _DataPipeSerializationWrapper:
             return len(self._datapipe)
         except Exception as e:
             raise TypeError(
-                "{} instance doesn't have valid length".format(type(self).__name__)
+                f"{type(self).__name__} instance doesn't have valid length"
             ) from e
 
 
@@ -364,7 +379,7 @@ class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataP
         self._datapipe_iter = iter(self._datapipe)
         return self
 
-    def __next__(self) -> T_co:
+    def __next__(self) -> T_co:  # type: ignore[type-var]
         assert self._datapipe_iter is not None
         return next(self._datapipe_iter)
 

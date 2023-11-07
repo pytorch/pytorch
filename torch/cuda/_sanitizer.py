@@ -12,6 +12,7 @@ environment variable.
 
 import enum
 import functools
+import inspect
 import io
 import logging
 import sys
@@ -168,7 +169,7 @@ class _TensorsAccessed:
                 "Found tensor with pointer: %s, but no matching tensor "
                 "allocation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr
+                data_ptr,
             )
             self.create_tensor(data_ptr, None)
 
@@ -179,7 +180,7 @@ class _TensorsAccessed:
                 "pointer: %s. Assuming the trace for tensor deallocation "
                 "wasn't caught and backfilling it now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                data_ptr
+                data_ptr,
             )
             self.delete_tensor(data_ptr)
 
@@ -226,7 +227,7 @@ class StreamSynchronizations:
                 "Found Stream with id: %s, but no matching stream "
                 "creation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                stream
+                stream,
             )
             self.create_stream(stream)
 
@@ -236,7 +237,7 @@ class StreamSynchronizations:
                 "Found Event with id: %s, but no matching event "
                 "creation in the trace. Backfilling the trace now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                event
+                event,
             )
             self.create_event(event)
 
@@ -247,7 +248,7 @@ class StreamSynchronizations:
                 "id: %s. Assuming the trace for event deletion wasn't caught "
                 "and backfilling it now. "
                 "Perhaps the sanitizer was enabled after some torch operations?",
-                event
+                event,
             )
             self.delete_event(event)
 
@@ -257,7 +258,7 @@ class StreamSynchronizations:
                 "Found duplicate Stream creation in the trace for Stream with "
                 "id: %s. PyTorch Streams are only created once, so this "
                 "trace entry is ignored.",
-                stream
+                stream,
             )
         else:
             self.host_sync_state[stream] = 0
@@ -369,7 +370,7 @@ class EventHandler:
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.
@@ -428,7 +429,7 @@ class EventHandler:
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.

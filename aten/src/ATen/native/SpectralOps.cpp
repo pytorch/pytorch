@@ -502,7 +502,7 @@ Tensor& fft_rfftn_symint_out(const Tensor& self,
   return out;
 }
 
-ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
+static ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
     const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dims,
@@ -751,7 +751,7 @@ Tensor fft_rfftfreq(int64_t n, double d,
 
 // If an array dim is specified, wraps them according to self.dim().
 // Otherwise returns a vector of all dims.
-DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
+static DimVector default_alldims(const Tensor& self, at::OptionalIntArrayRef dim_opt) {
   DimVector dim;
   if (dim_opt) {
     IntArrayRef dim_unwrapped = *dim_opt;
@@ -793,19 +793,19 @@ Tensor fft_ifftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_max_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+void _cufft_set_plan_cache_max_size(DeviceIndex device_index, int64_t max_size) {
   detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache(int64_t device_index) {
+void _cufft_clear_plan_cache(DeviceIndex device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
@@ -831,6 +831,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied,"
+        "which is known to cause spectral leakage. "
+        "Other windows such as torch.hann_window or torch.hamming_window "
+        "can are recommended to reduce spectral leakage."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -1008,6 +1019,16 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
 
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied."
+        "Please provide the same window used by stft to make the inversion "
+        "lossless."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
+
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -1175,7 +1196,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 #undef REPR
 }
 
-Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+static Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt) {

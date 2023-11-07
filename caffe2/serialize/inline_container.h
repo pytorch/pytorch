@@ -93,6 +93,31 @@ typedef struct mz_zip_archive mz_zip_archive;
 namespace caffe2 {
 namespace serialize {
 
+static constexpr const char* kSerializationIdRecordName = ".data/serialization_id";
+
+struct MzZipReaderIterWrapper;
+
+class TORCH_API ChunkRecordIterator {
+ public:
+  ~ChunkRecordIterator();
+
+  // Read at most `chunkSize` into `buf`. Return the number of actual bytes read.
+  size_t next(void* buf);
+
+ private:
+ ChunkRecordIterator(
+      size_t recordSize,
+      size_t chunkSize,
+      std::unique_ptr<MzZipReaderIterWrapper> iter);
+
+  const size_t recordSize_;
+  const size_t chunkSize_;
+  size_t offset_;
+  std::unique_ptr<MzZipReaderIterWrapper> iter_;
+
+  friend class PyTorchStreamReader;
+};
+
 class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
@@ -108,14 +133,26 @@ class TORCH_API PyTorchStreamReader final {
       void* dst,
       size_t n,
       size_t chunk_size,
-      const std::function<void(void*, const void*, size_t)>& memcpy_func);
+      void* buf,
+      const std::function<void(void*, const void*, size_t)>& memcpy_func = nullptr);
+
+  size_t getRecordSize(const std::string& name);
+
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
 
+  ChunkRecordIterator createChunkReaderIter(
+      const std::string& name,
+      const size_t recordSize,
+      const size_t chunkSize);
+
   ~PyTorchStreamReader();
   uint64_t version() const {
     return version_;
+  }
+  const std::string& serializationId() {
+    return serialization_id_;
   }
 
   void setShouldLoadDebugSymbol(bool should_load_debug_symbol) {
@@ -137,11 +174,12 @@ class TORCH_API PyTorchStreamReader final {
   int64_t version_;
   std::mutex reader_lock_;
   bool load_debug_symbol_ = true;
+  std::string serialization_id_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
  public:
-  explicit PyTorchStreamWriter(std::string archive_name);
+  explicit PyTorchStreamWriter(const std::string& archive_name);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func);
 
@@ -164,11 +202,16 @@ class TORCH_API PyTorchStreamWriter final {
     return archive_name_;
   }
 
+  const std::string& serializationId() {
+    return serialization_id_;
+  }
+
   ~PyTorchStreamWriter();
 
  private:
   void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
+  void writeSerializationId();
   size_t current_pos_ = 0;
   std::unordered_set<std::string> files_written_;
   std::unique_ptr<mz_zip_archive> ar_;
@@ -177,6 +220,9 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  uint64_t combined_uncomp_crc32_ = 0;
+  std::string serialization_id_;
+
   // This number will be updated when the model has operators
   // that have valid upgraders.
   uint64_t version_ = kMinProducedFileFormatVersion;

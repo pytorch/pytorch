@@ -42,13 +42,13 @@
 #include <memory>
 
 namespace c10::cuda::_internal {
-void setHasPrimaryContext(bool (*func)(int64_t));
+void setHasPrimaryContext(bool (*func)(DeviceIndex));
 }
 
 namespace at::cuda::detail {
 
 const at::cuda::NVRTC& nvrtc();
-int64_t current_device();
+DeviceIndex current_device();
 
 static void (*magma_init_fn)() = nullptr;
 
@@ -57,7 +57,7 @@ void set_magma_init_fn(void (*fn)()) {
 }
 
 namespace {
-bool _hasPrimaryContext(int64_t device_index) {
+bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
   unsigned int ctx_flags;
@@ -140,14 +140,14 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear HIP error
     return false;
   }
 #endif
@@ -176,6 +176,8 @@ bool CUDAHooks::hasCuDNN() const {
 
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
   return true;
 #else
   return false;
@@ -224,7 +226,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
   return at::cuda::detail::nvrtc();
 }
 
-int64_t current_device() {
+DeviceIndex current_device() {
   int device;
   cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
@@ -233,11 +235,11 @@ int64_t current_device() {
   return -1;
 }
 
-int64_t CUDAHooks::current_device() const {
+DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
 
-bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
+bool CUDAHooks::hasPrimaryContext(DeviceIndex device_index) const {
   return _hasPrimaryContext(device_index);
 }
 
@@ -412,19 +414,19 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #endif
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_max_size_impl(device_index);
 }
 
-void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(DeviceIndex device_index, int64_t max_size) const {
   at::native::detail::cufft_set_plan_cache_max_size_impl(device_index, max_size);
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheSize(int64_t device_index) const {
+int64_t CUDAHooks::cuFFTGetPlanCacheSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_size_impl(device_index);
 }
 
-void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
+void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
@@ -432,7 +434,7 @@ int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
 
-void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
 }

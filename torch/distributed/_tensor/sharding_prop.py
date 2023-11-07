@@ -1,159 +1,77 @@
-from typing import Callable, Dict, Optional, Tuple
+from functools import lru_cache
+from itertools import chain
+from typing import Callable, Dict, List, Optional
 
 import torch
-import torch.distributed._tensor.api as dtensor
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._tensor.op_schema import DTensorSpec, OpSchema, OutputSharding
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
-from torch.utils._pytree import tree_map
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.op_schema import (
+    DTensorSpec,
+    OpInfo,
+    OpSchema,
+    OpStrategy,
+    OutputSharding,
+    OutputSpecType,
+    PlacementStrategy,
+    RuntimeSchemaInfo,
+    StrategyType,
+)
+from torch.distributed._tensor.placement_types import TensorMeta
 
-"""
-Print information on ops input shape and sharding for debugging purposes.
-"""
-_DEBUG_VERBOSE = False
-
-
-def unwrap_schema(e: object) -> object:
-    return e._spec if isinstance(e, dtensor.DTensor) else e
+aten = torch.ops.aten
 
 
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
+        self.op_strategy_funcs: Dict[
+            OpOverload,
+            Callable[[DeviceMesh, OpSchema], StrategyType],
+        ] = {}
+        # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
+        self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
+        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding_non_cached)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
-        self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
+        self,
+        op_overload: OpOverload,
+        rule_func: Callable[[OpSchema], OutputSharding],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a sharding propagation rule for an operator.
         """
         self.op_to_rules[op_overload] = rule_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
-    def prepare_op_schema(
-        self, op_call: OpOverload, args: Tuple[object, ...], kwargs: Dict[str, object]
-    ) -> OpSchema:
-        """
-        This unwrap the args/kwargs DTensor to DTensorSpec and pack them
-        into an OpSchema for sharding propagation usage.
-        """
-        args_schema = tree_map(unwrap_schema, args)
-        kwargs_schema = tree_map(unwrap_schema, kwargs)
-
-        op_schema = OpSchema(op_call._schema, args_schema, kwargs_schema)
-
-        if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
-            print(f"OpSchema({op_schema})")
-            local_shapes = tree_map(
-                lambda t: t.to_local().shape
-                if isinstance(t, dtensor.DTensor)
-                else None,
-                args,
-            )
-            print(f"    local shapes: {local_shapes}")
-
-        return op_schema
-
-    def propagate_op_sharding(
-        self, op_overload: OpOverload, op_schema: OpSchema
-    ) -> OutputSharding:
-        """
-        Propagate the sharding for an operator given the op_schema.
-        """
-        # first we propagate the tensor metadata
-        output_node = self._propagate_tensor_meta(op_overload, op_schema)
-
-        # then we propagate the sharding
-        sharding_prop_func = self.op_to_rules.get(op_overload, None)
-
-        if sharding_prop_func is None:
-            # step 1. If there's not even one sharding rule
-            # implemented for the operator, we error out.
-            raise NotImplementedError(
-                f"Operator {op_overload} does not have a DistributedTensor rule registered."
-            )
-
-        # step 2. there's sharding propagation rule, run
-        # sharding propagation to get the output sharding
-        try:
-            output_sharding = sharding_prop_func(op_schema)
-        except NotImplementedError as e:
-            raise e
-        except Exception as e:
-            raise RuntimeError(
-                f"Sharding propagation failed on op {op_overload}.\n"
-                f"Input schema: {op_schema}.\n"
-                f"Error: {e}"
-            ) from e
-
-        # step 3. if can't get output_spec from sharding
-        # propagation (i.e. no rules apply for input
-        # placements), we return the output sharding
-        # with schema suggestions, which can be used to
-        # decide how to do redistribute on inputs
-        if output_sharding.output_spec is None:
-            if output_sharding.schema_suggestions is None:
-                if output_sharding.failed_reason is not None:
-                    raise RuntimeError(
-                        f"Sharding propagation failed on op {op_overload}!"
-                        f"Input schema: {op_schema}."
-                        f"Failed reason: {output_sharding.failed_reason}"
-                    )
-                else:
-                    # if both output spec and schema suggestions are None, it
-                    # means the operator return a non-tensor (scalar) value,
-                    # in this case we just return the suggestion with the original
-                    # input schema
-                    output_sharding.schema_suggestions = [op_schema]
-            else:
-                # we do auto redistribute on inputs if necessary
-                # to get an eligible input, which we will pick a
-                # schema suggestion base on the redistribute cost.
-                # For now we simply pick the first suggestion.
-                # TODO: implement full auto distribute with a
-                # simple cost estimation model
-                suggested_input_schema = output_sharding.schema_suggestions[0]
-                # run sharding propagation again with suggested schema
-                propagation_res = sharding_prop_func(suggested_input_schema)
-                # we set the output sharding with the new propagation result
-                # so that dispatching know both output_spec and schema_suggestions
-                # exist, which indicates a reshard is needed
-                output_sharding.output_spec = propagation_res.output_spec
-        else:
-            # if sharding propagation succeed, we set the schema suggestion to
-            # the default op_schema, which indicates no reshard is needed
-            output_sharding.schema_suggestions = [op_schema]
-
-        # associate the output sharding with the output metadata
-        if output_node is not None:
-            output_nodes = output_node.args[0]
-            output_spec = output_sharding.output_spec
-            if output_spec is not None:
-                assert isinstance(output_nodes, (tuple, list))
-                if isinstance(output_spec, DTensorSpec):
-                    output_spec.tensor_meta = output_nodes[0].meta["tensor_meta"]
-                elif isinstance(output_spec, (tuple, list)):
-                    for i, spec in enumerate(output_spec):
-                        if isinstance(spec, DTensorSpec):
-                            spec.tensor_meta = output_nodes[i].meta["tensor_meta"]
-
-        return output_sharding
-
-    def _propagate_tensor_meta(
+    def register_op_strategy(
         self,
         op_overload: OpOverload,
-        op_schema: OpSchema,
-    ) -> Optional[torch.fx.Node]:
-        # right now we only use the graph for metadata prop, but next we will use
-        # the graph to do sharding prop together
+        strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
+    ):
+        """
+        Register a sharding strategy generator for an operator.
+        """
+        self.op_strategy_funcs[op_overload] = strategy_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
+    def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
+        """
+        Propagate the tensor metadata, it could either return a TensorMeta
+        or a list/tuple of TensorMetas
+        """
         # special case op list, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
-            torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default,
+            aten._local_scalar_dense.default,
+            aten.equal.default,
+            aten.is_same_size.default,
         ]
-        if op_overload in skip_prop_list:
+        if op_schema.op in skip_prop_list:
             return None
 
         # NOTE: We must call the tracing in fake tensor mode so that it
@@ -161,42 +79,205 @@ class ShardingPropagator:
         with FakeTensorMode():
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
-            g = get_isolated_graphmodule(op_overload, fake_args, fake_kwargs)
+            fake_out = op_schema.op(*fake_args, **fake_kwargs)
 
-        output = None
-        for node in g.graph.nodes:
-            if node.op == "output":
-                output = node
-        return output
+        if isinstance(fake_out, torch.Tensor):
+            return TensorMeta(
+                shape=fake_out.shape, stride=fake_out.stride(), dtype=fake_out.dtype
+            )
 
+        elif isinstance(fake_out, (tuple, list)):
+            tensor_meta_list = []
+            for fake_out_item in fake_out:
+                if isinstance(fake_out_item, torch.Tensor):
+                    tensor_meta_list.append(
+                        TensorMeta(
+                            shape=fake_out_item.shape,
+                            stride=fake_out_item.stride(),
+                            dtype=fake_out_item.dtype,
+                        )
+                    )
+            return (
+                tuple(tensor_meta_list)
+                if isinstance(fake_out, tuple)
+                else tensor_meta_list
+            )
+        else:
+            # if fake is not a tensor or tuple of tensor, return as none
+            return None
 
-class _CachingPropagator(ShardingPropagator):
-    """
-    A sharding propagator that caches the propagation results.
-    This is currently experimental for Tensor Parallel usage.
-    """
+    def _wrap_output_spec_tensor_meta(
+        self, output_spec: OutputSpecType, output_tensor_meta: object
+    ) -> None:
+        """
+        Wrap the output_spec with the tensor metadata from the output.
+        """
+        if output_spec is not None:
+            if isinstance(output_spec, DTensorSpec):
+                assert isinstance(output_tensor_meta, TensorMeta)
+                output_spec.tensor_meta = output_tensor_meta
+            elif isinstance(output_spec, (tuple, list)):
+                for i, spec in enumerate(output_spec):
+                    if isinstance(spec, DTensorSpec):
+                        assert isinstance(output_tensor_meta, (tuple, list))
+                        output_tensor_meta_i = output_tensor_meta[i]
+                        assert isinstance(output_tensor_meta_i, TensorMeta)
+                        spec.tensor_meta = output_tensor_meta_i
 
-    def __init__(self, op_to_rules=None) -> None:
-        super().__init__()
-        if op_to_rules is not None:
-            self.op_to_rules = op_to_rules
+    def propagate(self, op_info: OpInfo) -> None:
+        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
+        # because SymInts are not hashable.
+        # This is generally ok because this only happens during tracing in torch.compile,
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        if op_info.schema.has_symints:
+            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
+        else:
+            output_sharding = self.propagate_op_sharding(op_info.schema)
+        op_info.output_sharding = output_sharding
 
-        # cache table for sharding propagation results, we might need to
-        # limit the size of the cache table in the future
-        self.cached_prop_results: Dict[OpSchema, OutputSharding] = {}
-
-    def propagate_op_sharding(
-        self, op_overload: OpOverload, op_schema: OpSchema
-    ) -> OutputSharding:
+    def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
         Propagate the sharding for an operator given the op_schema.
-        Cache the propagation results to avoid running propagation again.
         """
-        if op_schema in self.cached_prop_results:
-            return self.cached_prop_results[op_schema]
-        else:
-            # call DTensor's propagate_op_sharding to get the prop result
-            output_sharding = super().propagate_op_sharding(op_overload, op_schema)
-            # update cached table
-            self.cached_prop_results[op_schema] = output_sharding
+        out_tensor_meta = self._propagate_tensor_meta(op_schema)
+        if out_tensor_meta is None:
+            return OutputSharding(None, [op_schema])
+
+        def spec_to_strategy(spec: object) -> object:
+            if isinstance(spec, DTensorSpec):
+                return OpStrategy([PlacementStrategy(spec)])
+            else:
+                return spec
+
+        if op_schema.op in self.op_strategy_funcs:
+            # generate op strategy for the op.
+            mesh = op_schema.args_spec[0].mesh
+
+            # swap the args spec with args strategies
+            args_op_strategy = [spec_to_strategy(i) for i in op_schema.args_schema]
+
+            kwargs_op_strategy = {
+                k: spec_to_strategy(v) for k, v in op_schema.kwargs_schema.items()
+            }
+
+            # construct a new OpSchema on args for strategy based propagation
+            # TODO: op schema should contain flat sharding by default later
+            strategy_schema: OpSchema = OpSchema(
+                op=op_schema.op,
+                args_schema=tuple(args_op_strategy),
+                kwargs_schema=kwargs_op_strategy,
+            )
+
+            op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
+
+            assert isinstance(op_strategy, OpStrategy)
+            output_strategy = self._select_strategy(op_strategy)
+
+            needs_redistribute = False
+            expected_input_specs = []
+            for idx, input_spec in enumerate(op_schema.args_spec):
+                desired_spec = (
+                    output_strategy.output_spec
+                    if output_strategy.input_specs is None
+                    else output_strategy.input_specs[idx]
+                )
+                expected_input_specs.append(desired_spec)
+                if input_spec.placements != desired_spec.placements:
+                    needs_redistribute = True
+
+            suggestion_schema = None
+            if needs_redistribute:
+                reshard_schema = OpSchema(op_schema.op, tuple(expected_input_specs), {})
+                reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
+                suggestion_schema = [reshard_schema]
+
+            if op_schema.return_type_tuple_tensors():
+                # for ops return multiple tensors, make output spec return same spec
+                # returned from the op strategy
+                output_spec: OutputSpecType = tuple(
+                    [
+                        output_strategy.output_spec
+                        for _ in range(len(op_schema.op._schema.returns))
+                    ]
+                )
+            else:
+                output_spec = output_strategy.output_spec
+
+            output_sharding = OutputSharding(
+                output_spec,
+                suggestion_schema,
+                needs_redistribute=needs_redistribute,
+            )
+            # associate the output sharding with the output tensor metadata
+            self._wrap_output_spec_tensor_meta(
+                output_sharding.output_spec, out_tensor_meta
+            )
             return output_sharding
+
+        elif op_schema.op in self.op_to_rules:
+            # propagate the sharding with rule
+            sharding_prop_func = self.op_to_rules[op_schema.op]
+
+            # step 1. there's sharding propagation rule, run
+            # sharding propagation to get the output sharding
+            try:
+                output_sharding = sharding_prop_func(op_schema)
+            except NotImplementedError as e:
+                raise e
+            except Exception as e:
+                raise RuntimeError(
+                    f"Sharding propagation failed on op {op_schema}.\n" f"Error: {e}"
+                ) from e
+
+            # step 2. if can't get output_spec from sharding
+            # propagation (i.e. no rules apply for input
+            # placements), we return the output sharding
+            # with schema suggestions, which can be used to
+            # decide how to do redistribute on inputs
+            if output_sharding.output_spec is None:
+                if output_sharding.schema_suggestions is None:
+                    if output_sharding.failed_reason is not None:
+                        raise RuntimeError(
+                            f"Sharding propagation failed on op {op_schema}!"
+                            f"Failed reason: {output_sharding.failed_reason}"
+                        )
+                else:
+                    # we do auto redistribute on inputs if necessary
+                    # to get an eligible input, which we will pick a
+                    # schema suggestion base on the redistribute cost.
+                    # For now we simply pick the first suggestion.
+                    suggested_input_schema = output_sharding.schema_suggestions[0]
+                    # run sharding propagation again with suggested schema
+                    propagation_res = sharding_prop_func(suggested_input_schema)
+                    # we set the output sharding with the new propagation result
+                    # so that dispatching know both output_spec and schema_suggestions
+                    # exist, which indicates a reshard is needed
+                    output_sharding.output_spec = propagation_res.output_spec
+                    output_sharding.needs_redistribute = True
+
+            # associate the output sharding with the output tensor metadata
+            self._wrap_output_spec_tensor_meta(
+                output_sharding.output_spec, out_tensor_meta
+            )
+
+            return output_sharding
+        else:
+            raise NotImplementedError(
+                f"Operator {op_schema.op} does not have a sharding strategy registered."
+            )
+
+    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
+        if len(strategy.strategies) == 1:
+            # short cut with only one possible strategy
+            return strategy.strategies[0]
+
+        strategy_costs: List[float] = []
+        for strtg in strategy.strategies:
+            assert (
+                strtg.redistribute_cost is not None
+            ), "must set redistribute cost each strategy!"
+            redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
+            strategy_costs.append(redistribute_cost)
+
+        # for eager execution, we just select the one with the minimal redistribute cost
+        return strategy.strategies[strategy_costs.index(min(strategy_costs))]

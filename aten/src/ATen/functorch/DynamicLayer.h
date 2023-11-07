@@ -9,9 +9,6 @@
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/function_schema.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
-#include <unordered_map>
-#include <mutex>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/functorch/Interpreter.h>
 #include <ATen/functorch/VmapInterpreter.h>
@@ -21,8 +18,7 @@
 // Forward declared
 namespace c10 { struct AutogradMetaInterface; }
 
-namespace at {
-namespace functorch {
+namespace at::functorch  {
 
 // This file contains the implementation of functorch's interpreter stack.
 // See NOTE: [functorch interpreter stack] first before reading on.
@@ -47,7 +43,7 @@ struct TORCH_API DynamicLayer {
   explicit DynamicLayer(
       TransformType transform_type,
       int64_t layerId,
-      optional<int64_t> batchSize = nullopt,
+      optional<c10::SymInt> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
       optional<bool> prev_grad_mode = nullopt,
       optional<bool> pre_fwd_grad_mode = nullopt,
@@ -60,7 +56,7 @@ struct TORCH_API DynamicLayer {
   Interpreter& interpreter() { return interpreter_; }
 
   // Only valid for vmap
-  int64_t batchSize() const;
+  c10::SymInt batchSize() const;
   RandomnessType randomness() const;
 
  private:
@@ -69,7 +65,7 @@ struct TORCH_API DynamicLayer {
 
 TORCH_API int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<int64_t> batch_size = nullopt,
+    optional<c10::SymInt> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
     optional<bool> prev_grad_mode = nullopt,
     optional<bool> prev_fwd_grad_mode = nullopt,
@@ -125,5 +121,4 @@ TORCH_API bool getInplaceRequiresGradAllowed();
 TORCH_API DynamicLayer popDynamicLayer();
 TORCH_API int64_t pushDynamicLayer(DynamicLayer&& layer);
 
-}
-} // namespace at
+} // namespace at::functorch

@@ -24,8 +24,7 @@ typedef void* MTLLibrary_t;
 
 using namespace std;
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
 enum class MacOSVersion : uint32_t {
@@ -66,7 +65,7 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
-  MTLComputePipelineState_t metalIndexingFunction(const std::string &kernel);
+  MTLComputePipelineState_t metalIndexingPSO(const std::string &kernel);
   MTLLibrary_t getMetalIndexingLibrary();
 
   ~MPSDevice();
@@ -80,8 +79,6 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
-TORCH_API void device_synchronize();
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps

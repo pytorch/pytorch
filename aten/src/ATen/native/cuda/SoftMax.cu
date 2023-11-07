@@ -395,17 +395,17 @@ blockReduce(AccumT* smem, AccumT val,
   return smem[0];
 }
 
-template <template<typename, typename> class Reduction, int ILP, typename T, typename AccumT>
+template <template<typename, typename> class Reduction, int ILP, typename T, typename AccumT, typename index_t=int>
 __device__ __forceinline__ AccumT
-ilpReduce(int shift,
+ilpReduce(index_t shift,
           const T* data,
-          int size,
+          index_t size,
           const Reduction<T, AccumT>& r,
           AccumT defaultVal)
 {
   using LoadT = at::native::memory::aligned_vector<T, ILP>;
   AccumT threadVal = defaultVal;
-  int offset = threadIdx.x;
+  index_t offset = threadIdx.x;
 
   // shift and do 1
   if(shift > 0){
@@ -417,7 +417,7 @@ ilpReduce(int shift,
     size -= blockDim.x;
     data += blockDim.x;
   }
-  int last = size % (ILP * blockDim.x);
+  index_t last = size % (ILP * blockDim.x);
 
   T v[ILP];
   LoadT* value = reinterpret_cast<LoadT*>(&v);
@@ -495,11 +495,11 @@ WriteFpropResultsVectorized(
   }
 }
 
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __device__ __forceinline__ void
 WriteBpropResultsVectorized(
-             int size,
-             const int shift,
+             index_t size,
+             const index_t shift,
              scalar_t *gradInput,
              const outscalar_t *output,
              const outscalar_t *gradOutput,
@@ -507,7 +507,7 @@ WriteBpropResultsVectorized(
   using gradInputT = at::native::memory::aligned_vector<scalar_t, ILP>;
   using outputT = at::native::memory::aligned_vector<outscalar_t, ILP>;
 
-  int offset = threadIdx.x;
+  index_t offset = threadIdx.x;
 
   // if unaligned, do one value / thread and move on, guaranteeing aligned reads/writes later
   if (shift > 0) {
@@ -525,7 +525,7 @@ WriteBpropResultsVectorized(
     gradOutput += blockDim.x;
   }
 
-  const int last = size % (ILP * blockDim.x);
+  const index_t last = size % (ILP * blockDim.x);
 
   scalar_t dX[ILP];
   gradInputT *dX_v = reinterpret_cast<gradInputT*>(&dX);
@@ -588,7 +588,7 @@ WriteFpropResults(
   }
 }
 
-template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue, typename index_t>
 __device__ __forceinline__ void
 WriteBpropResults(
              int classes,
@@ -597,9 +597,9 @@ WriteBpropResults(
              const outscalar_t *gradOutput,
              Epilogue<scalar_t, accum_t, outscalar_t> epilogue) {
 
-  int offset = threadIdx.x;
+  index_t offset = threadIdx.x;
 
-  int last = classes % (ILP * blockDim.x);
+  index_t last = classes % (ILP * blockDim.x);
 
   for (; offset < classes - last; offset += blockDim.x * ILP) {
     outscalar_t tmpOutput[ILP];
@@ -662,9 +662,13 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   }
 }
 
+C10_DEVICE bool inline is_32bit_representable(const int64_t value) {
+  return value < static_cast<int64_t>(std::numeric_limits<int32_t>::max());
+}
+
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
-cunn_SoftMaxBackward(scalar_t *gradInput, const outscalar_t *output, const outscalar_t *gradOutput, int classes)
+cunn_SoftMaxBackward(scalar_t *gradInput, const outscalar_t *output, const outscalar_t *gradOutput, int64_t classes)
 {
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
   using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
@@ -675,21 +679,36 @@ cunn_SoftMaxBackward(scalar_t *gradInput, const outscalar_t *output, const outsc
   output += static_cast<int64_t>(blockIdx.x) * classes;
   gradOutput += static_cast<int64_t>(blockIdx.x) * classes;
 
-  const int shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
-  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
-  const int grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
+  const int64_t shift = ((uint64_t)gradInput) % ALIGN_BYTES / sizeof(scalar_t);
+  const int64_t output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+  const int64_t grad_output_shift = ((uint64_t)gradOutput) % ALIGN_BYTES / sizeof(outscalar_t);
 
-  accscalar_t threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t>(
-      grad_output_shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
+  const bool can_use_32bit_indexing = is_32bit_representable(shift) && is_32bit_representable(output_shift) && is_32bit_representable(grad_output_shift) && is_32bit_representable(classes);
+  accscalar_t threadSum;
+  if (can_use_32bit_indexing) {
+    threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t, int32_t>(
+        static_cast<int32_t>(grad_output_shift), gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
+  } else {
+    threadSum = ilpReduce<AddFloat, ILP, outscalar_t, accscalar_t, int64_t>(
+        grad_output_shift, gradOutput, classes, AddFloat<outscalar_t, accscalar_t>(), accscalar_t(0));
+  }
   accscalar_t sum_k = blockReduce<Add, accscalar_t>(
         sdata, threadSum, Add<accscalar_t>(), accscalar_t(0));
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(sum_k);
 
   if (shift == output_shift && shift == grad_output_shift) {
-    WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, gradInput, output, gradOutput, epilogue);
+    if (can_use_32bit_indexing) {
+      WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int32_t>(classes, static_cast<int32_t>(shift), gradInput, output, gradOutput, epilogue);
+    } else {
+      WriteBpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int64_t>(classes, shift, gradInput, output, gradOutput, epilogue);
+    }
   } else {
-    WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, gradInput, output, gradOutput, epilogue);
+    if (can_use_32bit_indexing) {
+      WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int32_t>(classes, gradInput, output, gradOutput, epilogue);
+    } else {
+      WriteBpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue, int64_t>(classes, gradInput, output, gradOutput, epilogue);
+    }
   }
 }
 

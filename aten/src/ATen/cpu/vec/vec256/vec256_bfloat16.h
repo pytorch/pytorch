@@ -14,8 +14,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -161,13 +160,13 @@ public:
     __m256i cmp = _mm256_cmpeq_epi16(values, _mm256_set1_epi16(0));
     return _mm256_movemask_epi8(cmp);
   }
-  static Vectorized<T> loadu(const void* ptr) {
-    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
-  }
-  static Vectorized<T> loadu(const void* ptr, int16_t count) {
+  static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
+    if (count == size())
+      return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
+
     __at_align__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    return loadu(tmp_values);
+    return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(tmp_values));
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -273,13 +272,15 @@ public:
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
   }
-  Vectorized<T> abs() const {
+  Vectorized<T> isnan() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
-    const auto mask = _mm256_set1_ps(-0.f);
-    const auto o1 = _mm256_andnot_ps(mask, lo);
-    const auto o2 = _mm256_andnot_ps(mask, hi);
-    return cvt_from_fp32<T>(o1, o2);
+    lo = _mm256_cmp_ps(lo, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    hi = _mm256_cmp_ps(hi, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    return merge_compare_result(lo, hi);
+  }
+  Vectorized<T> abs() const {
+    return _mm256_andnot_si256(_mm256_set1_epi16(0x8000), values);
   }
   Vectorized<T> angle() const {
     __m256 lo, hi;
@@ -317,6 +318,9 @@ public:
   }
   Vectorized<T> atan() const {
     return map(Sleef_atanf8_u10);
+  }
+  Vectorized<T> atanh() const {
+    return map(Sleef_atanhf8_u10);
   }
   Vectorized<T> atan2(const Vectorized<T> &b) const {
     __m256 lo, hi;
@@ -413,6 +417,22 @@ public:
     const auto o2 = _mm256_loadu_ps(tmp2);
     return cvt_from_fp32<T>(o1, o2);
   }
+  Vectorized<T> digamma() const {
+    __m256 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    constexpr auto sz = size();
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
+      tmp1[i] = calc_digamma(tmp1[i]);
+      tmp2[i] = calc_digamma(tmp2[i]);
+    }
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
+    return cvt_from_fp32<T>(o1, o2);
+  }
   Vectorized<T> igamma(const Vectorized<T> &x) const {
     __m256 lo, hi;
     __m256 xlo, xhi;
@@ -491,12 +511,7 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
   Vectorized<T> neg() const {
-    __m256 lo, hi;
-    cvt_to_fp32<T>(values, lo, hi);
-    auto mask = _mm256_set1_ps(-0.f);
-    auto o1 = _mm256_xor_ps(mask, lo);
-    auto o2 = _mm256_xor_ps(mask, hi);
-    return cvt_from_fp32<T>(o1, o2);
+    return _mm256_xor_si256(values, _mm256_set1_epi16(0x8000));
   }
   Vectorized<T> round() const {
     __m256 lo, hi;
@@ -1070,6 +1085,6 @@ LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
 
 #endif
-}}}
+}} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

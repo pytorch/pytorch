@@ -1,12 +1,13 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/EmptyTensor.h>
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <torch/library.h>
+#include <ATen/mps/EmptyTensor.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TensorFactories.h>
 #include <ATen/native/mps/Copy.h>
 
 #define MPS_ERROR_NOT_COMPILED "PyTorch code is not compiled with MPS enabled"
@@ -16,7 +17,7 @@
 #define MPS_ERROR_DOUBLE_NOT_SUPPORTED "Cannot convert a MPS Tensor to float64 dtype " \
   "as the MPS framework doesn't support float64. Please use float32 instead."
 
-namespace at { namespace detail {
+namespace at::detail {
 TensorBase empty_mps(
     IntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
@@ -42,7 +43,6 @@ TensorBase empty_mps(
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
-    TORCH_CHECK_TYPE(!c10::isComplexType(dtype), "Complex types are unsupported on MPS");
     TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16, "BFloat16 is not supported on MPS");
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);
@@ -63,6 +63,10 @@ TensorBase empty_mps(
 
     auto memory_format = memory_format_opt.value_or(MemoryFormat::Contiguous);
     tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+    // See Note [Enabling Deterministic Operations]
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+      at::native::fill_empty_deterministic_(tensor);
+    }
     return tensor;
   } else {
     TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
@@ -100,8 +104,13 @@ TensorBase empty_strided_mps(
     const DeviceGuard device_guard(device);
     auto* allocator = at::mps::GetMPSAllocator();
     constexpr c10::DispatchKeySet mps_dks(c10::DispatchKey::MPS);
-    return at::detail::empty_strided_generic(
+    Tensor result = at::detail::empty_strided_generic(
         size, stride, allocator, mps_dks, dtype);
+    // See Note [Enabling Deterministic Operations]
+    if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+      at::native::fill_empty_deterministic_(result);
+    }
+    return result;
   } else {
     TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
   }
@@ -126,5 +135,4 @@ TensorBase empty_strided_mps(
       options.pinned_memory_opt());
 }
 
-} // namespace detail
-} // namespace at
+} // namespace at::detail

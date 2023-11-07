@@ -262,7 +262,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
     "There are 0 sized dimensions, and they aren't selected, so unique cannot be applied");
 
   // reshape tensor as [dim, -1]
-  Tensor input_flat = self.transpose(dim, 0);
+  Tensor input_flat = self.moveaxis(dim, 0);
   auto orig_sizes = input_flat.sizes().vec();
   input_flat = input_flat.contiguous().view({input_flat.size(0), -1});
 
@@ -311,7 +311,7 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
   auto new_sizes = std::vector<int64_t>(std::move(orig_sizes));
   new_sizes[0] = -1;
   output = output.view(new_sizes);
-  output = output.transpose(0, dim);
+  output = output.moveaxis(0, dim);
 
   return std::make_tuple(output, inverse_indices, counts);
 }

@@ -43,22 +43,6 @@ Features described in this documentation are classified by release status:
    notes/*
 
 .. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: torch.compile
-
-   compile/index
-   compile/get-started
-   compile/troubleshooting
-   compile/faq
-   compile/technical-overview
-   compile/guards-overview
-   compile/custom-backends
-   compile/deep-dive
-   compile/performance-dashboard
-   ir
-
-.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 
@@ -80,9 +64,12 @@ Features described in this documentation are classified by release status:
    torch.amp <amp>
    torch.autograd <autograd>
    torch.library <library>
+   cpu
    cuda
+   torch.cuda.memory <torch_cuda_memory>
    mps
    torch.backends <backends>
+   torch.export <export>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
@@ -91,7 +78,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
-   torch._dynamo <_dynamo>
+   torch.compiler <torch.compiler>
    torch.fft <fft>
    torch.func <func>
    futures
@@ -107,7 +94,6 @@ Features described in this documentation are classified by release status:
    profiler
    nn.init
    onnx
-   onnx_diagnostics
    optim
    complex_numbers
    ddp_comm_hooks
@@ -120,11 +106,13 @@ Features described in this documentation are classified by release status:
    sparse
    storage
    torch.testing <testing>
+   torch.utils <utils>
    torch.utils.benchmark <benchmark_utils>
    torch.utils.bottleneck <bottleneck>
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.deterministic <deterministic>
    torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>

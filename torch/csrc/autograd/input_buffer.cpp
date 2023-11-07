@@ -5,6 +5,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/core/DeviceGuard.h>
@@ -106,6 +107,7 @@ static void accumulate(
   //  5) The other Tensor is not a Tensor subclass (except sparse), since
   //     it's hard to predict the semantics of arbitrary subclass behavior.
 
+  // NOLINTNEXTLINE(bugprone-branch-clone)
   if (at::GradMode::is_enabled()) {
     buffer[pos] = old_var + var;
   } else if (

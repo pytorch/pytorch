@@ -23,7 +23,7 @@ static inline DTYPE ## 3 cross(DTYPE ## 3 x, DTYPE ## 3 y) {    \
 }
 
 // Metal only supports half and float for native cross implementation.
-// For all the the other data types, implement cross manually.
+// For all the other data types, implement cross manually.
 REGISTER_CROSS_FUNC(int);
 REGISTER_CROSS_FUNC(long);
 REGISTER_CROSS_FUNC(short);
@@ -136,9 +136,8 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      NSError* error = nil;
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
@@ -157,11 +156,9 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       }
 
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];

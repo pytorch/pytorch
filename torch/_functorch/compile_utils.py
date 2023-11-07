@@ -25,13 +25,13 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
     for n in fx_g.nodes:
-        # The placeholder, output, and get_attr nodes are copied to the new grpah without change
+        # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
         if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
-            # substitute args and kwargs memebrs to their mapping in env if exists
+            # substitute args and kwargs members to their mapping in env if exists
             # specs can be used to reconstruct nested list/dictionaries
             def substitute(arg_list):
                 arg_list, spec = tree_flatten(arg_list)
@@ -39,6 +39,8 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                     v = arg_list[i]
                     if isinstance(v, torch.fx.node.Node) and v in env:
                         arg_list[i] = env[v]
+                    if isinstance(v, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+                        arg_list[i] = v.node
                 return tuple(arg_list), spec
             args, args_spec = substitute(n.args)
             kwargs, kwargs_spec = substitute(n.kwargs)

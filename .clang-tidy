@@ -30,8 +30,13 @@ cppcoreguidelines-*,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
-misc-unused-alias-decls,
-misc-unused-using-decls,
+misc-*,
+-misc-const-correctness,
+-misc-use-anonymous-namespace,
+-misc-unused-parameters,
+-misc-no-recursion,
+-misc-non-private-member-variables-in-classes,
+-misc-confusable-identifiers,
 modernize-*,
 -modernize-concat-nested-namespaces,
 -modernize-macro-to-enum,
@@ -42,11 +47,9 @@ modernize-*,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
 performance-*,
--performance-noexcept-move-constructor,
--performance-unnecessary-value-param,
 readability-container-size-empty,
 '
-HeaderFilterRegex: '^(c10/(?!test)|torch/csrc/(?!deploy/interpreter/cpython)).*$'
+HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 ...

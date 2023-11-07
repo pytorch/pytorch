@@ -240,6 +240,29 @@ void _validate_compressed_sparse_indices_kernel(
   // For TensorIterator's output: no void lambdas.
   const auto dummy = at::empty({1}, cidx.options());
 
+  // Catch integer overflow from large dimensions. Otherwise, the
+  // invariant checks may fail with bogus exceptions or succeed with
+  // false-positive results when int64_t typed dimensions are cast to
+  // index dtype that corresponds to smaller interger type such as
+  // int32_t.
+  {
+    AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [cdim, dim, nnz]() {
+      if (cdim_name == CDimName::CRow) {
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(dim)) == dim,
+                    sizeof(index_t) * 8, "-bit integer overflow in column dimension = ", dim);
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(cdim)) == cdim,
+                    sizeof(index_t) * 8, "-bit integer overflow in row dimension = ", cdim);
+      } else {
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(dim)) == dim,
+                    sizeof(index_t) * 8, "-bit integer overflow in row dimension = ", dim);
+        TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(cdim)) == cdim,
+                    sizeof(index_t) * 8, "-bit integer overflow in column dimension = ", cdim);
+      }
+      TORCH_CHECK(static_cast<int64_t>(static_cast<index_t>(nnz)) == nnz,
+                  sizeof(index_t) * 8, "-bit integer overflow in nnz = ", nnz);
+    });
+  }
+
   // Invariants 5.4 and 5.5
   {
     auto iter = TensorIteratorConfig()

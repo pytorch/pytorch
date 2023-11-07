@@ -49,7 +49,7 @@ from torch.utils._pytree import tree_map
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
-_sharded_tensor_map: Dict[int, 'weakref.ReferenceType[ShardedTensor]'] = {}
+_sharded_tensor_map: Dict[int, weakref.ReferenceType[ShardedTensor]] = {}
 
 # Default sharded ops
 _SHARDED_OPS: Dict[Callable, Callable] = {}
@@ -136,7 +136,7 @@ class ShardedTensorBase(torch.Tensor):
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
         sharding_spec=None,
-    ) -> "ShardedTensorBase":
+    ) -> ShardedTensorBase:
         """
         Initialize a ShardedTensorBase with local shards and a global
         ShardedTensorMetadata built on each rank.
@@ -234,7 +234,7 @@ class ShardedTensor(ShardedTensorBase):
 
     """
     def __new__(cls, sharding_spec: shard_spec.ShardingSpec, *size, **kwargs):
-        self = super(ShardedTensor, cls).__new__(cls, sharding_spec, *size, **kwargs)
+        self = super().__new__(cls, sharding_spec, *size, **kwargs)
         return self
 
     def __init__(
@@ -371,6 +371,8 @@ class ShardedTensor(ShardedTensorBase):
         self,
         dst: int = 0,
         out: Optional[torch.Tensor] = None,
+        enforce_dtype: bool = False,
+        dtype: Optional[torch.dtype] = None,
     ) -> None:
         """
         Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
@@ -386,9 +388,16 @@ class ShardedTensor(ShardedTensorBase):
             out (:class `torch.Tensor`, optional): The output full tensor.
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
+            enforce_dtype (bool): Deprecated, please use dtype instead.  Force the
+                gathered tensors to be the same type as input and output.
+            dtype (torch.dtype): Force the gathered tensors to be this dtype.
+                Default: ``None``
         """
         def shard_size(shard_md):
             return reduce((lambda x, y: x * y), shard_md.shard_sizes)  # type: ignore[attr-defined]
+
+        if enforce_dtype:
+            warnings.warn("enforce_dtype is deprecated.  Please use dtype instead.")
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -411,15 +420,25 @@ class ShardedTensor(ShardedTensorBase):
         gather_list: Optional[List[torch.Tensor]]
         if rank == dst:
             assert out is not None
-            gather_list = [torch.empty((max_rank_size,), device=out.device) for _ in range(world_size)]
+            if enforce_dtype:
+                # enforce_dtype is deprecated.  Do it for backward compatibility.
+                dtype = out.dtype
+            # TODO make it as a view of out tensor
+            gather_list = [torch.empty((max_rank_size,), device=out.device, dtype=dtype) for _ in range(world_size)]
         else:
             gather_list = None
 
         with torch.no_grad():
-            data = torch.empty(max_rank_size, device=self._get_preferred_device())
+            if enforce_dtype and len(local_shards) > 0:
+                # enforce_dtype is deprecated.  Do it for backward compatibility.
+                dtype = local_shards[0].tensor.dtype
+            data = torch.empty(max_rank_size, device=self._get_preferred_device(), dtype=dtype)
 
             for shard in local_shards:
                 src = shard.tensor.flatten()
+                if src.nelement() == 0 :
+                    warnings.warn("Gathering a tensor with zero elements on rank " + str(rank))
+                    return
                 shard_offset = shard_placement[shard.metadata][1]
                 data[shard_offset: shard_offset + src.numel()].copy_(src)
 
@@ -608,7 +627,6 @@ class ShardedTensor(ShardedTensorBase):
             # if user specify the device index.
             current_idx = torch.cuda.current_device()
             if device_to.index != current_idx:
-                import warnings
                 warnings.warn("ShardedTensor.to only move tensor to its current device"
                               "If you want to put to different device, use `reshard` instead.")
             device_to = torch.device(current_idx)
@@ -724,9 +742,9 @@ class ShardedTensor(ShardedTensorBase):
         local_tensor: torch.Tensor,
         sharding_spec: shard_spec.ShardingSpec,
         *global_size: Sequence[int],
-        process_group: dist.ProcessGroup = None,
+        process_group: Optional[dist.ProcessGroup] = None,
         init_rrefs=False,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor given only one local tensor, global sharded tensor
         size and sharding spec on each rank.
@@ -831,7 +849,7 @@ class ShardedTensor(ShardedTensorBase):
         process_group=None,
         init_rrefs=False,
         sharding_spec=None,
-    ) -> "ShardedTensor":
+    ) -> ShardedTensor:
         """
         Initialize a ShardedTensor with local shards and a global
         ShardedTensorMetadata built on each rank.

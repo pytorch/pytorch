@@ -1,19 +1,15 @@
 # Owner(s): ["module: dynamo"]
 import unittest
-from unittest.mock import patch
 
 import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from torch._dynamo.testing import same
+from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 
 
 class CutomizedCtxManager:
@@ -163,7 +159,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2))
+        x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
@@ -179,11 +175,20 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 2)
             with torch.cuda.stream(s):
                 x = torch.relu(x)
+
+            s1 = torch.cuda.current_stream()
+            with torch.cuda.stream(s1):
+                x = torch.relu(x)
+
+            s2 = torch.cuda.Stream()
+            with torch.cuda.stream(s2):
+                x = torch.relu(x)
+
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2))
+        x = torch.randn((2, 2), device="cuda")
         s = torch.cuda.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
@@ -191,7 +196,84 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, s)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 8)
+        self.assertEqual(cnts.op_count, 18)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_stream_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            new_stream = torch.cuda.Stream()
+            with torch.cuda.stream(new_stream):
+                x = torch.sin(x)
+                x = torch.add(x, 3)
+
+            cur_stream = torch.cuda.current_stream()
+            cur_stream.wait_stream(new_stream)
+
+            x = torch.add(x, 4)
+            is_idle = cur_stream.query()
+            cur_stream.synchronize()
+
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 5)
+            new_stream.synchronize()
+
+            is_equal = cur_stream == new_stream
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 20)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_event_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.cuda.current_stream()
+            new_stream = torch.cuda.Stream()
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            is_idle = event.query()
+
+            new_stream.wait_event(event)
+            with torch.cuda.stream(new_stream):
+                x = torch.add(x, 4)
+
+            new_event = torch.cuda.Event()
+            new_event.record(new_stream)
+
+            x = torch.add(x, 5)
+            new_event.wait(cur_stream)
+
+            # use new event to sync
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device="cuda")
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 19)
 
     def test_autograd_profiler_enabled(self):
         def fn(x):
@@ -238,7 +320,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -263,7 +345,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -288,17 +370,16 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
-    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
                 with torch.autocast("cpu"):
                     with torch.autocast("cuda", dtype=torch.float32):
                         out = F.scaled_dot_product_attention(
-                            query, key, value, None, 0.5, True
+                            query, key, value, None, 0.0, True
                         )
                 return out
 
@@ -348,7 +429,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -522,7 +603,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -548,13 +629,35 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.torch.float16)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_autocast_arguments_binding(self):
+        def f1(x):
+            with torch.cuda.amp.autocast(False):
+                x = torch.sin(x + 1)
+            return x
+
+        def f2(x):
+            with torch.cpu.amp.autocast(False):
+                x = torch.cos(x + 1)
+            return x
+
+        x = torch.rand([2, 3])
+        ref1 = f1(x)
+        ref2 = f2(x)
+        opt_f1 = torch.compile(backend="eager")(f1)
+        opt_f2 = torch.compile(backend="eager")(f2)
+        res1 = opt_f1(x)
+        res2 = opt_f2(x)
+        self.assertTrue(same(ref1, res1))
+        self.assertTrue(same(ref2, res2))
 
     def test_generic_context_manager(self):
         def fn(x):
@@ -615,8 +718,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 3)
-            self.assertEqual(cnts.op_count, 3)
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
 
     def test_nested_generic_context_manager_with_graph_break(self):
         def fn(x):
@@ -651,5 +754,270 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 3)
-            self.assertEqual(cnts.op_count, 3)
+            self.assertEqual(cnts.frame_count, 4)
+            self.assertEqual(cnts.op_count, 4)
+
+    def test_graph_break_inlining_grad(self):
+        def gn(z):
+            with torch.no_grad():
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y, z):
+            a = torch.mm(x, y)
+            z = gn(z)
+            return a
+
+        torch._dynamo.reset()
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4)
+        opt_fn(x, y, z).sum().backward()
+
+        self.assertEqual(cnts.frame_count, 2)
+
+    def _graph_break_inlining_autocast_test_helper(self, device):
+        def gn(x, y):
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                z = torch.mm(x, y)
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y):
+            z = torch.mm(x, y)
+            z = z + gn(x, y)
+            return z
+
+        x = torch.rand(3, 3).to(device)
+        y = torch.rand(3, 3).to(device)
+        opt_fn = torch.compile(backend="eager")(fn)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_graph_break_inlining_autocast(self):
+        for device in ["cuda", "cpu"]:
+            if device == "cuda" and not (
+                torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            ):
+                continue
+            self._graph_break_inlining_autocast_test_helper(device)
+
+    def test_disable_saved_tensors_hooks(self):
+        def fn(z):
+            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
+            def f(x, y):
+                return x + y
+
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
+            )
+            return f(x, y)
+
+        eager = EagerAndRecordGraphs()
+        torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        x = torch.ones(1)
+
+        y = torch.zeros(1)
+
+        add = x + y;  x = y = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (add,)
+"""
+        self.assertExpectedInline(actual, expected)
+
+    def test_disable_saved_tensors_hooks_prev_disabled(self):
+        def fn(z):
+            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
+            def f(x, y):
+                return x + y
+
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
+            )
+            return f(x, y)
+
+        eager = EagerAndRecordGraphs()
+        with torch.autograd.graph.disable_saved_tensors_hooks(
+            "Previously disabled message"
+        ):
+            torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        x = torch.ones(1)
+
+        y = torch.zeros(1)
+
+        add = x + y;  x = y = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        return (add,)
+"""
+        self.assertExpectedInline(actual, expected)
+
+    def test_disable_saved_tensors_hooks_prev_disabled_nested(self):
+        def fn(z):
+            @torch.autograd.graph.disable_saved_tensors_hooks("This is not supported")
+            def f(x, y):
+                @torch.autograd.graph.disable_saved_tensors_hooks(
+                    "This is not supported inner"
+                )
+                def inner_fn(x, y):
+                    return x + y
+
+                return inner_fn(x, y) + x
+
+            x, y = torch.ones(
+                1,
+            ), torch.zeros(
+                1,
+            )
+            return f(x, y)
+
+        eager = EagerAndRecordGraphs()
+        with torch.autograd.graph.disable_saved_tensors_hooks(
+            "Previously disabled message"
+        ):
+            torch.compile(fn, backend=eager, fullgraph=True)(torch.randn(()))
+
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        x = torch.ones(1)
+
+        y = torch.zeros(1)
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
+
+        add = x + y;  y = None
+
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        add_1 = add + x;  add = x = None
+
+        _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
+        return (add_1,)
+"""
+        self.assertExpectedInline(actual, expected)
+
+    def test_disable_saved_tensors_hooks_graph_break(self):
+        def fn(x):
+            with torch.autograd.graph.disable_saved_tensors_hooks(
+                "This is not supported"
+            ):
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y * 2
+
+        eager = EagerAndRecordGraphs()
+        torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
+
+        def check_graph(actual, expected):
+            self.assertExpectedInline(actual, expected)
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        y = l_x_ + 1;  l_x_ = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (y,)
+"""
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+        check_graph(actual, expected)
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_ : torch.Tensor):
+        l_y_ = L_y_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        mul = l_y_ * 2;  l_y_ = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (mul,)
+"""
+        graph = eager.graphs[1]
+        actual = normalize_gm(graph.print_readable(False))
+        check_graph(actual, expected)
+
+    def test_context_wrapping_grad_mode_decorator(self):
+        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        for i in range(2):
+            torch._dynamo.reset()
+
+            ctx_wrapper = ctx_wrappers[i]
+            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+
+            def fn(x):
+                def inner_func(x):
+                    return x.sin()
+
+                with ctx_wrapper_inverse():
+                    return ctx_wrapper(inner_func)(x)
+
+            x = torch.zeros(10, requires_grad=True)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_context_wrapping_grad_mode_nested_function_decorator(self):
+        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        for i in range(2):
+            torch._dynamo.reset()
+
+            ctx_wrapper = ctx_wrappers[i]
+            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+
+            def fn(x):
+                @ctx_wrapper
+                def inner_func(x):
+                    return x.sin()
+
+                with ctx_wrapper_inverse():
+                    return inner_func(x)
+
+            x = torch.zeros(10, requires_grad=True)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(fn(x), opt_fn(x))
+            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

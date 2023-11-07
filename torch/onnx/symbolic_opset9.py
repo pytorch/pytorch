@@ -52,6 +52,7 @@ __all__ = [
     "bitwise_or",
     "bmm",
     "broadcast_tensors",
+    "broadcast_to",
     "bucketize",
     "cat",
     "cdist",
@@ -144,6 +145,7 @@ __all__ = [
     "logical_not",
     "logical_or",
     "logical_xor",
+    "logit",
     "logsumexp",
     "lstm_cell",
     "lstm",
@@ -212,6 +214,8 @@ __all__ = [
     "prim_uninitialized",
     "rand_like",
     "rand",
+    "randint_like",
+    "randint",
     "randn_like",
     "randn",
     "reciprocal",
@@ -843,28 +847,42 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", "none")
         def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         dim_desc = "is" if allow_multi_dim_support else "i"
 
         @symbolic_helper.quantized_args(True)
         @symbolic_helper.parse_args("v", dim_desc, "i", "none")  # type: ignore[arg-type]
         def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         return reduce_nodim, reduce_dim
 
@@ -934,6 +952,27 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def expand(g: jit_utils.GraphContext, self, size, implicit):
+    size = symbolic_helper._maybe_get_const(size, "is")
+    if not symbolic_helper._is_value(size):
+        size = g.op("Constant", value_t=torch.LongTensor(size))
+    elif symbolic_helper._is_packed_list(size):
+        # Expand with -1 dim value means dim is unchanged.
+        # Since onnx::expand supports two-way broadcasting,
+        # -1 dim value can be exported to onnx as 1
+        size = symbolic_helper._reshape_helper(
+            g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
+        )
+    dtype = _type_utils.JitScalarType.INT64
+    ones = ones_like(g, size, dtype)
+    neg_ones = mul(g, ones, g.op("Constant", value_t=torch.tensor(-1)))
+    size = where(g, g.op("Equal", size, neg_ones), ones, size)
+    return g.op("Expand", self, size)
+
+
+@_onnx_symbolic("aten::broadcast_to")
+@symbolic_helper.quantized_args(True)
+@_beartype.beartype
+def broadcast_to(g: jit_utils.GraphContext, self, size):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -1037,6 +1076,7 @@ def embedding_bag(
 
 
 @_onnx_symbolic("aten::size")
+@symbolic_helper.quantized_args(True, quantize_output=False)
 @_beartype.beartype
 def size(g: jit_utils.GraphContext, self, dim=None):
     if dim is None:
@@ -1615,7 +1655,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
         # This will result in a tensor of indices in which each index will have it's own value.
-        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
         # the dimension it is in.
@@ -1635,8 +1675,8 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
                 g,
                 flattened_indices,
                 axes=[2 + i for i in range(ndims)],
-                starts=tuple_fn(0),
-                ends=tuple_fn(1),
+                starts=list(tuple_fn(0)),
+                ends=list(tuple_fn(1)),
             )
             indices = sub(g, indices, s)
             return r, indices
@@ -3745,7 +3785,7 @@ def new_empty(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3827,8 +3867,10 @@ def zeros_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+    if symbolic_helper._is_none(dtype):
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3844,7 +3886,8 @@ def new_zeros(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3887,8 +3930,10 @@ def ones_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+    if symbolic_helper._is_none(dtype):
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3904,7 +3949,7 @@ def new_ones(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3950,7 +3995,9 @@ def full_like(
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
@@ -3979,7 +4026,7 @@ def new_full(
     pin_memory=False,
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
@@ -4360,7 +4407,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -4383,6 +4430,10 @@ def repeat_interleave(
             input,
         )
 
+    # Handle cases where dim is negative
+    if dim < 0:
+        dim += len(input_sizes)
+
     input_sizes_temp = input_sizes.copy()
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
@@ -4390,8 +4441,6 @@ def repeat_interleave(
 
     # Cases where repeats is an int or single value tensor
     if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-        if not symbolic_helper._is_tensor(repeats):
-            repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
         if input_sizes[dim] == 0:
             return symbolic_helper._onnx_opset_unsupported_detailed(
                 "repeat_interleave",
@@ -4400,11 +4449,9 @@ def repeat_interleave(
                 "Unsupported along dimension with unknown input size",
                 self,
             )
-        else:
-            reps = input_sizes[dim]
-            repeats = expand(
-                g, repeats, g.op("Constant", value_t=torch.tensor([reps])), None
-            )
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
 
     # Cases where repeats is a 1 dim Tensor
     elif repeats_dim == 1:
@@ -5081,6 +5128,80 @@ def _pad_packed_sequence(
     return data, lengths
 
 
+@_onnx_symbolic("aten::randint")
+@_beartype.beartype
+def randint(g: jit_utils.GraphContext, low, high, shapes, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    shape = symbolic_helper._maybe_get_const(shapes, "is")
+    if symbolic_helper._is_value(shape):
+        shape_const = g.op(
+            "ConstantOfShape",
+            shapes,
+            value_t=torch.tensor([0], dtype=torch.float),
+        )
+        randn = g.op(
+            "RandomUniformLike",
+            shape_const,
+            low_f=low_i,
+            high_f=high_i,
+        )
+    else:
+        randn = g.op(
+            "RandomUniform",
+            shape_i=shape,
+            low_f=low_i,
+            high_f=high_i,
+        )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
+@_onnx_symbolic("aten::randint_like")
+@_beartype.beartype
+def randint_like(g: jit_utils.GraphContext, self, low, high, dtype, *options):
+    dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+    low_i = symbolic_helper._get_const(low, "i", "low")
+    high_i = symbolic_helper._get_const(high, "i", "high")
+    if dtype is None:
+        scalar_type = _type_utils.JitScalarType.INT64
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if low_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", low)
+    if high_i is None:
+        raise symbolic_helper._onnx_unsupported("randint", high)
+
+    randn = g.op(
+        "RandomUniformLike",
+        self,
+        low_f=low_i,
+        high_f=high_i,
+    )
+
+    # cast to integer type
+    int_dtype = _type_utils.JitScalarType.INT64
+    randint = g.op("Cast", randn, to_i=int_dtype.onnx_type())
+    if int_dtype != scalar_type:
+        randint = g.op("Cast", randint, to_i=scalar_type.onnx_type())
+    return randint
+
+
 @_onnx_symbolic("aten::randn")
 @_beartype.beartype
 def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
@@ -5148,7 +5269,9 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
@@ -5167,7 +5290,9 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = _type_utils.JitScalarType.FLOAT
+        dtype = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     return g.op(
         "RandomUniformLike", self, dtype_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
@@ -5245,6 +5370,10 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
             input,
         )
 
+    if dim == 0:
+        return symbolic_helper._reshape_helper(g, input, [1])
+    if dim == 1:
+        return g.op("Identity", input)
     # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0:
         end_dim = dim + end_dim
@@ -5287,10 +5416,12 @@ def _any(g: jit_utils.GraphContext, *args):
     if len(args) == 1:
         input = args[0]
         dim, keepdim = None, 0
-    # aten::any(Tensor self, int dim, bool keepdim)
+    # aten::any(Tensor self, int[]? dim, bool keepdim)
     else:
         input, dim, keepdim = args
-        dim = [symbolic_helper._parse_arg(dim, "i")]
+        # Can be int list or single int
+        dim = symbolic_helper._parse_arg(dim, "t")
+        dim = [int(d) for d in dim.view(-1)]
         keepdim = symbolic_helper._parse_arg(keepdim, "i")
     input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
     input_sum = symbolic_helper._reducesum_helper(
@@ -5306,7 +5437,7 @@ def _all(g: jit_utils.GraphContext, *args):
     # aten::all(Tensor self)
     if len(args) == 1:
         return g.op("Not", _any(g, input))
-    # aten::all(Tensor self, int dim, bool keepdim)
+    # aten::all(Tensor self, int[]? dim, bool keepdim)
     else:
         return g.op("Not", _any(g, input, args[1], args[2]))
 
@@ -5919,7 +6050,7 @@ def linalg_matrix_norm(
             # ord = 2/-2 unimplemented due to lack of operators
             # used to calculate singular values
             return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==2", self)
-        # Wrap the dim vector to handle neagtive dim values
+        # Wrap the dim vector to handle negative dim values
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
             return symbolic_helper._unimplemented(
@@ -6026,13 +6157,14 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
         raise errors.SymbolicValueError(
             f"Unsupported indexing: {indexing}", tensor_list
         )
+    unpacked_tensor_list = symbolic_helper._unpack_list(tensor_list)
     if indexing == "xy":
-        tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
+        unpacked_tensor_list[:2] = unpacked_tensor_list[1::-1]
     tensors = [
         symbolic_helper._reshape_helper(
             g, t, g.op("Constant", value_t=torch.LongTensor([-1]))
         )
-        for t in symbolic_helper._unpack_list(tensor_list)
+        for t in unpacked_tensor_list
     ]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
@@ -7033,7 +7165,7 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
     # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
     # which results in failures due to missing operators for complex numbers
 
-    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
+    # While `aten::_conj` and `aten::conj_physical` raise exception when input is complex
     if symbolic_helper.is_complex_value(input):
         # FIXME(justinchuby): report correct name for symbolic being executed
         return symbolic_helper._onnx_unsupported(
@@ -7043,3 +7175,26 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
 
     # they can safely be implemented as no-op for real numbers only
     return noop_complex_operators(g, input)
+
+
+@_onnx_symbolic("aten::logit")
+@_beartype.beartype
+def logit(g: jit_utils.GraphContext, self: torch._C.Value, eps: torch._C.Value):
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+
+    if not symbolic_helper._is_none(eps):
+        eps = g.op(
+            "Cast", eps, to_i=_type_utils.JitScalarType.from_value(self).onnx_type()
+        )
+        one_sub_eps = g.op("Sub", one, eps)
+        self_less_equal_one_sub_eps = g.op("Greater", one_sub_eps, self)
+        temporary_self = g.op("Where", self_less_equal_one_sub_eps, self, one_sub_eps)
+
+        temporary_self_less_eps = g.op("Less", temporary_self, eps)
+        z = g.op("Where", temporary_self_less_eps, eps, temporary_self)
+    else:
+        z = self
+
+    sub = g.op("Sub", one, z)
+    div = g.op("Div", z, sub)
+    return g.op("Log", div)

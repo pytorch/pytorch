@@ -3,19 +3,7 @@ from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 from functorch import make_fx
 
@@ -28,66 +16,19 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 
 from torch import fx
+from torch._decomp.decompositions import native_layer_norm_backward
 
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._spmd.data_parallel import gradients_tagging
-from torch.distributed._spmd.distribute import distribute, Schema
-from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.parallel_mode import (
     DataParallel,
     DTensorExpandMode,
     ParallelMode,
 )
-from torch.distributed._tensor import Placement, Replicate
+from torch.distributed._tensor import Placement
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo, CodeGen
 from torch.nn.utils import stateless
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
-
-
-class SPMD(nn.Module):
-    def __init__(
-        self,
-        module: nn.Module,
-        schema: Schema,
-        input_schemas: Sequence[Placement] = tuple(),
-    ) -> None:
-        """
-        Given a non-distributed nn.Module, distribute the module and apply
-        optimizations over the distributed module (fx.GraphModule).
-
-        Args:
-            module (nn.Module): The target module.
-            schema (Schema): The distributed schema.
-            input_schemas (Sequence[Placement]): The schemas of the inputs.
-        """
-        super().__init__()
-        assert schema.placements == [
-            Replicate()
-        ], "SPMD only support Replicate() parameters for now"
-
-        # TODO: Fix model initialization with coalescing.
-        # This needs to happen post model transformation.
-        # Consider an explicit model init API.
-        for p in module.parameters():
-            dist.broadcast(p, src=0)
-
-        self._param_schema = schema
-        self._input_schemas = input_schemas
-        self._compiled_m: Optional[nn.Module] = None
-        self._dist_graph = DistributedGraph(orig_module=module)
-
-    def forward(self, *args: Tuple[object], **kwargs: Dict[str, object]) -> object:
-        if self._compiled_m is None:
-            self._compiled_m = distribute(
-                self._dist_graph,
-                self._param_schema,
-                self._input_schemas,
-                *args,
-                **kwargs,
-            )
-
-        assert self._compiled_m is not None
-        return self._compiled_m(*args, **kwargs)
 
 
 class Override(ABC):
@@ -202,7 +143,7 @@ def _rematerialize_optimizer(
     assert opt is not None
 
     # update opt.state with proxy tensors
-    orig_states: Dict[str, Any] = copy(opt.state)
+    orig_states = copy(opt.state)
     for n in named_states:
         # opt.state's key type is string, but optimizer uses Parameter as keys
         opt.state[params[n]] = named_states[n]  # type: ignore[index]
@@ -216,7 +157,7 @@ def _rematerialize_optimizer(
         yield
     finally:
         param_group["params"] = orig_params
-        opt.state.update(orig_states)
+        opt.state = orig_states
 
 
 aten = torch.ops.aten  # pyre-ignore
@@ -313,7 +254,7 @@ def _fused_adam_decomp(
             o.copy_(u)
 
 
-FOREACH_DECOMP_TABLE = {
+SPMD_DECOMP_TABLE = {
     aten._foreach_add_.List: _foreach_add_decomp,
     aten._foreach_add_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_add.Scalar
@@ -330,16 +271,23 @@ FOREACH_DECOMP_TABLE = {
     aten._foreach_mul_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
     ),
+    aten._foreach_div_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_div.Scalar
+    ),
     aten._foreach_neg_.default: partial(
         _foreach_unaop_decomp, aten._foreach_neg.default
     ),
     aten._foreach_reciprocal_.default: partial(
         _foreach_unaop_decomp, aten._foreach_reciprocal.default
     ),
+    aten._foreach_sqrt_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_sqrt.default
+    ),
     aten._foreach_sub_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
     ),
     aten._fused_adam_.default: _fused_adam_decomp,
+    aten.native_layer_norm_backward.default: native_layer_norm_backward,
 }
 
 
@@ -382,7 +330,7 @@ class _CompiledResult:
 
 def _compile(
     func: Callable,
-    module_override: Optional[Dict[Union[Type[Any], str], Override]],
+    module_override: Optional[List[Override]],
     parallel_mode: ParallelMode,
     *args: Any,
     **kwargs: Any,
@@ -406,16 +354,19 @@ def _compile(
     if module_override:
         accessor = NamedMemberAccessor(mod)
 
-        # FIXME(@mrshenli): type might overlap with fqns
-        for typ_or_fqn, override in module_override.items():
-            for fqn, submodule in mod.named_modules():
-                if (
-                    isinstance(typ_or_fqn, str)
-                    and typ_or_fqn == fqn
-                    or isinstance(typ_or_fqn, type)
-                    and isinstance(submodule, typ_or_fqn)
-                ):
-                    accessor.swap_submodule(fqn, override.replacement(fqn, submodule))
+        def swap(fqn_prefix: str, module: torch.nn.Module) -> None:
+            for override in module_override:  # type: ignore[union-attr]
+                for name, child in module.named_children():
+                    if len(name) == 0:
+                        continue
+                    fqn = fqn_prefix + "." + name if fqn_prefix != "" else name
+                    new_child = override.replacement(fqn, child)
+                    if id(new_child) == id(child):
+                        swap(fqn, new_child)
+                    else:
+                        accessor.swap_submodule(fqn, new_child)
+
+        swap("", mod)
 
     # 3. Trace statelss version of the train_step
     params = dict(mod.named_parameters(remove_duplicate=False))
@@ -438,7 +389,7 @@ def _compile(
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), {**params, **buffers}
+            mod, {**params, **buffers}
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():
@@ -457,6 +408,7 @@ def _compile(
 
     if is_data_parallel_mode:
         fake_mode = FakeTensorMode()
+        data_parallel_mode = cast(DataParallel, parallel_mode)
 
         def _get_full_batch_arg(arg: torch.Tensor) -> torch.Tensor:
             # since compilation happens in the first iteration and we
@@ -465,8 +417,8 @@ def _compile(
             # propagations
             fake_arg = fake_mode.from_tensor(arg)
             arg_dims = [1] * arg.ndim
-            # we assume the first dim is batch dim in data parallel
-            arg_dims[0] *= dist.get_world_size()
+            # expand the tensor to full batch size on its batch dim
+            arg_dims[data_parallel_mode.input_batch_dim] *= dist.get_world_size()
             return fake_arg.repeat(arg_dims)
 
         args = pytree.tree_map_only(
@@ -474,8 +426,13 @@ def _compile(
             _get_full_batch_arg,
             args,
         )
+        kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            _get_full_batch_arg,
+            kwargs,
+        )
 
-    with _enable_compile():
+    with _enable_compile(), torch.autograd.detect_anomaly(check_nan=False):
         # FIXME(@mrshenli): functionalization does not work for our use
         # case yet. Use explicit decompositions for foreach ops.
         # Remove this when the following issue is addressed.
@@ -483,7 +440,7 @@ def _compile(
         gm = make_fx(
             partial(stateless_func, func),
             tracing_mode=tracing_mode,
-            decomposition_table=FOREACH_DECOMP_TABLE,
+            decomposition_table=SPMD_DECOMP_TABLE,
             _allow_non_fake_inputs=False,
         )(params, buffers, named_states, args, kwargs)
 
@@ -527,7 +484,7 @@ def _compile(
 
     # 7. Replace previously inserted dummy ones with real graphs.
     if module_override:
-        for _, override in module_override.items():
+        for override in module_override:
             gm = override.transform(gm, flat_state)
 
     return _CompiledResult(gm, mod, opt, flat_state)
@@ -539,7 +496,7 @@ COMPILED_OBJECT_KEY = "_compiled_obj"
 
 
 def compile(
-    module_override: Optional[Dict[Union[Type[Any], str], Override]] = None,
+    module_override: Optional[List[Override]] = None,
     gm_transformation: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
     parallel_mode: Optional[ParallelMode] = None,
 ):
@@ -550,12 +507,10 @@ def compile(
     parameters and states.
 
     Args:
-        module_override (Optional[Dict[Union[Type[Any], str], Override]]): a
-            dictionary maps from target :class:`nn.Module` types or
-            fully-qualified names to :class:`Override` objects. The
-            :class:`Override` objects provide :class:`nn.Module` replacements
-            during tracing and a graph transformation function after tracing.
-            (Default: ``None``)
+        module_override (Optional[List[Override]]): a list of Override instances
+            that will be applied to the module in order. The :class:`Override`
+            objects provide :class:`nn.Module` replacements during tracing and a
+            graph transformation function after tracing. (Default: ``None``)
         gm_transformation (Optional[Callable[fx.GraphModule, fx.GraphModule]]):
             a callback that will be called after the original callable is
             compiled and distributed (usually after the first iteration) to

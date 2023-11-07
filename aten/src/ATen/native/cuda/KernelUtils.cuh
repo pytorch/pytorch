@@ -26,6 +26,17 @@ idx_cl(
   return ((n * height + h) * width + w) * channel + c;
 }
 
+// fastSpecializedAtomicAdd (and fastAtomicAdd) are an optimization
+// that speed up half-precision atomics.  The situation with half
+// precision atomics is that we have a slow __half atomic, and
+// a fast vectored __half2 atomic (this can be worth up to a 6x
+// speedup, see https://github.com/pytorch/pytorch/pull/21879).
+// We can convert a __half atomic into a __half2 atomic by simply
+// pairing the __half with a zero entry on the left/right depending
+// on alignment... but only if this wouldn't cause an out of bounds
+// access!  Thus, you must specify tensor and numel so we can check
+// if you would be out-of-bounds and use a plain __half atomic if
+// you would be.
 template <
     typename scalar_t,
     typename index_t,

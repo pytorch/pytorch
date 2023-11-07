@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-import pprint
+import logging
 from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
 
-class Level(enum.Enum):
+class Level(enum.IntEnum):
     """The level of a diagnostic.
 
     This class is used to represent the level of a diagnostic. The levels are defined
@@ -22,12 +22,21 @@ class Level(enum.Enum):
     - NOTE: An opportunity for improvement was found.
     - WARNING: A potential problem was found.
     - ERROR: A serious problem was found.
+
+    This level is a subclass of enum.IntEnum, and can be used as an integer. Its integer
+    value maps to the logging levels in Python's logging module. The mapping is as
+    follows:
+
+        Level.NONE = logging.DEBUG = 10
+        Level.NOTE = logging.INFO = 20
+        Level.WARNING = logging.WARNING = 30
+        Level.ERROR = logging.ERROR = 40
     """
 
-    NONE = enum.auto()
-    NOTE = enum.auto()
-    WARNING = enum.auto()
-    ERROR = enum.auto()
+    NONE = 10
+    NOTE = 20
+    WARNING = 30
+    ERROR = 40
 
 
 levels = Level
@@ -122,9 +131,6 @@ class Rule:
         """
         return self.message_default_template.format(*args, **kwargs)
 
-    def pretty_print(self):
-        pass
-
 
 @dataclasses.dataclass
 class Location:
@@ -153,16 +159,6 @@ class Location:
             else None,
         )
 
-    def pretty_print(self):
-        """Prints the location in a traceback style format."""
-        unknown = "<unknown>"
-        snippet = self.snippet or unknown
-        uri = self.uri or unknown
-        function = self.function or unknown
-        lineno = self.line if self.line is not None else unknown
-        message = f"  # {self.message}" if self.message is not None else ""
-        print(f'  File "{uri}", line {lineno}, in {function}\n    {snippet}{message}')
-
 
 @dataclasses.dataclass
 class StackFrame:
@@ -171,10 +167,6 @@ class StackFrame:
     def sarif(self) -> sarif.StackFrame:
         """Returns the SARIF representation of this stack frame."""
         return sarif.StackFrame(location=self.location.sarif())
-
-    def pretty_print(self):
-        """Prints the stack frame in a human-readable format."""
-        self.location.pretty_print()
 
 
 @dataclasses.dataclass
@@ -193,12 +185,6 @@ class Stack:
             else None,
         )
 
-    def pretty_print(self):
-        """Prints the stack in a human-readable format."""
-        formatter.pretty_print_title(f"Stack: {self.message}", fill_char="-")
-        for frame in reversed(self.frames):
-            frame.pretty_print()
-
 
 @dataclasses.dataclass
 class ThreadFlowLocation:
@@ -216,15 +202,6 @@ class ThreadFlowLocation:
             state=self.state,
             stack=self.stack.sarif() if self.stack is not None else None,
         )
-
-    def pretty_print(self, verbose: bool = False):
-        """Prints the thread flow location in a human-readable format."""
-        formatter.pretty_print_title(f"Step {self.index}", fill_char="-")
-        self.location.pretty_print()
-        if verbose:
-            print(f"State: {pprint.pformat(self.state)}")
-            if self.stack is not None:
-                self.stack.pretty_print()
 
 
 @dataclasses.dataclass
@@ -245,22 +222,6 @@ class Graph:
             description=sarif.Message(text=self.graph),
             properties=PatchedPropertyBag(name=self.name, description=self.description),
         )
-
-    def pretty_print(
-        self,
-        verbose: bool = False,
-    ):
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: If True, prints all information. Otherwise, only prints compact
-                information. E.g., graph name and description.
-            log_level: The minimum level of diagnostics to print.
-        """
-        formatter.pretty_print_title(f"Graph: {self.name}", fill_char="-")
-        print(self.description)
-        if verbose:
-            print(self.graph)
 
 
 @dataclasses.dataclass
@@ -308,9 +269,16 @@ class Invocation:
 
 @dataclasses.dataclass
 class DiagnosticOptions:
-    """
-    Options for diagnostic context.
+    """Options for diagnostic context.
+
+    Attributes:
+        verbosity_level: Set the amount of information logged for each diagnostics,
+            equivalent to the 'level' in Python logging module.
+        warnings_as_errors: When True, warning diagnostics are treated as error diagnostics.
     """
 
-    log_verbose: bool = dataclasses.field(default=False)
-    log_level: Level = dataclasses.field(default=Level.ERROR)
+    verbosity_level: int = dataclasses.field(default=logging.INFO)
+    """Set the amount of information logged for each diagnostics, equivalent to the 'level' in Python logging module."""
+
+    warnings_as_errors: bool = dataclasses.field(default=False)
+    """If True, warning diagnostics are treated as error diagnostics."""

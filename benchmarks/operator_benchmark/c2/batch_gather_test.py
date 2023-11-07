@@ -1,8 +1,9 @@
 import benchmark_caffe2 as op_bench_c2
-import operator_benchmark as op_bench
+import numpy
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
 from caffe2.python import core
-import numpy
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for element-wise BatchGather operator."""
@@ -19,18 +20,15 @@ batch_gather_configs_short = op_bench.config_list(
         [512, 512, 2],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        "device": ["cpu", "cuda"],
     },
-    tags=["short"]
+    tags=["short"],
 )
 
 batch_gather_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
-    N=[128, 1024],
-    K=[1, 2],
-    device=['cpu', 'cuda'],
-    tags=["long"]
+    M=[128, 1024], N=[128, 1024], K=[1, 2], device=["cpu", "cuda"], tags=["long"]
 )
+
 
 class BatchGatherBenchmark(op_bench_c2.Caffe2BenchmarkBase):
     def init(self, M, N, K, device):
@@ -38,12 +36,16 @@ class BatchGatherBenchmark(op_bench_c2.Caffe2BenchmarkBase):
         max_val = N
         numpy.random.seed((1 << 32) - 1)
         index_dim = numpy.random.randint(0, N)
-        self.index = self.feed_tensor(numpy.random.randint(0, max_val, index_dim), device=device)
+        self.index = self.feed_tensor(
+            numpy.random.randint(0, max_val, index_dim), device=device
+        )
         self.output = self.tensor([M, index_dim, K], device=device)
         self.set_module_name("batch_gather")
 
     def forward(self):
-        op = core.CreateOperator("BatchGather", [self.input_one, self.index], self.output)
+        op = core.CreateOperator(
+            "BatchGather", [self.input_one, self.index], self.output
+        )
         return op
 
 

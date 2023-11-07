@@ -3,8 +3,7 @@
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSGuardImpl.h>
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 void MPSGuardImpl::createEvent(mpsEvent_t* event, const EventFlag flag) const {}
 
@@ -28,20 +27,19 @@ void MPSGuardImpl::record(void** event,
 
   auto mps_event = static_cast<mpsEvent_t>(*event);
   MPSStream mps_stream{stream};
-  mps_event->recordEvent(true);
+  mps_event->record(true);
 }
 
 void MPSGuardImpl::block(void* event, const Stream& stream) const {
   auto mps_event = static_cast<mpsEvent_t>(event);
   MPSStream mps_stream{stream};
 
-  mps_event->waitForEvent(true);
+  mps_event->wait(true, false);
 }
 
 bool MPSGuardImpl::queryEvent(void* event) const {
   auto mps_event = static_cast<mpsEvent_t>(event);
-  return mps_event->queryEvent();
+  return mps_event->query();
 }
 
-}
-}
+} // namespace at::mps

@@ -228,7 +228,7 @@ class FakeQuantize(FakeQuantizeBase):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        # Removing this function throws an error that the the size of the loaded tensor does not match the original size
+        # Removing this function throws an error that the size of the loaded tensor does not match the original size
         # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
         local_state = ['scale', 'zero_point']
         for name in local_state:
@@ -264,10 +264,11 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     is supported.
     """
 
+    # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
         assert type(self.activation_post_process) == FixedQParamsObserver,\
-            "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
+            f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point

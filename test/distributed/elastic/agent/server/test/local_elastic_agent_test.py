@@ -727,7 +727,7 @@ class LocalElasticAgentTest(unittest.TestCase):
 
             rank, failure = cm.exception.get_first_failure()
             failure_data = failure.error_file_data["message"]
-            with open(replyfile, "r") as fp:
+            with open(replyfile) as fp:
                 data = json.load(fp)["message"]
 
                 # ran two; both failed; first failure is either rank 0 or 1
@@ -880,8 +880,8 @@ class LocalElasticAgentTest(unittest.TestCase):
 
         # global world size == sum of all the role world sizes
         expected_world_size = sum(expected_role_world_sizes.values())
-        for role, run_results in run_results.items():
-            for result in run_results:
+        for role, results in run_results.items():
+            for result in results:
                 res = result.return_values
                 for role_info in res.values():
                     rank = role_info.rank

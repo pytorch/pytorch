@@ -24,10 +24,14 @@
 #include <ATen/ops/_cummax_helper_native.h>
 #include <ATen/ops/_cummin_helper.h>
 #include <ATen/ops/_cummin_helper_native.h>
+#include <ATen/ops/_is_all_true_native.h>
+#include <ATen/ops/_is_any_true_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_to_copy.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -82,6 +86,7 @@
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/native_norm.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/norm_meta.h>
 #include <ATen/ops/norm_native.h>
@@ -160,7 +165,7 @@ static ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor&
   }
 }
 
-void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
+static void check_result_is_bytebool(const char* name, const Tensor& self, const Tensor& result) {
   if (result.defined()) {
     // Refer [all, any : uint8 compatibility]
     TORCH_CHECK(
@@ -181,33 +186,39 @@ static void allany_meta(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   const auto& result = meta.maybe_get_output();
   check_result_is_bytebool(name, self, result);
   auto out_dtype = get_result_or_bytebool_dtype(self, result);
-  resize_reduction(meta, self, dims, keepdim, out_dtype);
+  resize_reduction(meta, self, dims, keepdim, out_dtype, /*allow_empty_dims=*/true);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "all", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC2(all, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
+  allany_meta(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC(all)(const Tensor& self) {
   allany_meta(*this, "all", self, {}, false);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "any", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC2(any, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
+  allany_meta(*this, "any", self, dim, keepdim);
 }
 
 TORCH_META_FUNC(any)(const Tensor& self) {
   allany_meta(*this, "any", self, {}, false);
 }
 
-void check_argmax_argmin(
+static void check_argmax_argmin(
     const char* name,
     const Tensor& self,
     const c10::optional<int64_t>& dim) {
@@ -233,7 +244,7 @@ TORCH_META_FUNC(argmin)
   resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
-void meta_func_cum_ops(
+static void meta_func_cum_ops(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
@@ -305,7 +316,7 @@ TORCH_META_FUNC2(mean, dim)
   resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
-ScalarType get_result_or_self_value_dtype(
+static ScalarType get_result_or_self_value_dtype(
     const Tensor& self,
     const Tensor& result,
     const c10::optional<ScalarType>& dtype) {
@@ -501,7 +512,7 @@ TORCH_IMPL_FUNC(cumprod_out)
   impl_func_cum_ops(self, dim, result, cumprod_stub);
 }
 
-Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
+static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
   return w.flip(dim).cumsum(dim).flip(dim);
 }
 
@@ -593,11 +604,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     cumprod(input.conj()) = cumprod(input).conj()
   */
 
-  if (input.numel() <= 1) {
+  if (input.sym_numel() <= 1) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.sizes()[dim];
+  const int64_t dim_size = input.sym_sizes()[dim].guard_int(__FILE__, __LINE__);
   if (dim_size == 1) {
     return grad;
   }
@@ -641,7 +652,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
-    Tensor grad_input = at::zeros(input.sizes(), grad.options());
+    Tensor grad_input = at::zeros_symint(input.sym_sizes(), grad.options());
     const auto cumsum = is_zero.cumsum(dim);
 
     // case k < z1
@@ -710,9 +721,9 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     } else {
       grad_input = at::zeros(input.sizes(), grad.options());
     }
-    auto ones_size = input.sizes().vec();
+    auto ones_size = input.sym_sizes().vec();
     ones_size[dim] = 1;
-    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    const Tensor ones = at::ones({1}, grad.options()).expand_symint(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
@@ -732,7 +743,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       // At this point omitted_products is the same size
       // as input, except on the dimension dim where it's
       // dim_size - k
-      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
+      TORCH_CHECK(omitted_products.sym_size(dim) == dim_size - k);
 
       auto grad_slice = at::sum(grad.slice(dim, k) * omitted_products, dim);
       if (are_inputs_tensors_sublcass) {
@@ -890,11 +901,11 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
 
     for (const auto i : c10::irange(other.value().dim())) {
       TORCH_CHECK(
-          other.value().size(i) == self.size(i) || i == wrapped_dim,
+          other.value().sym_size(i) == self.sym_size(i) || i == wrapped_dim,
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
-          " input.size(", i, ") = ", self.size(i), ", but got"
-          " tensor.size(", i, ") = ", other.value().size(i));
+          " input.size(", i, ") = ", self.sym_size(i), ", but got"
+          " tensor.size(", i, ") = ", other.value().sym_size(i));
     }
   }
 }
@@ -920,19 +931,21 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
     return result;
   }
 
-  auto out_len = self.size(dim) - 1;
+  auto out_len = self.sym_size(dim) - 1;
   auto result = self;
   bool is_kBool = (self.dtype() == at::kBool);
-  n = n >= self.size(dim) ? self.size(dim) : n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
 
-  for (const auto i : c10::irange(n)) {
-    (void)i; // Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(n)) {
     if (is_kBool) {
-      result = at::logical_xor(at::narrow(result, dim, 1, out_len), at::narrow(result, dim, 0, out_len));
+      result = at::logical_xor(
+        at::narrow_symint(result, dim, 1, out_len),
+        at::narrow_symint(result, dim, 0, out_len)
+      );
     } else {
-      result = at::narrow(result, dim, 1, out_len) - at::narrow(result, dim, 0, out_len);
+      result = at::narrow_symint(result, dim, 1, out_len) - at::narrow_symint(result, dim, 0, out_len);
     }
-    out_len -= 1;
+    out_len = out_len - 1;
   }
 
   return result;
@@ -950,14 +963,15 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
   if (n == 0) {
-    at::native::resize_output(result, self.sizes());
+    if (resize_output_check_symint(result, self.sym_sizes())) {
+      result.resize__symint(self.sym_sizes());
+    }
     check_scalar_type_device_layout_equal(result, self);
-    result.copy_(self);
-    return result;
+    return result.copy_(self);
   }
 
-  n = n >= self.size(dim) ? self.size(dim) : n;
-  const auto out_len = self.size(dim) - n;
+  n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
+  const auto out_len = self.sym_size(dim) - n;
   auto prev_result = self;
 
   if (n > 1) {
@@ -965,10 +979,17 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
   }
 
   if (self.dtype() == at::kBool) {
-    at::logical_xor_out(result, at::narrow(prev_result, dim, 1, out_len), at::narrow(prev_result, dim, 0, out_len));
-
+    at::logical_xor_out(
+      result,
+      at::narrow_symint(prev_result, dim, 1, out_len),
+      at::narrow_symint(prev_result, dim, 0, out_len)
+    );
   } else {
-    at::sub_out(result, at::narrow(prev_result, dim, 1, out_len), at::narrow(prev_result, dim, 0, out_len));
+    at::sub_out(
+      result,
+      at::narrow_symint(prev_result, dim, 1, out_len),
+      at::narrow_symint(prev_result, dim, 0, out_len)
+    );
   }
 
   return result;
@@ -984,7 +1005,7 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional
   }
 }
 
-void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
+static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
@@ -1009,7 +1030,7 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
   }
 }
 
-std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
+static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
   for (const auto i : c10::irange(coordinates.size())) {
     TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
   }
@@ -1050,7 +1071,7 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
   return result;
 }
 
-std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
+static std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
   std::vector<Tensor> result;
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
@@ -1070,7 +1091,7 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   return result;
 }
 
-std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<int64_t> dim) {
+static std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<int64_t> dim) {
   // if gradient dim is provided as an integer, then we need to compute gradient only on this direction.
   // Moreover, if it's not provided at all, then we are interested in gradient for all directions.
   // Finally, if dim is provided as vector of ints, then it is not expected to be called by this function.
@@ -1253,7 +1274,7 @@ Tensor trace_cpu(const Tensor& self) {
   return result;
 }
 
-void impl_func_prod(
+static void impl_func_prod(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim,
@@ -1434,7 +1455,7 @@ Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim
   return at::logsumexp_out(result, self, dims, keepdim);
 }
 
-void impl_func_norm(
+static void impl_func_norm(
     const Tensor& self,
     const OptionalScalarRef& opt_p,
     IntArrayRef dim,
@@ -1494,7 +1515,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
@@ -1511,7 +1532,7 @@ template <int identity, typename Stub>
 inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim,
     Stub& stub) {
   if (self.numel() == 0) {
@@ -1529,6 +1550,11 @@ TORCH_IMPL_FUNC(all_out)
   allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
+TORCH_IMPL_FUNC(all_dims_out)
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
+  allany_impl<1>(self, result, dim, keepdim, and_stub);
+}
+
 TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<1>(self, result, {}, false, and_stub);
 }
@@ -1538,8 +1564,76 @@ TORCH_IMPL_FUNC(any_out)
   allany_impl<0>(self, result, dim, keepdim, or_stub);
 }
 
+TORCH_IMPL_FUNC(any_dims_out)
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
+  allany_impl<0>(self, result, dim, keepdim, or_stub);
+}
+
 TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
+}
+
+template <bool is_all>
+Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  // Default implementation in terms of all-reduce or single dim reduce
+  if (!dim) {
+    Tensor out;
+    if constexpr (is_all) {
+      out = self.all();
+    } else {
+      out = self.any();
+    }
+
+    if (keepdim) {
+      DimVector out_shape(self.dim(), 1);
+      return out.expand(out_shape);
+    }
+    return out;
+  }
+
+  if (dim->size() == 0) {
+    if (self.scalar_type() == kByte) {
+      // Convert to a 1 or 0 mask
+      auto out = at::empty_like(self);
+      return at::ne_outf(self, 0, out);
+    } else {
+      return at::_to_copy(self, kBool);
+    }
+  }
+
+  Tensor out = self;
+  for (auto d : *dim) {
+    if constexpr (is_all) {
+      out = out.all(d, /*keepdim=*/true);
+    } else {
+      out = out.any(d, /*keepdim=*/true);
+    }
+  }
+  return keepdim ? out : out.squeeze(*dim);
+}
+
+Tensor all_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  return allany_dims_default<true>(self, dim, keepdim);
+}
+
+Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  return allany_dims_default<false>(self, dim, keepdim);
+}
+
+Tensor& all_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
+  auto tmp = self.all(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
+}
+
+Tensor& any_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
+  auto tmp = self.any(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
 }
 
 TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
@@ -1659,6 +1753,15 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
   return result;
 }
 
+namespace {
+  inline void warn_invalid_degrees_of_freedom(const char* fname, const TensorIterator& iter, double correction) {
+    int64_t reducing_over_num_elements = iter.num_output_elements() == 0 ? 0 : iter.numel() / iter.num_output_elements();
+    if (reducing_over_num_elements - correction <= 0) {
+      TORCH_WARN(fname, "(): degrees of freedom is <= 0. Correction should be strictly less than the reduction factor (input numel divided by output numel).");
+    }
+  }
+} // namespace
+
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
     at::OptionalIntArrayRef dim, const c10::optional<Scalar>& correction_opt,
@@ -1711,6 +1814,7 @@ static Tensor& std_var_out(
   TORCH_CHECK(at::canCast(self.scalar_type(), result.scalar_type()),
               "result type ", self.scalar_type(), " can't be cast to the "
               "desired output type ", result.scalar_type());
+  warn_invalid_degrees_of_freedom(fname, iter, correction);
 
   if (iter.numel() == 0) {
     // Trivial reduction
@@ -1790,6 +1894,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
   ScalarType dtype = get_dtype_from_result(result1, {});
   auto iter =
       make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+  warn_invalid_degrees_of_freedom(fname, iter, correction);
 
   if (iter.numel() == 0) {
     // Trivial reduction
@@ -2072,7 +2177,27 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       && self.layout() == other.layout()
       && self.is_neg() == other.is_neg()
       && self.is_conj() == other.is_conj()) {
-    return true;
+    if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      return true;
+    }
+    std::atomic<bool> result{true};
+    auto iter = TensorIteratorConfig().add_input(self).build();
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
+      iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
+        if (!result) {
+            return;
+        }
+        char* self_data = data[0];
+        for (C10_UNUSED const auto i : c10::irange(dim_size)) {
+          if (isnan_(c10::load<scalar_t>(self_data))) {
+            result = false;
+            return;
+          }
+          self_data += strides[0];
+        }
+      });
+    });
+    return result.load();
   }
 
   std::atomic<bool> result{true};
@@ -2090,8 +2215,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (const auto i : c10::irange(dim_size)) {
-        (void)i; //Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(dim_size)) {
         if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
@@ -2104,7 +2228,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
-Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
+static Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, at::IntArrayRef sizes, bool keepdim) {
     return at::native::value_selecting_reduction_backward_symint(grad, dim, indices, c10::fromIntArrayRefSlow(sizes), keepdim);
 }
 
@@ -2163,6 +2287,24 @@ Tensor sum_sparse_coo(const Tensor& self, at::OptionalIntArrayRef dim, bool keep
     }
   }
   return result;
+}
+
+Tensor sum_sparse_compressed(
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
+  // TODO: The signature of sum.dim_IntList and _sparse_csr_sum.dim_dtype is a little
+  // bit different in the second parameters `dim`, which causes the conversion of `dim`
+  // to call into `_sparse_csr_sum`. Align the signatures would be a better choice.
+  TORCH_CHECK(
+      dim.has_value(), "dim has no value, cannot be used in sum.dim_IntList");
+  auto layout = self.layout();
+  TORCH_CHECK(
+      layout == kSparseCsr,
+      "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout ",
+      layout)
+  return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
 } // namespace native

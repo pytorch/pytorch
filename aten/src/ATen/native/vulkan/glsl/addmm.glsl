@@ -12,6 +12,7 @@ layout(set = 0, binding = 2)         uniform PRECISION                    sample
 layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uT;
 layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
   ivec4 size;
+  ivec4 bias_size;
   vec2 multiplier;
 } uBlock;
 
@@ -40,7 +41,8 @@ void main() {
       sum = fma(texel1.yyww, texel2.zwzw, sum);
     }
 
-    const vec4 outtex = uBlock.multiplier.x * sum + uBlock.multiplier.y * texelFetch(uT, pos, 0);
+    const ivec3 bias_pos = pos % uBlock.bias_size.xyz;
+    const vec4 outtex = uBlock.multiplier.x * sum + uBlock.multiplier.y * texelFetch(uT, bias_pos, 0);
 
     const ivec3 posy = posx + ivec3(int((posx.x + 1) < uBlock.size.x), 0, 0);
     const vec4 outy = vec4(outtex.y, 0, 0, 0);

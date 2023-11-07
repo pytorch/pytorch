@@ -1,7 +1,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-#ifdef CUDART_VERSION
+#if defined(CUDART_VERSION) || defined(ROCM_VERSION) && ROCM_VERSION >= 50300
 
 namespace at::cuda {
 namespace {
@@ -11,7 +11,6 @@ void createCusolverDnHandle(cusolverDnHandle_t *handle) {
 }
 
 void destroyCusolverDnHandle(cusolverDnHandle_t handle) {
-  (void)handle; // Suppress unused variable warning
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
@@ -19,6 +18,7 @@ void destroyCusolverDnHandle(cusolverDnHandle_t handle) {
 // the handle as a workaround.
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
+  (void)handle; // Suppress unused variable warning
 #else
     cusolverDnDestroy(handle);
 #endif

@@ -1,34 +1,30 @@
 #pragma once
 
-#include <c10/core/Backend.h>
-#include <c10/core/CopyBytes.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>
 #include <c10/core/SymBool.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyObjectSlot.h>
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
-#include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
+#include <c10/util/typeid.h>
 
 #include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
-#include <numeric>
 #include <type_traits>
 #include <utility>
 
@@ -58,11 +54,6 @@ class TensorBase;
 } // namespace at
 
 namespace c10 {
-class Scalar;
-struct Storage;
-} // namespace c10
-
-namespace c10 {
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -84,7 +75,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 
 // Product of all dims up to k (not including dims[k])
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)k <= dims.size());
+  TORCH_CHECK(k >= 0 && static_cast<size_t>(k) <= dims.size());
   int64_t r = 1;
   for (const auto i : c10::irange(k)) {
     r *= dims[i];
@@ -150,8 +141,6 @@ struct C10_API PlacementDeleteContext {
     // original memory will be freed when data_ptr_ is destructed
   }
 };
-
-struct TensorImpl;
 
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(
@@ -224,7 +213,7 @@ is_non_overlapping_and_dense
  * backend.
  **/
 struct C10_API BackendMeta : intrusive_ptr_target {
-  virtual ~BackendMeta(){};
+  ~BackendMeta() override = default;
   virtual intrusive_ptr<BackendMeta> clone(
       const intrusive_ptr<BackendMeta>& ptr) const {
     return ptr;
@@ -248,6 +237,8 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
+  c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
+  c10::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -261,15 +252,24 @@ struct C10_API ExtraMeta {
     if (other.backend_meta_) {
       backend_meta_ = other.backend_meta_->clone(other.backend_meta_);
     }
+    if (other.custom_data_ptr_error_msg_) {
+      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
+    }
+    if (other.custom_storage_error_msg_) {
+      custom_storage_error_msg_ = other.custom_storage_error_msg_;
+    }
   }
 
   ExtraMeta(
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
-      intrusive_ptr<c10::BackendMeta> backend_meta)
+      intrusive_ptr<c10::BackendMeta> backend_meta,
+      c10::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
+      c10::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
-        backend_meta_(backend_meta) {}
+        backend_meta_(std::move(backend_meta)),
+        custom_storage_error_msg_(std::move(custom_storage_access_error_msg)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);
@@ -412,20 +412,6 @@ struct C10_API VariableVersion {
 // Forward declaration of TensorImpl needed for forward declaration of
 // C10_TensorImpl_Size_Check_Dummy_Class
 struct C10_API TensorImpl;
-
-// Forward declaration needed because TensorImpl needs to be friends with
-// C10_TensorImpl_Size_Check_Dummy_Class in order to check the size
-// of its private fields.
-template <
-    size_t cplusplus,
-    size_t clang_ver_major,
-    size_t gcc_ver,
-    size_t gcc_ver_minor,
-    size_t nvcc,
-    size_t cuda_version,
-    size_t cuda_version_major,
-    size_t ptr_size>
-class C10_TensorImpl_Size_Check_Dummy_Class;
 
 /**
  * NOTE: Some TensorImpl methods are small and not overridden in the
@@ -597,6 +583,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_;
   }
 
+ private:
+  [[noreturn]] void throw_cannot_call_with_symbolic(const char* meth) const;
+
   // NOTE: The general recipe for customizable methods is that the fastpath
   // function (e.g., sizes()) does an unlikely policy test, and if doesn't
   // trigger, it does the fast path implementation with no checks and going
@@ -632,10 +621,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef sizes_default() const {
-    // TODO: force backtrace to be printed on this error
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call sizes() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("sizes");
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 
@@ -714,9 +702,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t numel_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call numel() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("numel");
+    }
     return numel_;
   }
 
@@ -770,9 +758,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t storage_offset_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call storage_offset() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("storage_offset");
+    }
     return storage_offset_;
   }
 
@@ -803,9 +791,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef strides_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call strides() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("strides");
+    }
     return sizes_and_strides_.strides_arrayref();
   }
 
@@ -1138,6 +1126,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return device_custom().is_xla();
     }
     return device_opt_.has_value() && device_opt_->type() == kXLA;
+  }
+
+  bool is_mtia() const {
+    if (C10_UNLIKELY(device_policy_)) {
+      return device_custom().is_mtia();
+    }
+    return device_opt_.has_value() && device_opt_->type() == kMTIA;
   }
 
   bool is_hpu() const {
@@ -1562,16 +1557,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Shared implementation of mutable_data_ptr_impl() and the future
   // mutable_data_ptr_impl().
   template <typename T, typename Func>
-  T* data_ptr_impl_impl(const Func& get_data) const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+  __ubsan_ignore_pointer_overflow__ T* data_ptr_impl_impl(
+      const Func& get_data) const {
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
+    // Note: storage_offset_ can be non-null even for zero-elements tensors
+    // (for example if created as `torch.empty(5)[10:]`) that triggers
+    // applying non-zero offset to null pointer in UBSan
     return get_data() + storage_offset_;
   }
 
@@ -1614,9 +1613,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /// std::byte const*, etc.
   template <typename Void, typename Func>
   Void* data_impl(const Func& get_data) const {
-    TORCH_CHECK(
-        has_storage(),
-        "Cannot access data pointer of Tensor that doesn't have storage");
+    if (C10_UNLIKELY(!has_storage())) {
+      throw_data_ptr_access_error();
+    }
     TORCH_CHECK(
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
@@ -1627,7 +1626,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Computing an offset into an empty tensor would be UB, since an empty
     // tensor's storage will be nullptr, and adding a nonzero offset to nullptr
     // is UB.  So we skip the offset computation in this case.
-    if (data == nullptr) {
+    if (is_empty()) {
       return nullptr;
     }
     return data + data_type_.itemsize() * storage_offset_;
@@ -1671,6 +1670,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return extra_meta_->backend_meta_;
   }
 
+  void release_storage_and_set_meta_custom_data_ptr_error_msg_(
+      c10::optional<std::string> s) {
+    storage_ = {};
+    set_storage_access_should_throw();
+    get_extra_meta().custom_data_ptr_error_msg_ = s;
+    get_extra_meta().custom_storage_error_msg_ = s;
+  }
+
  protected:
   /**
    * Returns the human-readable name of the actual type of this object (e.g.,
@@ -1682,6 +1689,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+  [[noreturn]] void throw_data_ptr_access_error() const;
 
   ExtraMeta& get_extra_meta() {
     if (!extra_meta_) {

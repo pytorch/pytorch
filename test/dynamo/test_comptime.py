@@ -43,7 +43,7 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    mul = l_x_ * 2;  l_x_ = None""",
+    y = l_x_ * 2;  l_x_ = None""",
         )
 
     def test_print_disas(self):
@@ -187,30 +187,56 @@ y = TensorVariable()
         self.assertExpectedInline(
             re.sub(r"\s+$", "", FILE.getvalue().rstrip(), flags=re.MULTILINE),
             """\
--
-            local "L['x']" TENSOR_MATCH
-            {
-                'guard_types': None,
-                'code': None,
-                'obj_weakref': None
-                'guarded_class': None
-            }
--
-            global '' DETERMINISTIC_ALGORITHMS
-            {
-                'guard_types': None,
-                'code': None,
-                'obj_weakref': None
-                'guarded_class': None
-            }
--
-            global '' DEFAULT_DEVICE
-            {
-                'guard_types': None,
-                'code': None,
-                'obj_weakref': None
-                'guarded_class': None
-            }""",
+
+        local "L['x']" TENSOR_MATCH
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' GRAD_MODE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' DETERMINISTIC_ALGORITHMS
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' TORCH_FUNCTION_STATE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' DEFAULT_DEVICE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        global '' BACKEND_MATCH
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+        shape_env '' SHAPE_ENV
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }""",
         )
 
     def test_graph_break(self):
@@ -282,8 +308,8 @@ y = TensorVariable()
             """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    mul = l_x_ * 2;  l_x_ = None
-    add = mul + 4;  mul = None""",
+    y = l_x_ * 2;  l_x_ = None
+    add = y + 4;  y = None""",
         )
 
 

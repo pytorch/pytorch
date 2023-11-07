@@ -13,6 +13,10 @@ inputs:
     required: true
     type: string
     description: JSON description of what test configs to run.
+  job-name:
+    type: string
+    required: false
+    default: ""
 
 outputs:
   test-matrix:
@@ -24,6 +28,9 @@ outputs:
   keep-going:
     description: True if keep-going label was on PR.
     value: ${{ steps.filter.outputs.keep-going }}
+  reenabled-issues:
+    description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
+    value: ${{ steps.filter.outputs.reenabled-issues }}
 
 runs:
   using: composite
@@ -42,12 +49,18 @@ runs:
           python3 -m pip install requests==2.26.0 pyyaml==6.0
 
     - name: Parse ref
-      shell: bash
       id: parse-ref
-      run: .github/scripts/parse_ref.py
+      shell: bash
+      run: |
+        set -x
+
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/parse_ref.py"
 
     - name: Get the job name
       id: get-job-name
+      if: inputs.job-name == ''
       continue-on-error: true
       shell: bash
       run: |
@@ -64,7 +77,16 @@ runs:
 
         LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log | tail -n 1)
         if [ -n "${LOG_FILE}" ]; then
-          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:,]' '{print $2}' | sed 's/"//g' | xargs)
+          # For some reasons, awk {print $2} on Linux and Windows (bash) work correctly while it
+          # needs to be awk {print $3} on MacOS
+          case ${RUNNER_OS} in
+            macOS)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $3}' | sed 's/"//g' | xargs)
+              ;;
+            *)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $2}' | sed 's/"//g' | xargs)
+              ;;
+          esac
           echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
         fi
 
@@ -74,22 +96,40 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        JOB_NAME: ${{ steps.get-job-name.outputs.job-name }}
+        JOB_NAME: ${{ inputs.job-name == '' && steps.get-job-name.outputs.job-name || inputs.job-name }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TAG: ${{ steps.parse-ref.outputs.tag }}
+        EVENT_NAME: ${{ github.event_name }}
+        SCHEDULE: ${{ github.event.schedule }}
+        HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       id: filter
       run: |
         echo "Workflow: ${GITHUB_WORKFLOW}"
         echo "Job name: ${JOB_NAME}"
 
-        .github/scripts/filter_test_configs.py \
+        # Use relative path here as this could be checked out anywhere, not necessarily
+        # in runner workspace
+        python3 "${GITHUB_ACTION_PATH}/../../scripts/filter_test_configs.py" \
           --workflow "${GITHUB_WORKFLOW}" \
           --job-name "${JOB_NAME}" \
           --test-matrix "${{ inputs.test-matrix }}" \
-          --pr-number "${{ github.event.pull_request.number }}" \
-          --tag "${{ steps.parse-ref.outputs.tag }}" \
-          --event-name "${{ github.event_name }}" \
-          --schedule "${{ github.event.schedule }}"
+          --pr-number "${PR_NUMBER}" \
+          --tag "${TAG}" \
+          --event-name "${EVENT_NAME}" \
+          --schedule "${SCHEDULE}" \
+          --branch "${HEAD_BRANCH}"
 
     - name: Print the filtered test matrix
       shell: bash
       run: |
+        echo "Filtered matrix:"
         echo "${{ steps.filter.outputs.test-matrix }}"
+
+        echo
+        echo "Is the current job unstable? ${{ steps.filter.outputs.is-unstable }}"
+
+        echo
+        echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
+
+        echo
+        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"

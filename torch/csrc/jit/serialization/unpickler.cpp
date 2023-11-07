@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/utils/byte_order.h>
 #include <string>
+#include <utility>
 
 namespace torch::jit {
 
@@ -97,7 +98,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymBoolType::Kind:
-        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
+        TORCH_CHECK(!w.value.toSymBool().is_heap_allocated());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -188,7 +189,9 @@ bool is(const Type& type) {
 }
 } // namespace
 
-void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
+static void restoreContainerTypeTags(
+    const IValue& ivalue,
+    const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -228,9 +231,11 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
-#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
   return big_endian;
-#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
 }
 
 void Unpickler::run() {
@@ -362,6 +367,12 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
+      TORCH_CHECK(
+          stack_.size() >= start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       const auto tupleSize = stack_.size() - start;
       switch (tupleSize) {
         case 3: {
@@ -396,7 +407,7 @@ PickleOpCode Unpickler::readInstruction() {
     } break;
     case PickleOpCode::TUPLE1: {
       TORCH_CHECK(
-          stack_.size() > 0,
+          !stack_.empty(),
           "Parsing error: stack_ contains ",
           stack_.size(),
           " elements, at least 1 expected");
@@ -434,9 +445,18 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       TORCH_CHECK(
           start > 0 && start <= stack_.size(),
-          "Parsing error: wrong start index for stack_");
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
+    } break;
+    case PickleOpCode::APPEND: {
+      TORCH_CHECK(
+          stack_.size() >= 2, "Parsing error: missing elements in stack_.");
+      auto list_ivalue = stack_.at(stack_.size() - 2);
+      readListElements(list_ivalue, stack_.size() - 1);
     } break;
     case PickleOpCode::LIST: {
       IValue list_ivalue = c10::impl::GenericList(AnyType::get());
@@ -447,7 +467,20 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          stack_.size() > start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ which of size ",
+          stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
+      TORCH_CHECK(
+          (stack_.size() - start) % 2 == 0,
+          "Parsing error: stack_ is of size ",
+          stack_.size(),
+          " and start index is ",
+          start,
+          ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
@@ -462,6 +495,13 @@ PickleOpCode Unpickler::readInstruction() {
           start > 0 && start <= stack_.size(),
           "Parsing error: wrong start index for stack_");
       auto dict = stack_.at(start - 1).toGenericDict();
+      TORCH_CHECK(
+          (stack_.size() - start) % 2 == 0,
+          "Parsing error: stack_ is of size ",
+          stack_.size(),
+          " and start index is ",
+          start,
+          ", but stack_ is iterated by two elemenst at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
@@ -532,7 +572,8 @@ PickleOpCode Unpickler::readInstruction() {
       const std::string& key = args.at(2).toStringRef();
 
       at::Device device(args.at(3).toStringRef());
-      if (device_) {
+      // remap device location if it's not meta
+      if (device_ && !device.is_meta()) {
         device = *device_;
       }
 
@@ -579,7 +620,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_privateuseone()) {
+          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
@@ -1056,6 +1097,11 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 std::string Unpickler::readBytes(size_t length) {
   std::string data;
   static const size_t kSmallString = 64;
+  TORCH_CHECK(
+      length <= data.max_size(),
+      "Parsing error: can't read ",
+      length,
+      " bytes to a string");
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
     data.assign(buffer_.data() + buffer_pos_, length);
@@ -1086,12 +1132,7 @@ std::string Unpickler::readBytes(size_t length) {
   return data;
 }
 
-// Pop all the list items off of the stack and append them to the list at
-// the corresponding MARK
-void Unpickler::readList(IValue list_ivalue) {
-  TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
-  size_t start = marks_.back();
-  marks_.pop_back();
+void Unpickler::readListElements(IValue list_ivalue, size_t start) {
   auto num_elements = stack_.size() - start;
   auto elements = c10::ArrayRef<IValue>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
@@ -1127,8 +1168,16 @@ void Unpickler::readList(IValue list_ivalue) {
   } else {
     AT_ERROR("Unknown IValue list kind: ", list_ivalue.tagKind());
   }
-
   stack_.erase(stack_.begin() + start, stack_.end());
+}
+
+// Pop all the list items off of the stack and append them to the list at
+// the corresponding MARK
+void Unpickler::readList(IValue list_ivalue) {
+  TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
+  size_t start = marks_.back();
+  marks_.pop_back();
+  readListElements(std::move(list_ivalue), start);
 }
 
 inline bool is_valid_python_id_char(char c) {

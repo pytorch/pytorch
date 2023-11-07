@@ -55,6 +55,18 @@ RESULTS_RE: Pattern[str] = re.compile(
     """
 )
 
+# torch/_dynamo/variables/tensor.py:363: error: INTERNAL ERROR
+INTERNAL_ERROR_RE: Pattern[str] = re.compile(
+    r"""(?mx)
+    ^
+    (?P<file>.*?):
+    (?P<line>\d+):
+    \s(?P<severity>\S+?):?
+    \s(?P<message>INTERNAL\sERROR.*)
+    $
+    """
+)
+
 
 def run_command(
     args: List[str],
@@ -80,6 +92,28 @@ severities = {
     "error": LintSeverity.ERROR,
     "note": LintSeverity.ADVICE,
 }
+
+
+def check_mypy_installed(code: str) -> List[LintMessage]:
+    cmd = [sys.executable, "-mmypy", "-V"]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        return []
+    except subprocess.CalledProcessError as e:
+        msg = e.stderr.decode(errors="replace")
+        return [
+            LintMessage(
+                path=None,
+                line=None,
+                char=None,
+                code=code,
+                severity=LintSeverity.ERROR,
+                name="command-failed",
+                original=None,
+                replacement=None,
+                description=f"Could not run '{' '.join(cmd)}': {msg}",
+            )
+        ]
 
 
 def check_files(
@@ -109,7 +143,8 @@ def check_files(
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
-    return [
+    stderr = str(proc.stderr, "utf-8").strip()
+    rc = [
         LintMessage(
             path=match["file"],
             name=match["code"],
@@ -124,7 +159,21 @@ def check_files(
             replacement=None,
         )
         for match in RESULTS_RE.finditer(stdout)
+    ] + [
+        LintMessage(
+            path=match["file"],
+            name="INTERNAL ERROR",
+            description=match["message"],
+            line=int(match["line"]),
+            char=None,
+            code=code,
+            severity=severities.get(match["severity"], LintSeverity.ERROR),
+            original=None,
+            replacement=None,
+        )
+        for match in INTERNAL_ERROR_RE.finditer(stderr)
     ]
+    return rc
 
 
 def main() -> None:
@@ -187,7 +236,9 @@ def main() -> None:
         else:
             filenames[filename] = True
 
-    lint_messages = check_files(list(filenames), args.config, args.retries, args.code)
+    lint_messages = check_mypy_installed(args.code) + check_files(
+        list(filenames), args.config, args.retries, args.code
+    )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 

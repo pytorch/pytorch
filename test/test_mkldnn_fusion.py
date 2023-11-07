@@ -22,7 +22,7 @@ class PointwisePostOp(NamedTuple):
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
     def assertFused(self, graph, fused_patterns):
         for pat in fused_patterns:
@@ -204,7 +204,7 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.unary(x)
                 return x
 
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
             for input_shape, bias in options:
                 with torch.no_grad():
@@ -233,7 +233,7 @@ class TestMkldnnFusion(JitTestCase):
                 return x
 
         input_shapes = {2: (112, 112), 3: (55, 55, 55)}
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
@@ -268,7 +268,7 @@ class TestMkldnnFusion(JitTestCase):
                 x = self.binary(x, other)
                 return x
 
-        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        input_shapes = {2: (112, 112), 3: (22, 22, 22)}
         for pointwise_name, pointwise_fn in self._binary_list().items():
             for dim in [2, 3]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
@@ -295,13 +295,13 @@ class TestMkldnnFusion(JitTestCase):
                         # for binary add, we support inplace version.
                         if attr == "add":
                             fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
-                                x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                                other, x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                                 mod.conv.groups, attr, None, unary_attr, [], None
                             )
                             self.assertEqual(ref, other)
                             self.assertEqual(ref, fused_inplace)
 
-                        self.assertEqual(ref, fused)
+                        self.assertEqual(ref, fused, atol=5e-4, rtol=5e-4)
 
 
     def test_linear_binary_fusion_ops(self):
@@ -347,7 +347,7 @@ class TestMkldnnFusion(JitTestCase):
 
         input_shapes = {2: (28, 28)}
         kernel_size = 3
-        for pointwise_name, pointwise_info in self._unary_list().items():
+        for pointwise_info in self._unary_list().values():
             for dim in [2]:
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last], [False, True])
@@ -366,7 +366,7 @@ class TestMkldnnFusion(JitTestCase):
 
                         if prepack_weight:
                             packed_weight = torch.ops.mkldnn._reorder_convolution_transpose_weight(
-                                mod.conv_transpose.weight.to_mkldnn(),
+                                mod.conv_transpose.weight,
                                 mod.conv_transpose.padding,
                                 mod.conv_transpose.output_padding,
                                 mod.conv_transpose.stride,

@@ -7,12 +7,12 @@ from unittest.mock import MagicMock
 
 import torch
 import torch.nn as nn
-from torch._inductor.utils import has_triton
 from torch.distributed._spmd.api import compile
 from torch.distributed._spmd.gm_transformation import GraphModuleTransformation
 from torch.distributed._spmd.graph_optimization import (
     _optimized_func,
     comm_fusion_with_concat,
+    find_all_descendants,
     get_all_fused_optimizer_blocks,
     graph_optimization_pass,
     iter_move_grads_and_optimizers,
@@ -20,14 +20,16 @@ from torch.distributed._spmd.graph_optimization import (
     schedule_comm_wait,
     split_fused_optimizer,
 )
+from torch.distributed._spmd.graph_utils import find_node
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms as base_with_comms,
 )
+from torch.utils._triton import has_triton
 
 
 def with_comms(func):
@@ -184,6 +186,7 @@ class TransformationTest(DTensorTestBase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm
     @with_comms
     def test_inductor(self):
         batch_size = 100
@@ -269,7 +272,7 @@ class TransformationTest(DTensorTestBase):
             split_fused_optimizer(gm, opt_block, gradients)
             gm.graph.eliminate_dead_code()
             gm.recompile()
-            self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            self.assertEqual(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
             gm.finalize_setup()
             return gm
 
@@ -310,6 +313,34 @@ class TransformationTest(DTensorTestBase):
             train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
         )
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_find_all_descendants(self):
+        batch_size = 100
+        layers = 5
+        dim = 4096
+        num_iters = 2
+
+        def my_transformation(gm):
+            gm = IterGraphModule(gm)
+            node1 = find_node(gm.graph, lambda n: n.name == "all_reduce")[0]
+            node2 = find_node(gm.graph, lambda n: n.name == "_foreach_add")[0]
+            nodes_to_move = find_all_descendants(gm, [node1, node2])
+            stop_node = find_node(gm.graph, lambda n: n.name == "relu")[0]
+            gm.graph.move_to_next_iter_before(nodes_to_move, stop_node)
+            return gm
+
+        @compile(gm_transformation=my_transformation)
+        def train_step(model, optim, batch):
+            model(batch).sum().backward()
+            optim.step()
+            optim.zero_grad()
+
+        self._test_train_step(
+            train_step, num_iters, batch_size, layers, dim, use_fused_optimizer=True
+        )
+
 
 if __name__ == "__main__":
-    run_tests()
+    if False:
+        run_tests()

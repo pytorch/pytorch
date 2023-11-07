@@ -9,8 +9,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <typename T>
 static void im2col(
@@ -56,7 +55,7 @@ static void im2col(
           }
         }
 
-        // move the the next index
+        // move the next index
         data_index_step(h_col, height_col, w_col, width_col);
       }
     });
@@ -147,5 +146,4 @@ static void col2im(
   }
 }
 
-} // native
-} // at
+} // namespace at::native

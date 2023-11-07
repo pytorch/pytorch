@@ -190,23 +190,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(
             itertools.product(shard_specs, shard_specs, shard_specs)
         )
-        passlist = [
-            (shard0_spec, shard0_spec, shard0_spec),
-            (shard0_spec, shard0_spec, replica_spec),
-            (shard0_spec, shard1_spec, shard0_spec),
-            (shard0_spec, shard2_spec, shard0_spec),
-            (shard1_spec, shard1_spec, replica_spec),
-            (shard0_spec, replica_spec, shard0_spec),
-            (shard2_spec, replica_spec, shard2_spec),
-            (shard2_spec, shard0_spec, shard2_spec),
-            (shard2_spec, shard1_spec, shard2_spec),
-            (shard2_spec, shard2_spec, shard2_spec),
-            (replica_spec, shard0_spec, shard0_spec),
-            (replica_spec, shard1_spec, replica_spec),
-            (replica_spec, shard2_spec, shard1_spec),
-            (replica_spec, replica_spec, shard2_spec),
-            (replica_spec, replica_spec, replica_spec),
-        ]
         # If beta is 0, input tensor will be ignored
         numeric_params_comb = [
             (0.0, 0.5),  # zero-beta
@@ -219,25 +202,11 @@ class DistMatrixOpsTest(DTensorTestBase):
             )
             grad_local_res = torch.ones_like(local_result)
             local_result.backward(grad_local_res)
-            # tests that currently pass
-            for spec in passlist:
+            # test all combos
+            for spec in shard_specs_comb:
                 test_placement_comb(
                     [spec[0]], [spec[1]], [spec[2]], beta, alpha, batch_1.grad
                 )
-            # TODO: support these tests
-            shard_specs_comb = [
-                spec for spec in shard_specs_comb if spec not in passlist
-            ]
-            for spec in shard_specs_comb:
-                with self.assertRaises(Exception):
-                    test_placement_comb(
-                        [spec[0]],
-                        [spec[1]],
-                        [spec[2]],
-                        beta,
-                        alpha,
-                        batch_1.grad,
-                    )
 
     @with_comms
     def test_bmm(self):

@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS
 )
 import torch
 import torch.nn as nn
@@ -20,14 +20,16 @@ import sys
 import unittest
 import warnings
 import math
+from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
 from torch.testing import make_tensor
+from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
-from torch._C import ExcludeDispatchKeyGuard, DispatchKeySet, DispatchKey
+from torch._C import _ExcludeDispatchKeyGuard, DispatchKeySet, DispatchKey
 
 import functorch
 from functorch import (
@@ -44,6 +46,7 @@ from torch._ops import HigherOrderOperator
 from torch._functorch.utils import enable_single_level_autograd_function
 import torch.autograd.forward_ad as fwAD
 from torch.func import functional_call, stack_module_state, linearize
+from common_utils import expectedFailureIf
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -309,6 +312,7 @@ class TestGradTransform(TestCase):
         result = grad(grad(torch.sin))(x)
         self.assertEqual(result, -torch.sin(x))
 
+    @skipIfTorchDynamo("Ref: https://github.com/pytorch/pytorch/issues/103613")
     def test_escaped_wrappers_are_marked_as_dead(self, device):
         x = torch.randn([], device=device)
         escaped = []
@@ -321,6 +325,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
         self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
+    @skipIfTorchDynamo("Ref: https://github.com/pytorch/pytorch/issues/103613")
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
         escaped = []
@@ -1318,7 +1323,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
     def test_in_dims_multiple_inputs(self, device):
         class Id(torch.autograd.Function):
             @staticmethod
-            def forward(input):
+            def forward(x, y):
                 pass
 
             @staticmethod
@@ -3373,16 +3378,13 @@ class TestComposability(TestCase):
         x = torch.randn([], device=device)
         expected = f(x)
 
-        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
-        try:
+        with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
             gm = make_fx(functorch.functionalize(f))(x)
             self.assertTrue('sin_' not in gm.code)
             self.assertEqual(gm(x), expected)
 
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.Functionalize))
-        finally:
-            del guard
 
     def test_can_use_vmap_when_key_is_excluded(self, device):
         def f(x):
@@ -3391,14 +3393,11 @@ class TestComposability(TestCase):
         x = torch.randn(3, device=device)
         expected = vmap(f)(x)
 
-        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchBatched))
-        try:
+        with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.FuncTorchBatched)):
             result = vmap(f)(x)
             self.assertEqual(result, expected)
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.FuncTorchBatched))
-        finally:
-            del guard
 
     def test_can_use_grad_when_key_is_excluded(self, device):
         def f(x):
@@ -3407,14 +3406,11 @@ class TestComposability(TestCase):
         x = torch.randn([], device=device)
         expected = grad(f)(x)
 
-        guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Autograd))
-        try:
+        with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Autograd)):
             result = grad(f)(x)
             self.assertEqual(result, expected)
             local_exclude_set = torch._C._dispatch_tls_local_exclude_set()
             self.assertTrue(local_exclude_set.has(DispatchKey.Autograd))
-        finally:
-            del guard
 
 
 class TestMakeFunctional(TestCase):
@@ -4715,12 +4711,83 @@ class TestHigherOrderOperatorInteraction(TestCase):
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
 
+    def test_grad_name_wrapping(self, device):
+
+        def my_fn(x):
+            return x.sum()
+        grad_fn = grad(my_fn)
+        self.assertEqual(grad_fn.__name__, "my_fn")
+
     def test_functional_call_multiple_dicts(self):
         mod = nn.Linear(1, 1)
         x = torch.randn((1, 1))
         params = ({'weight': torch.zeros(1, 1)}, {'bias': torch.ones(1)})
         functional_call(mod, params, x)
 
+def traceable(f):
+    f = allow_in_graph(f)
+
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return f(*args, **kwargs)
+
+    return wrapper
+
+
+class TestCompileTransforms(TestCase):
+    # torch.compile is not supported on Windows
+    # Triton only supports GPU with SM70 or later.
+    @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    def test_compile_vmap_hessian(self, device):
+        # The model and inputs are a smaller version
+        # of code at benchmark repo:
+        # https://github.com/pytorch/benchmark/blob/main/userbenchmark/functorch/vmap_hessian_fc.py
+        D = 2
+        B = 4
+
+        x = torch.randn(B, D, device=device)
+
+        model = nn.Sequential(nn.Linear(D, D), nn.ReLU()).to(device)
+
+        params_and_buffers = (dict(model.named_parameters()), dict(model.named_buffers()))
+
+        def predict(params_and_buffers, x):
+            out = torch.func.functional_call(model, params_and_buffers, x)
+            return out, out
+
+        fn = vmap(
+            jacfwd(jacrev(predict, argnums=1, has_aux=True), argnums=1, has_aux=True),
+            in_dims=(None, 0),
+        )
+
+        expected = fn(params_and_buffers, x)
+
+        opt_fn = torch.compile(traceable(fn))
+        actual = opt_fn(params_and_buffers, x)
+        self.assertEqual(actual, expected)
+
+    # torch.compile is not supported on Windows
+    @expectedFailureIf(IS_WINDOWS)
+    @torch._dynamo.config.patch(suppress_errors=False)
+    @torch._dynamo.config.patch(capture_func_transforms=True)
+    @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
+    def test_grad_deprecated_api(self, device):
+        x = torch.randn((), device=device)
+        y = torch.randn((), device=device)
+
+        def wrapper_fn(x, y):
+            return functorch.grad(torch.mul)(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
+
+        def wrapper_fn(x, y):
+            return functorch.grad(torch.mul, argnums=(0, 1))(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
@@ -4795,6 +4862,11 @@ instantiate_device_type_tests(
 )
 instantiate_parametrized_tests(
     TestMakeFunctional,
+)
+instantiate_device_type_tests(
+    TestCompileTransforms,
+    globals(),
+    only_for=only_for,
 )
 
 if __name__ == '__main__':

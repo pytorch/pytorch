@@ -1,5 +1,5 @@
-load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:expect.bzl", "expect")
+load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 
@@ -72,6 +72,18 @@ def pt_operator_library(
         # was hand-crafted which is not a support workflow for traced ops.
         yaml_option = "--models_yaml_path $(location fbsource//xplat/pytorch_models/build/{}/v{}:{})/{}.yaml".format(model_name, model_version, yaml_dep, model_asset)
 
+    not_include_all_overloads_static_root_ops = kwargs.pop(
+        "not_include_all_overloads_static_root_ops",
+        False,
+    )
+
+    not_include_all_overloads_closure_ops = kwargs.pop("not_include_all_overloads_closure_ops", False)
+
+    if False:
+        # TODO(nga): `yaml_option` is never `None`, but it is checked against `None` below.
+        #   Typechecker (`--unstable-typecheck`) catches it.
+        yaml_option = None
+
     fb_xplat_genrule(
         name = name,
         out = "model_operators.yaml",
@@ -87,7 +99,9 @@ def pt_operator_library(
             "{optionally_model_versions} " +
             "{optionally_model_assets} " +
             "{optionally_model_traced_backends} " +
-            "{optionally_include_all_operators}"
+            "{optionally_include_all_operators}" +
+            "{not_include_all_overloads_static_root_ops}" +
+            "{not_include_all_overloads_closure_ops}"
         ).format(
             exe = "//tools:gen_operators_yaml" if IS_OSS else "fbsource//xplat/caffe2/tools:gen_operators_yaml",
             rule_name = name,
@@ -100,6 +114,8 @@ def pt_operator_library(
             optionally_model_assets = "--model_assets " + (",".join(model_assets)) if model_assets != None else "",
             optionally_model_traced_backends = "--model_traced_backends " + (",".join(model_traced_backends)) if model_traced_backends != None else "",
             optionally_include_all_operators = "--include_all_operators " if include_all_operators else "",
+            not_include_all_overloads_static_root_ops = "--not_include_all_overloads_static_root_ops " if not_include_all_overloads_static_root_ops else "",
+            not_include_all_overloads_closure_ops = "--not_include_all_overloads_closure_ops " if not_include_all_overloads_closure_ops else "",
         ),
         labels = labels + [
             "pt_operator_library",
@@ -332,9 +348,11 @@ PT_OPS_PRIM = [
     "aten::copy_.float",
     "aten::backward",
     "aten::index.Tensor_hacked_twin",
+    "aten::_unsafe_index.Tensor_hacked_twin",
     "aten::_index_put_impl_.hacked_twin",
     "aten::index_put_.hacked_twin",
     "aten::index_put.hacked_twin",
+    "aten::_unsafe_index_put.hacked_twin",
     "aten::to.prim_Device",
     "aten::to.prim_dtype",
     "prim::is_cuda",

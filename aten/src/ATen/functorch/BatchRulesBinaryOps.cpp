@@ -71,12 +71,12 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     check_randomness(randomness, (tensor_bdim || other_bdim));
     if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
       auto shape = tensor_value.sizes();
-      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
       shapeVec.reserve(shape.size() + 1);
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
       // not taken care of with binary batch rule, which assumes at least one input is batched
-      tensor_value = tensor_value.expand(shapeVec);
+      tensor_value = tensor_value.expand_symint(shapeVec);
       tensor_bdim = 0;
     } else if (randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
 
@@ -362,12 +362,15 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_and_, Tensor);
+  POINTWISE_BOXED(bitwise_and_.Scalar);
   POINTWISE_BOXED(bitwise_and.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_SCALAR_2(bitwise_or, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_or_, Tensor);
+  POINTWISE_BOXED(bitwise_or_.Scalar);
   POINTWISE_BOXED(bitwise_or.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_xor, Tensor);
+  BINARY_SCALAR_2(bitwise_xor, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_xor_, Tensor);
+  POINTWISE_BOXED(bitwise_xor_.Scalar);
   POINTWISE_BOXED(bitwise_xor.Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   POINTWISE_BOXED(bitwise_left_shift_.Tensor_Scalar);
@@ -399,6 +402,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
   BINARY_POINTWISE(floor_divide);
+  UNARY_POINTWISE2(floor_divide, Scalar);
 
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
@@ -430,7 +434,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
-  BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
 
   VMAP_SUPPORT2(where, self, where_self_batch_rule);

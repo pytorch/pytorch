@@ -1,13 +1,10 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
-#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
 #include <climits>
 #include <memory>
-#include <stdexcept>
 
 namespace pybind11 {
 template <typename, typename...>
@@ -53,6 +50,7 @@ struct DontIncreaseRefcount {};
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
+// NOLINTNEXTLINE(cppcoreguidelines-virtual-class-destructor)
 class C10_API intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -385,11 +383,15 @@ class intrusive_ptr final {
   }
 
   intrusive_ptr& operator=(const intrusive_ptr& rhs) & noexcept {
+    if (this == &rhs) {
+      return *this;
+    }
     return operator=<TTarget, NullType>(rhs);
   }
 
   template <class From, class FromNullType>
-  intrusive_ptr& operator=(const intrusive_ptr<From, NullType>& rhs) & {
+  intrusive_ptr& operator=(
+      const intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
@@ -407,7 +409,6 @@ class intrusive_ptr final {
   }
 
   TTarget* operator->() const noexcept {
-    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     return target_;
   }
 
@@ -421,9 +422,7 @@ class intrusive_ptr final {
   }
 
   void swap(intrusive_ptr& rhs) noexcept {
-    TTarget* tmp = target_;
-    target_ = rhs.target_;
-    rhs.target_ = tmp;
+    std::swap(target_, rhs.target_);
   }
 
   // We do a lot of null-pointer checks in our code, good to have this be cheap.
@@ -771,6 +770,9 @@ class weak_intrusive_ptr final {
   }
 
   weak_intrusive_ptr& operator=(const weak_intrusive_ptr& rhs) & noexcept {
+    if (this == &rhs) {
+      return *this;
+    }
     return operator=<TTarget, NullType>(rhs);
   }
 
@@ -783,7 +785,7 @@ class weak_intrusive_ptr final {
 
   template <class From, class FromNullType>
   weak_intrusive_ptr& operator=(
-      const weak_intrusive_ptr<From, NullType>& rhs) & {
+      const weak_intrusive_ptr<From, NullType>& rhs) & noexcept {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");

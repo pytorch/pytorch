@@ -124,5 +124,23 @@ Tensor& NestedTensor_silu_(Tensor& self){
   return self;
 }
 
+Tensor sin_nested(const Tensor& self) {
+  return map_nt(self, at::sin);
+}
+
+Tensor cos_nested(const Tensor& self) {
+  return map_nt(self, at::cos);
+}
+
+Tensor _pin_memory_nested(const Tensor& self, c10::optional<Device> device) {
+  auto* nt_input = get_nested_tensor_impl(self);
+  const auto& input_buffer = nt_input->get_unsafe_storage_as_tensor();
+  return wrap_buffer(
+      at::_pin_memory(input_buffer, device),
+      nt_input->get_nested_sizes(),
+      nt_input->get_nested_strides(),
+      nt_input->get_storage_offsets());
+}
+
 } // namespace native
 } // namespace at

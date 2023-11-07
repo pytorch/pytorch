@@ -12,7 +12,9 @@ and optimization research.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 torch.manual_seed(0)
+
 
 # Here's a simple CNN
 class SimpleCNN(nn.Module):
@@ -37,12 +39,14 @@ class SimpleCNN(nn.Module):
         output = x
         return output
 
+
 def loss_fn(predictions, targets):
     return F.nll_loss(predictions, targets)
 
+
 # Let's generate a batch of dummy data. Pretend that we're working with an
 # MNIST dataset where the images are 28 by 28 and we have a minibatch of size 64.
-device = 'cuda'
+device = "cuda"
 num_models = 10
 batch_size = 64
 data = torch.randn(batch_size, 1, 28, 28, device=device)
@@ -56,6 +60,7 @@ predictions = model(data)
 loss = loss_fn(predictions, targets)
 loss.backward()
 
+
 # Conceptually, per-sample-gradient computation is equivalent to: for each sample
 # of the data, perform a forward and a backward pass to get a gradient.
 def compute_grad(sample, target):
@@ -65,11 +70,13 @@ def compute_grad(sample, target):
     loss = loss_fn(prediction, target)
     return torch.autograd.grad(loss, list(model.parameters()))
 
+
 def compute_sample_grads(data, targets):
     sample_grads = [compute_grad(data[i], targets[i]) for i in range(batch_size)]
     sample_grads = zip(*sample_grads)
     sample_grads = [torch.stack(shards) for shards in sample_grads]
     return sample_grads
+
 
 per_sample_grads = compute_sample_grads(data, targets)
 
@@ -85,8 +92,10 @@ print(per_sample_grads[0].shape)
 # We can compute per-sample-gradients efficiently by using function transforms.
 # First, let's create a stateless functional version of ``model`` by using
 # ``functorch.make_functional_with_buffers``.
-from functorch import make_functional_with_buffers, vmap, grad
+from functorch import grad, make_functional_with_buffers, vmap
+
 fmodel, params, buffers = make_functional_with_buffers(model)
+
 
 # Next, let's define a function to compute the loss of the model given a single
 # input rather than a batch of inputs. It is important that this function accepts the
@@ -99,6 +108,7 @@ def compute_loss(params, buffers, sample, target):
     predictions = fmodel(params, buffers, batch)
     loss = loss_fn(predictions, targets)
     return loss
+
 
 # Now, let's use ``grad`` to create a new function that computes the gradient
 # with respect to the first argument of compute_loss (i.e. the params).

@@ -30,8 +30,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
       algo_ = ialgo::convolution_winograd;
     }
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPConvOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPConvOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT_X);
@@ -199,8 +199,8 @@ class IDEEPConvFusionOp final : public IDEEPConvOp {
         CAFFE_THROW("Unsupported conv fusion type!");
     }
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPConvFusionOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPConvFusionOp() override {}
 };
 
 const char* kConvFusionDoc = R"DOC(
@@ -291,8 +291,8 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
         "In order to backward propagate weights correctly, "
         "please set training_mode=1");
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPConvGradientOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPConvGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(INPUT);
