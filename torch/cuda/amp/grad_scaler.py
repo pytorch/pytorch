@@ -49,7 +49,7 @@ def _refresh_per_optimizer_state() -> Dict[str, Any]:
 
 class GradScaler:
     """An instance ``scaler`` of :class:`GradScaler`.
-    
+
     Helps perform the steps of gradient scaling
     conveniently.
 
@@ -354,7 +354,7 @@ class GradScaler:
         self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
     ) -> Optional[float]:
         """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
-        
+ 
         :meth:`step` carries out the following two operations:
 
         1.  Internally invokes ``unscale_(optimizer)`` (unless :meth:`unscale_` was explicitly called for ``optimizer``
@@ -619,7 +619,7 @@ class GradScaler:
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""Load the scaler state.
-        
+
         If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
         Args:
