@@ -6278,8 +6278,14 @@ def fn():
         def my_dyn_fn(x, y):
             z = x * y
 
-            if z.shape[0] == 3:
-                return z.cos()
+            # We can handle dynamic jump on symint but we cannot handle it while in a try/except
+            # Hence we need to guard the resulting graph on the constant value of shape[0]
+            # But this is impossible when shape[0] is a symint
+            try:
+                if z.shape[0] == 3:
+                    return x.cos()
+            finally:
+                pass
 
             return x.cos()
 
@@ -6342,19 +6348,27 @@ def fn():
         x0 = torch.randn([3, 3, 3])
         torch._dynamo.mark_dynamic(x0, 0)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 2)  # dynamic jump = 2 new graphs
 
         # Run without dynamic, no recompile
         x = torch.randn([3, 3, 3])
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 2)
 
         # Mark a new dim, 1, as dynamic
         x1 = torch.randn([3, 3, 3])
         torch._dynamo.mark_dynamic(x1, 1)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x1)
         # Recompile triggered because we marked a new dym as dynamic
-        self.assertEqual(counter.frame_count, 2)
+        # size[0] is still dynamic due to automatic dynamic
+        self.assertEqual(counter.frame_count, 4)  # dynamic jump = 2 new graphs
+
+        x2 = torch.randn([3, 3, 3])
+        torch._dynamo.mark_dynamic(x2, 2)
+        torch._dynamo.optimize(counter, dynamic=False)(my_dyn_fn)(x2)
+        # Recompile triggered because we marked a new dym as dynamic
+        # size[0] is no longer dynamic due to turning off automatic dynamic
+        self.assertEqual(counter.frame_count, 5)  # non-dynamic jump = 1 new graph
 
         # Reset
         torch._dynamo.reset()
@@ -6363,11 +6377,11 @@ def fn():
 
         # Run with dynamic 1
         torch._dynamo.optimize(counter)(my_dyn_fn)(x1)
-        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.frame_count, 1)  # no dynamic jump
 
         # Run with dynamic 0, not subset
         torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 3)  # dynamic jump = 2 new graphs
 
         # Run with dynamic 0, 1, 2, not subset
         x012 = torch.randn([3, 3, 3])
@@ -6375,7 +6389,7 @@ def fn():
         torch._dynamo.mark_dynamic(x012, 1)
         torch._dynamo.mark_dynamic(x012, 2)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x012)
-        self.assertEqual(counter.frame_count, 3)
+        self.assertEqual(counter.frame_count, 5)  # dynamic jump = 2 new graphs
 
     def test_recompile_on_global_state_change(self):
         last_state = []

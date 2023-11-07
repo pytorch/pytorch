@@ -389,8 +389,9 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, x), fn(x, x))
-        self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(cnt_dynamic.frame_count, 2)
+        self.assertEqual(opt_fn(x, y), fn(x, y))
+        self.assertEqual(cnt_dynamic.frame_count, 4)
 
     def test_dynamic_order_dependence(self):
         def fn(a, b):
