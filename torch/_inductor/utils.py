@@ -1213,11 +1213,13 @@ def try_find_schema(schemas, args, kwargs):
 
 
 @functools.lru_cache(None)
-def get_device_tflops(dtype):
+def get_device_tflops(dtype) -> Optional[float]:
+    if dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        return None
+
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops, nvsmi
 
     cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
-    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
     if dtype in (torch.float16, torch.bfloat16):
         return get_max_tensorcore_tflops(dtype, cur_sm_clock)
 
@@ -1246,8 +1248,8 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+def has_free_symbols(itr: Iterable[Any]):
+    return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
 def is_dynamic(*args):

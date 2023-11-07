@@ -2621,6 +2621,7 @@ class NoneLayout(IRNode):
 
     def __init__(self, device):
         self.device = device
+        self.size = [0]
 
     def storage_size(self):
         return 0
@@ -2955,6 +2956,17 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    def get_computed_buffer_name(self):
+        """
+        Returns self.name if it exists, otherwise returns the name of the data node if that exists.
+        If neither exist, returns None.
+        """
+        if self.name is not None:
+            return self.name
+        if hasattr(self.data, "name"):
+            return self.data.name
+        return None
+
     @cache_on_self
     def num_reads(self):
         return len(self.get_read_writes().reads)
@@ -3284,11 +3296,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         layout,
         inputs,
         make_kernel_render,
-        workspace_size: int = 0,
+        workspace_size: int,
+        template: "CUDATemplate",  # type: ignore[name-defined]
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
+        self.template = template
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
@@ -3946,17 +3960,19 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
-        new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
+        # Definition of kernel
+        new_name = wrapper.define_user_defined_triton_kernel(
+            kernel, configs, self.kwargs
+        )
+
+        # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
             configs,
             self.codegen_kwargs(),
-        )
-        wrapper.define_user_defined_triton_kernel(
-            new_name, kernel, configs, self.kwargs
         )
 
     def should_allocate(self):
