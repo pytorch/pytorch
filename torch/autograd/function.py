@@ -320,7 +320,7 @@ class _SingleLevelFunction(
     @staticmethod
     def forward(ctx: Any, *args: Any, **kwargs: Any) -> Any:
         r"""Override this function in all subclasses.
-        
+
         There are two ways to define forward:
 
         Usage 1 (Combined forward and ctx)::
@@ -413,7 +413,7 @@ class _SingleLevelFunction(
     @staticmethod
     def jvp(ctx: Any, *grad_inputs: Any) -> Any:
         r"""Formulate differentiation with forward mode automatic differentiation.
-        
+
         This function is to be overridden by all subclasses.
         It must accept a context :attr:`ctx` as the first argument, followed by
         as many inputs as the :func:`forward` got (None will be passed in
@@ -502,7 +502,7 @@ class Function(_SingleLevelFunction):
     @staticmethod
     def vmap(info, in_dims, *args):
         r"""Define vmap behavior for this autograd.Function, override or set ``generate_vmap_rule`` to enable :func:`torch.vmap`.
-        
+
         This static method sets the behavior for this autograd.Function within 
         :func:`torch.vmap`. To enable :func:`torch.vmap`, you can either override this 
         method or set ``generate_vmap_rule`` to ``True``, but not both.
