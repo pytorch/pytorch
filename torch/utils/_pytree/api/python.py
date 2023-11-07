@@ -16,7 +16,6 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
-import inspect
 import json
 import warnings
 from collections import deque, namedtuple, OrderedDict
@@ -101,6 +100,9 @@ class NodeDef(NamedTuple):
     unflatten_fn: UnflattenFunc
 
 
+SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+
+
 # _SerializeNodeDef holds the following:
 # - typ: the type of the node (e.g., "Dict", "List", etc)
 # - serialized_type_name: the fully qualified name of the type, e.g. "collections.OrderedDict"
@@ -113,6 +115,10 @@ class _SerializeNodeDef(NamedTuple):
     serialized_type_name: str
     to_dumpable_context: Optional[ToDumpableContextFn]
     from_dumpable_context: Optional[FromDumpableContextFn]
+
+
+SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {}
+SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {}
 
 
 def _register_pytree_node(
@@ -144,6 +150,50 @@ def _register_pytree_node(
             to convert the custom json dumpable representation of the context
             back to the original context. This is used for json deserialization,
             which is being used in torch.export right now.
+    """
+    _private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        to_str_fn=to_str_fn,  # deprecated
+        maybe_from_str_fn=maybe_from_str_fn,  # deprecated
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+    try:
+        from . import cxx
+    except ImportError:
+        pass
+    else:
+        cxx._private_register_pytree_node(
+            cls,
+            flatten_fn,
+            unflatten_fn,
+            serialized_type_name=serialized_type_name,
+            to_dumpable_context=to_dumpable_context,
+            from_dumpable_context=from_dumpable_context,
+        )
+
+
+register_pytree_node = _register_pytree_node
+
+
+def _private_register_pytree_node(
+    cls: Any,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    to_str_fn: Optional[ToStrFunc] = None,  # deprecated
+    maybe_from_str_fn: Optional[MaybeFromStrFunc] = None,  # deprecated
+    *,
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+) -> None:
+    """This is an internal function that is used to register a pytree node type
+    for the Python pytree only. End-users should use :func:`register_pytree_node`
+    instead.
     """
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
@@ -178,31 +228,6 @@ def _register_pytree_node(
     )
     SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
     SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
-
-    import torch
-
-    if torch._running_with_deploy():
-        warnings.warn("C++ pytree utilities do not work with torch::deploy.")
-        return
-
-    try:
-        from . import cxx
-    except ImportError:
-        pass
-    else:
-        current_frame = inspect.currentframe()
-        previous_frame = current_frame.f_back if current_frame is not None else None
-        if previous_frame is not None and inspect.getmodule(previous_frame) is not cxx:
-            cxx.register_pytree_node(
-                cls,
-                flatten_fn,
-                unflatten_fn,
-                to_dumpable_context=to_dumpable_context,
-                from_dumpable_context=from_dumpable_context,
-            )
-
-
-register_pytree_node = _register_pytree_node
 
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -263,48 +288,38 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {
-    dict: NodeDef(dict, _dict_flatten, _dict_unflatten),
-    list: NodeDef(list, _list_flatten, _list_unflatten),
-    tuple: NodeDef(tuple, _tuple_flatten, _tuple_unflatten),
-    namedtuple: NodeDef(namedtuple, _namedtuple_flatten, _namedtuple_unflatten),  # type: ignore[dict-item,arg-type]
-    OrderedDict: NodeDef(OrderedDict, _odict_flatten, _odict_unflatten),
-}
-SUPPORTED_SERIALIZED_TYPES: Dict[Type[Any], _SerializeNodeDef] = {
-    dict: _SerializeNodeDef(
-        dict,
-        f"{dict.__module__}.{dict.__qualname__}",
-        None,
-        None,
-    ),
-    list: _SerializeNodeDef(
-        list,
-        f"{list.__module__}.{list.__qualname__}",
-        None,
-        None,
-    ),
-    tuple: _SerializeNodeDef(
-        tuple,
-        f"{tuple.__module__}.{tuple.__qualname__}",
-        None,
-        None,
-    ),
-    namedtuple: _SerializeNodeDef(  # type: ignore[dict-item]
-        namedtuple,  # type: ignore[arg-type]
-        f"{namedtuple.__module__}.{namedtuple.__qualname__}",
-        _namedtuple_serialize,
-        _namedtuple_deserialize,
-    ),
-    OrderedDict: _SerializeNodeDef(
-        OrderedDict,
-        f"{OrderedDict.__module__}.{OrderedDict.__qualname__}",
-        None,
-        None,
-    ),
-}
-SERIALIZED_TYPE_TO_PYTHON_TYPE: Dict[str, Type[Any]] = {
-    f"{cls.__module__}.{cls.__qualname__}": cls for cls in SUPPORTED_SERIALIZED_TYPES
-}
+_register_pytree_node(
+    dict,
+    _dict_flatten,
+    _dict_unflatten,
+    serialized_type_name="builtins.dict",
+)
+_register_pytree_node(
+    list,
+    _list_flatten,
+    _list_unflatten,
+    serialized_type_name="builtins.list",
+)
+_register_pytree_node(
+    tuple,
+    _tuple_flatten,
+    _tuple_unflatten,
+    serialized_type_name="builtins.tuple",
+)
+_register_pytree_node(
+    namedtuple,
+    _namedtuple_flatten,
+    _namedtuple_unflatten,
+    to_dumpable_context=_namedtuple_serialize,
+    from_dumpable_context=_namedtuple_deserialize,
+    serialized_type_name="collections.namedtuple",
+)
+_register_pytree_node(
+    OrderedDict,
+    _odict_flatten,
+    _odict_unflatten,
+    serialized_type_name="collections.OrderedDict",
+)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
@@ -759,7 +774,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
 
     if treespec.type not in SUPPORTED_SERIALIZED_TYPES:
         raise NotImplementedError(
-            f"Serializing {treespec.type} in pytree is not registered."
+            f"Serializing {treespec.type} in pytree is not registered.",
         )
 
     serialize_node_def = SUPPORTED_SERIALIZED_TYPES[treespec.type]
