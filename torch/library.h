@@ -644,13 +644,12 @@ class TORCH_API Library final {
   /// }
   /// ```
   template <typename NameOrSchema, typename Func>
-  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f,
-      const std::vector<at::Tag>& tags = {}) & {
+  Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
     return _def(
         detail::constructSchemaOrName(
             ::std::forward<NameOrSchema>(raw_name_or_schema)),
-        ::std::move(f), tags);
+        ::std::move(f));
   }
 
   /// Register an implementation for an operator.  You may register multiple
@@ -856,8 +855,7 @@ class TORCH_API Library final {
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
       std::variant<c10::OperatorName, c10::FunctionSchema>&&,
-      CppFunction&& f,
-      const std::vector<at::Tag>& tags = {}) &;
+      CppFunction&& f) &;
   Library& _impl(
       const char* name,
       CppFunction&& f,
