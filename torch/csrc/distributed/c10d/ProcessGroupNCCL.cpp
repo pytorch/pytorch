@@ -1229,8 +1229,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   if ((terminateProcessGroup_.load() || shutdownMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave six mins for desync report generation or process group destroy.
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartbeatTimeoutInSec_ * 3));
+    std::unique_lock<std::mutex> lock(monitorMutex_);
+    monitorWakeUpCV_.wait_for(
+        lock, std::chrono::seconds(heartbeatTimeoutInSec_ * 3), [] {
+          return false;
+        });
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
