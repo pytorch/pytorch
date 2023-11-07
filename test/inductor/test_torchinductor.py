@@ -670,14 +670,15 @@ class CommonTemplate:
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
 
-        self.common(
-            fn,
-            [
-                torch.zeros(3, 5, dtype=torch.bfloat16),
-                torch.ones((2, 5), dtype=torch.bfloat16),
-                torch.tensor([[0, 1, 2, 0, 0]]),
-            ],
-        )
+        for dtype in [torch.int64, torch.bool, torch.bfloat16]:
+            self.common(
+                fn,
+                [
+                    torch.zeros(3, 5, dtype=dtype),
+                    torch.ones((2, 5), dtype=dtype),
+                    torch.tensor([[0, 1, 2, 0, 0]]),
+                ],
+            )
 
     def test_randn_generator(self):
         def fn(a, generator):
