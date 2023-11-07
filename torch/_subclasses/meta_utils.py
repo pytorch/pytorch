@@ -632,8 +632,10 @@ class MetaConverter:
 
         prior_fake = None
         if force_fresh:
-            prior_fake = self.tensor_memo[WeakIdRef(t)]
-            del self.tensor_memo[WeakIdRef(t)]
+            widt = WeakIdRef(t)
+            if widt in self.tensor_memo:
+                prior_fake = self.tensor_memo[widt]
+                del self.tensor_memo[widt]
 
         if (
             type(t) is torch.Tensor
