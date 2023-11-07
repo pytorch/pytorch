@@ -31,7 +31,12 @@ def dl_open_guard():
 
 
 class OperatorBase:
-    """Base class for OpOverload (which represents C++ ATen operators) and HigherOrderOperator (which represents Python-only operators that are unrepresentable in TorchScript)."""
+    """
+    Base class for OpOverload and HigherOrderOperator.
+
+    OpOverload: represents C++ ATen operators.
+    HigherOrderOperator: represents Python-only operators that are unrepresentable in TorchScript.
+    """
 
     def __init__(self):
         # The dispatch cache precomputes a mapping of dispatch key that the

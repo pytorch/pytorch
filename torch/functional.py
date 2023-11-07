@@ -196,7 +196,9 @@ def split(
 
 def einsum(*args: Any) -> Tensor:
     r"""
-    Sum the product of the elements of the input :attr:`operands` along dimensions specified using a notation based on the Einstein summation convention.
+    Sum the product of the elements of the input :attr:`operands`.
+
+    The sum is taken along dimensions specified using a notation based on the Einstein summation convention.
 
     einsum(equation, *operands) -> Tensor
 
@@ -1379,7 +1381,9 @@ def atleast_1d(*tensors):
 
 def atleast_2d(*tensors):
     r"""
-    Return a 2-dimensional view of each input tensor with zero dimensions. Input tensors with two or more dimensions are returned as-is.
+    Return a 2-dimensional view of each input tensor with zero dimensions.
+
+    Input tensors with two or more dimensions are returned as-is.
 
     Args:
         input (Tensor or list of Tensors)
@@ -1416,7 +1420,9 @@ def atleast_2d(*tensors):
 
 def atleast_3d(*tensors):
     r"""
-    Return a 3-dimensional view of each input tensor with zero dimensions. Input tensors with three or more dimensions are returned as-is.
+    Return a 3-dimensional view of each input tensor with zero dimensions.
+
+    Input tensors with three or more dimensions are returned as-is.
 
     Args:
         input (Tensor or list of Tensors)
@@ -1693,7 +1699,10 @@ def norm(input, p: Optional[Union[float, str]] = "fro", dim=None, keepdim=False,
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
 def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size]) -> List[Tensor]:
-    r"""Convert a tensor of flat indices into a tuple of coordinate tensors that index into an arbitrary tensor of the specified shape.
+    r"""
+    Convert a tensor of flat indices into a tuple of coordinate tensors.
+
+    The coordinate tensors index into an arbitrary tensor of the specified shape.
 
     Args:
         indices (Tensor): An integer tensor containing indices into the
@@ -1774,7 +1783,10 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     ) % torch.tensor(shape, device=indices.device, dtype=torch.int64)
 
 def chain_matmul(*matrices, out=None):
-    r"""Return the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms of arithmetic operations (`[CLRS]`_).
+    r"""Return the matrix product of the :math:`N` 2-D tensors.
+
+    This product is efficiently computed using the matrix chain order algorithm which selects
+    the order in which incurs the lowest cost in terms of arithmetic operations (`[CLRS]`_).
 
     Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.

@@ -1,4 +1,9 @@
-"""The weak_script annotation needs to be here instead of inside torch/jit/ so it can be used in other places in torch/ (namely torch.nn) without running into circular dependency problems."""
+"""
+weak_srcipt annotation exists here to avoid circular dependency issues.
+
+The weak_script annotation needs to be here instead of inside torch/jit/ so it can be used in other places in torch
+/ (namely torch.nn) without running into circular dependency problems.
+"""
 
 import ast
 import builtins
@@ -91,7 +96,10 @@ loader = SourceLoader()
 
 def createResolutionCallbackFromEnv(lookup_base):
     """
-    Create a resolution callback that will look up qualified names in an environment, starting with `lookup_base` for the base of any qualified names, then proceeding down the lookup chain with the resolved object.
+    Create a resolution callback that will look up qualified names in an environment.
+
+    This starts with `lookup_base` for the base of any qualified names,
+    then proceeding down the lookup chain with the resolved object.
 
     You should not use this directly, it should only be used from the other
     createResolutionCallbackFrom* functions.
@@ -156,8 +164,10 @@ def createResolutionCallbackFromEnv(lookup_base):
 
 def createResolutionCallbackFromFrame(frames_up: int = 0):
     """
-    Return the value of the variable in the scope of the caller of the function which called createResolutionCallbackFromFrame (by default) given a string variable name.
-    
+    Return the value of the variable in the scope of the caller of the calling function given a string variable name.
+
+    Calling function is the function which called createResolutionCallbackFromFrame (by default)
+
     This is used to enable access in-scope Python variables inside TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
@@ -299,7 +309,9 @@ def can_compile_class(cls) -> bool:
 
 def get_callable_argument_names(fn) -> List[str]:
     """
-    Get names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`. Return an empty list when other types of arguments are present.
+    Get names of all POSITIONAL_OR_KEYWORD arguments for callable `fn`.
+
+    Return an empty list when other types of arguments are present.
 
     This is used by `torch.jit.trace` to assign meaningful argument names to
     traced functions and modules.
@@ -348,7 +360,9 @@ def get_annotation_str(annotation):
 
 def get_type_hint_captures(fn):
     """
-    Get a dictionary containing type resolution mappings necessary to resolve types for the literal annotations on 'fn'. These are not considered to be closed-over by fn and must be obtained separately (e.g. using this function).
+    Get a dictionary containing type resolution mappings necessary to resolve types for the literal annotations on 'fn'.
+
+    These are not considered to be closed-over by fn and must be obtained separately (e.g. using this function).
 
     Args:
         fn: A callable.
@@ -457,7 +471,12 @@ def createResolutionCallbackForClassMethods(cls):
 def boolean_dispatch(
     arg_name, arg_index, default, if_true, if_false, module_name, func_name
 ):
-    """Dispatch to either of 2 script functions based on a boolean argument. In TorchScript, the boolean argument must be constant so that the correct function to use can be determined at compile time."""
+    """
+    Dispatch to either of 2 script functions based on a boolean argument.
+
+    In TorchScript, the boolean argument must be constant so that the correct function
+    to use can be determined at compile time.
+    """
 
     def fn(*args, **kwargs):
         dispatch_flag = default
@@ -514,7 +533,7 @@ class FunctionModifiers:
 
 def export(fn):
     """
-    Indicate (decorator) that a method on an ``nn.Module`` is used as an entry point into a :class:`ScriptModule` and should be compiled.
+    Indicate that a method on an ``nn.Module`` is used as an entry point into a `ScriptModule` and should be compiled.
 
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
@@ -559,7 +578,9 @@ def export(fn):
 
 def unused(fn):
     """
-    Indicate (decorator) to the compiler that a function or method should be ignored and replaced with the raising of an exception. This allows you to leave code in your model that is not yet TorchScript compatible and still export your model.
+    Indicate to the compiler that a function/method should be ignored and replaced with the raising of an exception.
+
+    This allows you to leave code in your model that is not yet TorchScript compatible and still export your model.
 
         Example (using ``@torch.jit.unused`` on a method)::
 
@@ -619,7 +640,11 @@ class _IgnoreContextManager(contextlib.AbstractContextManager):
 
 def ignore(drop=False, **kwargs):
     """
-    Indicate (decorator) to the compiler that a function or method should be ignored and left as a Python function. This allows you to leave code in your model that is not yet TorchScript compatible. If called from TorchScript, ignored functions will dispatch the call to the Python interpreter. Models with ignored functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
+    Indicate (decorator) to the compiler that a function or method should be ignored and left as a Python function.
+
+    This allows you to leave code in your model that is not yet TorchScript compatible.
+    If called from TorchScript, ignored functions will dispatch the call to the Python interpreter.
+    Models with ignored functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -1080,7 +1105,10 @@ for i in range(2, 7):
 
 def is_scripting() -> bool:
     r"""
-    Return True when in compilation and False otherwise. This is useful especially with the @unused decorator to leave code in your model that is not yet TorchScript compatible.
+    Return True when in compilation and False otherwise.
+
+    This is useful especially with the @unused decorator to leave code in your model that is
+    not yet TorchScript compatible.
 
     .. testcode::
 

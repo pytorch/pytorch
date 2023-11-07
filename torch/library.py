@@ -30,7 +30,10 @@ def fallthrough_kernel():
 
 class Library:
     """
-    A class to create libraries that can be used to register new operators or override operators in existing libraries from Python. A user can optionally pass in a dispatch keyname if they only want to register kernels corresponding to only one specific dispatch key.
+    A class to create libraries that can be used to register new or override operators in existing Python libraries .
+
+    A user can optionally pass in a dispatch keyname if they only want to register kernels
+    corresponding to only one specific dispatch key.
 
     To create a library to override operators in an existing library (with name ns), set the kind to "IMPL".
     To create a new library (with name ns) to register new operators, set the kind to "DEF".
