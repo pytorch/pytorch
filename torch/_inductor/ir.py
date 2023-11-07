@@ -3623,9 +3623,7 @@ class ExternKernel(InputsKernel):
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
             if self.kwargs and not self.ordered_kwargs_for_cpp_kernel:
-                assert (
-                    self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel is missing"
+                raise AssertionError("ordered_kwargs_for_cpp_kernel is missing")
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)

@@ -51,8 +51,8 @@ def buffer_reuse_key(node: ir.Buffer):
 def is_int(s: str):
     # Cpp code gen adds L at the end of ints
     # Lets remove it for checking whether we have an int or not
-    if len(s) > 1 and s[-1] == "L":
-        s = s[: len(s) - 1]
+    if s and s[-1] == "L":
+        s = s[:-1]
     try:
         int(s)
     except ValueError:

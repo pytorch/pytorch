@@ -22,12 +22,10 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     IS_WINDOWS,
-    skipIfRocm,
     TEST_WITH_ROCM,
     TestCase,
 )
 
-# Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
 
@@ -1021,8 +1019,6 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-    @requires_cuda()
-    @skipIfRocm
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
