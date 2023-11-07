@@ -7484,7 +7484,7 @@ class CommonTemplate:
         Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
-        if not _has_sufficient_memory(self.device, 3 * 2**24 * 64 * 4):
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
             raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
