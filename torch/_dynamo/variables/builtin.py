@@ -1182,10 +1182,10 @@ class BuiltinVariable(VariableTracker):
                     "need to graph break to apply the aliasing (or track new aliased tensors) "
                     "to continue to trace the graph"
                 )
-            if name == "requires_grad" and isinstance(obj, TensorVariable):
+            if name == "requires_grad" and isinstance(obj, variables.TensorVariable):
                 unimplemented(
-                    "requires_grad can introduce a new leaf from non-leaf in the middle of the "
-                    "aot_autograd graph, which aot_autograd does not currently know how to handle. "
+                    "mutating requires_grad can introduce a new leaf from non-leaf or vice versa in "
+                    "the middle of the graph, which aot_autograd does not currently know how to handle. "
                 )
             tx.output.side_effects.store_attr(obj, name, val)
             return val.add_options(self, obj, name_var)

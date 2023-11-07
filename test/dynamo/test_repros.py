@@ -3639,10 +3639,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_setattr_requires_grad_graph_breaks(self):
         def fn(x):
-            x += 1
+            z = x + 4
             x.requires_grad = True
-            x += 1
-            return x
+            y = x * z
+            return y
 
         for backend in ["count", "eager", "aot_eager"]:
             if backend == "count":
@@ -3652,8 +3652,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             eager = torch.zeros(5)
             compiled = eager.clone()
 
-            fn(eager)
-            opt_fn(compiled)
+            out_eager = fn(eager)
+            out_opt = opt_fn(compiled)
+
+            self.assertEqual(out_eager, out_opt)
+
+            out_eager.sum().backward()
+            out_opt.sum().backward()
 
             self.assertEqual(eager, compiled)
             if isinstance(backend, CompileCounter):
