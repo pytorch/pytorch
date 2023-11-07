@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+from collections import defaultdict
 from typing import Dict
 
 import torch
@@ -40,6 +41,16 @@ class MLPListModule(torch.nn.Module):
         return x + torch.ones_like(x)
 
 
+class DummyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Linear(3, 5)
+        self.bn = torch.nn.BatchNorm1d(5)
+
+    def forward(self, x):
+        return self.bn(self.fc(x))
+
+
 class TensorParallelTest(DTensorTestBase):
     def setUp(self) -> None:
         super().setUp()
@@ -55,7 +66,36 @@ class TensorParallelTest(DTensorTestBase):
         self.assertDictEqual(expected_ops_count, actual_ops_count)
 
     @with_comms
-    def test_tensor_parallel_transformation_e2e(self):
+    def test_tp_transform_with_uncovered_op(self):
+        model = DummyModel().to(device=self.device_type)
+        inputs = (torch.randn(7, 3).to(device=self.device_type),)
+        res = model(*inputs)
+        exported_program = torch._export.export(
+            model,
+            inputs,
+            constraints=None,
+        )
+        tp_exported_program = tensor_parallel_transformation(
+            exported_program,
+            self.rank,
+            self.world_size,
+            self.device_type,
+            {"fc": ColwiseParallel},
+        )
+        tp_model = tp_exported_program.module()
+        tp_res = tp_model(*inputs)
+        self.assertEqual(res, tp_res)
+        # Expect all_gather to be inserted to distributed sharded fc resutls
+        self.assert_has_c10d_ops(
+            tp_exported_program.graph_module,
+            {
+                "c10d_functional.all_gather_into_tensor.default": 1,
+                "c10d_functional.wait_tensor.default": 1,
+            },
+        )
+
+    @with_comms
+    def test_tp_transform_e2e(self):
         torch.manual_seed(0)
         model = MLPListModule(2).to(device=self.device_type)
         inputs = (torch.randn((10, 12)).to(device=self.device_type),)
@@ -84,6 +124,14 @@ class TensorParallelTest(DTensorTestBase):
         with torch.inference_mode():
             tp_res = tp_model(*inputs)
         self.assertEqual(res, tp_res)
+        # Expect all_reduce to be inserted at the end of each MLP
+        self.assert_has_c10d_ops(
+            tp_exported_program.graph_module,
+            {
+                "c10d_functional.all_reduce.default": 2,
+                "c10d_functional.wait_tensor.default": 2,
+            },
+        )
 
     @with_comms
     def test_tp_transform_no_bias(self):
@@ -113,3 +161,10 @@ class TensorParallelTest(DTensorTestBase):
         with torch.inference_mode():
             tp_res = tp_model(*inputs)
         self.assertEqual(res, tp_res)
+        self.assert_has_c10d_ops(
+            tp_exported_program.graph_module,
+            {
+                "c10d_functional.all_reduce.default": 1,
+                "c10d_functional.wait_tensor.default": 1,
+            },
+        )
