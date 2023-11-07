@@ -622,7 +622,7 @@ class DataClassVariable(ConstDictVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        name_vt = ConsantVariable.create(name)
+        name_vt = ConstantVariable.create(name)
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
         elif not self.include_none:
@@ -748,7 +748,7 @@ class CustomizedDictVariable(ConstDictVariable):
         unimplemented("custom dict: call_method unimplemented name=%s", name)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
-        name_vt = ConsantVariable.create(name)
+        name_vt = ConstantVariable.create(name)
         if name_vt in self:
             return self.call_method(tx, "__getitem__", [name_vt], {})
         super().var_getattr(tx, name)
