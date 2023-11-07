@@ -688,7 +688,7 @@ class DistributedDataParallel(Module, Joinable):
                 f"the same type of devices, but input module parameters locate in {distinct_device_types}.",
             )
 
-        self.device_type = list(distinct_device_types)[0]
+        self.device_type = next(iter(distinct_device_types))
 
         if (
             device_ids is None
@@ -726,7 +726,7 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = False
         self.dim = dim
         self.module = module
-        self.device = list(self._module_parameters)[0].device
+        self.device = next(iter(self._module_parameters)).device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
