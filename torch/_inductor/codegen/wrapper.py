@@ -596,15 +596,10 @@ class WrapperCodeGen(CodeGen):
             # We disable planning during training because it presently increases peak memory consumption.
             if is_inference and config.memory_planning:
                 self.memory_plan()
+                # TODO: integrate memory planning & stack allocation?
+                self.allow_stack_allocation = False
             else:
                 self.memory_plan_reuse()
-
-            self.allow_stack_allocation = (
-                self.allow_stack_allocation is not False
-                and config.allow_stack_allocation
-                and planning_state.total_allocated_buffer_size
-                <= MAX_STACK_ALLOCATION_SIZE
-            )
 
             device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
@@ -665,6 +660,12 @@ class WrapperCodeGen(CodeGen):
         for i in range(len(self.lines)):
             if isinstance(self.lines[i], MemoryPlanningLine):
                 self.lines[i] = self.lines[i].plan(planning_state)
+
+        self.allow_stack_allocation = (
+            self.allow_stack_allocation is not False
+            and config.allow_stack_allocation
+            and planning_state.total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
+        )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
         code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
