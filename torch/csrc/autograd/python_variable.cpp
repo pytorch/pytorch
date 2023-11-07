@@ -82,7 +82,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto is_default = [&](size_t idx) -> bool {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
-      return arguments[idx].isNone();
+      return false;
     }
     const auto& default_ivalue = *arg.default_value();
     const auto& ivalue = arguments[idx];
