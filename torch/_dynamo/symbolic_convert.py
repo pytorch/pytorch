@@ -2511,22 +2511,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             self.push(InlinedClosureVariable(name=inst.argval))
 
-    def _check_replace_is_safe(self, oldvar, newvar):
-        if (
-            isinstance(oldvar, TensorVariable)
-            and isinstance(newvar, TensorVariable)
-            and oldvar.as_proxy().node.meta["example_value"]
-            is newvar.as_proxy().node.meta["example_value"]
-        ):
-            # Mutation is due to in-place op. We just want to propagate
-            return
+    def check_replace_is_safe(self, oldvar, newvar):
         if not is_side_effect_safe(oldvar.mutable_local):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
             )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        self._check_replace_is_safe(oldvar)
+        self.check_replace_is_safe(oldvar)
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
         translator: InstructionTranslatorBase = self
