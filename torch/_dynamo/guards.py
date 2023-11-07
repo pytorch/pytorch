@@ -14,6 +14,7 @@ import math
 import os
 import re
 import sys
+import textwrap
 import types
 import weakref
 from inspect import currentframe, getframeinfo
@@ -51,9 +52,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
-from . import config, convert_frame, mutation_guard
-from .eval_frame import set_guard_error_hook, set_guard_fail_hook
-from .exc import unimplemented
+from . import config, convert_frame, exc, mutation_guard
+from .eval_frame import set_guard_error_hook
 from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -71,6 +71,7 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
 
 TensorGuards = torch._C._dynamo.guards.TensorGuards
@@ -468,7 +469,7 @@ class GuardBuilder(GuardBuilderBase):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
             setup_guard()
         else:
-            unimplemented(f"Guard setup for uninitialized class {type(val)}")
+            exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -1156,13 +1157,6 @@ class CheckFunctionManager:
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
 
-        if is_guard_failure_reporting_enabled() or guard_fail_fn is not None:
-            # Guard fail hook is called everytime guard eval fails. For a cache
-            # lookup where there are multiple entries in the same cache line,
-            # this can lead to very high performance overhead. So, we have
-            # decided to hide this behing a config flag.
-            set_guard_fail_hook(guard_fail_hook)
-
         out: Dict[str, Any] = dict()
         exec(pycode, builder.scope, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
@@ -1247,24 +1241,16 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
-stashed_first_fail_reason = None
-
-
-def guard_fail_hook(
+def get_guard_fail_reason(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    index: int,
-    last: bool,
-) -> None:
+) -> str:
     """
-    called whenever a guard fails.
+    Return the reason why `guard_fn` failed.
+    Updates `guard_failures` with the generated reason.
+    Only the first failed check of guard_fn is reported.
     """
-    first = index == 0
-    global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
-        return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]
@@ -1278,29 +1264,14 @@ def guard_fail_hook(
         # for everything else we just report the code that failed
 
         if isinstance(fail_reason, bool) and not fail_reason:
-            fail_reason = part
-        if isinstance(fail_reason, str):
-            reason += fail_reason
-            if config.report_all_guard_failures:
-                reason += "\n"
-            else:
-                break
+            reason = part
+            break
+        elif isinstance(fail_reason, str):
+            reason = fail_reason
+            break
 
-    if first:
-        stashed_first_fail_reason = reason
+    guard_failures[orig_code_map[code]].append(reason)
 
-    if not last:
-        return
-
-    # Technically, we're failing our last guard, which is our oldest guard due to the
-    # eval_frame.c logic that moves newest frames to head, but for logging purposes
-    # it's more useful to see the 'first' failure (if we never got a hit) since it's
-    # likely not yet been logged as a failure reason in a case of repeating failures.
-    assert stashed_first_fail_reason
-    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
-    stashed_first_fail_reason = None
-
-    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -1311,6 +1282,47 @@ def guard_fail_hook(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
             exc_info=True,
         )
+
+    return reason
+
+
+def get_and_maybe_log_recompilation_reason(
+    cache_entry, frame: types.FrameType
+) -> List[str]:
+    """
+    Return the list of guard failure reasons using cache_entry.
+    Logs the recompilation reason if `recompiles` logging is enabled.
+    Raises a RecompileError if `config.error_on_recompile` is enabled.
+    """
+    reasons = []
+    while cache_entry is not None:
+        reason = get_guard_fail_reason(
+            cache_entry.check_fn, cache_entry.code, frame.f_locals
+        )
+        if reason:
+            reasons.append(reason)
+        cache_entry = cache_entry.next
+
+    code = frame.f_code
+
+    do_recompiles_log = (
+        is_guard_failure_reporting_enabled()
+        and recompiles_log.isEnabledFor(logging.DEBUG)
+    )
+
+    if do_recompiles_log or config.error_on_recompile:
+        failures = "\n".join(reasons)
+        guard_failure_details = f"triggered by the following guard failure(s):\n{textwrap.indent(failures, '- ')}"
+        message = (
+            f"Recompiling function {code.co_name} in {code.co_filename}:{code.co_firstlineno}\n"
+            f"{textwrap.indent(guard_failure_details, '    ')}"
+        )
+        if do_recompiles_log:
+            recompiles_log.debug(message, stack_info=True)
+        if config.error_on_recompile:
+            raise exc.RecompileError(message)
+
+    return reasons
 
 
 def guard_error_hook(
