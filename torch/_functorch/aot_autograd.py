@@ -1011,6 +1011,16 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
         idx += cnt
     return infos
 
+def _get_autocast_states():
+    return [
+        torch.is_autocast_enabled(),
+        torch.is_autocast_cpu_enabled(),
+        torch.get_autocast_gpu_dtype(),
+        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_cache_enabled(),
+    ]
+
+
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
 #
@@ -1060,12 +1070,21 @@ def run_functionalized_fw_and_collect_metadata(
         flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
+        prior_autocast_states = _get_autocast_states()
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
         with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
+
+        if prior_autocast_states != _get_autocast_states():
+            raise RuntimeError(
+                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                "which will unwind all of their mutations to autocast state before the graph exits. "
+                "If you encounter this error while using torch.compile, please file a bug."
+            )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
@@ -3619,7 +3638,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -3685,7 +3704,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
         _indices_of_inps_to_detach = []
-        bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
+        bw_outs = next(n for n in bw_module.graph.nodes if n.op == "output").args[0]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
