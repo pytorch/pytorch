@@ -815,8 +815,7 @@ c10::Layout ConcretePyInterpreterVTable::layout(
   return toLayout(out.ptr());
 }
 
-int64_t ConcretePyInterpreterVTable::numel(
-    const c10::TensorImpl* self) const {
+int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
   auto out = torchDispatchFromTensorImpl(
