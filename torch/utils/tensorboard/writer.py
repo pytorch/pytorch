@@ -1147,7 +1147,7 @@ class SummaryWriter:
     ):
         """
         Shorthand for creating multilinechart.
-        
+
         Similar to ``add_custom_scalars()``, but the only necessary argument
         is *tags*.
 
@@ -1169,7 +1169,7 @@ class SummaryWriter:
     ):
         """
         Shorthand for creating marginchart.
-        
+
         Similar to ``add_custom_scalars()``, but the only necessary argument
         is *tags*, which should have exactly 3 elements.
 
@@ -1190,8 +1190,8 @@ class SummaryWriter:
     def add_custom_scalars(self, layout):
         """
         Create special chart by collecting charts tags in 'scalars'.
-        
-        NOTE: This function can only be called once for each SummaryWriter() object. 
+
+        NOTE: This function can only be called once for each SummaryWriter() object.
         Because it only provides metadata to tensorboard, the function can be called
         before or after the training loop.
 
@@ -1224,10 +1224,10 @@ class SummaryWriter:
     ):
         """
         Add meshes or 3D point clouds to TensorBoard.
-        
-        The visualization is based on Three.js, so it allows users to interact with the rendered object. 
-        Besides the basic definitions such as vertices, faces, users can further provide camera parameter, 
-        lighting condition, etc. Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene 
+
+        The visualization is based on Three.js, so it allows users to interact with the rendered object.
+        Besides the basic definitions such as vertices, faces, users can further provide camera parameter,
+        lighting condition, etc. Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene
         for advanced usage.
 
         Args:
@@ -1282,7 +1282,7 @@ class SummaryWriter:
     def flush(self):
         """
         Flush the event file to disk.
-        
+
         Call this method to make sure that all pending events have been written to
         disk.
         """

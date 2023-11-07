@@ -355,7 +355,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
 def scalar(name, tensor, collections=None, new_style=False, double_precision=False):
     """
     Output a `Summary` protocol buffer containing a single scalar value.
-    
+
     The generated Summary has a Tensor.proto containing the input Tensor.
     Args:
       name: A name for the generated node. Will also serve as the series name in
@@ -439,7 +439,7 @@ def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_c
     # pylint: disable=line-too-long
     """
     Output a `Summary` protocol buffer with a histogram.
-    
+
     The generated
     [`Summary`](https://www.tensorflow.org/code/tensorflow/core/framework/summary.proto)
     has one summary value containing a histogram for `values`.
@@ -665,7 +665,7 @@ def video(tag, tensor, fps=4):
     Create a video summary of a tensor.
 
     Args:
-      tag: A name for the generated node. Will also serve as a series 
+      tag: A name for the generated node. Will also serve as a series
         name in TensorBoard.
       tensor : Input tensor containing consecutive video frames
       fps : Frames per second of the video
@@ -741,7 +741,7 @@ def audio(tag, tensor, sample_rate=44100):
     Create an audio summary of a tensor.
 
     Args:
-      tag: A name for the generated node. Will also serve as a series 
+      tag: A name for the generated node. Will also serve as a series
           name in TensorBoard.
       tensor : Input tensor containing consecutive audio frames
       sample_rate : Sample rate of the audio
@@ -785,7 +785,7 @@ def custom_scalars(layout):
     Args:
       layout: A list of category-title pairs. Within each category, a chart
           will be generated for each scalar.
-    
+
     Returns:
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol
     """
@@ -830,10 +830,10 @@ def text(tag, text):
     Create a text summary.
 
     Args:
-      tag: A name for the generated node. Will also serve as a series 
+      tag: A name for the generated node. Will also serve as a series
           name in TensorBoard.
       text : A string
-    
+
     Returns:
       A scalar `Tensor` of type `string`. The serialized `Summary` protocol.
 
@@ -859,7 +859,7 @@ def pr_curve_raw(
     Output a `Summary` protocol buffer with PR curve data.
 
     Args:
-      tag: A name for the generated node. Will also serve as a series 
+      tag: A name for the generated node. Will also serve as a series
           name in TensorBoard.
       tp: True positives counts.
       fp: False positives counts.
@@ -902,7 +902,7 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
     Output a `Summary` protocol buffer with PR curve data.
 
     Args:
-      tag: A name for the generated node. Will also serve as a series 
+      tag: A name for the generated node. Will also serve as a series
           name in TensorBoard.
       labels: Ground truth values. shape = [batch_size, d0, .. dN].
       predictions: The predicted values. shape = [batch_size, d0, .. dN].
@@ -950,7 +950,7 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
 
     Returns:
       numpy array with columns [tp, fp, tn, fn, precision, recall].
-    
+
     """
     _MINIMUM_COUNT = 1e-7
 

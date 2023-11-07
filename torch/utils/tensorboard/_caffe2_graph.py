@@ -245,7 +245,7 @@ def _replace_colons(shapes, blob_name_tracker, ops, repl):
     """
     Replace all colons with $ to avoid any possible conflicts.
 
-    NOTE: `:i` has a special meaning in Tensorflow. 
+    NOTE: `:i` has a special meaning in Tensorflow.
     Args:
         shapes: Dictionary mapping blob names to their shapes/dimensions.
         blob_name_tracker: Dictionary of all unique blob names (with respect to
@@ -346,7 +346,7 @@ def _add_tf_shape(attr_dict, ints):
 def _set_tf_attr(attr_dict, arg):
     """
     Add attributes to a node.
-    
+
     Key is the arg.name, and values can be shape, floats, strings, ints or an empty list.
 
     Args:
@@ -539,7 +539,7 @@ def _clear_debug_info(ops, perform_clear):
 def _check_if_forward(blob):
     """
     Check for blobs with names containing '_m' or 'grad' as they are part of the backward pass.
-        
+
     This function references facebookresearch/Detectron/detectron/utils/net.py.
 
     Args:
@@ -765,7 +765,7 @@ def _try_get_shapes(nets):
 def model_to_graph_def(model, **kwargs):
     """
     Convert a Caffe2 model to a Tensorflow graph.
-    
+
     This function extracts 'param_init_net' and 'net' from the model and passes it to nets_to_graph()
     for further processing.
 
