@@ -1,6 +1,6 @@
 import copy
 import operator
-from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
@@ -18,6 +18,7 @@ from torch.distributed._tensor.placement_types import (
     TensorMeta,
 )
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
+from torch.distributed.tensor.parallel.style import ColwiseParallel, ParallelStyle
 from torch.export import ExportedProgram
 from torch.export.exported_program import ExportGraphSignature
 from torch.fx import GraphModule
@@ -34,6 +35,8 @@ def tensor_parallel_transformation(
     exported_program: ExportedProgram,
     rank: int,
     world_size: int,
+    device_type: str,
+    parallel_strategies: Dict[str, ParallelStyle],
 ) -> ExportedProgram:
     """
     The entry point function to perform graph transformations on an exported program
@@ -46,8 +49,10 @@ def tensor_parallel_transformation(
         TensorParallelTransformPass(
             rank,
             world_size,
+            device_type,
             exported_program.state_dict,
             exported_program.graph_signature,
+            parallel_strategies,
         )
     )
 
@@ -63,19 +68,27 @@ class TensorParallelTransformPass(PassBase):
         self,
         rank: int,
         world_size: int,
+        device_type: str,
         state_dict: Dict[str, torch.Tensor],
         graph_signiture: ExportGraphSignature,
+        parallel_strategies: Dict[str, ParallelStyle],
     ) -> None:
         super().__init__()
         self.rank = rank
-        self.mesh = DeviceMesh("cuda", torch.arange(world_size))
+        self.mesh = DeviceMesh(device_type, torch.arange(world_size))
         self.state_dict: Dict[str, torch.Tensor] = state_dict
         self.graph_signiture = graph_signiture
+        self.parallel_strategies = parallel_strategies
 
     def call(self, graph_module) -> PassResult:
         gm = copy.deepcopy(graph_module)
 
-        placement_strategies = _mark_sharding(gm, self.graph_signiture, self.mesh)
+        parameter_placements = _generate_parameter_and_buffer_placements(
+            list(self.state_dict.keys()), self.parallel_strategies
+        )
+        placement_strategies = _mark_sharding(
+            gm, self.graph_signiture, self.mesh, parameter_placements
+        )
         _partitioner(gm)
         _shard_state_dict(
             self.state_dict, placement_strategies, self.graph_signiture, self.mesh
@@ -83,10 +96,33 @@ class TensorParallelTransformPass(PassBase):
         return PassResult(gm, True)
 
 
+def _generate_parameter_and_buffer_placements(
+    params_and_buffers: List[str],
+    parallel_strategies: Dict[str, ParallelStyle],
+) -> Dict[str, Placement]:
+    """
+    Build parameter placements based on the give parallel style of linear layers.
+    """
+    parameter_placements: Dict[str, Placement] = {}
+    for linear_fqn, parallel_style in parallel_strategies.items():
+        weight_fqn = f"{linear_fqn}.weight"
+        bias_fqn = f"{linear_fqn}.bias"
+        assert weight_fqn in params_and_buffers
+        parameter_placements[weight_fqn] = (
+            Shard(0) if parallel_style == ColwiseParallel else Shard(1)
+        )
+        if bias_fqn in params_and_buffers:
+            parameter_placements[bias_fqn] = (
+                Shard(0) if parallel_style == ColwiseParallel else Replicate()
+            )
+    return parameter_placements
+
+
 def _mark_tensor_parallel_shardings(
     gm: GraphModule,
     graph_signiture: ExportGraphSignature,
     mesh: DeviceMesh,
+    parameter_placements: Dict[str, Placement],
 ) -> Dict[Node, PlacementStrategy]:
     """
     Mark the placement strategies of the parameter and buffer placeholder nodes.
@@ -96,33 +132,20 @@ def _mark_tensor_parallel_shardings(
         graph_signiture.inputs_to_buffers
     )
     placeholder_idx: int = 0
-    linear_node_names: Set[str] = set()
-    last_linear_params: Set[Node] = set()
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             if placeholder_idx < num_params_and_buffers:
-                # For a pair of linear layers, shard the first weight colwise and the second weight rowwise.
-                linear_name, source_fn_class = node.meta["source_fn_stack"][0]
-                if source_fn_class == torch.nn.Linear:
-                    linear_node_names.add(linear_name)
-                    placement: Placement
-                    if len(linear_node_names) % 2 == 1:
-                        placement = Shard(0)
-                        if len(last_linear_params) == 2:
-                            last_linear_params.clear()
-                        last_linear_params.add(node)
-                    else:
-                        placement = (
-                            Replicate()
-                            if len(node.meta["tensor_meta"].shape) == 1
-                            else Shard(1)
-                        )
-
-                    placement_strategies[node] = _create_placement_strategy(
-                        node,
-                        mesh,
-                        placements=(placement,),
-                    )
+                fqn: str = _get_input_node_fqn(node.name, graph_signiture)
+                placement: Placement = (
+                    parameter_placements[fqn]
+                    if fqn in parameter_placements
+                    else Replicate()
+                )
+                placement_strategies[node] = _create_placement_strategy(
+                    node,
+                    mesh,
+                    placements=(placement,),
+                )
                 placeholder_idx += 1
             else:
                 placement_strategies[node] = _create_placement_strategy(
@@ -130,26 +153,35 @@ def _mark_tensor_parallel_shardings(
                     mesh,
                     placements=(Replicate(),),
                 )
-    # If there are odd number of linear layers, no need to shard the params of the last layer.
-    if len(linear_node_names) % 2 == 1:
-        assert (
-            len(last_linear_params) == 2
-        ), f"There should be exactly two params for the last linear layer. but got {last_linear_params=}"
-        for param_node in last_linear_params:
-            placement_strategies[param_node].output_spec.placements = (Replicate(),)
-
     return placement_strategies
 
 
+def _get_input_node_fqn(input_name: str, graph_signiture: ExportGraphSignature) -> str:
+    """
+    Return the FQN of an input node.
+    """
+    if input_name in graph_signiture.inputs_to_parameters:
+        return graph_signiture.inputs_to_parameters[input_name]
+    elif input_name in graph_signiture.inputs_to_buffers:
+        return graph_signiture.inputs_to_buffers[input_name]
+    else:
+        raise ValueError(
+            f"{input_name} not found in inputs_to_parameters or inputs_to_buffers"
+        )
+
+
 def _mark_sharding(
-    gm: GraphModule, graph_signiture: ExportGraphSignature, mesh: DeviceMesh
+    gm: GraphModule,
+    graph_signiture: ExportGraphSignature,
+    mesh: DeviceMesh,
+    parameter_placements: Dict[str, Placement],
 ) -> Dict[Node, PlacementStrategy]:
     """
     Mark the sharding strategy for each node in the graph module.
     """
     placement_strategies: Dict[
         Node, PlacementStrategy
-    ] = _mark_tensor_parallel_shardings(gm, graph_signiture, mesh)
+    ] = _mark_tensor_parallel_shardings(gm, graph_signiture, mesh, parameter_placements)
 
     for node in gm.graph.nodes:
         if node.op == "placeholder":
