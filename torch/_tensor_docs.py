@@ -2103,8 +2103,16 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
 
+.. note::
+  Geometric distribution can be defined by two different probability mass functions (PMFs), and the meaning of geometric random variable is determined by the PMF used. 
+  
+  The most common PMF is that used for here where :math:`k` stands for the number of trials before the first success (i.e., :math:`k`-th trial is the first success). Hence, its support is positive integer [1, :math:`\inf`).
+  
+  Another PMF is a shifted version of the above PMF and used for :func:`torch.distributions.geometric.Geometric`:
+  :math:`P(X=k) = (1-p)^{k} p, k = 0, 1, ...`
+  where :math:`k` stands for the number of failures before the first success (i.e., :math:`(k+1)`-th trial is the first success). Hence, its support is non-negative integer [0, :math:`\inf`). 
 """,
 )
 

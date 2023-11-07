@@ -18,10 +18,19 @@ class Geometric(Distribution):
     r"""
     Creates a Geometric distribution parameterized by :attr:`probs`,
     where :attr:`probs` is the probability of success of Bernoulli trials.
-    It represents the probability that in :math:`k + 1` Bernoulli trials, the
-    first :math:`k` trials failed, before seeing a success.
+    
+    .. math::
 
-    Samples are non-negative integers [0, :math:`\inf`).
+        P(X=k) = (1-p)^{k} p, k = 0, 1, ...
+    
+    .. note::
+        Geometric distribution can be defined by two different probability mass functions (PMFs), and the meaning of geometric random variable is determined by the PMF used.
+        
+        One PMF is that used for here where :math:`k` stands for the number of failures before the first success (i.e., :math:`(k+1)`-th trial is the first success). Hence, its support is non-negative integer [0, :math:`\inf`). 
+        
+        Another common PMF is a shifted version of the above PMF and used for :func:`torch.Tensor.geometric_`:
+        :math:`P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...`
+        where :math:`k` stands for the number of trials before the first success (i.e., :math:`k`-th trial is the first success). Hence, its support is positive integer [1, :math:`\inf`).
 
     Example::
 
