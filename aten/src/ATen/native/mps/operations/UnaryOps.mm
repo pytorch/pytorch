@@ -70,11 +70,11 @@ static bool is_empty_tensor(const Tensor& self) {
   return self.numel() == 0;
 }
 
-void unary_op(const Tensor& self,
-              const Tensor& output_,
-              std::string op_name,
-              UnaryOpBlock unaryBlock,
-              is_noop_p is_noop = is_empty_tensor) {
+static void unary_op(const Tensor& self,
+                     const Tensor& output_,
+                     std::string op_name,
+                     UnaryOpBlock unaryBlock,
+                     is_noop_p is_noop = is_empty_tensor) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
 
