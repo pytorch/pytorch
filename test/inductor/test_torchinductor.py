@@ -3455,6 +3455,17 @@ class CommonTemplate:
             (torch.randn([1, 3, 3, 16]).to(memory_format=torch.channels_last),),
         )
 
+    def test_cat_uint8(self):
+        def fn(x):
+            batch_shape = x.shape[:1]
+            out = torch.cat([x.new_zeros(1).expand(batch_shape + (1,)), x], dim=-1)
+            return out
+
+        self.common(
+            fn,
+            (torch.randint(0, 256, size=(3, 255), dtype=torch.uint8),),
+        )
+
     def test_cat_empty(self):
         def fn_2(*tensors):
             return torch.cat(tensors)
@@ -7461,6 +7472,31 @@ class CommonTemplate:
                 source,
             ),
         )
+
+    @config.patch(
+        "triton.autotune_pointwise", True
+    )  # needed to introduce config that exceed max shared memory usage
+    def test_large_block_sizes(self):
+        """
+        Inductor will try triton configs like x = 64 and y = 1024 which will
+        result in out of shared memory if dtype is fp32.
+
+        Currnelty inductor will skip such bad configs and pick the best one
+        from the remaining configs.
+        """
+
+        @torch.compile
+        def fn(x, y):
+            return x.t() + y
+
+        # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
+        # CI while still keep the same up-rounded size-hints.
+        try:
+            a = torch.randn(2**24, 65, device=self.device)
+            b = torch.randn(65, 2**24, device=self.device)
+        except RuntimeError:
+            return  # skip testing if OOM
+        fn(a, b)
 
 
 @dataclasses.dataclass
