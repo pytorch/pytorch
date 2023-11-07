@@ -6377,11 +6377,13 @@ def fn():
 
         # Run with dynamic 1
         torch._dynamo.optimize(counter)(my_dyn_fn)(x1)
-        self.assertEqual(counter.frame_count, 1)  # no dynamic jump
+        # no dynamic jump if assuming static by default
+        starting_frame_count = 1 if torch._dynamo.config.assume_static_by_default else 2
+        self.assertEqual(counter.frame_count, starting_frame_count)
 
         # Run with dynamic 0, not subset
         torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
-        self.assertEqual(counter.frame_count, 3)  # dynamic jump = 2 new graphs
+        self.assertEqual(counter.frame_count, starting_frame_count + 2)  # dynamic jump = 2 new graphs
 
         # Run with dynamic 0, 1, 2, not subset
         x012 = torch.randn([3, 3, 3])
@@ -6389,7 +6391,7 @@ def fn():
         torch._dynamo.mark_dynamic(x012, 1)
         torch._dynamo.mark_dynamic(x012, 2)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x012)
-        self.assertEqual(counter.frame_count, 5)  # dynamic jump = 2 new graphs
+        self.assertEqual(counter.frame_count, starting_frame_count + 4)  # dynamic jump = 2 new graphs
 
     def test_recompile_on_global_state_change(self):
         last_state = []
