@@ -354,13 +354,12 @@ inline bool use_cudnn_mha(sdp_params const& kernel_params, bool print_debug) {
     if (!supported) { TORCH_WARN("cuDNN MHA is only supported on sm80 and sm90"); }
     if (!kernel_params.is_causal) { TORCH_WARN("cuDNN MHA only supports is_causal=True"); }
   }
-  const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
-  const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
-  const bool ok = supported;// && kernel_params.is_causal && shape_ok && layout_ok;
+  //const bool shape_ok = check_cudnn_mha_shape(kernel_params, print_debug);
+  //const bool layout_ok = check_cudnn_mha_layout(kernel_params, print_debug);
+  const bool ok = supported && kernel_params.query.scalar_type() != c10::kFloat && !kernel_params.query.is_nested();// && kernel_params.is_causal && shape_ok && layout_ok;
   if (ok) {
     TORCH_WARN("USING EXPERIMENTAL CUDNN MHA");
   }
-  std::cout << "supported? " << supported << " ok? " << ok << std::endl;
   return ok;
 }
 
