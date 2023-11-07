@@ -22,13 +22,14 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
-
+from torch.testing._internal.common_state_dict import VerifyStateDictMixin
 
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
+        torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())
         self.net3 = nn.Linear(32, 64)
@@ -45,10 +46,21 @@ class ModelType(Enum):
     FSDP = auto()
     HSDP = auto()
     FSDP_TP = auto()
+    NONE = auto() # no parallelization
 
+def _train(model, optim, train_steps=1):
+    torch.manual_seed(0)
+    loss = None
+    for _ in range(train_steps):
+        loss = model(model.get_input()).sum()
+        loss.backward()
+        optim.step()
+        optim.zero_grad()
 
-class TestE2ELoadAndSave(DTensorTestBase):
-    def _create_model(self, compile, model_type):
+    return loss
+
+class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
+    def _create_model(self, compile, model_type, train_steps=2):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -75,14 +87,12 @@ class TestE2ELoadAndSave(DTensorTestBase):
             dp_mesh = mesh_2d["dp"]
             model = parallelize_module(dummy_model, tp_mesh, PairwiseParallel())
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
-
+        else:
+            model = dummy_model
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
 
         if compile:
             model = torch.compile(model)
-
-        model(model.get_input()).sum().backward()
-        optim.step()
 
         return model, optim
 
@@ -98,37 +108,48 @@ class TestE2ELoadAndSave(DTensorTestBase):
     @parametrize("compile", [True, False])
     @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
     def test_e2e(self, compile, model_type):
-        # first create and save a checkpoint
-        model, optim = self._create_model(compile, model_type)
-        model_state_dict_0, optim_state_dict_0 = get_state_dict(model, optimizers=optim)
+        model, optim = self._create_model(compile, ModelType.NONE)
+        _train(model, optim, train_steps=2)
 
+        dist_model, dist_optim = self._create_model(compile, model_type)
+        _train(dist_model, dist_optim, train_steps=2)
+
+        # create and save a checkpoint for parallel model
+        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
         DCP.save_state_dict(
-            state_dict={"model": model_state_dict_0, "optimizer": optim_state_dict_0},
+            state_dict={"model": dist_msd, "optimizer": dist_osd},
             storage_writer=DCP.FileSystemWriter(self.temp_dir),
         )
 
         # load the checkpoint, starting with a new model
-        model, optim = self._create_model(compile, model_type)
-        model_state_dict_1, optim_state_dict_1 = get_state_dict(model, optimizers=optim)
-
-        # sanity check, since we have not done any loading, state dicts should differ
-        self.assertFalse(self._equal_state_dict(model_state_dict_0, model_state_dict_1))
-
+        dist_model, dist_optim = self._create_model(compile, model_type)
+        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
         DCP.load_state_dict(
-            {"model": model_state_dict_1, "optimizer": optim_state_dict_1},
+            {"model": dist_msd, "optimizer": dist_osd},
             storage_reader=DCP.FileSystemReader(self.temp_dir),
         )
         set_state_dict(
-            model,
-            optimizers=optim,
-            model_state_dict=model_state_dict_1,
-            optim_state_dict=optim_state_dict_1,
+            dist_model,
+            optimizers=dist_optim,
+            model_state_dict=dist_msd,
+            optim_state_dict=dist_osd,
         )
 
-        # state dict should be the same following loading
-        self.assertTrue(self._equal_state_dict(model_state_dict_0, model_state_dict_1))
-        self.assertEqual(optim_state_dict_0, optim_state_dict_1)
+        # train one more step on both models
+        loss = _train(model, optim, train_steps=1)
+        dist_loss = _train(dist_model, dist_optim, train_steps=1)
+        self.assertEqual(loss, dist_loss)
 
+        dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
+        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
+
+        self._verify_msd(model_sd, dist_msd)
+        self._verify_osd_by_load(
+            model,
+            optim,
+            torch.optim.Adam(model.parameters(), lr=0.1),
+            optim_sd
+        )
 
 instantiate_parametrized_tests(TestE2ELoadAndSave)
 if __name__ == "__main__":
