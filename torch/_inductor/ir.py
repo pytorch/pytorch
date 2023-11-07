@@ -3804,17 +3804,19 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
-        new_name = wrapper.get_unique_kernel_name(kernel.__name__)
 
+        # Definition of kernel
+        new_name = wrapper.define_user_defined_triton_kernel(
+            kernel, configs, self.kwargs
+        )
+
+        # Call to kernel
         self.codegen_comment(wrapper)
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
             configs,
             self.codegen_kwargs(),
-        )
-        wrapper.define_user_defined_triton_kernel(
-            new_name, kernel, configs, self.kwargs
         )
 
     def should_allocate(self):
