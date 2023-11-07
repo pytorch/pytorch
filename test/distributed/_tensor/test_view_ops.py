@@ -133,7 +133,7 @@ class TestViewOps(DTensorTestBase):
         spec = ops[op]
         rules = spec.dim_map(*args, **kwargs)
         outputs = op(*args, **kwargs)
-        flat_args = pytree.tree_leaves(args)
+        flat_args = pytree.arg_tree_leaves(*args)
         in_shape = flat_args[0].shape
 
         no_shard_dims = set()

@@ -594,6 +594,13 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
+    # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
+    # that is intended to be in effect prior to running the graph, in keeping with
+    # equivalence to eager mode. It is the responsibility of upstream graph acquisition
+    # to reset the grad mode to its pre-graph value prior to calling aot_autograd.
+    grad_enabled_mutation: Optional[bool] = None
+
     def __post_init__(self):
         mutated_inp_indices = [
             i for i, m in enumerate(self.input_info) if m.mutates_metadata or m.mutates_data
@@ -973,7 +980,7 @@ def _get_hints(exprs):
         return exprs
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
-    args_flattened = pytree.tree_leaves(args)
+    args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(is_traceable_wrapper_subclass(x) for x in args_flattened if isinstance(x, Tensor))
     any_subclass_outputs = any(is_traceable_wrapper_subclass(x) for x in fw_metadata.traced_tangents if isinstance(x, Tensor))
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
@@ -1003,6 +1010,16 @@ def create_subclass_meta(curr_args: List[Any]) -> List[Union[int, SubclassCreati
             cnt = 1
         idx += cnt
     return infos
+
+def _get_autocast_states():
+    return [
+        torch.is_autocast_enabled(),
+        torch.is_autocast_cpu_enabled(),
+        torch.get_autocast_gpu_dtype(),
+        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_cache_enabled(),
+    ]
+
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -1052,11 +1069,22 @@ def run_functionalized_fw_and_collect_metadata(
 
         flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
+        prior_grad_enabled = torch.is_grad_enabled()
+        prior_autocast_states = _get_autocast_states()
+
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
         with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
+
+        if prior_autocast_states != _get_autocast_states():
+            raise RuntimeError(
+                "AOTAutograd does not support tracing graphs that mutate the autocast state. "
+                "Dynamo will only insert autocast context managers (e.g. with torch.autocast(..)) into the graph, "
+                "which will unwind all of their mutations to autocast state before the graph exits. "
+                "If you encounter this error while using torch.compile, please file a bug."
+            )
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
@@ -1392,6 +1420,16 @@ from a multi-output view call")
             f_fw_graph_outs = f_fw_graph_outs + intermediate_bases
         fw_graph_outs = pytree.tree_map(from_fun, f_fw_graph_outs)
 
+        grad_enabled_mutation = None
+        if torch.is_grad_enabled() != prior_grad_enabled:
+            grad_enabled_mutation = torch.is_grad_enabled()
+            torch.set_grad_enabled(prior_grad_enabled)  # Restore the prior state after tracing it
+            aot_graphs_log.info(
+                ("grad_mode mutation encountered in graph. "
+                 "Will emit mutation epilogue, to set grad_mode=%s"),
+                grad_enabled_mutation
+            )
+
         metadata = ViewAndMutationMeta(
             input_info=input_info,
             output_info=output_info,
@@ -1402,6 +1440,7 @@ from a multi-output view call")
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
+            grad_enabled_mutation=grad_enabled_mutation,
         )
         return metadata
 
@@ -3164,7 +3203,8 @@ def create_runtime_wrapper(
                     t._dynamo_weak_dynamic_indices |= o.dynamic_dims
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
-
+        if runtime_metadata.grad_enabled_mutation is not None:
+            torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
     return runtime_wrapper
 
@@ -4623,7 +4663,7 @@ def aot_function(
     def returned_function(*args, **kwargs):
         nonlocal cached_res
         # Now flatten the tensor args
-        flat_args = pytree.tree_leaves((args, kwargs))
+        flat_args = pytree.arg_tree_leaves(*args, **kwargs)
 
         # Compile the function and save it in the cache
         if cached_res is None:
@@ -4715,7 +4755,6 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-
     params = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
@@ -4973,7 +5012,7 @@ https://github.com/pytorch/pytorch/issues/101192
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
 
-    user_args_flat = pytree.tree_leaves(args)
+    user_args_flat = pytree.arg_tree_leaves(*args)
     return fx_g, create_graph_signature(
         fx_g,
         metadata,

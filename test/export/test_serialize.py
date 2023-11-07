@@ -84,7 +84,7 @@ class TestSerialize(TestCase):
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
-        # aten::native_layer_norm returns 3 tensnors
+        # aten::native_layer_norm returns 3 tensors
         self.assertEqual(len(node.outputs), 3)
 
         # check the names are unique
@@ -206,7 +206,10 @@ class TestDeserialize(TestCase):
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
             self.assertEqual(type(orig), type(loaded))
             if isinstance(orig, torch.Tensor):
-                self.assertTrue(torch.allclose(orig, loaded))
+                if orig.is_meta:
+                    self.assertEqual(orig, loaded)
+                else:
+                    self.assertTrue(torch.allclose(orig, loaded))
             else:
                 self.assertEqual(orig, loaded)
 
@@ -374,6 +377,21 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.randn(3, 3),)
         self.check_graph(M(), inputs)
+
+    def test_module_meta(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.ones(3, 3))
+
+            def forward(self, x):
+                return self.p + x
+
+        with torch.device("meta"):
+            mod = M()
+
+        inputs = (torch.randn(3, 3, device="meta"),)
+        self.check_graph(mod, inputs)
 
     def test_cond(self):
         from functorch.experimental.control_flow import cond

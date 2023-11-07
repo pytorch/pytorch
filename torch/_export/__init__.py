@@ -28,7 +28,6 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
-from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module
 from torch._functorch.eager_transforms import functionalize
@@ -36,8 +35,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import _create_constraint, _Dim, Constraint
-from torch.export.exported_program import (
-    ExportedProgram,
+from torch.export.graph_signature import (
     ExportGraphSignature,
     _sig_to_specs,
     ArgumentSpec,
@@ -48,6 +46,11 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
     InputSpec
+)
+from torch.export.exported_program import (
+    ExportedProgram,
+    ModuleCallEntry,
+    ModuleCallSignature,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
@@ -71,7 +74,7 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
 )
 from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.remove_runtime_assertions import _RemoveRuntimeAssertionsPass
-from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
+from .passes.replace_sym_size_ops_pass import _replace_sym_size_ops_pass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
 )
@@ -82,7 +85,7 @@ def _process_dynamic_shapes(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> Optional[List[Constraint]]:
     if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return None
@@ -209,6 +212,8 @@ def _process_dynamic_shapes(
         signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
         combined_args = signature.bind(*args, **kwargs).arguments
 
+    # This means user didn't specify dynamic shapes with argument names.
+    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
@@ -229,15 +234,17 @@ def export__RC__(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Dict[str, Any]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     preserve_module_call_signature: Tuple[str, ...] = (),
 ) -> ExportedProgram:
     """
     API for exporting with dynamic shape specifications instead of constraints.
     It should be considered "release candidate" (RC), meant to replace `export`.
 
-    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
-    argument names of `f` to dynamic shape specifications, as follows:
+    Here, `dynamic_shapes` is expected to be a dict from
+    argument names of `f` to dynamic shape specifications OR a tuple where each element
+    corresponds to the original order of the arguments defined in the function signature
+    ,as follows:
     - The dynamic shape of a tensor argument can be specified as:
       - Either a dict from dynamic dimension indices to Dim types. It is not
         required to include static dimension indices in this dict, but when
@@ -797,11 +804,13 @@ def _export(
     }
 
     if len(preserve_module_call_signature) > 0:
-        res = CollectTracepointsPass(module_call_signatures)(gm)
+        res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
         assert res is not None
         gm = res.graph_module
 
     assert orig_out_spec is not None
+    lift_constant_tensor_pass(gm, export_graph_signature, params_buffers)
+    _replace_sym_size_ops_pass(gm)
     exported_program = ExportedProgram(
         gm,
         gm.graph,
@@ -819,9 +828,8 @@ def _export(
         exported_program = exported_program._transform(
             _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
         )
-    exported_program = lift_constant_tensor_pass(exported_program)
 
-    return exported_program._transform(_ReplaceSymSizeOpPass())
+    return exported_program
 
 
 def _reorder_kwargs_by_names(arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]):
@@ -947,7 +955,7 @@ def aot_compile(
     # We want to export to Torch IR here to utilize the pre_grad passes in
     # inductor, which run on Torch IR.
     gm = _export_to_torch_ir(f, args, kwargs, constraints)
-    flat_example_inputs = pytree.tree_leaves(combine_args_kwargs(args, kwargs))
+    flat_example_inputs = pytree.arg_tree_leaves(*args, **kwargs or {})
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
