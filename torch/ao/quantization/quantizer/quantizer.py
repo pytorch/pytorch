@@ -157,6 +157,13 @@ class QuantizationAnnotation:
 
 
 class Quantizer(ABC):
+
+    # transform the model before annotation, to make sure we can annotate the model properly
+    # for example, we can decompose some compound operators here, or change scalar argument to Tensor
+    # so we can annotate the argument
+    def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        return model
+
     # annotate nodes in the graph with observer or fake quant constructors
     # to convey the desired way of quantization
     @abstractmethod
