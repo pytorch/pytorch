@@ -167,8 +167,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
             numerical stability (default: 1e-6).
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0). The `lr` parameter controls the overall
-            learning rate of the optimizer. A higher value of `lr` will result in
-            faster learning, but it can also lead to overfitting.
+            learning rate of the optimizer.
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0).
         {foreach}
         {maximize}
