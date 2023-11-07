@@ -3639,11 +3639,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_setattr_requires_grad_graph_breaks(self):
         def fn(x):
+            x += 1
             x.requires_grad = True
             x += 1
             return x
 
-        for backend in ["eager", "aot_eager"]:
+        for backend in ["count", "eager", "aot_eager"]:
+            if backend == "count":
+                backend = CompileCounter()
             opt_fn = torch.compile(fn, backend=backend)
 
             eager = torch.zeros(5)
@@ -3653,6 +3656,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             opt_fn(compiled)
 
             self.assertEqual(eager, compiled)
+            if isinstance(backend, CompileCounter):
+                self.assertEqual(backend.frame_count, 2)  # graph breaks
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
