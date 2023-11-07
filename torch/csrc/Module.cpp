@@ -85,6 +85,10 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
+#include <c10/util/Logging.h>
+#include <torch/csrc/profiler/combined_traceback.h>
+#include <sstream>
+
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
@@ -141,6 +145,25 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
+  if (torch::get_cpp_stacktraces_enabled()) {
+    c10::SetStackTraceFetcher([]() -> std::string {
+      auto tb = torch::CapturedTraceback::gather(false, false, true);
+      LOG(WARNING)
+          << "symbolizing C++ stack trace for exception, this may take a while..."
+          << std::endl;
+      auto s_tbs = torch::symbolize({tb.get()});
+      std::stringstream oss;
+      oss << "C++ CapturedTraceback:" << std::endl;
+      const auto& s_tb = s_tbs.tracebacks.at(0);
+      for (auto idx : c10::irange(s_tb.size())) {
+        auto frame_id = s_tb[idx];
+        const auto& frame = s_tbs.all_frames.at(frame_id);
+        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+            << ":" << frame.lineno << std::endl;
+      }
+      return oss.str();
+    });
+  }
   if (!THPUtils_checkString(shm_manager_path)) {
     THPUtils_setError(
         "initialization error - expected bytes/string object as shm_manager_path!");
