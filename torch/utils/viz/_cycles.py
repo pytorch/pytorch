@@ -429,7 +429,7 @@ def warn_tensor_cycles():
     """
     Install a warning that reports whenever a cycle that is holding CUDA memory is observed.
 
-    The warning produces a html file that visualizes the cycle,
+    The warning produces an .html file that visualizes the cycle,
     and links it to the stack frame that allocted the CUDA tensor.
 
     Reference cycles are freed by the cycle collector rather than being cleaned up
