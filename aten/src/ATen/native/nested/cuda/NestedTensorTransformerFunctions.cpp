@@ -140,7 +140,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     const Tensor& t,
     double padding,
     OptionalIntArrayRef output_size) {
-  TORCH_CHECK(t.numel() > 0, "to_padded_tensor only supports tensors with non-zero numel")
+  TORCH_CHECK(t.numel() > 0, "to_padded_tensor: at least one constituent tensor should have non-zero numel")
   int64_t t_dim = t.dim();
   if (t_dim >= 2 && t_dim <= 4 &&
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
