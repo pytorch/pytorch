@@ -6,7 +6,7 @@ namespace c10 {
 namespace detail {
 
 C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input) {
-  constexpr float e5m2fnuz_lut[256] = {
+  constexpr std::array<float, 256> e5m2fnuz_lut = {
       0.0f,
       7.62939453125e-06f,
       1.52587890625e-05f,
@@ -268,7 +268,7 @@ C10_HOST_DEVICE float fp8e5m2fnuz_to_fp32_value(uint8_t input) {
   return e5m2fnuz_lut[input];
 }
 
-}
+} // namespace detail
 
 static_assert(
     std::is_standard_layout<Float8_e5m2fnuz>::value,
