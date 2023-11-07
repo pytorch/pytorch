@@ -2103,7 +2103,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    P(X=k) = (1 - p)^{k - 1} p
 
 """,
 )
@@ -6032,7 +6032,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    P(x) = \dfrac{1}{\text{to} - \text{from}}
+    f(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 
