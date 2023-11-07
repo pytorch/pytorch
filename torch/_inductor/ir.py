@@ -3520,21 +3520,10 @@ class ExternKernel(InputsKernel):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
-        def deref_alias_and_mutation(x):
-            if isinstance(x.get_layout(), AliasedLayout):
-                return deref_alias_and_mutation(x.get_layout().view)
-            elif isinstance(x.get_layout(), MutationLayout):
-                target = x.get_layout().target
-                if isinstance(target.get_layout(), FlexibleLayout):
-                    raise AssertionError(
-                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
-                    )
-                return deref_alias_and_mutation(target)
-            return x
-
         # require x to have the layout as strided_ordered as order
         if is_storage_and_layout(x):
-            x = deref_alias_and_mutation(x)
+            while isinstance(x.get_layout(), AliasedLayout):
+                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
@@ -3545,6 +3534,15 @@ class ExternKernel(InputsKernel):
                 x.get_layout(), FixedLayout
             ) and x.get_layout().is_stride_ordered(order):
                 return x
+            elif isinstance(x.get_layout(), MutationLayout):
+                if isinstance(x.get_layout().real_layout(), FlexibleLayout):
+                    raise AssertionError(
+                        "the MutationLayout's real layout shouldn't be FlexibleLayout"
+                    )
+                elif isinstance(
+                    x.get_layout().real_layout(), FixedLayout
+                ) and x.get_layout().real_layout().is_stride_ordered(order):
+                    return x
 
         # TODO - Storage to InputBuffer
         if isinstance(x, InputBuffer) and x.get_layout().is_stride_ordered(order):

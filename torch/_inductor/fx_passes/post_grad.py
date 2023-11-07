@@ -657,6 +657,7 @@ def reinplace_inplaceable_ops(graph):
     def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
             return all(can_inplace(node, arg) for arg in mutated_arg)
+
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -673,7 +674,6 @@ def reinplace_inplaceable_ops(graph):
             if len(mutated_arg.users) > 2:
                 return False
 
-            graph.erase_node(copy_node)
             return True
         else:
             # NB: This condition could be relaxed if none of the aliases
@@ -700,7 +700,11 @@ def reinplace_inplaceable_ops(graph):
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_inplace(node, node.args[inplaceable_op.mutated_arg]):
+            mutated_arg = node.args[inplaceable_op.mutated_arg]
+            if can_inplace(node, mutated_arg):
+                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                if copy_node is not None:
+                    graph.erase_node(copy_node)
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
