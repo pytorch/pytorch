@@ -96,15 +96,34 @@ def noncontiguous_to_padded_tensor(input, shape=None):
 # Helper function to generate a random nested tensor
 
 
-def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided):
+def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided, require_non_empty=True):
     if min_dims is None:
         min_dims = tuple([0] * len(max_dims))
+
+    assert len(max_dims) == len(min_dims)
+    for min_dim, max_dim in zip(min_dims, max_dims):
+        assert max_dim > min_dim, "random_nt: max_dim must be greater than min_dim"
+        assert min_dim >= 0, "random_nt: min_dim must be non-negative"
+        if require_non_empty:
+            assert not (min_dim == 0 and max_dim == 1), (
+                "random_nt: zero cannot be the only possible value if require_non_empty is True"
+            )
+
+    if require_non_empty:
+        # Select a random idx that will be required to be non-empty
+        non_zero_idx = torch.randint(low=0, high=num_tensors, size=(1,)).item()
+
     ts1 = []
-    for _ in range(num_tensors):
-        tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
-                            for (min_dim, max_dim) in zip(min_dims, max_dims)])
+    for i, _ in enumerate(range(num_tensors)):
+        tensor_dims = []
+        for min_dim, max_dim in zip(min_dims, max_dims):
+            new_min_dim = min_dim
+            if require_non_empty and i == non_zero_idx and min_dim == 0:
+                new_min_dim = 1
+            tensor_dims.append(torch.randint(low=new_min_dim, high=max_dim, size=(1,)).item())
         t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
         ts1.append(t1)
+
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype, layout=layout)
 
 
@@ -1335,7 +1354,7 @@ class TestNestedTensorDeviceType(NestedTestCase):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
 
         def test_sum(device, dtype, ntensors, max_sizes, dim, keepdim=True):
-            nt = random_nt(device, dtype, ntensors, max_sizes)
+            nt = random_nt(device, dtype, ntensors, max_sizes, require_non_empty=False)
             nt2 = nt.clone()
             ub2 = nt2.unbind()
             nt.requires_grad_(True)
@@ -1896,6 +1915,16 @@ class TestNestedTensorDeviceType(NestedTestCase):
             RuntimeError,
             r"for now linear only supports contiguous nested tensor",
             lambda: torch.nn.functional.linear(nt_noncontiguous, weight)
+        )
+
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_to_padded_tensor_zero_numel_errors(self, device, dtype):
+        ts = [torch.ones(1, 0), torch.ones(0, 0)]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype, layout=torch.strided)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"at least one constituent tensor should have non-zero numel",
+            lambda: torch.nested.to_padded_tensor(nt, 0.0)
         )
 
     @dtypes(torch.float, torch.float16, torch.double)
