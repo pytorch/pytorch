@@ -122,9 +122,15 @@ class AOTInductorModelContainer {
           device_type,
           device_idx,
           &tensor_handle));
-      constants_->emplace(
-          std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
+      constants_->emplace(std::move(name), tensor_handle);
     }
+
+    for (auto& model : models_) {
+      model->update_constants_map(constants_);
+    }
+
+    in_spec_ = model->get_in_spec();
+    out_spec_ = model->get_out_spec();
   }
 
   void run(
@@ -173,9 +179,19 @@ class AOTInductorModelContainer {
     return models_.size();
   }
 
+  const char* get_in_spec() const {
+    return in_spec_;
+  }
+
+  const char* get_out_spec() const {
+    return out_spec_;
+  }
+
  private:
   std::vector<std::string> input_names_;
   std::vector<std::string> output_names_;
+  const char* in_spec_;
+  const char* out_spec_;
 
 #ifdef USE_CUDA
   // Holds the blob storage for constants' at::Tensor for CUDA.

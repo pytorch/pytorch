@@ -513,7 +513,7 @@ class PartialMaml(torch.nn.Module):
         corrects = [0 for _ in range(self.update_step_test + 1)]
 
         # in order to not ruin the state of running_mean/variance and bn_weight/bias
-        # we finetunning on the copied model instead of self.net
+        # we finetuning on the copied model instead of self.net
         net = deepcopy(self.net)
 
         # 1. run the i-th task and compute loss for k=0
@@ -1539,6 +1539,85 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
 
+    def test_tensor_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
+
+        for func in [func1, func2]:
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+            b = torch.rand([6])
+            b1 = torch.clone(b)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            _ = func(a, b)
+            _ = torch.compile(func, backend=cnt)(a1, b1)
+
+            self.assertEqual(a, a1)
+            self.assertEqual(b, b1)
+            self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_untracked_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(y):
+            x = torch.tensor([0])
+            x.data = y  # Setattr for untracked tensors is unsupported
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        _ = func(a)
+        _ = torch.compile(func, backend=cnt)(a1)
+
+        self.assertEqual(a, a1)
+        self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(x):
+            y = torch.tensor([0])
+            # If we setattr to untracked tensor, it aliases a new tensor.
+            # we need to start tracking y even though it is created in graph
+            x.data = y
+            x.add_(1)
+            return x, y
+
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
+            self.assertEqual(a, a1)
+            self.assertEqual(cnt.frame_count, 2)
+
+    def test_setattr_data_tensor_raises(self):
+        def func(x):
+            x.data = None
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        with self.assertRaises(TypeError):
+            func(a)
+        with self.assertRaises(TypeError):
+            torch.compile(func, backend="eager")(a1)
+
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
         @torch._dynamo.disable(recursive=False)
@@ -1633,31 +1712,35 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(b(y), y.sin().cos()))
 
-    # AssertionError: ABCMeta
-    @unittest.expectedFailure
-    def test_numpy_list(self):
-        @torch._dynamo.disable
-        def rand_gen():
-            return list(np.array([random.randint(5, 10) for _ in range(10)]))
+    def test_longtensor_list(self):
+        for partition in [0, 5, 10]:
 
-        def fn(x):
-            random_list = rand_gen()
-            z = torch.LongTensor(random_list)
-            return x * z
+            @torch._dynamo.disable
+            def rand_gen():
+                rand_vals = [random.randint(5, 10) for _ in range(10)]
+                # List of tensors mixed with np.arrays
+                return list(np.array(rand_vals[:partition])) + [
+                    torch.tensor(val) for val in rand_vals[partition:]
+                ]
 
-        x = torch.ones(10) * 2
+            def fn(x):
+                random_list = rand_gen()
+                z = torch.LongTensor(random_list)
+                return x * z
 
-        random.seed(0)
-        ref0 = fn(x)
-        ref1 = fn(x)
+            x = torch.ones(10) * 2
 
-        random.seed(0)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
-        res0 = opt_fn(x)
-        res1 = opt_fn(x)
+            random.seed(0)
+            ref0 = fn(x)
+            ref1 = fn(x)
 
-        self.assertTrue(same(ref0, res0))
-        self.assertTrue(same(ref1, res1))
+            random.seed(0)
+            opt_fn = torch._dynamo.optimize("eager")(fn)
+            res0 = opt_fn(x)
+            res1 = opt_fn(x)
+
+            self.assertTrue(same(ref0, res0))
+            self.assertTrue(same(ref1, res1))
 
     def test_primtorch(self):
         @torch._dynamo.optimize("eager")
@@ -3553,6 +3636,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(1000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
+        )
+
+    def test_numpy_not_ndarray_recompiles(self):
+        import torch
+
+        def fn(x=None):
+            if x is None:
+                x = np.ones(3)
+            elif isinstance(x, int):
+                x = np.ones(6)
+            elif isinstance(x, str):
+                x = np.ones(9)
+            return x**2
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
+
+        x = np.zeros((2, 2))
+
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(opt_fn(), fn())
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(10), fn(10))
+        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(opt_fn("10"), fn("10"))
+        self.assertEqual(cnt.frame_count, 4)
 
 
 if __name__ == "__main__":

@@ -185,6 +185,9 @@ class FunctionalTensor(torch.Tensor):
     def sync(self) -> None:
         torch._functionalize_sync(self.elem)
 
+    def mark_mutation_hidden_from_autograd(self) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
+
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self):
@@ -305,10 +308,17 @@ class FunctionalTensorMode(TorchDispatchMode):
         )
         assert is_excluded or not is_included
 
-        # If no outputs are our functional subclass, then don't try to fix up aliasing
-        if not any(
-            isinstance(x, FunctionalTensor)
-            for x in pytree.tree_flatten(outs_wrapped)[0]
+        if (
+            # If no outputs are our functional subclass, then don't try to fix up aliasing
+            not any(
+                isinstance(x, FunctionalTensor)
+                for x in pytree.tree_leaves(outs_wrapped)
+            )
+            # Since lift_fresh lifts its argument into a functional tensor, we can skip the
+            # aliasing correction step. Otherwise, we would be setting the storage of a
+            # lifted tensor to that of an unlifted tensor.
+            # Ref: https://github.com/pytorch/pytorch/issues/111506
+            or func == torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
         # Wrapper tensor subclasses do not have correct aliasing info! Use this util to manually correct the output aliasing.
@@ -370,8 +380,8 @@ def dispatch_functionalize(func):
         func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
         func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
 
-        flattened_wrapped_args, _ = pytree.tree_flatten(func_args)
-        flattened_wrapped_kwargs, _ = pytree.tree_flatten(func_kwargs)
+        flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
+        flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -414,6 +424,10 @@ class BaseFunctionalizeAPI(ABC):
     def sync(self, tensor) -> None:
         pass
 
+    @abstractmethod
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        pass
+
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -445,6 +459,10 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         assert isinstance(tensor, FunctionalTensor)
         tensor.sync()
 
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        assert isinstance(tensor, FunctionalTensor)
+        tensor.mark_mutation_hidden_from_autograd()
+
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
@@ -475,6 +493,9 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
+
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)
 
 
 class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
@@ -514,3 +535,6 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def sync(self, tensor) -> None:
         torch._functionalize_sync(tensor)
+
+    def mark_mutation_hidden_from_autograd(self, tensor) -> None:
+        torch._functionalize_mark_mutation_hidden_from_autograd(tensor)

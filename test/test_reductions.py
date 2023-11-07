@@ -1207,7 +1207,7 @@ class TestReductions(TestCase):
         self._test_minmax_helper(torch.amax, np.amax, device, dtype)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
@@ -1434,6 +1434,18 @@ class TestReductions(TestCase):
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.prod(x, 1, out=res2)
         self.assertEqual(res1, res2)
+
+    @onlyCPU
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_prod_lowp(self, device, dtype):
+        x = torch.rand(100, 100, dtype=dtype, device=device)
+        x_ref = x.float()
+        res1 = torch.prod(x, 1)
+        res2 = torch.prod(x_ref, 1)
+        self.assertEqual(res1, res2.to(dtype=dtype))
+        res1 = torch.prod(x, 0)
+        res2 = torch.prod(x_ref, 0)
+        self.assertEqual(res1, res2.to(dtype=dtype))
 
     def test_prod_bool(self, device):
         vals = [[True, True], [True, False], [False, False], []]
@@ -2982,13 +2994,14 @@ class TestReductions(TestCase):
         test_against_np(linear, bins=20, min=0, max=0.99)
 
     @onlyCPU
-    def test_histc_bfloat16(self, device):
+    @dtypes(torch.bfloat16, torch.half)
+    def test_histc_lowp(self, device, dtype):
         actual = torch.histc(
-            torch.tensor([1, 2, 1], dtype=torch.bfloat16, device=device), bins=4, min=0, max=3)
+            torch.tensor([1, 2, 1], dtype=dtype, device=device), bins=4, min=0, max=3)
         self.assertEqual(
-            torch.tensor([0, 2, 1, 0], dtype=torch.bfloat16, device=device),
+            torch.tensor([0, 2, 1, 0], dtype=dtype, device=device),
             actual)
-        self.assertEqual(actual.dtype, torch.bfloat16)
+        self.assertEqual(actual.dtype, dtype)
 
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
