@@ -539,7 +539,7 @@ class BuiltinVariable(VariableTracker):
                         variables.NumpyNdarrayVariable, tx, proxy, **options
                     )
                     if self.fn in self._self_assigning_ops():
-                        tx.replace_all(args[0], ret)
+                        ret = tx.replace_all(args[0], ret)
                     return ret
 
                 proxy = tx.output.create_proxy(
@@ -584,7 +584,7 @@ class BuiltinVariable(VariableTracker):
                     ret = wrap_fx_proxy(tx, proxy, **options)
 
                 if self.fn in self._self_assigning_ops():
-                    tx.replace_all(args[0], ret)
+                    ret = tx.replace_all(args[0], ret)
                 return ret
 
             except NotImplementedError:

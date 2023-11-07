@@ -1540,6 +1540,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
 
     def test_tensor_setattr_data_graph_breaks(self):
+        from torch._dynamo.utils import counters
+        counters.clear()
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
             x.data = y
@@ -1566,6 +1568,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(b, b1)
             self.assertEqual(cnt.frame_count, 2)  # graph breaks
 
+            self.assertEqual(len(counters['graph_break']), 1)
+            self.assertTrue(
+                ".data assignment to a tracked tensors can introduce aliasing" in next(iter(counters['graph_break'].keys()))
+            )
+            counters.clear()
+
     def test_tensor_untracked_setattr_data_graph_breaks(self):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(y):
@@ -1586,8 +1594,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)  # graph breaks
 
     def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
+        from torch._dynamo.utils import counters
+
+        counters.clear()
         # https://github.com/pytorch/pytorch/issues/113030
         def func(x):
+            x += 1
             y = torch.tensor([0])
             # If we setattr to untracked tensor, it aliases a new tensor.
             # we need to start tracking y even though it is created in graph
@@ -1595,14 +1607,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x.add_(1)
             return x, y
 
-            a = torch.rand([6])
-            a1 = torch.clone(a)
+        a = torch.rand([6])
+        a1 = torch.clone(a)
 
-            cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
-            self.assertEqual(a, a1)
-            self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
+        self.assertEqual(a, a1)
+        self.assertEqual(cnt.frame_count, 2)
+    
+        self.assertEqual(len(counters['graph_break']), 1)
+        self.assertTrue(
+            ".data assignment to a tracked tensors can introduce aliasing" in next(iter(counters['graph_break'].keys()))
+        )
+        counters.clear()
 
     def test_setattr_data_tensor_raises(self):
         def func(x):
