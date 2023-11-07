@@ -4785,7 +4785,7 @@
   autogen: repeat.out
   tags: core
 
-- func: repeat_interleave.Tensor(Tensor repeats, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.Tensor(Tensor repeats, *, SymInt? output_size=None) -> Tensor
   variants: function
   dispatch:
     CPU: repeat_interleave_cpu
@@ -4794,10 +4794,12 @@
   tags: dynamic_output_shape
   autogen: repeat_interleave.Tensor_out
 
-- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: repeat_interleave_symint
 
-- func: repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
   variants: function, method
   dispatch:
     CompositeImplicitAutograd: repeat_interleave_symint
@@ -5098,12 +5100,14 @@
   python_module: nn
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu
+  tags: pointwise
 
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: silu.out
   python_module: nn
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu_
+  tags: pointwise
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -5112,6 +5116,7 @@
   dispatch:
     CPU, CUDA: silu_out
     MPS: silu_out_mps
+  tags: pointwise
 
 - func: silu_backward.grad_input(Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5120,6 +5125,7 @@
   dispatch:
     CPU, CUDA: silu_backward_out
     MPS: silu_backward_out_mps
+  tags: pointwise
 
 - func: silu_backward(Tensor grad_output, Tensor self) -> Tensor
   structured_delegate: silu_backward.grad_input
@@ -5127,6 +5133,7 @@
   dispatch:
     CompositeImplicitAutograd: math_silu_backward
     NestedTensorCPU, NestedTensorCUDA: silu_backward_nested
+  tags: pointwise
 
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
@@ -11152,37 +11159,44 @@
   dispatch:
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
+    MPS: bucketize_mps
 
 - func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: bucketize_out_cpu
     CUDA: bucketize_out_cuda
+    MPS: bucketize_out_mps
 
 - func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
+    MPS: bucketize_mps
   autogen: bucketize.Scalar_out
 
 - func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
+    MPS: searchsorted_mps
 
 - func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
+    MPS: searchsorted_out_mps
 
 - func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
+    MPS: searchsorted_mps
 
 - func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
+    MPS: searchsorted_out_mps
 
 - func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
   structured_delegate: _convert_indices_from_coo_to_csr.out

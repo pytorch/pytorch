@@ -15,7 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_fun
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.immutable_collections import immutable_dict
 
-from .. import config, ir, pattern_matcher
+from .. import config, inductor_prims, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 
 from ..lowering import lowerings as L
@@ -90,6 +90,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     stable_topological_sort(gm.graph)
 
     fake_tensor_updater.incremental_update()
+
     # Keep this last, since it introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_scatters(gm.graph)
@@ -484,8 +485,8 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
+def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
+    """True if two nodes have the same metadata"""
     val1 = node1.meta.get("val")
     val2 = node2.meta.get("val")
     return (
@@ -493,6 +494,8 @@ def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
         and val2 is not None
         and val1.size() == val2.size()
         and val1.layout == val2.layout
+        and val1.dtype == val2.dtype
+        and val1.device == val2.device
         and (val1.layout != torch.strided or val1.stride() == val2.stride())
     )
 
@@ -505,6 +508,7 @@ def register_noop_decomp(targets, nop_arg=0):
         register_decomposition(targets, registry=noop_registry, unsafe=True)(
             (cond, nop_arg)
         )
+        return cond
 
     return register_fun
 
@@ -564,16 +568,22 @@ def cat_noop(inputs, dim=0):
     return len(inputs) == 1
 
 
-@register_noop_decomp([aten.clone, aten.alias])
+@register_noop_decomp(aten.view)
+def view_noop(arg, size):
+    return arg.shape == size
+
+
+# Note, we also always have a check for identical metadata, which is why these
+# are safe
+@register_noop_decomp([aten.copy], nop_arg=1)
+@register_noop_decomp([aten.alias, aten.clone])
 def true_noop(*args, **kwargs):
     return True
 
 
 def remove_noop_ops(graph: torch.fx.Graph):
     """
-    Removes aten.clone and aten.alias ops from the graph when it's safe.
-
-    Other no-ops should be done as decompositions that selectively turn into aten.clone or aten.alias
+    Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     input_storages = set()
     output_storages = set()
@@ -607,7 +617,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
-            if same_layout(node, src) and cond(*args, **kwargs):
+            if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
 
@@ -617,17 +627,25 @@ InplaceableOp = namedtuple("InplaceableOp", ["inplace_op", "mutated_arg"])
 
 def reinplace_scatters(graph):
     """
-    Reinplaces scatter operations in easy cases where the node being mutated
-    is only used by the scatter (users == 1), and the node being mutated
-    shares storage with no other nodes.
-
-    Also handles input mutations when there is a corresponding copy node.
+    Reinplaces scatter operations.
+    If there are no uses of a view of the mutated arg after the current node,
+    it is possible to inplace the op.
+    This above algorithm could be justified by observing side effects. While
+    we traverse the graph in forwards direction, only latter nodes could view
+    side effects of the current node. If the current node is not used later as
+    well as no view of this node is used later in the graph, then it is safe to
+    inplace as there would be no way to observe the side effects.
+    This condition is slightly different for graph inputs where they can only
+    be inplaced if the above condition is true and there's a copy_ in the
+    epilogue that signals that the caller wants to observe the mutation.
     """
 
     copy_args_to_copy_nodes = {}
     mutated_inputs = set()
     storage_to_nodes = defaultdict(list)
-    for node in reversed(graph.nodes):
+    node_order: Dict[Any, int] = {}
+    for i, node in enumerate(reversed(graph.nodes)):
+        node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
         if node.target == aten.copy_.default:
             dst = node.args[0]
@@ -644,7 +662,20 @@ def reinplace_scatters(graph):
             assert node.args[0].op == "placeholder"
             mutated_inputs.add(node.args[0])
 
-    def can_replace(node, mutated_arg):
+    def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
+        node_loc = node_order[node]
+        for view in shared_view_nodes:
+            for user in view.users:
+                # Skip all users before node
+                if node_order[user] <= node_loc:
+                    continue
+                # Skip over the copy_ epilogue node that could get reinplaced
+                if copy_node == user:
+                    continue
+                return True
+        return False
+
+    def can_inplace(node, mutated_arg):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -654,32 +685,34 @@ def reinplace_scatters(graph):
             ):
                 return False
 
-            if len(shared_view_nodes) > 2:  # Arg aliases another node other than copy_
-                return False
-
-            # Check for any uses other than current node and copy_ epilogue
-            if len(mutated_arg.users) > 2:
+            if any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=copy_node
+            ):
                 return False
 
             graph.erase_node(copy_node)
             return True
+        elif any(view.op == "placeholder" for view in shared_view_nodes):
+            # If mutated arg is view of any of the inputs of the graph,
+            # do not allow for inplacing.
+            # This would require more sophisticated algorithm to handle
+            return False
         else:
-            # NB: This condition could be relaxed if none of the aliases
-            # are used after this mutation op. But that's trickier.
-            if len(shared_view_nodes) > 1:  # Arg aliases another node
-                return False
-            if len(mutated_arg.users) > 1:  # Arg used somewhere else
-                return False
-            return True
+            return not any_use_of_views_after_node(
+                node, shared_view_nodes, copy_node=None
+            )
 
     inplaceable_ops = {
         aten.index_put.default: InplaceableOp(aten.index_put_.default, 0),
+        aten._unsafe_index_put.default: InplaceableOp(
+            inductor_prims._unsafe_index_put_, 0
+        ),
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            if can_replace(node, node.args[inplaceable_op.mutated_arg]):
+            if can_inplace(node, node.args[inplaceable_op.mutated_arg]):
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
@@ -689,7 +722,7 @@ def reinplace_scatters(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_replace(node, node.kwargs["kwargs"][arg]):
+                if not can_inplace(node, node.kwargs["kwargs"][arg]):
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone

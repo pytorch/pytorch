@@ -179,7 +179,15 @@ TestEnvironment.def_flag(
     env_var="SANDCASTLE",
     implied_by_fn=lambda: os.getenv("TW_JOB_USER") == "sandcastle",
     include_in_repro=False)
-TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE", include_in_repro=False)
+
+_is_fbcode_default = (
+    hasattr(torch._utils_internal, "IS_FBSOURCE") and
+    torch._utils_internal.IS_FBSOURCE
+)
+
+TestEnvironment.def_flag("IS_FBCODE", env_var="PYTORCH_TEST_FBCODE",
+                         default=_is_fbcode_default,
+                         include_in_repro=False)
 TestEnvironment.def_flag("IS_REMOTE_GPU", env_var="PYTORCH_TEST_REMOTE_GPU",
                          include_in_repro=False)
 
@@ -1086,7 +1094,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
-IS_ARM64 = platform.machine() == 'arm64'
+IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1287,14 +1295,14 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                if TEST_WITH_TORCHINDUCTOR:
+                if condition:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
         assert(isinstance(fn, type))
-        if TEST_WITH_TORCHINDUCTOR:
+        if condition:
             fn.__unittest_skip__ = True
             fn.__unittest_skip_why__ = msg
 
@@ -1309,7 +1317,7 @@ def skipRocmIfTorchInductor(msg="test doesn't currently work with torchinductor 
 TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
 
 if TEST_WITH_TV:
-    torch._dynamo.config.translation_validation = True
+    torch.fx.experimental._config.translation_validation = True
 
 # Some tests take too long when dynamic_shapes is combined with
 # translation_validation. Whenever that happens, we solve that by
@@ -1319,7 +1327,7 @@ def disable_translation_validation_if_dynamic_shapes(fn):
     def wrapper(*args, **kwargs):
         if torch._dynamo.config.dynamic_shapes:
             # Turning TV off due to high latency on dynamic shapes.
-            torch._dynamo.config.translation_validation = False
+            torch.fx.experimental._config.translation_validation = False
         return fn(*args, **kwargs)
     return wrapper
 
@@ -1458,21 +1466,25 @@ def setLinalgBackendsToDefaultFinally(fn):
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
 class DeterministicGuard:
-    def __init__(self, deterministic, *, warn_only=False):
+    def __init__(self, deterministic, *, warn_only=False, fill_uninitialized_memory=True):
         self.deterministic = deterministic
         self.warn_only = warn_only
+        self.fill_uninitialized_memory = fill_uninitialized_memory
 
     def __enter__(self):
         self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
         self.warn_only_restore = torch.is_deterministic_algorithms_warn_only_enabled()
+        self.fill_uninitialized_memory_restore = torch.utils.deterministic.fill_uninitialized_memory
         torch.use_deterministic_algorithms(
             self.deterministic,
             warn_only=self.warn_only)
+        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
+        torch.utils.deterministic.fill_uninitialized_memory = self.fill_uninitialized_memory_restore
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):

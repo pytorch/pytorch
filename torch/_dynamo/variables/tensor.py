@@ -20,9 +20,10 @@ import torch.random
 from torch._dynamo import compiled_autograd
 
 from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
     guard_scalar,
     GuardOnDataDependentSymNode,
+    has_free_symbols,
+    is_symbolic,
     SymTypes,
 )
 
@@ -156,14 +157,18 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not free_symbols(value):
+        if not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
             # We have to cast to int here, because these might get accessed as ConstantVariable, which has
             # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple([int(s) for s in value.size()])
+            props["size"] = tuple(
+                # the non is_symbolic case applies to the jagged layout
+                # NestedTensor case as singleton ints are not symbolic
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
@@ -233,9 +238,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = ConstantVariable.create(self.dtype, **options)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
@@ -396,13 +401,13 @@ class TensorVariable(VariableTracker):
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 if dim is None:
                     fake_r = getattr(fake, name)()
-                    if not free_symbols(fake_r):
+                    if not has_free_symbols(fake_r):
                         # int conversion for safety, in case a SymInt refined
                         # to constant
                         return RetVariable(tuple(int(r) for r in fake_r), **options)
                 else:
                     fake_r = getattr(fake, name)(dim)
-                    if not free_symbols(fake_r):
+                    if not has_free_symbols(fake_r):
                         return ConstantVariable.create(int(fake_r), **options)
 
             # Oops, it's not constant.  Do the dynamic shapes path.
@@ -423,7 +428,7 @@ class TensorVariable(VariableTracker):
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 fake_r = fake.numel()
-                if not free_symbols(fake_r):
+                if not has_free_symbols(fake_r):
                     return ConstantVariable.create(int(fake_r), **options)
 
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
@@ -459,9 +464,9 @@ class TensorVariable(VariableTracker):
             and len(args) == 0
             and isinstance(self.device, torch.device)
         ):
-            tensortype = [k for k, v in tensortype_to_dtype.items() if self.dtype in v][
-                0
-            ]
+            tensortype = next(
+                k for k, v in tensortype_to_dtype.items() if self.dtype in v
+            )
             if self.device.type == "cuda":
                 constant_result = ConstantVariable.create(
                     f"torch.cuda.{tensortype.__name__}", **options
@@ -922,11 +927,11 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ("ndim", "itemsize"):
             return ConstantVariable.create(getattr(example_ndarray, name), **options)
         elif name in ("shape", "stride"):
-            if not free_symbols(r := getattr(example_ndarray, name)):
+            if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return ConstantVariable.create(tuple(int(r) for r in r), **options)
             return insert_into_graph()
         elif name == "size":
-            if not free_symbols(r := example_ndarray.size):
+            if not has_free_symbols(r := example_ndarray.size):
                 return ConstantVariable.create(int(r), **options)
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
