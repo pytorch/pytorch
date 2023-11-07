@@ -229,6 +229,9 @@ def _private_register_pytree_node(
     SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
+register_pytree_node = _register_pytree_node
+
+
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
