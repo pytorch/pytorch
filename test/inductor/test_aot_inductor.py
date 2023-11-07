@@ -13,7 +13,7 @@ import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodeGenError
-from torch._inductor.utils import aot_inductor_launcher
+from torch._inductor.utils import aot_inductor_launcher, cache_dir
 
 from torch.testing import FileCheck
 
@@ -92,7 +92,7 @@ class AOTInductorModelRunner:
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher(so_path, device)],
                 # use a unique build directory to avoid test interference
-                build_directory=tempfile.mkdtemp(),
+                build_directory=tempfile.mkdtemp(dir=cache_dir()),
                 functions=["run", "get_call_spec"],
                 with_cuda=(device == "cuda"),
             )
@@ -222,7 +222,7 @@ class AOTInductorTestsTemplate:
         with config.patch({"always_keep_tensor_constants": True}):
             self.check_model(Model().to(self.device), example_inputs)
 
-    def test_output_path(self):
+    def test_output_path_1(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -237,6 +237,26 @@ class AOTInductorTestsTemplate:
         )
         with config.patch("aot_inductor.output_path", "tmp_output_"):
             self.check_model(Model(), example_inputs)
+
+    def test_output_path_2(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        model = Model().to(device=self.device)
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        expected_path = os.path.join(tempfile.mkdtemp(dir=cache_dir()), "model.so")
+        actual_path = AOTInductorModelRunner.compile(
+            model, example_inputs, options={"aot_inductor.output_path": expected_path}
+        )
+        self.assertTrue(actual_path == expected_path)
 
     @requires_cuda()
     def test_multi_device(self):
@@ -1000,6 +1020,18 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_repeat_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.sin(x)
+                return y, y
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -1010,13 +1042,14 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     use_minimal_arrayref_interface = False
 
 
-def fail_with_and_without_stack_allocation():
+def fail_with_and_without_stack_allocation(is_skip=False):
     return TestFailure(
         (
             "abi_compatible_cpu",
             "abi_compatible_cpu_with_stack_allocation",
             "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        )
+        ),
+        is_skip=is_skip,
     )
 
 
@@ -1030,14 +1063,7 @@ CPU_TEST_FAILURES = {
     "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
-    "test_freezing": TestFailure(
-        (
-            "abi_compatible_cpu",
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        ),
-        is_skip=True,
-    ),
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": TestFailure(
         ("abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",),
@@ -1045,6 +1071,8 @@ CPU_TEST_FAILURES = {
     ),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # There is a double-free issue which will be fixed in another PR
+    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     "test_sdpa": fail_with_and_without_stack_allocation(),
     "test_sdpa_2": fail_with_and_without_stack_allocation(),
     "test_simple_dynamic": fail_with_and_without_stack_allocation(),
@@ -1111,6 +1139,8 @@ copy_tests(
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
     },
 )
 
