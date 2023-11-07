@@ -1523,12 +1523,23 @@ def lcm(a: TensorLikeType, b: TensorLikeType):
     return res if not promote_to_int else prims.convert_element_type(res, dtype)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
 def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    """
+    Perform element-wise "less than or equal to" comparison between two tensors.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor.
+
+    Returns:
+        TensorLikeType: A tensor of booleans where each element indicates
+            whether the corresponding element in `a` is less than or equal
+            to the corresponding element in `b`.
+    """
     return prims.le(a, b)
 
 
@@ -1581,11 +1592,21 @@ def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return torch.where(inf_mask, a, result)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_and(a: TensorLikeType, b: TensorLikeType):
+    """
+    Perform element-wise logical AND operation between two tensors.
+
+    Args:
+        a (TensorLikeType): The first input tensor
+        b (TensorLikeType): The second input tensor
+
+    Returns:
+        TensorLikeType: A tensor of booleans where each element indicates
+            whether the corresponding elements in `a` and `b` are both True.
+    """
     if not utils.is_boolean_dtype(a.dtype):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
@@ -1593,19 +1614,39 @@ def logical_and(a: TensorLikeType, b: TensorLikeType):
     return a & b
 
 
-# TODO: add docstring
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def logical_not(a: TensorLikeType):
+    """
+    Perform element-wise logical NOT operation on a tensor.
+
+    Args:
+        a (TensorLikeType): The input tensor.
+
+    Returns:
+        TensorLikeType: A tensor of booleans where each element
+            indicates the logical NOT of the corresponding element in `a`.
+    """
     if not utils.is_boolean_dtype(a.dtype):
         return a == 0
     return ~a
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_or(a: TensorLikeType, b: TensorLikeType):
+    """
+    Performs element-wise logical OR operation between two tensors.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor.
+
+    Returns:
+        TensorLikeType: A tensor of booleans where each element
+            indicates whether at least one of the corresponding
+            elements in `a` or `b` is True.
+    """
     if not utils.is_boolean_dtype(a.dtype):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
@@ -1613,12 +1654,23 @@ def logical_or(a: TensorLikeType, b: TensorLikeType):
     return bitwise_or(a, b)
 
 
-# TODO: add docstring
 # TODO: skip unnecessary conversion of long to float
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
 )
 def logical_xor(a: TensorLikeType, b: TensorLikeType):
+    """
+    Performs element-wise logical XOR operation between two tensors.
+
+    Args:
+        a (TensorLikeType): The first input tensor.
+        b (TensorLikeType): The second input tensor.
+
+    Returns:
+        TensorLikeType: A tensor of booleans where each element indicates
+            whether exactly one of the corresponding elements in `a` or `b` is
+            True.
+    """
     if not utils.is_boolean_dtype(a.dtype):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
