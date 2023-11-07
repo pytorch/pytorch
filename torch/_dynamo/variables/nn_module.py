@@ -9,7 +9,7 @@ import torch.nn
 
 from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis, unimplemented, Unsupported
+from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
 from ..source import (
@@ -74,7 +74,7 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = ["module_type", "module_key"]
+    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
 
     def __init__(self, module_type: type, module_key: str, **kwargs):
         super().__init__(**kwargs)
@@ -145,7 +145,7 @@ class NNModuleVariable(VariableTracker):
         # Mark the class dynamic unless its module initialization
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
-        raise RestartAnalysis()
+        raise UnspecializeRestartAnalysis()
 
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
@@ -639,7 +639,7 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
-    _nonvar_fields = ["value_type"]
+    _nonvar_fields = {"value_type", *UserDefinedObjectVariable._nonvar_fields}
 
     """
     The above class will specialize on the id() of a module and place

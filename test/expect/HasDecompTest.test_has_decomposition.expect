@@ -134,9 +134,12 @@ aten::_foreach_add.Scalar
 aten::_foreach_add.ScalarList
 aten::_foreach_add.ScalarList_out
 aten::_foreach_add.Scalar_out
+aten::_foreach_add.Tensor
+aten::_foreach_add.Tensor_out
 aten::_foreach_add_.List
 aten::_foreach_add_.Scalar
 aten::_foreach_add_.ScalarList
+aten::_foreach_add_.Tensor
 aten::_foreach_addcdiv.Scalar
 aten::_foreach_addcdiv.ScalarList
 aten::_foreach_addcdiv.ScalarList_out
@@ -589,8 +592,6 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
-aten::_weight_norm_interface
-aten::_weight_norm_interface.out
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out

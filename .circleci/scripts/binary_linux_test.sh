@@ -66,6 +66,12 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 #   conda build scripts themselves. These should really be consolidated
 # Pick only one package of multiple available (which happens as result of workflow re-runs)
 pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
+if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
+    CHANNEL="nightly"
+else
+    CHANNEL="test"
+fi
+
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install
@@ -83,24 +89,19 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
-
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
       CUDA_PACKAGE="pytorch-cuda"
-      PYTORCH_CHANNEL="pytorch"
-      if [[ "\${TORCH_CONDA_BUILD_FOLDER}" == "pytorch-nightly" ]]; then
-              PYTORCH_CHANNEL="pytorch-nightly"
-      fi
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "\${PYTORCH_CHANNEL}" "pytorch-cuda=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "pytorch-\${CHANNEL}" "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "$(uname -m)" == aarch64 ]]; then
     # Using "extra-index-url" until all needed aarch64 dependencies are
-    # added to "https://download.pytorch.org/whl/nightly/"
-    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
+    # added to "https://download.pytorch.org/whl/"
+    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
   else
-    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
+    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
   fi
   retry pip install -q numpy protobuf typing-extensions
 fi
