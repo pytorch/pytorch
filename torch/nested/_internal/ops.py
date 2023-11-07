@@ -36,8 +36,11 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
 
     arg_type_check_fns = {
         "t": lambda x: isinstance(x, torch.Tensor) and not isinstance(x, NestedTensor),
-        "jt": lambda x: isinstance(x, NestedTensor) and x._lengths is None,
-        "jt_all": lambda x: isinstance(x, NestedTensor),
+        "jt": lambda x: isinstance(x, NestedTensor)
+        and x._lengths is None,  # ops with "jt" require contiguous JT only
+        "jt_all": lambda x: isinstance(
+            x, NestedTensor
+        ),  # ops with "jt_all" can accept all kinds of JT
         "any": lambda x: True,
     }
     for i, named_arg_type in enumerate(named_arg_types):
@@ -282,7 +285,7 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
         )
 
 
-@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
+@register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt_all")
 def is_contiguous_general(func, *args, **kwargs):
     from torch._prims_common import is_contiguous_for_memory_format
 
@@ -290,16 +293,32 @@ def is_contiguous_general(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     inp = new_kwargs.pop("input")
+    # If created from narrow() check if offsets and lengths make it possibly contiguous
+    if inp.lengths() is not None:
+        orig_dim = inp.values().shape[0] / inp.lengths().shape[0]
+        if torch.any(inp.lengths()[1:-1].ne(orig_dim)):
+            return False
+        if torch.any(
+            inp.offsets()[1:]
+            - torch.arange(
+                1, inp.lengths().shape[0], device=inp.device, dtype=torch.int64
+            )
+            * orig_dim
+        ):
+            return False
+        if inp.offsets()[0] + inp.lengths()[0] != orig_dim:
+            return False
+
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
     if new_kwargs["memory_format"] == torch.preserve_format:
         return True
-    return is_contiguous_for_memory_format(inp, **new_kwargs)
+    return is_contiguous_for_memory_format(inp.values(), **new_kwargs)
 
 
 register_jagged_func(
-    torch.ops.aten.is_contiguous.memory_format, "self: jt, memory_format: any?"
+    torch.ops.aten.is_contiguous.memory_format, "self: jt_all, memory_format: any?"
 )(is_contiguous_general)
 
 
@@ -443,7 +462,7 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
-@register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
+@register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
 def unbind_int(func, *args, **kwargs):
     # Note that this specializes on the length of the offsets
     _, new_kwargs = normalize_function(
@@ -457,8 +476,21 @@ def unbind_int(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     values = inp._values
     offsets = inp.offsets()
+    lengths = inp.lengths()
 
-    return torch.split(values, offsets.diff().tolist())
+    if lengths is None:
+        split_offsets = torch.cat(
+            (
+                offsets,
+                torch.tensor(
+                    [values.shape[0]], device=offsets.device, dtype=offsets.dtype
+                ),
+            )
+        )
+        return torch.split(values, split_offsets.diff().tolist())
+    return [
+        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
+    ]
 
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")

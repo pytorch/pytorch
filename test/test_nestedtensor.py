@@ -3179,6 +3179,60 @@ class TestNestedTensorSubclass(TestCase):
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
 
+    def test_narrow(self, device):
+        starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        nt = torch.nested.narrow(
+            torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone(),
+            1,
+            starts,
+            lengths,
+            layout=torch.jagged
+        )
+
+        unbinded_nt = nt.unbind()
+        for i in range(starts.shape[0]):
+            self.assertEqual(torch.arange(starts[i], starts[i] + lengths[i], device=device, dtype=torch.int64), unbinded_nt[i])
+
+    def test_is_contiguous(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt_contiguous, _ = jagged_from_list([a, b, c], None)
+
+        starts_nc = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
+        lengths_nc = torch.tensor([3, 2, 2, 1, 5], device=device, dtype=torch.int64)
+        narrow_base = torch.arange(0, 10, device=device, dtype=torch.int64).unsqueeze(0).expand(5, -1).clone()
+        nt_noncontiguous = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_nc,
+            lengths_nc,
+            layout=torch.jagged
+        )
+
+        starts_c = torch.tensor([1, 0, 0, 0, 0], device=device, dtype=torch.int64)
+        lengths_c = torch.tensor([9, 10, 10, 10, 8], device=device, dtype=torch.int64)
+        nt_contiguous_narrow = torch.nested.narrow(
+            narrow_base,
+            1,
+            starts_c,
+            lengths_c,
+            layout=torch.jagged
+        )
+
+        # Test contiguous case
+        assert nt_contiguous.is_contiguous()
+
+        # Test narrow case
+        assert not nt_noncontiguous.is_contiguous()
+        assert nt_contiguous_narrow.is_contiguous()
+
+        # Test querying by memory_format
+        self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
+        self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

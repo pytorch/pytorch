@@ -189,7 +189,7 @@ Example::
         raise RuntimeError(f"Specified layout is unsupported for nested tensors: {layout}")
 
 
-def narrow(tensor: Tensor, dim: int, start: Union[int, Tensor], length: Union[int, Tensor], layout=torch.strided):
+def narrow(tensor: Tensor, dim: int, start: Union[int, Tensor], length: Union[int, Tensor], layout=torch.strided) -> Tensor:
     r"""
 Constructs a nested tensor (which might be a view) from :attr:`tensor`, a strided tensor. This follows
 similar semantics to torch.Tensor.narrow, where in the :attr:`dim`-th dimension the new nested tensor

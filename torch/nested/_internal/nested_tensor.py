@@ -89,7 +89,7 @@ class NestedTensor(torch.Tensor):
                 ragged_size = get_tensor_id(offsets, coeff=1)
             else:
                 ragged_size = get_tensor_id(lengths, coeff=1)
-        B = offsets.shape[0] - 1
+        B = offsets.shape[0]
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
         stride = values.stride()
@@ -141,14 +141,20 @@ class NestedTensor(torch.Tensor):
             "requires_grad": self.requires_grad,
             "ragged_size": self._size[self._ragged_idx],
         }
-        return ["_values", "_offsets", "_lengths"], ctx
+        inner_tensors = ["_values", "_offsets"]
+        if self._lengths:
+            inner_tensors.append("_lengths")
+        return inner_tensors, ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):
-        assert len(inner_tensors) == 2
+        assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        lengths = inner_tensors["_lengths"]
+        if "_lengths" in inner_tensors:
+            lengths = inner_tensors["_lengths"]
+        else:
+            lengths = None
 
         # NOTE [ Storing symbolic values as plain attributes on subclasses ]
         #
@@ -301,7 +307,9 @@ def jagged_from_list(
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),
-                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
+                torch.tensor([s[0] for s in sizes[:-1]], device=values.device).cumsum(
+                    dim=0
+                ),
             ]
         )
 
