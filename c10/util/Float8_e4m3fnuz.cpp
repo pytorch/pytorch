@@ -1,5 +1,6 @@
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <iostream>
+#include <array>
 
 namespace c10 {
 
