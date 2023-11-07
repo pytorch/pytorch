@@ -1,43 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import sys
 from itertools import chain
-from typing import Any, Callable, Dict
+from typing import Any, Dict
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
-    _patch_model_state_dict,
-    _patch_optimizer_state_dict,
-    get_model_state_dict,
-    get_state_dict,
     PG,
-    set_model_state_dict,
     set_state_dict,
     STATE,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.distributed.optim import _apply_optimizer_in_backward
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_dist_composable import (
-    CompositeParamModel,
-    UnitModule,
-)
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
 class VerifyStateDictMixin:
-
     def _compare_tensor(self, orig_tensor, dist_tensor):
         if isinstance(dist_tensor, (DTensor, ShardedTensor)):
             dist_tensor = _gather_state_dict({"mykey": dist_tensor}).pop("mykey")
@@ -48,7 +28,7 @@ class VerifyStateDictMixin:
         self,
         msd: Dict[str, Any],
         dist_msd: Dict[str, Any],
-        options: StateDictOptions=StateDictOptions(),
+        options: StateDictOptions = StateDictOptions(),
     ) -> None:
         if not options.ignore_frozen_params:
             self.assertEqual(len(msd), len(dist_msd))
