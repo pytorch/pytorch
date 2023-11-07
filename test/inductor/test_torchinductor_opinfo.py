@@ -230,6 +230,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
     "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
