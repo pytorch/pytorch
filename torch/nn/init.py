@@ -1,25 +1,26 @@
+"""This file contains utilities for initializing neural network parameters."""
 import math
 import warnings
 
 from torch import Tensor
 import torch
-
+from typing import Optional as _Optional
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
 # lets us keep those builtins small and re-usable.
-def _no_grad_uniform_(tensor, a, b):
+def _no_grad_uniform_(tensor, a, b, generator=None):
     with torch.no_grad():
-        return tensor.uniform_(a, b)
+        return tensor.uniform_(a, b, generator=generator)
 
 
-def _no_grad_normal_(tensor, mean, std):
+def _no_grad_normal_(tensor, mean, std, generator=None):
     with torch.no_grad():
-        return tensor.normal_(mean, std)
+        return tensor.normal_(mean, std, generator=generator)
 
 
-def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+def _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=None):
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x):
         # Computes standard normal cumulative distribution function
@@ -39,7 +40,7 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
         # Uniformly fill tensor with values from [l, u], then translate to
         # [2l-1, 2u-1].
-        tensor.uniform_(2 * l - 1, 2 * u - 1)
+        tensor.uniform_(2 * l - 1, 2 * u - 1, generator=generator)
 
         # Use inverse cdf transform for normal distribution to get truncated
         # standard normal
@@ -66,6 +67,7 @@ def _no_grad_zero_(tensor):
 
 def calculate_gain(nonlinearity, param=None):
     r"""Return the recommended gain value for the given nonlinearity function.
+
     The values are as follows:
 
     ================= ====================================================
@@ -85,7 +87,7 @@ def calculate_gain(nonlinearity, param=None):
         you should use ``nonlinearity='linear'`` instead of ``nonlinearity='selu'``.
         This gives the initial weights a variance of ``1 / N``,
         which is necessary to induce a stable fixed point in the forward pass.
-        In contrast, the default gain for ``SELU`` sacrifices the normalisation
+        In contrast, the default gain for ``SELU`` sacrifices the normalization
         effect for more stable gradient flow in rectangular layers.
 
     Args:
@@ -111,52 +113,78 @@ def calculate_gain(nonlinearity, param=None):
             # True/False are instances of int, hence check above
             negative_slope = param
         else:
-            raise ValueError("negative_slope {} not a valid number".format(param))
+            raise ValueError(f"negative_slope {param} not a valid number")
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
     elif nonlinearity == 'selu':
         return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
-        raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
+        raise ValueError(f"Unsupported nonlinearity {nonlinearity}")
 
 
-def uniform_(tensor: Tensor, a: float = 0., b: float = 1.) -> Tensor:
-    r"""Fills the input Tensor with values drawn from the uniform
-    distribution :math:`\mathcal{U}(a, b)`.
+def uniform_(
+    tensor: Tensor,
+    a: float = 0.0,
+    b: float = 1.0,
+    generator: _Optional[torch.Generator] = None,
+) -> Tensor:
+    r"""Fill the input Tensor with values drawn from the uniform distribution.
+
+    :math:`\mathcal{U}(a, b)`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.uniform_(w)
     """
     if torch.overrides.has_torch_function_variadic(tensor):
-        return torch.overrides.handle_torch_function(uniform_, (tensor,), tensor=tensor, a=a, b=b)
-    return _no_grad_uniform_(tensor, a, b)
+        return torch.overrides.handle_torch_function(
+            uniform_, (tensor,), tensor=tensor, a=a, b=b, generator=generator
+        )
+    return _no_grad_uniform_(tensor, a, b, generator)
 
 
-def normal_(tensor: Tensor, mean: float = 0., std: float = 1.) -> Tensor:
-    r"""Fills the input Tensor with values drawn from the normal
-    distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
+def normal_(
+    tensor: Tensor,
+    mean: float = 0.0,
+    std: float = 1.0,
+    generator: _Optional[torch.Generator] = None,
+) -> Tensor:
+    r"""Fill the input Tensor with values drawn from the normal distribution.
+
+    :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
         mean: the mean of the normal distribution
         std: the standard deviation of the normal distribution
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.normal_(w)
     """
     if torch.overrides.has_torch_function_variadic(tensor):
-        return torch.overrides.handle_torch_function(normal_, (tensor,), tensor=tensor, mean=mean, std=std)
-    return _no_grad_normal_(tensor, mean, std)
+        return torch.overrides.handle_torch_function(
+            normal_, (tensor,), tensor=tensor, mean=mean, std=std, generator=generator
+        )
+    return _no_grad_normal_(tensor, mean, std, generator)
 
-def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = -2., b: float = 2.) -> Tensor:
-    r"""Fills the input Tensor with values drawn from a truncated
-    normal distribution. The values are effectively drawn from the
+def trunc_normal_(
+    tensor: Tensor,
+    mean: float = 0.,
+    std: float = 1.,
+    a: float = -2.,
+    b: float = 2.,
+    generator: _Optional[torch.Generator] = None
+) -> Tensor:
+    r"""Fill the input Tensor with values drawn from a truncated normal distribution.
+
+    The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
     with values outside :math:`[a, b]` redrawn until they are within
     the bounds. The method used for generating the random values works
@@ -168,16 +196,17 @@ def trunc_normal_(tensor: Tensor, mean: float = 0., std: float = 1., a: float = 
         std: the standard deviation of the normal distribution
         a: the minimum cutoff value
         b: the maximum cutoff value
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.trunc_normal_(w)
     """
-    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b, generator=generator)
 
 
 def constant_(tensor: Tensor, val: float) -> Tensor:
-    r"""Fills the input Tensor with the value :math:`\text{val}`.
+    r"""Fill the input Tensor with the value :math:`\text{val}`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -193,7 +222,7 @@ def constant_(tensor: Tensor, val: float) -> Tensor:
 
 
 def ones_(tensor: Tensor) -> Tensor:
-    r"""Fills the input Tensor with the scalar value `1`.
+    r"""Fill the input Tensor with the scalar value `1`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -206,7 +235,7 @@ def ones_(tensor: Tensor) -> Tensor:
 
 
 def zeros_(tensor: Tensor) -> Tensor:
-    r"""Fills the input Tensor with the scalar value `0`.
+    r"""Fill the input Tensor with the scalar value `0`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -219,8 +248,9 @@ def zeros_(tensor: Tensor) -> Tensor:
 
 
 def eye_(tensor):
-    r"""Fills the 2-dimensional input `Tensor` with the identity
-    matrix. Preserves the identity of the inputs in `Linear` layers, where as
+    r"""Fill the 2-dimensional input `Tensor` with the identity matrix.
+
+    Preserves the identity of the inputs in `Linear` layers, where as
     many inputs are preserved as possible.
 
     Args:
@@ -239,8 +269,9 @@ def eye_(tensor):
 
 
 def dirac_(tensor, groups=1):
-    r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
-    delta function. Preserves the identity of the inputs in `Convolutional`
+    r"""Fill the {3, 4, 5}-dimensional input `Tensor` with the Dirac delta function.
+
+    Preserves the identity of the inputs in `Convolutional`
     layers, where as many input channels are preserved as possible. In case
     of groups>1, each group of channels preserves identity
 
@@ -300,11 +331,14 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010), using a uniform
-    distribution. The resulting tensor will have values sampled from
+def xavier_uniform_(
+    tensor: Tensor, gain: float = 1.0, generator: _Optional[torch.Generator] = None
+) -> Tensor:
+    r"""Fill the input `Tensor` with values using a Xavier uniform distribution.
+
+    The method is described in `Understanding the difficulty of training
+    deep feedforward neural networks` - Glorot, X. & Bengio, Y. (2010).
+    The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-a, a)` where
 
     .. math::
@@ -315,6 +349,7 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -324,15 +359,19 @@ def xavier_uniform_(tensor: Tensor, gain: float = 1.) -> Tensor:
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
 
-    return _no_grad_uniform_(tensor, -a, a)
+    return _no_grad_uniform_(tensor, -a, a, generator)
 
 
-def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Understanding the difficulty of training deep feedforward
-    neural networks` - Glorot, X. & Bengio, Y. (2010), using a normal
-    distribution. The resulting tensor will have values sampled from
-    :math:`\mathcal{N}(0, \text{std}^2)` where
+def xavier_normal_(
+    tensor: Tensor,
+    gain: float = 1.0,
+    generator: _Optional[torch.Generator] = None,
+) -> Tensor:
+    r"""Fill the input `Tensor` with values using a Xavier normal distribution.
+
+    The method is described in `Understanding the difficulty of training deep feedforward
+    neural networks` - Glorot, X. & Bengio, Y. (2010). The resulting tensor
+    will have values sampled from :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
         \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan\_in} + \text{fan\_out}}}
@@ -342,6 +381,7 @@ def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -350,26 +390,31 @@ def xavier_normal_(tensor: Tensor, gain: float = 1.) -> Tensor:
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
 
-    return _no_grad_normal_(tensor, 0., std)
+    return _no_grad_normal_(tensor, 0., std, generator)
 
 
 def _calculate_correct_fan(tensor, mode):
     mode = mode.lower()
     valid_modes = ['fan_in', 'fan_out']
     if mode not in valid_modes:
-        raise ValueError("Mode {} not supported, please use one of {}".format(mode, valid_modes))
+        raise ValueError(f"Mode {mode} not supported, please use one of {valid_modes}")
 
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     return fan_in if mode == 'fan_in' else fan_out
 
 
 def kaiming_uniform_(
-    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+    tensor: Tensor,
+    a: float = 0,
+    mode: str = "fan_in",
+    nonlinearity: str = "leaky_relu",
+    generator: _Optional[torch.Generator] = None,
 ):
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015), using a
-    uniform distribution. The resulting tensor will have values sampled from
+    r"""Fill the input `Tensor` with values using a Kaiming uniform distribution.
+
+    The method is described in `Delving deep into rectifiers: Surpassing
+    human-level performance on ImageNet classification` - He, K. et al. (2015).
+    The resulting tensor will have values sampled from
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
@@ -387,6 +432,7 @@ def kaiming_uniform_(
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -399,7 +445,8 @@ def kaiming_uniform_(
             tensor=tensor,
             a=a,
             mode=mode,
-            nonlinearity=nonlinearity)
+            nonlinearity=nonlinearity,
+            generator=generator)
 
     if 0 in tensor.shape:
         warnings.warn("Initializing zero-element tensors is a no-op")
@@ -409,16 +456,21 @@ def kaiming_uniform_(
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
-        return tensor.uniform_(-bound, bound)
+        return tensor.uniform_(-bound, bound, generator=generator)
 
 
 def kaiming_normal_(
-    tensor: Tensor, a: float = 0, mode: str = 'fan_in', nonlinearity: str = 'leaky_relu'
+    tensor: Tensor,
+    a: float = 0,
+    mode: str = "fan_in",
+    nonlinearity: str = "leaky_relu",
+    generator: _Optional[torch.Generator] = None,
 ):
-    r"""Fills the input `Tensor` with values according to the method
-    described in `Delving deep into rectifiers: Surpassing human-level
-    performance on ImageNet classification` - He, K. et al. (2015), using a
-    normal distribution. The resulting tensor will have values sampled from
+    r"""Fill the input `Tensor` with values using a Kaiming normal distribution.
+
+    The method is described in `Delving deep into rectifiers: Surpassing
+    human-level performance on ImageNet classification` - He, K. et al. (2015).
+    The resulting tensor will have values sampled from
     :math:`\mathcal{N}(0, \text{std}^2)` where
 
     .. math::
@@ -436,6 +488,7 @@ def kaiming_normal_(
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -448,12 +501,17 @@ def kaiming_normal_(
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     with torch.no_grad():
-        return tensor.normal_(0, std)
+        return tensor.normal_(0, std, generator=generator)
 
 
-def orthogonal_(tensor, gain=1):
-    r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
-    described in `Exact solutions to the nonlinear dynamics of learning in deep
+def orthogonal_(
+    tensor,
+    gain=1,
+    generator: _Optional[torch.Generator] = None,
+):
+    r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
+
+    Described in `Exact solutions to the nonlinear dynamics of learning in deep
     linear neural networks` - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
     trailing dimensions are flattened.
@@ -461,6 +519,7 @@ def orthogonal_(tensor, gain=1):
     Args:
         tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         gain: optional scaling factor
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
@@ -475,7 +534,7 @@ def orthogonal_(tensor, gain=1):
         return tensor
     rows = tensor.size(0)
     cols = tensor.numel() // rows
-    flattened = tensor.new(rows, cols).normal_(0, 1)
+    flattened = tensor.new(rows, cols).normal_(0, 1, generator=generator)
 
     if rows < cols:
         flattened.t_()
@@ -496,9 +555,15 @@ def orthogonal_(tensor, gain=1):
     return tensor
 
 
-def sparse_(tensor, sparsity, std=0.01):
-    r"""Fills the 2D input `Tensor` as a sparse matrix, where the
-    non-zero elements will be drawn from the normal distribution
+def sparse_(
+    tensor,
+    sparsity,
+    std=0.01,
+    generator: _Optional[torch.Generator] = None,
+):
+    r"""Fill the 2D input `Tensor` as a sparse matrix.
+
+    The non-zero elements will be drawn from the normal distribution
     :math:`\mathcal{N}(0, 0.01)`, as described in `Deep learning via
     Hessian-free optimization` - Martens, J. (2010).
 
@@ -507,6 +572,7 @@ def sparse_(tensor, sparsity, std=0.01):
         sparsity: The fraction of elements in each column to be set to zero
         std: the standard deviation of the normal distribution used to generate
             the non-zero values
+        generator: the torch Generator to sample from (default: None)
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -519,7 +585,7 @@ def sparse_(tensor, sparsity, std=0.01):
     num_zeros = int(math.ceil(sparsity * rows))
 
     with torch.no_grad():
-        tensor.normal_(0, std)
+        tensor.normal_(0, std, generator=generator)
         for col_idx in range(cols):
             row_indices = torch.randperm(rows)
             zero_indices = row_indices[:num_zeros]
@@ -533,18 +599,16 @@ def _make_deprecate(meth):
     old_name = new_name[:-1]
 
     def deprecated_init(*args, **kwargs):
-        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
-                      .format(old_name, new_name), stacklevel=2)
+        warnings.warn(f"nn.init.{old_name} is now deprecated in favor of nn.init.{new_name}.", stacklevel=2)
         return meth(*args, **kwargs)
 
-    deprecated_init.__doc__ = r"""
+    deprecated_init.__doc__ = fr"""
     {old_name}(...)
 
     .. warning::
         This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
 
-    See :func:`~torch.nn.init.{new_name}` for details.""".format(
-        old_name=old_name, new_name=new_name)
+    See :func:`~torch.nn.init.{new_name}` for details."""
     deprecated_init.__name__ = old_name
     return deprecated_init
 

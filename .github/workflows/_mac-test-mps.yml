@@ -14,17 +14,54 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
-      runs-on:
+      python-version:
         required: false
         type: string
-        default: "macos-m1-12"
-        description: Hardware to run tests on
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
 
 jobs:
-  run_mps_test:
-    name: "Run MPS tests"
-    runs-on: ${{ inputs.runs-on }}
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+      reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+  test:
+    needs: filter
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    strategy:
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Print runner OS/HW info
+        shell: arch -arch arm64 bash {0}
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -42,52 +79,67 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      # This is copied from the main macos test workflow. It was missed in the earlier fix because macos M1
-      # runners are shared and not ephemeral, so the issue wasn't manifested if the runners with the fix were
-      # used
-      - name: Install macOS homebrew dependencies
-        run: |
-          # Install dependencies
-          brew install libomp
-          brew link --force libomp
-
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.9
+          python-version: ${{ inputs.python-version }}
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
           pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
 
-      - name: Install PyTorch
-        env:
-          ENV_NAME: conda-test-env-${{ github.run_id }}
-          PY_VERS: 3.9
-        shell: arch -arch arm64 bash {0}
-        run: |
-          # shellcheck disable=SC1090
-          set -ex
-          # As wheels are cross-compiled they are reported as x86_64 ones
-          ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
-
-      - name: Run MPS tests
+      - name: Install PyTorch and run MPS tests
         id: test
         env:
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          TEST_CONFIG: ${{ matrix.config }}
           ENV_NAME: conda-test-env-${{ github.run_id }}
+          PY_VERS: 3.9
           PR_BODY: ${{ github.event.pull_request.body }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
           set -ex
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # Print out some information about the test environment
+          which conda
+          conda --version
+          ${CONDA_RUN} which python3
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} python --version
+
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
           ${CONDA_RUN} python3 test/run_test.py --mps --verbose
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
-          cat test/**/*.log || true
+          cat test/**/*_toprint.log || true
 
       - name: Get workflow job id
         id: get-job-id
@@ -101,4 +153,9 @@ jobs:
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
           use-gha: true
-          file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main

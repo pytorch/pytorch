@@ -1,16 +1,20 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <memory>
 
 namespace c10 {
 
 class SymNodeImpl;
 using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
+// When you add a method, you also need to edit
+// torch/csrc/jit/python/init.cpp
+// torch/csrc/utils/python_symnode.h
+// c10/core/ConstantSymNodeImpl.h
 class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
  public:
   ~SymNodeImpl() override = default;
@@ -93,7 +97,35 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode sym_not() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymNode sym_ite(const SymNode& then_val, const SymNode& else_val) {
+    TORCH_CHECK(false, "NYI");
+  };
   // NB: self is ignored here, only the arguments are used
+  virtual SymNode is_contiguous(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode is_channels_last_contiguous_2d(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode is_channels_last_contiguous_3d(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode is_channels_last_strides_2d(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymNode is_channels_last_strides_3d(
+      ArrayRef<SymNode> sizes,
+      ArrayRef<SymNode> strides) {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual SymNode is_non_overlapping_and_dense(
       ArrayRef<SymNode> sizes,
       ArrayRef<SymNode> strides) {
@@ -123,19 +155,53 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool expect_true(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  };
+  virtual bool expect_size(const char* file, int64_t line) {
+    // No improvement for unbacked SymInts by default, replace this
+    // with a better implementation!
+    return ge(wrap_int(0))->guard_bool(file, line);
+  };
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };
   virtual bool bool_() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool has_hint() {
+    TORCH_CHECK(false, "NYI");
+  };
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual c10::optional<int64_t> singleton_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> singleton_coeff() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> constant_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<bool> constant_bool() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> maybe_as_int() {
+    return c10::nullopt;
+  }
+  virtual bool is_constant() {
+    return false;
+  }
+  virtual bool is_symbolic() {
+    return true;
+  }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
-  };
+  }
 };
 
 } // namespace c10

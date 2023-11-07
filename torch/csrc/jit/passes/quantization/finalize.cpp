@@ -168,7 +168,7 @@ void FoldQuantizedPrepackingOps(Module& module) {
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
 
-std::unordered_set<std::string> RegisterPrePackingParams(
+static std::unordered_set<std::string> RegisterPrePackingParams(
     Module& module,
     const std::string& method_name) {
   auto filter_fn = [](const Node* n) -> bool {
@@ -233,7 +233,7 @@ Module FinalizeOnDevicePTQ(
   const std::string quantized_method_name = "quantized_" + orig_method_name;
   auto graph = module.get_method(method_name).graph();
   // Doing some AOT optimizations here
-  // Of all CSE seeems to be required otherwise in some experiments
+  // Of all CSE seems to be required otherwise in some experiments
   // serialized model is incorrect. As in it cannot be deserialized
   // Rest are included as canonical optimizations that are not for inference
   EliminateCommonSubexpression(graph);
@@ -257,7 +257,7 @@ Module FinalizeOnDevicePTQ(
   // 1. Replicate this method in quantize_forward
   // 2. Remove SetAttr for fp weights that are reset by quantize_forward
   // 3. Remove SetAttr node which will subsequently optimize away the nodes
-  //    producin packed_params
+  //    producing packed_params
   // 4. Modify quantized_forward to remove all the nodes except for SetAttrs
   cloneMethod(module, method_name, quantized_method_name);
   // removeWeightSetAttrs(module, quantized_method_name);
@@ -265,7 +265,7 @@ Module FinalizeOnDevicePTQ(
   removePackedParamInsertionAndFPWeightsSetAttr(
       quantized_graph, packed_param_attr_names);
   // Removing packed params is not sufficient since that does not do DCE
-  // for observer node's getatts and callmthods because callmethods have side
+  // for observer node's getatts and callmethods because callmethods have side
   // effects
   removeObserverCallMethods(quantized_graph);
   // This step removed the return output from the graph and subsequent

@@ -7,10 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
-namespace at {
-namespace vec {
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -680,6 +678,16 @@ public:
   static Vectorized<T> loadu(const void* ptr) {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
+  static Vectorized<T> loadu_one_fourth(const void* ptr) {
+      // Fast path if only load element number of 8.
+      // Note: We didn't merge it as fast path of loadu(const void* ptr, T count),
+      // Because loadu(const void* ptr, T count) requires zero initialization for upper 128 bits.
+      // However, by using _mm256_castsi128_si256, the upper 128 bits of the result are undefined.
+      // TODO<leslie> We can use _mm256_zextsi128_si256 in the furture,
+      // since gcc 9.3 doesn't support it now.
+      __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr));
+      return _mm256_castsi128_si256(input_128);
+  }
   static Vectorized<T> loadu(const void* ptr, T count) {
     __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
@@ -697,9 +705,14 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ T tmp_values[size()];
-      _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(T));
+      if (count == 8) {
+        // Fast path if only store element number of 8
+        _mm_storel_epi64(reinterpret_cast<__m128i*>(ptr), _mm256_castsi256_si128(values));
+      } else {
+        __at_align__ T tmp_values[size()];
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
+        std::memcpy(ptr, tmp_values, count * sizeof(T));
+      }
     }
   }
   const T& operator[](int idx) const  = delete;
@@ -1398,7 +1411,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c0 = _mm256_sllv_epi32(a0, b0);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c0 = _mm256_srav_epi32(a0, b0);
     else
       c0 = _mm256_srlv_epi32(a0, b0);
@@ -1412,7 +1425,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c1 = _mm256_sllv_epi32(a1, b1);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c1 = _mm256_srav_epi32(a1, b1);
     else
       c1 = _mm256_srlv_epi32(a1, b1);
@@ -1426,7 +1439,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c2 = _mm256_sllv_epi32(a2, b2);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c2 = _mm256_srav_epi32(a2, b2);
     else
       c2 = _mm256_srlv_epi32(a2, b2);
@@ -1440,7 +1453,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c3 = _mm256_sllv_epi32(a3, b3);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c3 = _mm256_srav_epi32(a3, b3);
     else
       c3 = _mm256_srlv_epi32(a3, b3);
@@ -1481,16 +1494,22 @@ Vectorized<uint8_t> inline operator<<(const Vectorized<uint8_t>& a, const Vector
 
 template <>
 Vectorized<int64_t> inline operator>>(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
-  // No vector instruction for right shifting int64_t, so emulating it
+  // No vector instruction for right arithmetic shifting int64_t, so emulating it
   // instead.
 
+  // Clamp the shift values such that shift values < 0 and > 64 are changed to 64
+  // which results in -1 for negative input and 0 for non-negative input.
+  __m256i zero = _mm256_set1_epi64x(0);
+  __m256i max_shift = _mm256_set1_epi64x(64);
+  __m256i mask = _mm256_or_si256(_mm256_cmpgt_epi64(zero, b), _mm256_cmpgt_epi64(b, max_shift));
+  __m256i shift = _mm256_blendv_epi8(b, max_shift, mask);
   // Shift the number logically to the right, thus filling the most
   // significant bits with 0s.  Then, replace these bits with the sign
   // bit.
-  __m256i sign_bits = _mm256_cmpgt_epi64(_mm256_set1_epi64x(0), a);
-  __m256i b_inv_mod_64 = _mm256_sub_epi64(_mm256_set1_epi64x(64), b);
-  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, b_inv_mod_64);
-  __m256i c = _mm256_srlv_epi64(a, b);
+  __m256i sign_bits = _mm256_cmpgt_epi64(zero, a);
+  __m256i sign_shift = _mm256_sub_epi64(max_shift, shift);
+  __m256i sign_ext = _mm256_sllv_epi64(sign_bits, sign_shift);
+  __m256i c = _mm256_srlv_epi64(a, shift);
   c = _mm256_or_si256(c, sign_ext);
 
   return c;
@@ -1518,4 +1537,4 @@ Vectorized<uint8_t> inline operator>>(const Vectorized<uint8_t>& a, const Vector
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

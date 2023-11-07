@@ -379,15 +379,6 @@ struct RandomFromToStub {
   }
 };
 
-template<typename RNG>
-struct RandomFromToMeta {
-  // No-op!
-  void operator()(TensorIteratorBase& iter, uint64_t range, int64_t from, c10::optional<Generator> gen) {
-  }
-  void operator()(TensorIteratorBase& iter, c10::optional<Generator> gen) {
-  }
-};
-
 Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
   return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, std::move(gen));
 }
@@ -402,11 +393,13 @@ Tensor& random_meta_(Tensor& self, c10::optional<Generator> gen) {
 }
 
 Tensor& random_meta_(Tensor& self, int64_t from, optional<int64_t> to, c10::optional<Generator> gen) {
-  return at::native::templates::random_from_to_impl<RandomFromToMeta, Generator>(self, from, to, std::move(gen));
+  // No error checking yay
+  return self;
 }
 
 Tensor& random_meta_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
-  return random_meta_(self, 0, to, std::move(gen));
+  // No error checking yay
+  return self;
 }
 
 // ====================================================================================================================
@@ -477,7 +470,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
     .add_output(ret)
     .add_input(lambda)
     .build();
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -607,10 +600,6 @@ Tensor& multinomial_out(const Tensor& self,
   // Fast-path for no replacement or if only one sample is drawn.
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
-  // Half is not supported on CPU.
-  TORCH_CHECK(
-      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
-      "multinomial is not implemented for half on CPU");
   if (!with_replacement || n_sample == 1) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();

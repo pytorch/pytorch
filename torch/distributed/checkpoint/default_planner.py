@@ -11,7 +11,7 @@ from typing import List, Tuple, Dict, Any, Union, cast
 import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor
 
 
 from torch.distributed.checkpoint.planner import (
@@ -51,7 +51,7 @@ from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.checkpoint._traverse import set_element
 
-logger: logging.Logger = logging.getLogger(__file__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -249,9 +249,16 @@ def create_default_local_load_plan(
     It handles resharding by issuing multiple read requests against storage in order to match
     load requirements.
     """
+
     for fqn, obj in state_dict.items():
         md = metadata.state_dict_metadata[fqn]
-        requests += _create_read_items(fqn, md, obj)
+        # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
+        if isinstance(obj, DTensor):
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_read_items(fqn, md, obj)
+        else:
+            requests += _create_read_items(fqn, md, obj)
 
     return LoadPlan(requests)
 
@@ -281,20 +288,28 @@ def create_default_local_save_plan(
     """
     requests = []
     for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor) or is_coordinator:
+        # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
+        if isinstance(obj, DTensor):
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_write_items(fqn, obj)
+        elif isinstance(obj, (torch.Tensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
+
     return SavePlan(requests)
 
 
 def create_default_global_save_plan(
     all_plans: List[SavePlan],
+    rewrite_index_hints: bool = True,
 ) -> Tuple[List[SavePlan], Metadata]:
     """
     Create the global plan and metadata used by DefaultSavePlanner.
 
     Metadata is produced by concatenating the metadata of all ``WriteItem`` from the supplied plans.
 
-    The only global planning change is to update index hints in all ``MetadataIndex`` objects.
+    The only global planning change is to update index hints in all ``MetadataIndex`` objects if
+    ``rewrite_index_hints`` is True.
     """
     md: Dict[str, STORAGE_TYPES] = {}
     new_plans = []
@@ -320,10 +335,12 @@ def create_default_global_save_plan(
                         ),
                     ),
                 )
-                new_index = dataclasses.replace(
-                    item.index, index=len(tensor_md.chunks)
-                )
-                new_item = dataclasses.replace(item, index=new_index)
+                new_item = item
+                if rewrite_index_hints:
+                    new_index = dataclasses.replace(
+                        item.index, index=len(tensor_md.chunks)
+                    )
+                    new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
                 assert (
@@ -392,30 +409,33 @@ def _validate_global_plan(
             continue
         chunks_volume = 0
         for chunk_idx, chunk0 in enumerate(value.chunks):
+            # Compute the volume
             if not _check_box_bounds(value.size, chunk0):
                 logger.warning(
-                    f"""
-                        key:{key} has out of bounds chunk:
-                        tensor-size:{value.size} chunk: {chunk0}
                     """
+                        key:%s has out of bounds chunk:
+                        tensor-size:%s chunk: %s
+                    """, key, value.size, chunk0
                 )
                 all_good = False
             chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
 
+            # Check for overlap
             for chunk1 in value.chunks[chunk_idx + 1 :]:
                 if _check_box_overlap(chunk0, chunk1):
                     logger.warning(
-                        f"key:{key} has overlapping chunks: {chunk0} {chunk1}"
+                        "key:%s has overlapping chunks: %s %s", key, chunk0, chunk1
                     )
                     all_good = False
 
+        # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
         if chunks_volume != tensor_volume:
             logger.warning(
-                f"""
-                    key:{key} invalid fill tensor-volume:
-                    {tensor_volume} chunks-volume: {chunks_volume}
                 """
+                    key:%s invalid fill tensor-volume:
+                    %s chunks-volume: %s
+                """, key, tensor_volume, chunks_volume
             )
             all_good = False
 

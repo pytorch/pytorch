@@ -1,5 +1,6 @@
 #include <ATen/Utils.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/ApproximateClock.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 
@@ -59,7 +60,7 @@ std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
 }
 
 float* float_data_ptr(const at::Tensor& t) {
-  return t.unsafeGetTensorImpl()->data_ptr_impl<float>();
+  return t.data_ptr<float>();
 }
 } // namespace
 
@@ -68,8 +69,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   // Constructor.
   // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit BackendWithCompiler() {}
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~BackendWithCompiler() = default;
+  virtual ~BackendWithCompiler() override = default;
 
   bool is_available() override {
     return true;
@@ -113,14 +113,14 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 
     c10::List<at::Tensor> output_list;
 #ifndef NO_PROFILING
-    auto start_us = torch::profiler::impl::getTime() / 1000;
+    auto start_us = c10::getTime() / 1000;
 #endif
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTupleRef().elements()[0].toStringRef();
       auto debug_handle = val.toTupleRef().elements()[1].toInt();
 #ifndef NO_PROFILING
-      auto start_time_us = torch::profiler::impl::getTime() / 1000;
+      auto start_time_us = c10::getTime() / 1000;
 #endif
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
@@ -172,7 +172,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
         TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
 #ifndef NO_PROFILING
-      auto end_time_us = torch::profiler::impl::getTime() / 1000;
+      auto end_time_us = c10::getTime() / 1000;
       auto duration = end_time_us - start_time_us;
       op_runtimes_us.emplace_back(duration, debug_handle, instruction);
 #endif

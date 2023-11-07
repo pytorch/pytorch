@@ -30,7 +30,7 @@ struct QuantOpParams {
   c10::QScheme qscheme{c10::kPerTensorAffine};
   std::vector<Value*> qparams;
   // This is only so that insertQuantizationOps can be templatized
-  // and subsequntly significant portion of that code can be reused.
+  // and subsequently significant portion of that code can be reused.
   std::string back() const {
     return "AttributeDoesNotExist";
   }
@@ -126,7 +126,7 @@ Node* insertDeQuant(
   Node* dequant = graph->create(Symbol::aten("dequantize"), {quantized_val});
   dequant->output()
       ->setDebugName(
-          original_val->debugName() + ".dequant." + c10::guts::to_string(id))
+          original_val->debugName() + ".dequant." + std::to_string(id))
       ->setType(original_val->type());
   graph->insertNode(dequant);
   return dequant;
@@ -714,7 +714,7 @@ class InsertQuantDeQuantHelper {
 
   // In order to propagate quantization ops through the ops that doesn't
   // require observation, we'll first inline the graph, and call the
-  // PropgateQuantizationOps pass
+  // PropagateQuantizationOps pass
   void propagateQuantizationOps(Module& module);
 
   // Used for dynamic quantization to selectively run the weight observers.
@@ -971,7 +971,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
   auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
-  return torch::make_unique<GraphFunction>(
+  return std::make_unique<GraphFunction>(
       name, observer_subgraph, build_observer_graph);
 }
 
@@ -1342,7 +1342,7 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
       }
       // 2. remove the dequantize ops from inputs
       removeDequantizeFromInputs(dequantized_inputs);
-      // 3. insert dequantize op for outpus
+      // 3. insert dequantize op for outputs
       for (auto* output : outputs_to_dequantize) {
         insertDeQuantForAllUse(output->owningGraph(), output, output);
       }

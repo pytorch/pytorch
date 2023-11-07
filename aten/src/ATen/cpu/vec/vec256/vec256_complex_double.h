@@ -12,8 +12,7 @@
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
@@ -121,7 +120,10 @@ public:
     return _mm256_hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m256d abs_() const {
-    return _mm256_sqrt_pd(abs_2_());                // abs     abs
+    auto real = _mm256_movedup_pd(values);       // real real
+    // movehdup_pd does not exist...
+    auto imag = _mm256_permute_pd(values, 0xf);  // imag imag
+    return Sleef_hypotd4_u05(real, imag);        // abs  abs
   }
   Vectorized<c10::complex<double>> abs() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
@@ -143,11 +145,8 @@ public:
     auto abs = abs_();
     auto zero = _mm256_setzero_pd();
     auto mask = _mm256_cmp_pd(abs, zero, _CMP_EQ_OQ);
-    auto abs_val = Vectorized(abs);
-
-    auto div = values / abs_val.values;       // x / abs(x)
-
-    return blendv(div, zero, mask);
+    auto div = values / abs;
+    return _mm256_blendv_pd(div, zero, mask);
   }
   __m256d real_() const {
     const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
@@ -214,14 +213,8 @@ public:
     return _mm256_sub_pd(pi_2, asin());
   }
   Vectorized<c10::complex<double>> atan() const;
-  Vectorized<c10::complex<double>> atan2(const Vectorized<c10::complex<double>>&) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erf() const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erfc() const {
-    AT_ERROR("not supported for complex numbers");
+  Vectorized<c10::complex<double>> atanh() const {
+    return map(std::atanh);
   }
   Vectorized<c10::complex<double>> exp() const {
     //exp(a + bi)
@@ -241,7 +234,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<double>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::expm1);
   }
   Vectorized<c10::complex<double>> sin() const {
     return map(std::sin);
@@ -261,21 +254,9 @@ public:
   Vectorized<c10::complex<double>> floor() const {
     return _mm256_floor_pd(values);
   }
-  Vectorized<c10::complex<double>> hypot(const Vectorized<c10::complex<double>> &) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igamma(const Vectorized<c10::complex<double>> &) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igammac(const Vectorized<c10::complex<double>> &) const {
-    AT_ERROR("not supported for complex numbers");
-  }
   Vectorized<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
-  }
-  Vectorized<c10::complex<double>> nextafter(const Vectorized<c10::complex<double>> &) const {
-    AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -330,18 +311,6 @@ public:
 
   Vectorized<c10::complex<double>> eq(const Vectorized<c10::complex<double>>& other) const;
   Vectorized<c10::complex<double>> ne(const Vectorized<c10::complex<double>>& other) const;
-  Vectorized<c10::complex<double>> lt(const Vectorized<c10::complex<double>>&) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> le(const Vectorized<c10::complex<double>>&) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> gt(const Vectorized<c10::complex<double>>&) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> ge(const Vectorized<c10::complex<double>>&) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
 };
 
 template <> Vectorized<c10::complex<double>> inline operator+(const Vectorized<c10::complex<double>> &a, const Vectorized<c10::complex<double>> &b) {
@@ -446,13 +415,17 @@ Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::eq(const Vectorized<c10::complex<double>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(const Vectorized<c10::complex<double>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<double>>(_mm256_set1_pd(1.0));
 }
 
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

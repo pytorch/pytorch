@@ -33,7 +33,7 @@ class FloatFunctional(torch.nn.Module):
         - mul_scalar
     """
     def __init__(self):
-        super(FloatFunctional, self).__init__()
+        super().__init__()
         self.activation_post_process = torch.nn.Identity()
 
     def forward(self, x):
@@ -76,6 +76,12 @@ class FloatFunctional(torch.nn.Module):
     def add_relu(self, x: Tensor, y: Tensor) -> Tensor:
         r = torch.add(x, y)
         r = torch.nn.functional.relu(r)
+        r = self.activation_post_process(r)
+        return r
+
+    r"""Operation equivalent to ``torch.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = torch.matmul(x, y)
         r = self.activation_post_process(r)
         return r
 
@@ -126,6 +132,11 @@ class FXFloatFunctional(torch.nn.Module):
         r = torch.nn.functional.relu(r)
         return r
 
+    r"""Operation equivalent to ``torch.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = torch.matmul(x, y)
+        return r
+
 class QFunctional(torch.nn.Module):
     r"""Wrapper class for quantized operations.
 
@@ -154,13 +165,13 @@ class QFunctional(torch.nn.Module):
         - mul_scalar
     """
     def __init__(self):
-        super(QFunctional, self).__init__()
+        super().__init__()
         self.scale = 1.0
         self.zero_point = 0
         self.activation_post_process = torch.nn.Identity()
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(QFunctional, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
@@ -169,16 +180,14 @@ class QFunctional(torch.nn.Module):
 
         self.scale = float(state_dict.pop(prefix + 'scale'))
         self.zero_point = int(state_dict.pop(prefix + 'zero_point'))
-        super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def _get_name(self):
         return 'QFunctional'
 
     def extra_repr(self):
-        return 'scale={}, zero_point={}'.format(
-            self.scale, self.zero_point
-        )
+        return f'scale={self.scale}, zero_point={self.zero_point}'
 
     def forward(self, x):
         raise RuntimeError("Functional is not intended to use the " +
@@ -220,6 +229,13 @@ class QFunctional(torch.nn.Module):
     def add_relu(self, x: Tensor, y: Tensor) -> Tensor:
         r = ops.quantized.add_relu(x, y, scale=self.scale, zero_point=self.zero_point)
         r = self.activation_post_process(r)
+        return r
+
+    r"""Operation equivalent to ``torch.ops.quantized.matmul(Tensor, Tensor)``"""
+    def matmul(self, x: Tensor, y: Tensor) -> Tensor:
+        r = ops.quantized.matmul(x, y, scale=self.scale, zero_point=self.zero_point)
+        # Note: this operation is not observed because the observation is not
+        # needed for the quantized op.
         return r
 
     @classmethod

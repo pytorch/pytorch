@@ -4,7 +4,9 @@
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
 
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 
@@ -41,9 +43,7 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
-    // AVX512 can be slower then AVX2, so lets keep it as opt-in
-    // see https://github.com/pytorch/pytorch/issues/80252
-#if defined(HAVE_AVX512_CPU_DEFINITION) && false
+#if defined(HAVE_AVX512_CPU_DEFINITION)
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
     // versions 9 & beyond. So, we want to ensure that only releases built with
     // supported compilers on supported hardware return CPU Capability AVX512,
@@ -129,6 +129,10 @@ void* DispatchStubImpl::get_call_ptr(
       TORCH_INTERNAL_ASSERT(mps_dispatch_ptr, "DispatchStub: missing MPS kernel");
       return mps_dispatch_ptr;
 #endif
+
+    case DeviceType::PrivateUse1:
+      TORCH_INTERNAL_ASSERT(privateuse1_dispatch_ptr, "DispatchStub: missing PrivateUse1 kernel");
+      return privateuse1_dispatch_ptr;
 
     default:
       AT_ERROR("DispatchStub: unsupported device type", device_type);

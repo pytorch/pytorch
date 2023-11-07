@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
 
 import functools
 import os
@@ -8,6 +9,7 @@ import unittest
 from typing import Optional
 
 import numpy as np
+import packaging.version
 
 import torch
 from torch.autograd import function
@@ -47,6 +49,12 @@ skipIfTravis = _skipper(lambda: os.getenv("TRAVIS"), "Skip In Travis")
 skipIfNoBFloat16Cuda = _skipper(
     lambda: not torch.cuda.is_bf16_supported(), "BFloat16 CUDA is not available"
 )
+
+skipIfQuantizationBackendQNNPack = _skipper(
+    lambda: torch.backends.quantized.engine == "qnnpack",
+    "Not compatible with QNNPack quantization backend",
+)
+
 
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
@@ -153,6 +161,136 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
         return wrapper
 
     return skip_dec
+
+
+# NOTE: This decorator is currently unused, but we may want to use it in the future when
+# we have more tests that are not supported in released ORT.
+def skip_min_ort_version(reason: str, version: str, dynamic_only: bool = False):
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if (
+                packaging.version.parse(self.ort_version).release
+                < packaging.version.parse(version).release
+            ):
+                if dynamic_only and not self.dynamic_shapes:
+                    return func(self, *args, **kwargs)
+
+                raise unittest.SkipTest(
+                    f"ONNX Runtime version: {version} is older than required version {version}. "
+                    f"Reason: {reason}."
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_dynamic_fx_test(reason: str):
+    """Skip dynamic exporting test.
+
+    Args:
+        reason: The reason for skipping dynamic exporting test.
+
+    Returns:
+        A decorator for skipping dynamic exporting test.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.dynamic_shapes:
+                raise unittest.SkipTest(
+                    f"Skip verify dynamic shapes test for FX. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_load_checkpoint_after_model_creation(reason: str):
+    """Skip loading checkpoint right after model initialization.
+
+    Args:
+        reason: The reason for skipping dynamic exporting test.
+
+    Returns:
+        A decorator for skipping dynamic exporting test.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.load_checkpoint_during_init:
+                raise unittest.SkipTest(
+                    f"Skip loading checkpoint during model initialization for FX tests. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_op_level_debug_test(reason: str):
+    """Skip tests with op_level_debug enabled.
+
+    Args:
+        reason: The reason for skipping tests with op_level_debug enabled.
+
+    Returns:
+        A decorator for skipping tests with op_level_debug enabled.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if self.op_level_debug:
+                raise unittest.SkipTest(
+                    f"Skip test with op_level_debug enabled. {reason}"
+                )
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def skip_in_ci(reason: str):
+    """Skip test in CI.
+
+    Args:
+        reason: The reason for skipping test in CI.
+
+    Returns:
+        A decorator for skipping test in CI.
+    """
+
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if os.getenv("CI"):
+                raise unittest.SkipTest(f"Skip test in CI. {reason}")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
+def xfail(reason: str):
+    """Expect failure.
+
+    Args:
+        reason: The reason for expected failure.
+
+    Returns:
+        A decorator for expecting test failure.
+    """
+    return unittest.expectedFailure
 
 
 # skips tests for opset_versions listed in unsupported_opset_versions.

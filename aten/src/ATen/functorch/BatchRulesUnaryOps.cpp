@@ -9,6 +9,7 @@
 
 namespace at { namespace functorch {
 
+namespace{
 std::tuple<Tensor,optional<int64_t>>
 clone_batch_rule(
     const Tensor& self,
@@ -48,19 +49,6 @@ clone_batch_rule(
 }
 
 std::tuple<Tensor,optional<int64_t>>
-contiguous_batch_rule(
-    const Tensor& self,
-    optional<int64_t> self_bdim,
-    MemoryFormat memory_format) {
-  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
-      "NYI: Tensor.contiguous(...) inside of vmap for memory_format other ",
-      "than torch.contiguous_format");
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = self_.contiguous(memory_format);
-  return std::make_tuple(result, 0);
-}
-
-std::tuple<Tensor,optional<int64_t>>
 view_as_complex_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
@@ -78,6 +66,7 @@ to_other_batch_rule(const Tensor& self, optional<int64_t> self_bdim,
                     bool copy, c10::optional<at::MemoryFormat> memory_format) {
   return std::make_tuple(self.to(other, non_blocking, copy, memory_format), self_bdim);
 }
+}
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
@@ -88,15 +77,9 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   POINTWISE_BOXED(op ## _); \
   VMAP_SUPPORT(op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
-  UNARY_POINTWISE(imag);
-  UNARY_POINTWISE(real);
   UNARY_POINTWISE(view_as_real);
   VMAP_SUPPORT(view_as_complex, view_as_complex_batch_rule);
   VMAP_SUPPORT(clone, clone_batch_rule);
-  VMAP_SUPPORT2(to, device, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, device)));
-  VMAP_SUPPORT2(to, dtype, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype)));
-  VMAP_SUPPORT2(to, dtype_layout, BASIC_UNARY_BATCH_RULE(ATEN_FN2(to, dtype_layout)));
-  VMAP_SUPPORT2(to, other, to_other_batch_rule);
 
   UNARY_POINTWISE(_to_copy);
   UNARY_POINTWISE(alias);
@@ -121,12 +104,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(expm1);
   UNARY_POINTWISE_ALL(floor);
   UNARY_POINTWISE_ALL(frac);
-  UNARY_POINTWISE(isfinite);
   UNARY_POINTWISE(isnan);
   UNARY_POINTWISE(isinf);
   UNARY_POINTWISE(isposinf);
   UNARY_POINTWISE(isneginf);
-  UNARY_POINTWISE(isreal);
   UNARY_POINTWISE_ALL(lgamma);
   UNARY_POINTWISE_ALL(log);
   UNARY_POINTWISE_ALL(log10);
@@ -167,6 +148,17 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE(special_i1);
   UNARY_POINTWISE(special_i1e);
   UNARY_POINTWISE(special_ndtri);
+  POINTWISE_BOXED(special_bessel_j0);
+  POINTWISE_BOXED(special_spherical_bessel_j0);
+  POINTWISE_BOXED(special_bessel_j1);
+  POINTWISE_BOXED(special_modified_bessel_i0);
+  POINTWISE_BOXED(special_modified_bessel_i1);
+  POINTWISE_BOXED(special_scaled_modified_bessel_k0);
+  POINTWISE_BOXED(special_modified_bessel_k0);
+  POINTWISE_BOXED(special_scaled_modified_bessel_k1);
+  POINTWISE_BOXED(special_modified_bessel_k1);
+  POINTWISE_BOXED(special_bessel_y0);
+  POINTWISE_BOXED(special_bessel_y1);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
   UNARY_POINTWISE_ALL(elu);
@@ -175,7 +167,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(hardtanh);
   UNARY_POINTWISE_ALL(hardswish);
   UNARY_POINTWISE_ALL(leaky_relu);
-  UNARY_POINTWISE(log_sigmoid);
   UNARY_POINTWISE_ALL(relu);
   UNARY_POINTWISE_ALL(celu);
   UNARY_POINTWISE(gelu);

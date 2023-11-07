@@ -10,8 +10,7 @@
 #include <cstddef>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void initScriptListBindings(PyObject* module);
 
@@ -40,6 +39,7 @@ class ScriptList final {
   // TODO: Do these make sense?
   using size_type = size_t;
   using diff_type = ptrdiff_t;
+  using ssize_t = Py_ssize_t;
 
   // Constructor for empty lists created during slicing, extending, etc.
   ScriptList(const TypePtr& type) : list_(AnyType::get()) {
@@ -119,13 +119,13 @@ class ScriptList final {
   }
 
   // Get the size of the list.
-  int64_t len() const {
+  ssize_t len() const {
     return list_.size();
   }
 
   // Count the number of times a value appears in the list.
-  int64_t count(const IValue& value) const {
-    int64_t total = 0;
+  ssize_t count(const IValue& value) const {
+    ssize_t total = 0;
 
     for (const auto& elem : list_) {
       if (elem == value) {
@@ -225,5 +225,4 @@ class ScriptList final {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

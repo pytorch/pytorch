@@ -67,7 +67,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.utils import FileManager, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
@@ -88,6 +89,10 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
+    "sym_size",
+    "sym_stride",
+    "sym_storage_offset",
+    "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
@@ -154,16 +159,13 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_tensor_strides",  # don't want to expose this to python
-    "_nested_tensor_offsets",  # don't want to expose this to python
-    "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
-    "_nested_view_from_buffer_copy",
-    "_nested_view_from_buffer_copy_out",
+    "nbytes",
+    "itemsize",
 ]
 
-SKIP_PYTHON_BINDINGS = list(
-    map(lambda pattern: re.compile(rf"^{pattern}$"), _SKIP_PYTHON_BINDINGS)
-)
+SKIP_PYTHON_BINDINGS = [
+    re.compile(rf"^{pattern}$") for pattern in _SKIP_PYTHON_BINDINGS
+]
 
 # These function signatures are not exposed to Python. Note that this signature
 # list does not support regex.
@@ -354,13 +356,18 @@ def gen(
     create_python_return_type_bindings(
         fm, functions, lambda fn: True, "python_return_types.cpp"
     )
+    create_python_return_type_bindings_header(
+        fm, functions, lambda fn: True, "python_return_types.h"
+    )
 
     valid_tags = parse_tags_yaml(tags_yaml_path)
 
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+                "".join(
+                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
+                )
             )
         }
 
@@ -429,22 +436,24 @@ def create_python_return_type_bindings(
 ) -> None:
     """
     Generate function to initialize and return named tuple for native functions
-    which returns named tuple and relevant entry for the map in `python_return_types.cpp`.
+    which returns named tuple and registration invocations in `python_return_types.cpp`.
     """
     py_return_types_definition: List[str] = []
-    py_return_types_map: List[str] = []
+    py_return_types_registrations: List[str] = []
 
     grouped = group_filter_overloads(pairs, pred)
 
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
-        definitions, map_entries = generate_return_type_definition_and_map_entry(
+        definitions, registrations = generate_return_type_definition_and_registrations(
             overloads
         )
         py_return_types_definition.append(
             "" if not definitions else "\n".join(definitions)
         )
-        py_return_types_map.append("" if not map_entries else "\n".join(map_entries))
+        py_return_types_registrations.append(
+            "" if not registrations else "\n".join(registrations)
+        )
 
     fm.write_with_template(
         filename,
@@ -453,7 +462,39 @@ def create_python_return_type_bindings(
             "generated_comment": "@"
             + f"generated from {fm.template_dir_for_comments()}/{filename}",
             "py_return_types": py_return_types_definition,
-            "py_return_types_map": py_return_types_map,
+            "py_return_types_registrations": py_return_types_registrations,
+        },
+    )
+
+
+def create_python_return_type_bindings_header(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    filename: str,
+) -> None:
+    """
+    Generate function to initialize and return named tuple for native functions
+    which returns named tuple and relevant entry for the map in `python_return_types.cpp`.
+    """
+    py_return_types_declarations: List[str] = []
+
+    grouped = group_filter_overloads(pairs, pred)
+
+    for name in sorted(grouped.keys(), key=lambda x: str(x)):
+        overloads = grouped[name]
+        declarations = generate_return_type_declarations(overloads)
+        py_return_types_declarations.append(
+            "" if not declarations else "\n".join(declarations)
+        )
+
+    fm.write_with_template(
+        filename,
+        filename,
+        lambda: {
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/{filename}",
+            "py_return_types_declarations": py_return_types_declarations,
         },
     )
 
@@ -546,7 +587,7 @@ def load_deprecated_signatures(
     # find matching original signatures for each deprecated signature
     results: List[PythonSignatureNativeFunctionPair] = []
 
-    with open(deprecated_yaml_path, "r") as f:
+    with open(deprecated_yaml_path) as f:
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
 
     for deprecated in deprecated_defs:
@@ -556,7 +597,7 @@ def load_deprecated_signatures(
         if is_out:
             aten_name = aten_name.replace("_out", "")
 
-        # HACK: these are fixed constants used to pass the the aten function.
+        # HACK: these are fixed constants used to pass the aten function.
         # The type must be known ahead of time
         known_constants = {
             "1": Type.parse("Scalar"),
@@ -676,27 +717,25 @@ def emit_namedtuple_call(
             typenames[tn_key] = typename
             typedefs.append(
                 f"""\
-static PyTypeObject* {typename} = get_namedtuple("{name}");"""
+static PyTypeObject* {typename} = generated::get_{name}_namedtuple();"""
             )
 
     return typedefs, typenames
 
 
-def generate_return_type_definition_and_map_entry(
+def generate_return_type_definition_and_registrations(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
 ) -> Tuple[List[str], List[str]]:
     """
     Generate block of function in `python_return_types.cpp` to initialize
     and return named tuple for a native function which returns named tuple
-    and relevant entry for the map in same file.
+    and registration invocations in same file.
     """
     typenames: Dict[
         str, str
     ] = {}  # map from unique name + field name lists to typedef name
-    definitions: List[str] = []  # function defintion to register the typedef
-    map_entries: List[
-        str
-    ] = []  # C++ map entry of <function_name, function creates it namedtuple>
+    definitions: List[str] = []  # function definition to register the typedef
+    registrations: List[str] = []  # register call for the typedef
 
     for overload in overloads:
         fieldnames = namedtuple_fieldnames(overload.function.func.returns)
@@ -728,9 +767,42 @@ PyTypeObject* get_{name}_namedtuple() {{
 }}
 """
             )
-            map_entries.append(f'{{"{name}", get_{name}_namedtuple()}}, ')
+            registrations.append(
+                f'addReturnType(return_types_module, "{name}", generated::get_{name}_namedtuple());'
+            )
 
-    return definitions, map_entries
+    return definitions, registrations
+
+
+def generate_return_type_declarations(
+    overloads: Sequence[PythonSignatureNativeFunctionPair],
+) -> List[str]:
+    """
+    Generate block of function declarations in `python_return_types.h` to initialize
+    and return named tuple for a native function.
+    """
+    typenames: Dict[
+        str, str
+    ] = {}  # map from unique name + field name lists to typedef name
+    declarations: List[str] = []  # function declaration to register the typedef
+
+    for overload in overloads:
+        fieldnames = namedtuple_fieldnames(overload.function.func.returns)
+        if not fieldnames:
+            continue
+
+        name = cpp.name(overload.function.func)  # use @with_native_function?
+        tn_key = gen_namedtuple_typename_key(overload.function)
+        typename = typenames.get(tn_key)
+
+        if typename is None:
+            typename = (
+                f'{name}NamedTuple{"" if not declarations else len(declarations)}'
+            )
+            typenames[tn_key] = typename
+            declarations.append(f"PyTypeObject* get_{name}_namedtuple();")
+
+    return declarations
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -866,7 +938,7 @@ def method_impl(
         name=name,
         pycname=pycname,
         method_header=method_header,
-        max_args=max(map(lambda o: o.signature.arguments_count(), overloads)),
+        max_args=max(o.signature.arguments_count() for o in overloads),
         signatures=signatures,
         traceable=traceable,
         check_has_torch_function=gen_has_torch_function_check(
@@ -1011,24 +1083,20 @@ def method_def(
     """
     pycname = get_pycname(name)
 
+    if name.dunder_method:
+        # PyMethodDef entry for binary op, throws not implemented error
+        pycname = f"TypeError_to_NotImplemented_<{pycname}>"
+
     if is_noarg(overloads):
-        pyfunc_cast = ""
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pyfunc_cast = "castPyCFunctionWithKeywords"
+        pycname = f"castPyCFunctionWithKeywords({pycname})"
         flags = "METH_VARARGS | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
 
-    if name.dunder_method:
-        # PyMethodDef entry for binary op, throws not implemented error
-        return f"""\
-{{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
-    else:
-        # PyMethodDef entry
-        return f"""\
-{{"{name}", {pyfunc_cast}({pycname}), {flags}, NULL}},"""
+    return f'{{"{name}", {pycname}, {flags}, NULL}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1218,7 +1286,7 @@ def sort_overloads(
                 del larger_than[j]
                 sorted_ids.append(j)
 
-    return list(map(lambda x: grouped_overloads[x], sorted_ids))
+    return [grouped_overloads[x] for x in sorted_ids]
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1252,10 +1320,7 @@ def emit_single_dispatch(
         # dispatch lambda signature
         name = cpp.name(f.func)
         lambda_formals = ", ".join(
-            map(
-                lambda a: f"{a.type_str} {a.name}",
-                dispatch_lambda_args(ps, f, symint=symint),
-            )
+            f"{a.type_str} {a.name}" for a in dispatch_lambda_args(ps, f, symint=symint)
         )
         lambda_return = dispatch_lambda_return_str(f)
 

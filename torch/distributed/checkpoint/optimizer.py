@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import copy
 import dataclasses
 from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 from torch.distributed.checkpoint.planner import LoadPlan
@@ -21,9 +20,12 @@ from torch.distributed.checkpoint.metadata import (
     MetadataIndex,
     STATE_DICT_TYPE,
     TensorStorageMetadata,
+    ChunkStorageMetadata,
 )
+from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 from torch.distributed.checkpoint.planner_helpers import (
-    _create_sharded_read_items,
+    create_read_items_for_chunk_list,
     _create_read_items,
 )
 from torch.distributed.remote_device import _remote_device
@@ -32,13 +34,16 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
 )
-from torch.distributed._shard.api import _shard_tensor
+from torch.distributed.checkpoint.planner import LoadPlanner
 
 from torch.distributed.checkpoint._nested_dict import unflatten_state_dict
 from torch.distributed.checkpoint.utils import (
     _element_wise_add,
     _element_wise_sub,
+    _normalize_device_info
 )
+
+from torch._utils import _get_device_module
 
 STATE_DICT_2D_LAYOUT = Dict[str, Tuple[Optional[Sequence[int]], Sequence[int]]]
 
@@ -49,23 +54,27 @@ __all__ = [
 ]
 
 
-def _gen_rank_device(global_rank: int) -> str:
-    if torch.cuda.is_available():
-        return f"cuda:{global_rank % torch.cuda.device_count()}"
+def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
+    if device_type == "cpu":
+        return "cpu"
+    device_module = _get_device_module(device_type)
+    if device_module.is_available():
+        return _normalize_device_info(device_type, global_rank % device_module.device_count())
     return "cpu"
 
 
 def _create_colwise_spec(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> ChunkShardingSpec:
+    pg_device_type = dist.distributed_c10d._get_pg_default_device(pg).type
     if pg is None:
         placements = [
-            f"rank:{idx}/{_gen_rank_device(idx)}"
+            f"rank:{idx}/{_gen_rank_device(idx, pg_device_type)}"
             for idx in range(dist.get_world_size())
         ]
     else:
         placements = [
-            f"rank:{idx}/{_gen_rank_device(dist.get_global_rank(pg, idx))}"
+            f"rank:{idx}/{_gen_rank_device(dist.get_global_rank(pg, idx), pg_device_type)}"
             for idx in range(pg.size())
         ]
     return ChunkShardingSpec(
@@ -92,14 +101,14 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
     return False
 
 
-def _alloc_tensor(props: TensorProperties, size: Sequence[int]) -> torch.Tensor:
+def _alloc_tensor(props: TensorProperties, size: Sequence[int], device_type: str = "cuda") -> torch.Tensor:
     return torch.empty(
         size=size,
         dtype=props.dtype,
         layout=props.layout,
         requires_grad=props.requires_grad,
         pin_memory=props.pin_memory,
-        device=cast(torch.device, torch.cuda.current_device()),
+        device=cast(torch.device, _get_device_module(device_type).current_device()),
     )
 
 
@@ -168,26 +177,31 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 
             assert len(obj.local_shards()) == 1
             original_shard = obj.local_shards()[0]
-            shard_md = copy.deepcopy(original_shard.metadata)
-            shard_md.shard_offsets = _element_wise_add(
-                shard_md.shard_offsets, offset
-            )
-            local_shards = [Shard(original_shard.tensor, shard_md)]
+            local_chunks = [
+                ChunkStorageMetadata(
+                    offsets=torch.Size(
+                        _element_wise_add(
+                            original_shard.metadata.shard_offsets, offset
+                        )
+                    ),
+                    sizes=torch.Size(original_shard.metadata.shard_sizes),
+                )
+            ]
 
-            reqs = _create_sharded_read_items(
-                fqn, cast(TensorStorageMetadata, md), local_shards
+            reqs = create_read_items_for_chunk_list(
+                fqn, cast(TensorStorageMetadata, md), local_chunks
             )
-            # TODO: The WriteItems will have a displaced MetadataIndex, fix it.
+            # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
-            for wi in reqs:
-                assert wi.dest_index.offset is not None
+            for ri in reqs:
+                assert ri.dest_index.offset is not None
                 original_offset = _element_wise_sub(
-                    wi.dest_index.offset, offset
+                    ri.dest_index.offset, offset
                 )
                 original_index = dataclasses.replace(
-                    wi.dest_index, offset=torch.Size(original_offset)
+                    ri.dest_index, offset=torch.Size(original_offset)
                 )
-                self.translation[wi.dest_index] = original_index
+                self.translation[ri.dest_index] = original_index
 
             requests += reqs
         return LoadPlan(requests)
@@ -200,20 +214,21 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: dist_cp.StorageReader,
+    planner: Optional[LoadPlanner] = None,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict to be used in conjuntion with FSDP sharded optimizer state.
-    This is the current recommended way to checkpoint is FSDP
+    Loads a state_dict in conjunction with FSDP sharded optimizer state.
+    This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
     >>> # Save
     >>> model: torch.nn.Model
     >>> optim_params = model.parameters()
     >>> optim = torch.optim.SGD(optim_params, lr=0.01)
-    >>>
+    >>> # Save
     >>> with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
     >>>     state_dict = {
-    >>>         "optimizer": FSDP.sharded_optim_state_dict(model, optim, optim_params),
+    >>>         "optimizer": FSDP.optim_state_dict(model, optim),
     >>>         "model": model.state_dict()
     >>>     }
     >>>     dist_cp.save_state_dict(
@@ -235,14 +250,14 @@ def load_sharded_optimizer_state_dict(
     >>>     )
     >>>     model.load_state_dict(checkpoint["model_state"])
     >>>
-    >>>     optim_state = sp_cp.load_sharded_optimizer_state_dict(
+    >>>     optim_state = dist_cp.load_sharded_optimizer_state_dict(
     >>>         model_state_dict,
     >>>         optimizer_key="optimizer",
     >>>         storage_reader=dist_cp.FileSystemReader("checkpoint"),
     >>>     )
     >>>
-    >>>     flattened_osd = FSDP.flatten_sharded_optim_state_dict(
-    >>>        optim_state["optimizer"], model, optim
+    >>>     flattened_osd = FSDP.optim_state_dict_to_load(
+    >>>        model, optim, optim_state["optimizer"]
     >>>     )
     >>>
     >>>     optim.load_state_dict(flattened_osd)
@@ -250,14 +265,15 @@ def load_sharded_optimizer_state_dict(
     metadata = storage_reader.read_metadata()
 
     layout_specs, dp_pg = _get_state_dict_2d_layout(model_state_dict)
+    dp_pg_device_type = dist.distributed_c10d._get_pg_default_device(dp_pg).type
+    device_module = _get_device_module(dp_pg_device_type)
 
     if dp_pg is None:
-        sharding_spec = ChunkShardingSpec(
-            dim=0,
-            placements=[
-                f"rank:{i}/cuda:{i}" for i in range(dist.get_world_size())
-            ],
-        )
+        placements = []
+        for i in range(dist.get_world_size()):
+            device_info = _normalize_device_info(dp_pg_device_type, i % device_module.device_count())
+            placements.append(f"rank:{i}/{device_info}")
+        sharding_spec = ChunkShardingSpec(dim=0, placements=placements)  # type: ignore[arg-type]
     else:
         sharding_spec = _create_colwise_spec(dp_pg)
 
@@ -276,10 +292,14 @@ def load_sharded_optimizer_state_dict(
 
         # value: TensorStorageMetadata
         if value.size.numel() == 1:
-            state_dict[key] = _alloc_tensor(value.properties, value.size)
+            state_dict[key] = _alloc_tensor(value.properties, value.size, dp_pg_device_type)
         elif dp_pg is None:
-            state_dict[key] = _shard_tensor(
-                _alloc_tensor(value.properties, value.size), sharding_spec
+            state_dict[key] = _create_chunk_sharded_tensor(
+                _alloc_tensor(value.properties, value.size, dp_pg_device_type),
+                rank=dist.get_rank(),
+                world_size=dist.get_world_size(),
+                num_devices_per_node=device_module.device_count(),
+                pg=_get_default_group(),
             )
         else:
             spec_key = key_path[2]
@@ -299,7 +319,7 @@ def load_sharded_optimizer_state_dict(
                 local_shards.append(
                     Shard(
                         tensor=_alloc_tensor(
-                            value.properties, shard_md.shard_sizes
+                            value.properties, shard_md.shard_sizes, dp_pg_device_type
                         ),
                         metadata=shard_md,
                     )
@@ -324,7 +344,7 @@ def load_sharded_optimizer_state_dict(
         state_dict=state_dict,
         storage_reader=storage_reader,
         # FIXME the type of planner is wrong in load_state_dict
-        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else None,
+        planner=_ReaderWithOffset(fqn_to_offset) if dp_pg is not None else planner,
     )
 
     state_dict = unflatten_state_dict(state_dict, metadata.planner_data)

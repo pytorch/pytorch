@@ -218,7 +218,7 @@ class List(Field):
         self._items = _normalize_field(values)
         self.lengths._set_parent(self, 0)
         self._items._set_parent(self, 1)
-        super(List, self).__init__([self.lengths, self._items])
+        super().__init__([self.lengths, self._items])
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -295,7 +295,7 @@ class ListWithEvicted(List):
             self._evicted_values = _normalize_field(evicted_values)
         else:
             self._evicted_values = Scalar(np.int64, evicted_values)
-        super(ListWithEvicted, self).__init__(values, lengths_blob=lengths_blob)
+        super().__init__(values, lengths_blob=lengths_blob)
 
     def field_names(self):
         value_fields = self._items.field_names()
@@ -418,7 +418,7 @@ class Struct(Field):
             self.fields[name] = self.fields[name] + field
         for id, (_, field) in enumerate(self.fields.items()):
             field._set_parent(self, id)
-        super(Struct, self).__init__(self.fields.values())
+        super().__init__(self.fields.values())
         self._frozen = True
 
     def _struct_from_nested_name(self, nested_name, field):
@@ -544,7 +544,7 @@ class Struct(Field):
         if item.startswith('__'):
             raise AttributeError(item)
         try:
-            return super(Struct, self).__getattribute__("fields")[item]
+            return super().__getattribute__("fields")[item]
         except KeyError as e:
             raise AttributeError(item) from e
 
@@ -555,7 +555,7 @@ class Struct(Field):
         # post initialization.
         if getattr(self, '_frozen', None) and not key.startswith('_'):
             raise TypeError('Struct.__setattr__() is disabled after __init__()')
-        super(Struct, self).__setattr__(key, value)
+        super().__setattr__(key, value)
 
     def __add__(self, other):
         """
@@ -725,7 +725,7 @@ class Scalar(Field):
     def __init__(self, dtype=None, blob=None, metadata=None):
         self._metadata = None
         self.set(dtype, blob, metadata, unsafe=True)
-        super(Scalar, self).__init__([])
+        super().__init__([])
 
     def field_names(self):
         return ['']
@@ -1081,7 +1081,7 @@ def from_column_list(
         'col_names and col_blobs must have the same length.'
     )
     root = _SchemaNode('root', 'Struct')
-    for col_name, col_type, col_blob, col_metadata in zip(
+    for col_name, col_type, col_blob, col_md in zip(
         col_names, col_types, col_blobs, col_metadata
     ):
         columns = col_name.split(FIELD_SEPARATOR)
@@ -1095,7 +1095,7 @@ def from_column_list(
                 field = Scalar(
                     dtype=col_type,
                     blob=col_blob,
-                    metadata=col_metadata
+                    metadata=col_md
                 )
             next = current.add_child(name, type_str)
             if field is not None:
@@ -1252,11 +1252,11 @@ def InitEmptyRecord(net, schema_or_record, enforce_types=False):
 
 
 _DATA_TYPE_FOR_DTYPE = [
-    (np.str, core.DataType.STRING),
+    (str, core.DataType.STRING),
     (np.float16, core.DataType.FLOAT16),
     (np.float32, core.DataType.FLOAT),
     (np.float64, core.DataType.DOUBLE),
-    (np.bool, core.DataType.BOOL),
+    (bool, core.DataType.BOOL),
     (np.int8, core.DataType.INT8),
     (np.int16, core.DataType.INT16),
     (np.int32, core.DataType.INT32),

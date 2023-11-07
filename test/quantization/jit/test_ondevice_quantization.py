@@ -1,8 +1,7 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import torch._C_flatbuffer
+import torch._C
 
 from torch.ao.quantization import (
     default_dynamic_qconfig,
@@ -33,7 +32,7 @@ from typing import Dict
 
 class myMod(torch.nn.Module):
     def __init__(self, weight):
-        super(myMod, self).__init__()
+        super().__init__()
         self.fc1 = torch.nn.Linear(5, 5).float()
         self.fc1.weight = weight
         self.fc2 = torch.nn.Linear(5, 5).float()
@@ -44,7 +43,7 @@ class myMod(torch.nn.Module):
 
 class MyConvLinearModule(torch.nn.Module):
     def __init__(self):
-        super(MyConvLinearModule, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(3, 5, 3)
         weight = torch.nn.Parameter(torch.ones(5, 5))
         self.weight1 = torch.nn.Parameter(torch.ones(5, 5))
@@ -443,8 +442,8 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
 
             # Now serialize to flabuffer and load from fb and check
             dict: Dict[str, str] = {}
-            bytes = torch._C_flatbuffer._save_mobile_module_to_bytes(m._c, dict)
-            m = LiteScriptModule(torch._C_flatbuffer._load_mobile_module_from_bytes(bytes))
+            bytes = torch._C._save_mobile_module_to_bytes(m._c, dict)
+            m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)
             self.assertTrue(torch.allclose(ref_output, fb_output))
 

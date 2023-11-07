@@ -310,7 +310,7 @@ class FutureTypingTest:
             dst_rank: int, inputs: Tuple[Tensor, Tensor]
         ) -> Future[Tensor]:
             return rpc.rpc_async(
-                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
+                f"worker{dst_rank}", two_args_two_kwargs, inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)
@@ -767,7 +767,7 @@ class JitRpcOpTest:
 
         # Notice, TorchScript always translates(emits) Python `raise` statement,
         # as the exception message string, "Exception",
-        # no matter what exception type and excetpion message are in the statement,
+        # no matter what exception type and exception message are in the statement,
         @torch.jit.script
         def rpc_async_call_remote_raising_torchscript_in_torchscript(
             dst_worker_name: str,
@@ -1194,11 +1194,11 @@ class JitRpcTest(
             self.assertEqual(remote_event_node_ids, {dst_rank})
             # script_rpc_async_call invokes add operator
             # so we should see this as a remote event.
-            remote_add = [
+            remote_add = next(
                 remote_event
                 for remote_event in remote_events
                 if "aten::add" in remote_event.name
-            ][0]
+            )
             remote_add_profiled_name = f"{profiled_name}#remote_op: aten::add"
             self.assertEqual(remote_add.name, remote_add_profiled_name)
 
@@ -1266,9 +1266,9 @@ class JitRpcTest(
                 + REMOTE_OP_STR
                 + block_scope
             )
-            remote_record_function_event = [
+            remote_record_function_event = next(
                 evt for evt in function_events if evt.name == expected_key
-            ][0]
+            )
             self.assertTrue(block_scope in remote_record_function_event.name)
             remote_children = remote_record_function_event.cpu_children
             self.assertTrue("aten::add" in child.name for child in remote_children)

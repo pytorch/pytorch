@@ -18,8 +18,7 @@ _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
 
 @contextmanager
 def cached():
-    r"""Context manager that enables the caching system within parametrizations
-    registered with :func:`register_parametrization`.
+    r"""Context manager that enables the caching system within parametrizations registered with :func:`register_parametrization`.
 
     The value of the parametrized objects is computed and cached the first time
     they are required when this context manager is active. The cached values are
@@ -67,8 +66,7 @@ def _register_parameter_or_buffer(module, name, X):
 
 
 class ParametrizationList(ModuleList):
-    r"""A sequential container that holds and manages the ``original`` or ``original0``, ``original1``, ...
-    parameters or buffers of a parametrized :class:`torch.nn.Module`.
+    r"""A sequential container that holds and manages the original parameters or buffers of a parametrized :class:`torch.nn.Module`.
 
     It is the type of ``module.parametrizations[tensor_name]`` when ``module[tensor_name]``
     has been parametrized with :func:`register_parametrization`.
@@ -91,6 +89,7 @@ class ParametrizationList(ModuleList):
             Warning: the parametrization is not checked for consistency upon registration.
             Enable this flag at your own risk.
     """
+
     original: Tensor
     unsafe: bool
 
@@ -115,7 +114,7 @@ class ParametrizationList(ModuleList):
         #    Y = param.right_inverse(X)
         #    assert isinstance(Y, Tensor) or
         #           (isinstance(Y, collections.abc.Sequence) and all(isinstance(t, Tensor) for t in Y))
-        #    Z = param(Y) if isisntance(Y, Tensor) else param(*Y)
+        #    Z = param(Y) if isinstance(Y, Tensor) else param(*Y)
         #    # Consistency checks
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
@@ -198,8 +197,8 @@ class ParametrizationList(ModuleList):
                 )
 
     def right_inverse(self, value: Tensor) -> None:
-        r"""Calls the methods ``right_inverse`` (see :func:`register_parametrization`)
-        of the parametrizations in the inverse order they were registered in.
+        r"""Call the ``right_inverse`` methods of the parametrizations in the inverse registration order.
+
         Then, it stores the result in ``self.original`` if ``right_inverse`` outputs one tensor
         or in ``self.original0``, ``self.original1``, ... if it outputs several.
 
@@ -277,7 +276,7 @@ class ParametrizationList(ModuleList):
 
 
 def _inject_new_class(module: Module) -> None:
-    r"""Sets up a module to be parametrized.
+    r"""Set up a module to be parametrized.
 
     This works by substituting the class of the module by a class
     that extends it to be able to inject a property
@@ -378,7 +377,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
 def register_parametrization(
     module: Module, tensor_name: str, parametrization: Module, *, unsafe: bool = False,
 ) -> Module:
-    r"""Adds a parametrization to a tensor in a module.
+    r"""Register a parametrization to a tensor in a module.
 
     Assume that ``tensor_name="weight"`` for simplicity. When accessing ``module.weight``,
     the module will return the parametrized version ``parametrization(module.weight)``.
@@ -584,15 +583,16 @@ def register_parametrization(
 
 
 def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
-    r"""Returns ``True`` if module has an active parametrization.
-
-    If the argument :attr:`tensor_name` is specified, returns ``True`` if
-    ``module[tensor_name]`` is parametrized.
+    r"""Determine if a module has a parametrization.
 
     Args:
         module (nn.Module): module to query
-        tensor_name (str, optional): attribute in the module to query
+        tensor_name (str, optional): name of the parameter in the module
             Default: ``None``
+    Returns:
+        ``True`` if :attr:`module` has a parametrization for the parameter named :attr:`tensor_name`,
+        or if it has any parametrization when :attr:`tensor_name` is ``None``;
+        otherwise ``False``
     """
     parametrizations = getattr(module, "parametrizations", None)
     if parametrizations is None or not isinstance(parametrizations, ModuleDict):
@@ -606,7 +606,7 @@ def is_parametrized(module: Module, tensor_name: Optional[str] = None) -> bool:
 def remove_parametrizations(
     module: Module, tensor_name: str, leave_parametrized: bool = True
 ) -> Module:
-    r"""Removes the parametrizations on a tensor in a module.
+    r"""Remove the parametrizations on a tensor in a module.
 
     - If ``leave_parametrized=True``, ``module[tensor_name]`` will be set to
       its current output. In this case, the parametrization shall not change the ``dtype``
@@ -628,7 +628,6 @@ def remove_parametrizations(
         ValueError: if ``module[tensor_name]`` is not parametrized
         ValueError: if ``leave_parametrized=False`` and the parametrization depends on several tensors
     """
-
     if not is_parametrized(module, tensor_name):
         raise ValueError(f"Module {module} does not have a parametrization on {tensor_name}")
 
@@ -687,8 +686,7 @@ def remove_parametrizations(
     return module
 
 def type_before_parametrizations(module: Module) -> type:
-    r"""Returns the module type before parametrizations were applied and if not,
-    then it returns the module type.
+    r"""Return the module type before parametrizations were applied and if not, then it returns the module type.
 
     Args:
         module (nn.Module): module to get type of
@@ -701,8 +699,9 @@ def type_before_parametrizations(module: Module) -> type:
 def transfer_parametrizations_and_params(
     from_module: Module, to_module: Module, tensor_name: Optional[str] = None
 ) -> Module:
-    r"""Transfers parametrizations and the parameters they parametrize from from_module
-    to to_module. If tensor_name is specified, only transfers the specified parameter, otherwise
+    r"""Transfer parametrizations and the parameters they parametrize from :attr:`from_module` to :attr:`to_module`.
+
+    If :attr:`tensor_name` is specified, only transfers the specified parameter, otherwise
     transfers all parametrized parameters. If those parameters do not exist in to_module, it will create them.
     Does nothing if from_module is not parametrized.
 
@@ -725,7 +724,7 @@ def transfer_parametrizations_and_params(
         assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
         for parameter_name in parameters_to_transfer:
 
-            # initialize the to-be-transfered param in to_module if it doesn't exist already
+            # initialize the to-be-transferred param in to_module if it doesn't exist already
             if not hasattr(to_module, parameter_name):
                 setattr(
                     to_module,

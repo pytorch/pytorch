@@ -53,7 +53,14 @@ USE_SMALL_BATCH_SIZE = {
     "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
+    "hf_T5_base": 4,
     "timm_efficientdet": 1,
+    "llama_v2_7b_16h": 1,
+    "yolov3": 8,  # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
+}
+
+INFERENCE_SMALL_BATCH_SIZE = {
+    "timm_efficientdet": 32,
 }
 
 DETECTRON2_MODELS = {
@@ -73,6 +80,46 @@ SKIP = {
     "detectron2_maskrcnn",
     # https://github.com/pytorch/torchdynamo/issues/145
     "fambench_xlmr",
+    # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
+    "tacotron2",
+    "hf_Bert",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
+    # takes too long, extreme slowdown (< .001)
+    "maml",
+    # Failing in eager mode
+    "clip",
+    # multi gpu not always available in benchmark runners
+    "simple_gpt_tp_manual",
+}
+
+SKIP_DUE_TO_CONTROL_FLOW = {
+    "cm3leon_generate",
+    "detectron2_fcos_r_50_fpn",
+    "fastNLP_Bert",
+    "hf_Longformer",
+    "hf_Reformer",
+    "hf_T5_generate",
+    "opacus_cifar10",
+    "speech_transformer",
+}
+
+SKIP_FOR_CPU = {
+    "hf_T5_generate",  # OOMs
+    "cm3leon_generate",  # model is CUDA only
+    "nanogpt",  # timeout
+    "sam",  # timeout
+    "llama_v2_7b_16h",  # model is CUDA only
+    "stable_diffusion",  # flaky
+    "torchrec_dlrm",  # requires FBGEMM, CUDA only
+    "simple_gpt",
+    "hf_Whisper",  # works on cuda, accuracy failure on cpu
+    "stable_diffusion_text_encoder",
+}
+
+SKIP_FOR_CUDA = {
+    "gat",  # only works on CPU
+    "gcn",  # only works on CPU
+    "sage",  # only works on CPU
 }
 
 # Additional models that are skipped in training
@@ -81,9 +128,10 @@ SKIP_TRAIN = {
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
-    # Unusual training setup
-    "opacus_cifar10",
     "maml",
+    "llama",
+    "llama_v2_7b_16h",
+    "simple_gpt",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -109,7 +157,6 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenet_v3_large",
     "nvidia_deeprecommender",
     "timm_efficientdet",
-    "vision_maskrcnn",
 }
 
 # These models need >1e-3 tolerance
@@ -119,7 +166,16 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "doctr_reco_predictor",
     "drq",
+    "hf_Whisper",
+}
+
+
+REQUIRE_HIGHER_BF16_TOLERANCE = {
+    "doctr_reco_predictor",
+    "drq",
+    "hf_Whisper",
 }
 
 REQUIRE_COSINE_TOLERACE = {
@@ -127,7 +183,10 @@ REQUIRE_COSINE_TOLERACE = {
 }
 
 # non-deterministic output / cant check correctness
-NONDETERMINISTIC = set()
+NONDETERMINISTIC = {
+    # https://github.com/pytorch/pytorch/issues/98355
+    "mobilenet_v3_large",
+}
 
 # These benchmarks took >600s on an i9-11900K CPU
 VERY_SLOW_BENCHMARKS = {
@@ -164,15 +223,11 @@ TRT_NOT_YET_WORKING = {
     "resnext50_32x4d",
 }
 
-DYNAMIC_SHAPES_NOT_YET_WORKING = {
-    "demucs",
-    "timm_nfnet",
-}
-
 DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
     "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",  # https://github.com/pytorch/benchmark/pull/1656
 }
 
 
@@ -184,6 +239,14 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "llama_v2_7b_16h",
+    "Background_Matting",
+    "stable_diffusion_unet",
+}
+
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
+    # Models that deterministic algorithms can not be turned on for eager mode.
+    "Background_Matting",
 }
 
 
@@ -192,16 +255,45 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "pytorch_unet": 2,
 }
 
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "DALLE2_pytorch",
+    "doctr_det_predictor",
+    "doctr_reco_predictor",
+    "Super_SloMo",
+    "tts_angular",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
+}
+
+# models in canary_models that we should run anyway
+CANARY_MODELS = {
+    "torchrec_dlrm",
+    "clip",  # torchbench removed torchtext dependency
+}
+
+ONLY_MULTIPROCESS = {
+    # Models that should only run in --multiprocess mode
+    "simple_gpt"
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
+        super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
 
     @property
     def skip_models(self):
         return SKIP
+
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
+
+    @property
+    def skip_models_for_cuda(self):
+        return SKIP_FOR_CUDA
 
     @property
     def slow_models(self):
@@ -224,8 +316,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return TRT_NOT_YET_WORKING
 
     @property
-    def failing_dynamic_shape_models(self):
-        return DYNAMIC_SHAPES_NOT_YET_WORKING
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
@@ -233,21 +325,49 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_MODELS
         return set()
 
+    @property
+    def skip_accuracy_check_as_eager_non_deterministic(self):
+        if self.args.accuracy and self.args.training:
+            return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
+        return set()
+
+    @property
+    def skip_multiprocess_models(self):
+        return ONLY_MULTIPROCESS
+
+    @property
+    def skip_models_due_to_control_flow(self):
+        return SKIP_DUE_TO_CONTROL_FLOW
+
     def load_model(
         self,
         device,
         model_name,
         batch_size=None,
         part=None,
+        extra_args=None,
     ):
-
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Torchbench models"
+            )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
-        try:
-            module = importlib.import_module(f"torchbenchmark.models.{model_name}")
-        except ModuleNotFoundError:
-            module = importlib.import_module(f"torchbenchmark.models.fb.{model_name}")
+        candidates = [
+            f"torchbenchmark.models.{model_name}",
+            f"torchbenchmark.canary_models.{model_name}",
+            f"torchbenchmark.models.fb.{model_name}",
+        ]
+        for c in candidates:
+            try:
+                module = importlib.import_module(c)
+                break
+            except ModuleNotFoundError as e:
+                if e.name != c:
+                    raise
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -260,6 +380,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             batch_size = None
         if batch_size is None and is_training and model_name in USE_SMALL_BATCH_SIZE:
             batch_size = USE_SMALL_BATCH_SIZE[model_name]
+        elif (
+            batch_size is None
+            and not is_training
+            and model_name in INFERENCE_SMALL_BATCH_SIZE
+        ):
+            batch_size = INFERENCE_SMALL_BATCH_SIZE[model_name]
 
         # Control the memory footprint for few models
         if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
@@ -267,14 +393,30 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
-        extra_args = []
+        if extra_args is None:
+            extra_args = []
         if part:
-            extra_args = ["--part", part]
-        if is_training:
+            extra_args += ["--part", part]
+
+        if model_name == "vision_maskrcnn" and is_training:
+            # Output of vision_maskrcnn model is a list of bounding boxes,
+            # sorted on the basis of their scores. This makes accuracy
+            # comparison hard with torch.compile. torch.compile can cause minor
+            # divergences in the output because of how fusion works for amp in
+            # TorchInductor compared to eager.  Therefore, instead of looking at
+            # all the bounding boxes, we compare only top 5.
+            model_kwargs = {"box_detections_per_img": 5}
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
-                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
+                model_kwargs=model_kwargs,
+            )
+        elif is_training:
+            benchmark = benchmark_cls(
+                test="train",
+                device=device,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
@@ -282,7 +424,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             benchmark = benchmark_cls(
                 test="eval",
                 device=device,
-                jit=False,
                 batch_size=batch_size,
                 extra_args=extra_args,
             )
@@ -300,6 +441,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         # the right example_inputs
         if model_name == "yolov3":
             example_inputs = (torch.rand(batch_size, 3, 384, 512).to(device),)
+        # See https://github.com/pytorch/benchmark/issues/1561
+        if model_name == "maml_omniglot":
+            batch_size = 5
+            assert example_inputs[0].shape[0] == batch_size
+        if model_name == "vision_maskrcnn":
+            batch_size = 1
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name
@@ -311,9 +458,16 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return device, benchmark.name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
-        from torchbenchmark import _list_model_paths
+        from torchbenchmark import _list_canary_model_paths, _list_model_paths
 
         models = _list_model_paths()
+        models += [
+            f
+            for f in _list_canary_model_paths()
+            if os.path.basename(f) in CANARY_MODELS
+        ]
+        models.sort()
+
         start, end = self.get_benchmark_indices(len(models))
         for index, model_path in enumerate(models):
             if index < start or index >= end:
@@ -324,7 +478,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 not re.search("|".join(args.filter), model_name, re.I)
                 or re.search("|".join(args.exclude), model_name, re.I)
                 or model_name in args.exclude_exact
-                or model_name in SKIP
+                or model_name in self.skip_models
             ):
                 continue
 
@@ -344,6 +498,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in REQUIRE_HIGHER_FP16_TOLERANCE:
                 return 1e-2, cosine
             return 1e-3, cosine
+
+        if self.args.bfloat16:
+            if name in REQUIRE_HIGHER_BF16_TOLERANCE:
+                return 1e-2, cosine
+
         if is_training and current_device == "cuda":
             tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:

@@ -1,5 +1,5 @@
 from collections import Counter
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ def functional_call(
     module: "torch.nn.Module",
     parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
     args: Union[Any, Tuple],
-    kwargs: Dict[str, Any] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
     strict: bool = False,
@@ -21,13 +21,13 @@ def functional_call(
     and buffers with the provided ones.
 
     .. note:: If the module has active parametrizations, passing a value in the
-        :attr:`parameters_and_buffers` argument with the name set to the regular parameter
+        :attr:`parameter_and_buffer_dicts` argument with the name set to the regular parameter
         name will completely disable the parametrization.
         If you want to apply the parametrization function to the value passed
         please set the key as ``{submodule_name}.parametrizations.{parameter_name}.original``.
 
     .. note:: If the module performs in-place operations on parameters/buffers, these will be reflected
-        in the ``parameters_and_buffers`` input.
+        in the ``parameter_and_buffer_dicts`` input.
 
 
          Example::
@@ -52,10 +52,10 @@ def functional_call(
             >>> mod(torch.zeros(()))  # tensor(2.)
             >>> functional_call(mod, a, torch.zeros(()))  # tensor(0.) since it will change self.foo_tied too
             >>> functional_call(mod, a, torch.zeros(()), tie_weights=False)  # tensor(1.)--self.foo_tied is not updated
-            >>> new_a = {'foo', torch.zeros(()), 'foo_tied': torch.zeros(())}
+            >>> new_a = {'foo': torch.zeros(()), 'foo_tied': torch.zeros(())}
             >>> functional_call(mod, new_a, torch.zeros()) # tensor(0.)
 
-    An example of passing mutliple dictionaries
+    An example of passing multiple dictionaries
 
     .. code-block:: python
 
@@ -102,14 +102,14 @@ def functional_call(
 
     Args:
         module (torch.nn.Module): the module to call
-        parameters_and_buffers (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
+        parameters_and_buffer_dicts (Dict[str, Tensor] or tuple of Dict[str, Tensor]): the parameters that will be used in
             the module call. If given a tuple of dictionaries, they must have distinct keys so that all dictionaries can
             be used together
         args (Any or tuple): arguments to be passed to the module call. If not a tuple, considered a single argument.
         kwargs (dict): keyword arguments to be passed to the module call
         tie_weights (bool, optional): If True, then parameters and buffers tied in the original model will be treated as
-            tied in the reparamaterized version. Therefore, if True and different values are passed for the tied
-            paramaters and buffers, it will error. If False, it will not respect the originally tied parameters and
+            tied in the reparameterized version. Therefore, if True and different values are passed for the tied
+            parameters and buffers, it will error. If False, it will not respect the originally tied parameters and
             buffers unless the values passed for both weights are the same. Default: True.
         strict (bool, optional): If True, then the parameters and buffers passed in must match the parameters and
             buffers in the original module. Therefore, if True and there are any missing or unexpected keys, it will

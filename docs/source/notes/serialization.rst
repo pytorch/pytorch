@@ -55,7 +55,7 @@ Saving tensors preserves their view relationships:
     tensor([ 1,  4,  3,  8,  5, 12,  7, 16,  9])
 
 Behind the scenes, these tensors share the same "storage." See
-`Tensor Views <https://pytorch.org/docs/master/tensor_view.html>`_ for more
+`Tensor Views <https://pytorch.org/docs/main/tensor_view.html>`_ for more
 on views and storage.
 
 When PyTorch saves tensors it saves their storage objects and tensor
@@ -153,7 +153,7 @@ can use this pattern:
     # A module with two linear layers
     >>> class MyModule(torch.nn.Module):
           def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 
@@ -218,7 +218,7 @@ this:
     # A module with control flow
     >>> class ControlFlowModule(torch.nn.Module):
           def __init__(self):
-            super(ControlFlowModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 
@@ -341,3 +341,16 @@ torch.full return float tensors by default, even when given bool or
 integer fill values. ScriptModules using :func:`torch.full` and serialized on PyTorch 1.6
 and later cannot be loaded in earlier versions of PyTorch, however, since those
 earlier versions do not understand the new behavior.
+
+.. _utility functions:
+
+Utility functions
+-----------------
+
+The following utility functions are related to serialization:
+
+.. currentmodule:: torch.serialization
+
+.. autofunction:: register_package
+.. autofunction:: get_default_load_endianness
+.. autofunction:: set_default_load_endianness

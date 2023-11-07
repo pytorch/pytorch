@@ -6,7 +6,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
 
-__all__ = ['VonMises']
+__all__ = ["VonMises"]
 
 
 def _eval_poly(y, coef):
@@ -17,12 +17,46 @@ def _eval_poly(y, coef):
     return result
 
 
-_I0_COEF_SMALL = [1.0, 3.5156229, 3.0899424, 1.2067492, 0.2659732, 0.360768e-1, 0.45813e-2]
-_I0_COEF_LARGE = [0.39894228, 0.1328592e-1, 0.225319e-2, -0.157565e-2, 0.916281e-2,
-                  -0.2057706e-1, 0.2635537e-1, -0.1647633e-1, 0.392377e-2]
-_I1_COEF_SMALL = [0.5, 0.87890594, 0.51498869, 0.15084934, 0.2658733e-1, 0.301532e-2, 0.32411e-3]
-_I1_COEF_LARGE = [0.39894228, -0.3988024e-1, -0.362018e-2, 0.163801e-2, -0.1031555e-1,
-                  0.2282967e-1, -0.2895312e-1, 0.1787654e-1, -0.420059e-2]
+_I0_COEF_SMALL = [
+    1.0,
+    3.5156229,
+    3.0899424,
+    1.2067492,
+    0.2659732,
+    0.360768e-1,
+    0.45813e-2,
+]
+_I0_COEF_LARGE = [
+    0.39894228,
+    0.1328592e-1,
+    0.225319e-2,
+    -0.157565e-2,
+    0.916281e-2,
+    -0.2057706e-1,
+    0.2635537e-1,
+    -0.1647633e-1,
+    0.392377e-2,
+]
+_I1_COEF_SMALL = [
+    0.5,
+    0.87890594,
+    0.51498869,
+    0.15084934,
+    0.2658733e-1,
+    0.301532e-2,
+    0.32411e-3,
+]
+_I1_COEF_LARGE = [
+    0.39894228,
+    -0.3988024e-1,
+    -0.362018e-2,
+    0.163801e-2,
+    -0.1031555e-1,
+    0.2282967e-1,
+    -0.2895312e-1,
+    0.1787654e-1,
+    -0.420059e-2,
+]
 
 _COEF_SMALL = [_I0_COEF_SMALL, _I1_COEF_SMALL]
 _COEF_LARGE = [_I0_COEF_LARGE, _I1_COEF_LARGE]
@@ -36,7 +70,7 @@ def _log_modified_bessel_fn(x, order=0):
     assert order == 0 or order == 1
 
     # compute small solution
-    y = (x / 3.75)
+    y = x / 3.75
     y = y * y
     small = _eval_poly(y, _COEF_SMALL[order])
     if order == 1:
@@ -76,7 +110,7 @@ class VonMises(Distribution):
     interpreted as angles modulo 2 pi.
 
     Example::
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = VonMises(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # von Mises distributed with loc=1 and concentration=1
         tensor([1.9777])
@@ -84,7 +118,8 @@ class VonMises(Distribution):
     :param torch.Tensor loc: an angle in radians.
     :param torch.Tensor concentration: concentration parameter
     """
-    arg_constraints = {'loc': constraints.real, 'concentration': constraints.positive}
+
+    arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
     support = constraints.real
     has_rsample = False
 
@@ -94,17 +129,21 @@ class VonMises(Distribution):
         event_shape = torch.Size()
 
         # Parameters for sampling
-        tau = 1 + (1 + 4 * self.concentration ** 2).sqrt()
+        tau = 1 + (1 + 4 * self.concentration**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * self.concentration)
-        self._proposal_r = (1 + rho ** 2) / (2 * rho)
+        self._proposal_r = (1 + rho**2) / (2 * rho)
 
-        super(VonMises, self).__init__(batch_shape, event_shape, validate_args)
+        super().__init__(batch_shape, event_shape, validate_args)
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         log_prob = self.concentration * torch.cos(value - self.loc)
-        log_prob = log_prob - math.log(2 * math.pi) - _log_modified_bessel_fn(self.concentration, order=0)
+        log_prob = (
+            log_prob
+            - math.log(2 * math.pi)
+            - _log_modified_bessel_fn(self.concentration, order=0)
+        )
         return log_prob
 
     @torch.no_grad()
@@ -120,9 +159,9 @@ class VonMises(Distribution):
 
     def expand(self, batch_shape):
         try:
-            return super(VonMises, self).expand(batch_shape)
+            return super().expand(batch_shape)
         except NotImplementedError:
-            validate_args = self.__dict__.get('_validate_args')
+            validate_args = self.__dict__.get("_validate_args")
             loc = self.loc.expand(batch_shape)
             concentration = self.concentration.expand(batch_shape)
             return type(self)(loc, concentration, validate_args=validate_args)
@@ -143,5 +182,10 @@ class VonMises(Distribution):
         """
         The provided variance is the circular one.
         """
-        return 1 - (_log_modified_bessel_fn(self.concentration, order=1) -
-                    _log_modified_bessel_fn(self.concentration, order=0)).exp()
+        return (
+            1
+            - (
+                _log_modified_bessel_fn(self.concentration, order=1)
+                - _log_modified_bessel_fn(self.concentration, order=0)
+            ).exp()
+        )

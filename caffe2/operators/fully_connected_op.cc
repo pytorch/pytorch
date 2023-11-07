@@ -55,8 +55,8 @@ Here, $X$ is a matrix of shape $(M,K)$, $W$ is a matrix of shape $(N,K)$, $b$ is
 *NOTE: $X$ does not need to explicitly be a 2-dimensional matrix, however, if it is not it will be coerced into one. For an arbitrary $n$-dimensional tensor $X$, e.g. $[a_0, a_1, \ldots ,a_{k-1}, a_k, \ldots , a_{n-1}]$, where $a_i$ in $N$, and $k$ is the $axis$ arg provided, then $X$ will be coerced into a 2-dimensional tensor with dimensions $[a_0 * \ldots * a_{k-1}, a_k * \ldots * a_{n-1}]$. For the default case where axis=1, this means the $X$ tensor will be coerced into a 2D tensor of dimensions $[a_0, a_1 * \ldots * a_{n-1}]$, where $a_0$ is often the batch size. In this situation, we must have $a_0 = M$ and $a_1 * \ldots * a_{n-1} = K$. Lastly, even though $b$ is a vector of length $N$, it is copied and resized to shape $(M x N)$ implicitly, then added to each vector in the batch.*
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/fully_connected_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/fully_connected_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/fully_connected_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/fully_connected_op.cc
 
 <details>
 

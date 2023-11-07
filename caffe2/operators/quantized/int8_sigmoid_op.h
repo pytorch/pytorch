@@ -20,7 +20,7 @@ class Int8SigmoidOp final : public Operator<CPUContext> {
 #endif
       }
 
-  ~Int8SigmoidOp() {
+  ~Int8SigmoidOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

@@ -1,10 +1,11 @@
 import torch
+from torch._jit_internal import _Await
+from torch.jit._builtins import _register_builtin
 
 from torch.utils import set_module
-from torch.jit._builtins import _register_builtin
-from torch._jit_internal import _Await
 
 set_module(_Await, "torch.jit")
+
 
 def _awaitable(func, *args, **kwargs):
     r"""
@@ -13,12 +14,14 @@ def _awaitable(func, *args, **kwargs):
     """
     return torch._C._awaitable(func, *args, **kwargs)
 
+
 def _awaitable_wait(aw):
     r"""
     Requests await the result of execution, if Await is not completed yet,
     the func will be called immediately.
     """
     return torch._C._awaitable_wait(aw)
+
 
 def _awaitable_nowait(o):
     r"""

@@ -1,5 +1,6 @@
 import contextlib
 import importlib
+import logging
 import sys
 
 import torch
@@ -7,12 +8,13 @@ import torch.testing
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
-    TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
 )
 
 from . import config, reset, utils
+
+log = logging.getLogger(__name__)
 
 
 def run_tests(needs=()):
@@ -22,8 +24,7 @@ def run_tests(needs=()):
         TEST_WITH_TORCHDYNAMO
         or IS_WINDOWS
         or TEST_WITH_CROSSREF
-        or TEST_WITH_ROCM
-        or sys.version_info >= (3, 11)
+        or sys.version_info >= (3, 12)
     ):
         return  # skip testing
 
@@ -55,6 +56,7 @@ class TestCase(TorchTestCase):
         )
 
     def setUp(self):
+        self._prior_is_grad_enabled = torch.is_grad_enabled()
         super().setUp()
         reset()
         utils.counters.clear()
@@ -65,3 +67,6 @@ class TestCase(TorchTestCase):
         reset()
         utils.counters.clear()
         super().tearDown()
+        if self._prior_is_grad_enabled is not torch.is_grad_enabled():
+            log.warning("Running test changed grad mode")
+            torch.set_grad_enabled(self._prior_is_grad_enabled)

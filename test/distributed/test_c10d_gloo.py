@@ -14,8 +14,8 @@ from itertools import groupby
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_gloo_available():
+    print("c10d GLOO not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -37,7 +37,6 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
@@ -50,7 +49,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
-    sandcastle_skip,
+    skip_but_pass_in_sandcastle,
     TestCase,
 )
 
@@ -217,7 +216,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         return pg
 
     def setUp(self):
-        super(ProcessGroupGlooTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def opts(self, threads=2):
@@ -621,7 +620,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 result,
-                msg="Mismatch in iteration {}".format(i),
+                msg=f"Mismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -643,7 +642,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 self._expected_output(i),
                 fut.wait(),
-                msg="Mismatch in iteration {}".format(i),
+                msg=f"Mismatch in iteration {i}",
             )
 
     @requires_gloo()
@@ -694,7 +693,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
-    @sandcastle_skip("intermittent failures on Windows, in CI")
     @requires_gloo()
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
@@ -703,6 +701,20 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_sparse_allreduce_basics_cuda(self):
         self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sparse_allreduce_cuda_dispatched(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        tests = simple_sparse_reduce_tests(
+            self.rank, self.world_size, num_inputs=1
+        )
+        for (inputs, outputs) in tests:
+            tensors = inputs[-1].clone().cuda()
+            work = dist.all_reduce(tensors, async_op=True)
+            work.wait()
+            self.assertEqual([tensors], outputs)
 
     @requires_gloo()
     def test_scatter_checks(self):
@@ -859,7 +871,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @sandcastle_skip(
+    @skip_but_pass_in_sandcastle(
         "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
     )
     @skip_if_lt_x_gpu(2)
@@ -1205,7 +1217,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Output is not a list of lists.
         dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
         with self.assertRaisesRegex(
-            RuntimeError, "Invalid function argument.*output_tensor_lists"
+            TypeError, "Invalid function argument.*output_tensor_lists"
         ):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
@@ -1458,7 +1470,7 @@ class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
-        super(DistributedDataParallelTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def _get_process_group(self):
@@ -1528,7 +1540,7 @@ class DistributedDataParallelTest(
 
         class GlobalLocalUnusedParamModule(nn.Module):
             def __init__(self):
-                super(GlobalLocalUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
                 self.task_unused = Task()
@@ -1610,7 +1622,7 @@ class DistributedDataParallelTest(
 
         class FindUnusedParamModule(nn.Module):
             def __init__(self):
-                super(FindUnusedParamModule, self).__init__()
+                super().__init__()
                 self.t0 = Task()
                 self.t1 = Task()
 
@@ -1663,7 +1675,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutput(nn.Module):
             def __init__(self):
-                super(IgnoredOutput, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -1705,7 +1717,7 @@ class DistributedDataParallelTest(
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
             def __init__(self):
-                super(IgnoredOutputWithUnusedParameters, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.fc3 = nn.Linear(4, 4, bias=False)
@@ -1766,20 +1778,19 @@ class DistributedDataParallelTest(
         local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
         st = init_from_local_shards(local_shards, [10, 10])
         m = MyModule(st)
-        with _ddp_replicated_tensor(False):
-            DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                module=m,
-                params_and_buffers_to_ignore={'st'}
-            )
-            # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
-            DistributedDataParallel(
-                m,
-                device_ids=[device] if device.type == "gpu" else None,
-                process_group=pg,
-                gradient_as_bucket_view=True,
-                broadcast_buffers=False,
-                static_graph=True,
-            )
+        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+            module=m,
+            params_and_buffers_to_ignore={'st'}
+        )
+        # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
+        DistributedDataParallel(
+            m,
+            device_ids=[device] if device.type == "gpu" else None,
+            process_group=pg,
+            gradient_as_bucket_view=True,
+            broadcast_buffers=False,
+            static_graph=True,
+        )
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
@@ -1813,7 +1824,7 @@ class DistributedDataParallelTest(
 
         class TestModel(nn.Module):
             def __init__(self):
-                super(TestModel, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 10, bias=False)
                 self.fc2 = nn.Linear(10, 4, bias=False)
                 self.relu = nn.ReLU()
@@ -2113,7 +2124,7 @@ class DistributedDataParallelTest(
 
 class ReducerModule(nn.Module):
     def __init__(self):
-        super(ReducerModule, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 4, bias=False)
         self.fc3 = nn.Linear(4, 4, bias=False)
@@ -2269,11 +2280,11 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -2296,9 +2307,9 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
-            tensors = list(tensor.clone() for tensor in target)
+            tensors = [tensor.clone() for tensor in target]
         else:
-            tensors = list(torch.zeros_like(tensor) for tensor in target)
+            tensors = [torch.zeros_like(tensor) for tensor in target]
 
         if self.rank != root_rank:
             self.assertNotEqual(tensors, target)
@@ -2354,18 +2365,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_sequence_num_incremented_gloo_subgroup(self):
         if self.world_size < 4:
-            return sandcastle_skip("Test requires world_size of at least 4")
+            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("gloo")
-
-    @requires_gloo()
-    def test_gloo_barrier_device_ids(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
-            c10d.barrier(device_ids=[self.rank])
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
@@ -2386,6 +2387,10 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_tensor_dtype_complex(self):
         self._test_tensor_dtype_complex(backend="gloo")
+
+    @requires_gloo()
+    def test_bool_tensors(self):
+        self._test_bool_tensors(backend="gloo")
 
 class GlooProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_gloo()
@@ -2488,6 +2493,34 @@ class CompilerTest(test_c10d_common.CompilerTest):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return torch.device("cpu")
+
+    @requires_gloo()
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_duplicate_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
 if __name__ == "__main__":
     assert (

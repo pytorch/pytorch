@@ -244,7 +244,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):
@@ -270,7 +270,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):
@@ -306,7 +306,7 @@ class TestEnum(JitTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, e: Color):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.e = e
 
             def forward(self):
@@ -362,3 +362,13 @@ class TestEnum(JitTestCase):
             GREEN = 2
 
         torch.jit.script(Color)
+
+    # Regression test for https://github.com/pytorch/pytorch/issues/108933
+    def test_typed_enum(self):
+        class Color(int, Enum):
+            RED = 1
+            GREEN = 2
+
+        @torch.jit.script
+        def is_red(x: Color) -> bool:
+            return x == Color.RED

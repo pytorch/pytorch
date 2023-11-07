@@ -13,6 +13,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
 
@@ -28,12 +29,7 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-TEST_CUDA = torch.cuda.is_available()
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
-TEST_CUDNN = False
-if TEST_CUDA and not TEST_ROCM:  # Skip ROCM
-    torch.ones(1).cuda()  # initialize cuda context
-    TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0')))
 
 def removeExceptions(graph):
     for n in graph.findAllNodes('prim::RaiseException'):
@@ -43,7 +39,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module(self):
         class M(nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.a = 1                      # folded
                 self.b = 1.2                    # folded
                 self.c = "hello"                # folded
@@ -101,7 +97,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_submodule(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 11
                 self.b = 2
 
@@ -110,7 +106,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.a = 12
                 self.b = 2
 
@@ -120,7 +116,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()
                 self.sub2 = SubModule2()
                 self.a = 3
@@ -166,7 +162,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_fork(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.ones(20, 20)
                 self.b = torch.ones(20, 20)
 
@@ -175,7 +171,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
 
             def forward(self, x):
@@ -206,7 +202,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_nested_fork(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.ones(20, 20)
                 self.b = torch.ones(20, 20)
 
@@ -215,7 +211,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
                 self.c = torch.ones(20, 20)
 
@@ -227,7 +223,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule2()
                 self.d = 1
 
@@ -266,7 +262,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.a = torch.ones(20, 20)
                 self.b = torch.ones(20, 20)
 
@@ -307,7 +303,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.a = torch.ones(20, 20)
                 self.b = torch.ones(20, 20)
 
@@ -347,7 +343,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_sharedclasstype(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = torch.tensor([2.2])
 
@@ -366,7 +362,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
                 self.b = torch.tensor([3.3])
 
@@ -376,7 +372,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()  # sub1 and sub2.sub shared same class type.
                 self.sub2 = SubModule2()
                 self.a = torch.tensor([4.4])
@@ -439,7 +435,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_nestedaliasing(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = torch.tensor([2.2])
 
@@ -459,7 +455,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.sub = Sub  # aliasing
 
             def forward(self, x):
@@ -467,7 +463,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = Sub  # aliasing
                 self.sub2 = SubModule2()
 
@@ -495,7 +491,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_nestedaliasingscalar(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 1.1
                 self.b = 2.2
 
@@ -515,7 +511,7 @@ class TestFreezing(JitTestCase):
 
         class SubModule2(nn.Module):
             def __init__(self):
-                super(SubModule2, self).__init__()
+                super().__init__()
                 self.sub = Sub  # aliasing
 
             def forward(self, x):
@@ -523,7 +519,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = Sub  # aliasing
                 self.sub2 = SubModule2()
 
@@ -551,7 +547,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_preserve_sub_module(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = 2.2
 
@@ -560,7 +556,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()  # aliasing
                 self.sub2 = SubModule()
 
@@ -584,7 +580,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_preserve_sub_module_and_mutation(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = 2.2
 
@@ -594,7 +590,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()  # aliasing
                 self.sub2 = SubModule()
 
@@ -622,7 +618,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_helperfunction(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 11
                 self.b = 2
 
@@ -631,7 +627,7 @@ class TestFreezing(JitTestCase):
 
         class TestModule(nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
                 self.a = 3
                 self.b = 4
@@ -655,7 +651,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [11, 22]
 
             @torch.jit.script_method
@@ -677,7 +673,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_list(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2]
 
             def forward(self, x):
@@ -704,7 +700,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_dict(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = {"layer" : "4"}
 
             def forward(self, x):
@@ -733,7 +729,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_mutable_tensor(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1., 2., 3.])
 
             def forward(self, x):
@@ -755,7 +751,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_tuple(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = (torch.tensor([1, 2, 3, 4, 5, 6]), "hi")
 
             def forward(self, x):
@@ -777,7 +773,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_tensor(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
 
             def forward(self, x):
@@ -799,7 +795,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_list(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [torch.tensor([1, 2, 3, 4, 5, 6])]
 
             def forward(self, x):
@@ -820,7 +816,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = self.a.view(2, 3)
 
@@ -841,7 +837,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr2(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = {"layer" : ([self.a.view(2, 3), torch.tensor([10])], 20)}
                 self.c = ([self.a.view(2, 3), torch.tensor([10])], 20)
@@ -862,7 +858,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr3(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = [self.a, torch.tensor([10])]
 
@@ -885,7 +881,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_tensor_attr4(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1, 2, 3, 4, 5, 6])
                 self.b = [self.a, torch.tensor([10])]
 
@@ -907,7 +903,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.b = [a.view(3, 2), torch.tensor([10])]
                 self.c = (20, a.view(2, 3))
 
@@ -927,7 +923,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = self.a
                 self.c = (self.a, 10)
@@ -954,7 +950,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr2(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = ([11], [10])
 
@@ -978,7 +974,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_aliased_attr3(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = [1, 2, 3, 4, 5, 6]
                 self.b = ([11], [10])
 
@@ -1002,7 +998,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_return_self(self):
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1., 2., 3.])
 
             def forward(self, x):
@@ -1023,7 +1019,7 @@ class TestFreezing(JitTestCase):
 
         class Mod(nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.obj = Obj(2, 3)
 
             def forward(self, i: int):
@@ -1046,7 +1042,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1)
 
             def forward(self, x):
@@ -1062,7 +1058,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.lin = nn.Linear(10, 1)
 
             @torch.jit.export
@@ -1081,7 +1077,7 @@ class TestFreezing(JitTestCase):
 
         class FreezeMe(nn.Module):
             def __init__(self):
-                super(FreezeMe, self).__init__()
+                super().__init__()
                 self.lin = nn.Linear(10, 1)
 
             @torch.jit.export
@@ -1099,7 +1095,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_in_training_mode(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 32, 3, 1)
                 self.conv2 = nn.Conv2d(32, 64, 3, 1)
                 self.dropout1 = nn.Dropout2d(0.25)
@@ -1243,7 +1239,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_user_preserved_attr(self):
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = torch.tensor([2.2])
 
@@ -1260,7 +1256,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_user_preserved_method(self):
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = torch.tensor([2.2])
 
@@ -1291,7 +1287,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_user_preserved_method2(self):
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.a = torch.tensor([1.1])
                 self.b = torch.tensor([2.2])
 
@@ -1313,7 +1309,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_user_preserved_attribute_on_submodule(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 1
                 self.b = 2
 
@@ -1322,7 +1318,7 @@ class TestFreezing(JitTestCase):
 
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.sub1 = SubModule()
                 self.sub2 = SubModule()
 
@@ -1347,7 +1343,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_module_with_user_preserved_attribute_on_unused_submodule(self):
         class SubModule(nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.a = 1
                 self.b = 2
 
@@ -1360,7 +1356,7 @@ class TestFreezing(JitTestCase):
 
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
 
             def forward(self):
@@ -1377,9 +1373,6 @@ class TestFreezing(JitTestCase):
 
     def test_freeze_module_with_user_preserved_method_on_submodule(self):
         class SubModule(nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-
             def forward(self, x):
                 return self.method_a(x) + self.method_b(x)
 
@@ -1391,7 +1384,7 @@ class TestFreezing(JitTestCase):
 
         class Module(nn.Module):
             def __init__(self):
-                super(Module, self).__init__()
+                super().__init__()
                 self.sub = SubModule()
 
             def forward(self, x):
@@ -1409,7 +1402,7 @@ class TestFreezing(JitTestCase):
     def test_module_with_shared_type_instances(self):
         class Child(nn.Module):
             def __init__(self):
-                super(Child, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
 
             def forward(self, x):
@@ -1418,7 +1411,7 @@ class TestFreezing(JitTestCase):
 
         class Parent(nn.Module):
             def __init__(self):
-                super(Parent, self).__init__()
+                super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
                 self.conv1 = nn.Conv2d(1, 1, 1).to(dtype=torch.float32)
                 self.child = Child()
@@ -1465,7 +1458,7 @@ class TestFreezing(JitTestCase):
 
         class Mod(nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mod1 = ValHolder(1)
                 self.mod2 = ValHolder(2)
 
@@ -1536,7 +1529,7 @@ class TestFreezing(JitTestCase):
 
         class ImplementsInterface(torch.nn.Module):
             def __init__(self):
-                super(ImplementsInterface, self).__init__()
+                super().__init__()
                 self.sum = torch.zeros((2, 2))
 
             def forward(self, inp: torch.Tensor) -> torch.Tensor:
@@ -1612,7 +1605,7 @@ class TestFreezing(JitTestCase):
 
         class InnerImpl(torch.nn.Module):
             def __init__(self):
-                super(InnerImpl, self).__init__()
+                super().__init__()
                 self.x = torch.ones((2, 2))
 
             def forward(self, inp):
@@ -1622,7 +1615,7 @@ class TestFreezing(JitTestCase):
             inner_impl: InnerInterface
 
             def __init__(self):
-                super(OuterImpl, self).__init__()
+                super().__init__()
                 self.inner_impl = InnerImpl()
 
             def forward(self, inp):
@@ -1632,7 +1625,7 @@ class TestFreezing(JitTestCase):
             outer_impl: OuterInterface
 
             def __init__(self):
-                super(WrapperModule, self).__init__()
+                super().__init__()
                 self.outer_impl = OuterImpl()
 
             def forward(self, inp):
@@ -1662,7 +1655,7 @@ class TestFreezing(JitTestCase):
 
         class InnerImpl1(torch.nn.Module):
             def __init__(self):
-                super(InnerImpl1, self).__init__()
+                super().__init__()
                 self.x = torch.ones((2, 2))
 
             def forward(self, inp):
@@ -1671,7 +1664,7 @@ class TestFreezing(JitTestCase):
 
         class InnerImpl2(torch.nn.Module):
             def __init__(self):
-                super(InnerImpl2, self).__init__()
+                super().__init__()
                 self.x = torch.ones((2, 2)) * 2
 
             def forward(self, inp):
@@ -1681,7 +1674,7 @@ class TestFreezing(JitTestCase):
             inner_impl: InnerInterface
 
             def __init__(self):
-                super(OuterImpl, self).__init__()
+                super().__init__()
                 self.inner_impl = InnerImpl1()
                 self.impl1 = InnerImpl1()
                 self.impl2 = InnerImpl1()
@@ -1699,7 +1692,7 @@ class TestFreezing(JitTestCase):
             outer_impl: OuterInterface
 
             def __init__(self):
-                super(WrapperModule, self).__init__()
+                super().__init__()
                 self.outer_impl = OuterImpl()
 
             def forward(self, inp):
@@ -1730,7 +1723,7 @@ class TestFreezing(JitTestCase):
             interface_impl: MyInterface
 
             def __init__(self):
-                super(WrapperModule1, self).__init__()
+                super().__init__()
                 self.interface_impl = Impl1()
                 self.impl1 = Impl1()
                 self.impl2 = Impl2()
@@ -1752,7 +1745,7 @@ class TestFreezing(JitTestCase):
             interface_impl: MyInterface
 
             def __init__(self):
-                super(WrapperModule2, self).__init__()
+                super().__init__()
                 self.interface_impl = Impl1()
                 self.impl1 = Impl1()
                 self.impl2 = Impl2()
@@ -1795,7 +1788,7 @@ class TestFreezing(JitTestCase):
 
         class InnerImpl(torch.nn.Module):
             def __init__(self):
-                super(InnerImpl, self).__init__()
+                super().__init__()
                 self.x = torch.ones((2, 2))
 
             def forward(self, inp):
@@ -1805,7 +1798,7 @@ class TestFreezing(JitTestCase):
             impl: InnerInterface
 
             def __init__(self):
-                super(OuterImpl, self).__init__()
+                super().__init__()
                 self.impl = InnerImpl()
                 self.x = torch.ones((2, 2)) * 5
 
@@ -1819,7 +1812,7 @@ class TestFreezing(JitTestCase):
             impl: OuterInterface
 
             def __init__(self):
-                super(WrapperModule, self).__init__()
+                super().__init__()
                 self.impl = OuterImpl()
 
             def forward(self, inp):
@@ -1839,7 +1832,7 @@ class TestFreezing(JitTestCase):
     def test_freeze_non_interface_module_swap(self):
         class InnerModule(torch.nn.Module):
             def __init__(self, x):
-                super(InnerModule, self).__init__()
+                super().__init__()
                 self.x = x
 
             def forward(self, inp: torch.Tensor) -> torch.Tensor:
@@ -1928,7 +1921,7 @@ class TestFreezing(JitTestCase):
             }
 
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.box_coder = BoxCoder(50.)
 
             def forward(self, input):
@@ -1944,9 +1937,6 @@ class TestFreezing(JitTestCase):
 
     def test_freeze_module_with_tupleoutput_submodule(self):
         class SubModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return (x + 1, x + 2)
 
@@ -2000,11 +1990,13 @@ class TestFreezing(JitTestCase):
 
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.double)
 
     def tearDown(self):
         torch.set_default_dtype(self.default_dtype)
+        super().tearDown()
 
     def test_conv_bn_folding(self):
         conv_bias = [True, False]
@@ -2015,7 +2007,7 @@ class TestFrozenOptimizations(JitTestCase):
         for use_bias, modules, tracing, track_stats in product(conv_bias, module_pairs, use_tracing, bn_running_stats):
             class ConvBN(torch.nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
-                    super(ConvBN, self).__init__()
+                    super().__init__()
                     self.conv = modules[0](in_channels, out_channels, bias=use_bias, **kwargs)
                     self.bn = modules[1](out_channels, eps=0.001, track_running_stats=track_stats)
 
@@ -2060,7 +2052,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_conv_bn_folding_not_forward(self):
         class ConvBN(torch.nn.Module):
             def __init__(self, in_channels, out_channels, **kwargs):
-                super(ConvBN, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
                 self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
                 self.amt = 3.2
@@ -2092,7 +2084,7 @@ class TestFrozenOptimizations(JitTestCase):
 
         class ConvBN(torch.nn.Module):
             def __init__(self, in_channels, out_channels, **kwargs):
-                super(ConvBN, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, dtype=torch.half, **kwargs)
                 self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
 
@@ -2123,7 +2115,7 @@ class TestFrozenOptimizations(JitTestCase):
                 __constants__ = ['use_scalar']
 
                 def __init__(self, in_channels, out_channels, tensor=None, **kwargs):
-                    super(ConvOp, self).__init__()
+                    super().__init__()
                     self.conv = module(in_channels, out_channels, bias=use_bias, **kwargs)
                     self.conv2 = module(in_channels, out_channels, bias=use_bias, **kwargs)
                     self.use_scalar = scalar
@@ -2202,7 +2194,7 @@ class TestFrozenOptimizations(JitTestCase):
         class Conv_Mul_Add_Bn(nn.Module):
 
             def __init__(self, in_channels, out_channels, **kwargs):
-                super(Conv_Mul_Add_Bn, self).__init__()
+                super().__init__()
                 self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
                 self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
                 self.tensor1 = torch.tensor(2.2)
@@ -2231,7 +2223,7 @@ class TestFrozenOptimizations(JitTestCase):
         for modules, tracing, track_stats in product(module_pairs, use_tracing, bn_running_stats):
             class LinearBN(torch.nn.Module):
                 def __init__(self, in_features, out_features):
-                    super(LinearBN, self).__init__()
+                    super().__init__()
                     self.linear = modules[0](in_features, out_features)
                     self.bn = modules[1](out_features, eps=0.001, track_running_stats=track_stats)
 
@@ -2286,7 +2278,7 @@ class TestFrozenOptimizations(JitTestCase):
         for modules, tracing, track_stats in product(module_pairs, use_tracing, bn_running_stats):
             class LinearBN(torch.nn.Module):
                 def __init__(self, in_features, out_features):
-                    super(LinearBN, self).__init__()
+                    super().__init__()
                     self.linear = modules[0](in_features, out_features, bias=False, dtype=torch.half)
                     self.bn = modules[1](out_features, eps=0.001, dtype=torch.float)
 
@@ -2331,7 +2323,7 @@ class TestFrozenOptimizations(JitTestCase):
         for w1_dim, w2_dim in out_dimms:
             class ModMultLinear(nn.Module):
                 def __init__(self, w1_dim, w2_dim):
-                    super(ModMultLinear, self).__init__()
+                    super().__init__()
                     self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
                     self.b1 = nn.Parameter(torch.rand([w1_dim]))
                     self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
@@ -2355,7 +2347,7 @@ class TestFrozenOptimizations(JitTestCase):
         """
         class ModMultLinear(nn.Module):
             def __init__(self):
-                super(ModMultLinear, self).__init__()
+                super().__init__()
                 w1_dim = 5
                 w2_dim = 10
                 self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
@@ -2384,7 +2376,7 @@ class TestFrozenOptimizations(JitTestCase):
         # Freezing requires that the graph be a module
         class ModMultLinear(nn.Module):
             def __init__(self, w1_dim, w2_dim):
-                super(ModMultLinear, self).__init__()
+                super().__init__()
                 self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
                 self.b1 = nn.Parameter(torch.rand([w1_dim]))
                 self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
@@ -2404,7 +2396,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_linear_multiple_blocks(self):
         class ModMultLinear(nn.Module):
             def __init__(self, w1_dim, w2_dim):
-                super(ModMultLinear, self).__init__()
+                super().__init__()
                 self.w1 = nn.Parameter(torch.rand([w1_dim, 5]))
                 self.b1 = nn.Parameter(torch.rand([w1_dim]))
                 self.w2 = nn.Parameter(torch.rand([w2_dim, 5]))
@@ -2472,7 +2464,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_freeze_remove_dropout(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.dropout = nn.Dropout(0.5)
 
             def forward(self, x):
@@ -2493,7 +2485,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_freeze_remove_feature_dropout(self):
         class Net(nn.Module):
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.dropout = nn.Dropout2d(0.5)
 
             def forward(self, x):
@@ -2511,7 +2503,7 @@ class TestFrozenOptimizations(JitTestCase):
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_freeze_mkdlnn(self):
         conv = torch.nn.Conv2d(3, 32, kernel_size=3, stride=2).eval().float()
         convmkl = mkldnn_utils.to_mkldnn(conv)
@@ -2519,7 +2511,7 @@ class TestFrozenOptimizations(JitTestCase):
         inp = torch.rand([4, 3, 4, 4]).float()
         self.assertEqual(out(inp.to_mkldnn()).to_dense(), conv(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_conv_to_mkldnn(self):
         with set_default_dtype(torch.float):
             for module, trace in product([nn.Conv2d, nn.Conv3d], [False, True]):
@@ -2554,7 +2546,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_linear_transpose(self):
         class ModLinear(torch.nn.Module):
             def __init__(self):
-                super(ModLinear, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.rand(30))
                 self.weight = torch.nn.Parameter(torch.rand([30, 20]))
 
@@ -2568,7 +2560,7 @@ class TestFrozenOptimizations(JitTestCase):
     def test_linear_non_constant_weight(self):
         class ModLinear(torch.nn.Module):
             def __init__(self):
-                super(ModLinear, self).__init__()
+                super().__init__()
                 self.bias = torch.nn.Parameter(torch.rand(30))
 
             def forward(self, x, weight):
@@ -2604,7 +2596,7 @@ class TestFrozenOptimizations(JitTestCase):
         # Generic composable conv for testing purposes
         return nn.Conv2d(8, 8, 1)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_collapse_adjacent_conversions(self):
 
         with set_default_dtype(torch.float):
@@ -2623,7 +2615,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(scripted_mod(inp), mod(inp))
             self.assertEqual(scripted_mod(inp), mod(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_mkldnn_fuser_broadcasting(self):
         class Add(nn.Module):
             def __init__(self, tensor):
@@ -2649,7 +2641,7 @@ class TestFrozenOptimizations(JitTestCase):
                 with self.assertRaisesRegex(RuntimeError, ""):
                     torch.rand([1, 8, 8, 8]).to_mkldnn() + torch.rand(add_inp).to_mkldnn()
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_mkldnn_inplace_removal(self):
         class AddMul(nn.Module):
             def __init__(self, tensor):
@@ -2670,7 +2662,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(scripted_mod(inp), mod(inp))
             self.assertEqual(scripted_mod(inp), mod(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     @skipIfNoTorchVision
     def test_maxpool_mkldnn(self):
         with set_default_dtype(torch.float):
@@ -2684,7 +2676,7 @@ class TestFrozenOptimizations(JitTestCase):
             FileCheck().check_count("to_dense", 1, exactly=True).run(mod.graph)
             self.assertEqual(mod(inp), sub_model(inp))
 
-    @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
+    @unittest.skipIf(torch.backends.mkldnn.is_available(), "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
         # test no error when mkldnn not available
         with set_default_dtype(torch.float):
@@ -2699,12 +2691,12 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             conv_bias = [True, False]
             conv_ops = [nn.Conv2d, nn.Conv3d]
-            add_z = [True, False]
+            use_add_z = [True, False]
             use_tracing = [True, False]
-            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, add_z, use_tracing):
+            for use_bias, conv, add_z, tracing in product(conv_bias, conv_ops, use_add_z, use_tracing):
                 class Net(nn.Module):
                     def __init__(self, in_channels, out_channels, **kwargs):
-                        super(Net, self).__init__()
+                        super().__init__()
                         self.conv = conv(in_channels, out_channels, bias=use_bias, **kwargs)
                         self.relu = nn.ReLU(inplace=True)
                         self.add_z = add_z
@@ -2748,7 +2740,7 @@ class TestFrozenOptimizations(JitTestCase):
         with set_default_dtype(torch.float):
             class Net(nn.Module):
                 def __init__(self, in_channels, out_channels, **kwargs):
-                    super(Net, self).__init__()
+                    super().__init__()
                     self.conv = nn.Conv2d(in_channels, out_channels, bias=None, **kwargs)
                     self.relu = nn.ReLU(inplace=True)
 
@@ -2778,7 +2770,7 @@ class TestFrozenOptimizations(JitTestCase):
 
             self.assertEqual(mod_eager.make_prediction(inp), optimized_mod.make_prediction(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_numel_less_than_size_with_padding(self):
 
         with set_default_dtype(torch.float):
@@ -2806,7 +2798,7 @@ class TestFrozenOptimizations(JitTestCase):
             eout = exported(i0)
             self.assertTrue(all(torch.allclose(x, y) for x, y in zip(out, eout)))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_incompatible_perf_formats(self):
         with set_default_dtype(torch.float):
             class Mod(nn.Module):
@@ -2828,7 +2820,7 @@ class TestFrozenOptimizations(JitTestCase):
             self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
             self.assertEqual(model(inp), mod(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_pool2d_batchnorm(self):
         with set_default_dtype(torch.float):
 
@@ -2852,7 +2844,7 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check("aten::to_dense").check_next("return").run(mod.graph)
                 self.assertEqual(sub_model(inp), mod(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_pool3d_batchnorm(self):
         with set_default_dtype(torch.float):
 
@@ -2877,13 +2869,13 @@ class TestFrozenOptimizations(JitTestCase):
                 self.assertEqual(sub_model(inp), mod(inp))
 
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     @skipIfNoTorchVision
     def test_conv_hardswish(self):
         with set_default_dtype(torch.float):
             class Clamp(torch.nn.Module):
                 def __init__(self, min_val, max_val, **kwargs):
-                    super(Clamp, self).__init__()
+                    super().__init__()
                     self.min_val = min_val
                     self.max_val = max_val
 
@@ -2916,7 +2908,7 @@ class TestFrozenOptimizations(JitTestCase):
                 FileCheck().check_count("aten::to_dense", 1, exactly=True).run(mod.graph)
                 self.assertEqual(sub_model(inp), mod(inp))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_hardswish_hardsigmoid(self):
         with set_default_dtype(torch.float):
             op_map = {
@@ -2943,7 +2935,7 @@ class TestFrozenOptimizations(JitTestCase):
                         # and we aren't testing aten impls anyways
                         self.assertEqual(aten_op(x, inplace=False), m(x).to_dense())
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_scalar_mul(self):
         with set_default_dtype(torch.float):
             class Mod(nn.Module):
@@ -2965,9 +2957,6 @@ class TestFrozenOptimizations(JitTestCase):
 
     def test_remove_detach(self):
         class Mod(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 y = x.detach()
                 return y * y
@@ -2980,9 +2969,6 @@ class TestFrozenOptimizations(JitTestCase):
 
     def test_remove_detach_not_applied(self):
         class Mod(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 y = x.detach()
                 return x is y
@@ -2993,13 +2979,15 @@ class TestFrozenOptimizations(JitTestCase):
         FileCheck().check("aten::detach").run(frozen_mod.graph)
         self.assertEqual(frozen_mod(inp), mod(inp))
 
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.float)
 
     def tearDown(self):
+        super().tearDown()
         torch.set_default_dtype(self.default_dtype)
 
     def getConv(self):

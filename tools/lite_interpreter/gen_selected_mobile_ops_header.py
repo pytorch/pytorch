@@ -11,7 +11,7 @@ from torchgen.selective_build.selector import SelectiveBuilder
 try:
     from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[assignment, misc]
 
 
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
@@ -47,7 +47,7 @@ selected_mobile_ops_preamble = """#pragma once
 
 def extract_root_operators(selective_builder: SelectiveBuilder) -> Set[str]:
     ops = []
-    for (op_name, op) in selective_builder.operators.items():
+    for op_name, op in selective_builder.operators.items():
         if op.is_root_operator:
             ops.append(op_name)
     return set(ops)
@@ -67,9 +67,7 @@ def get_selected_kernel_dtypes_code(
     ):
         body_parts = []
         for kernel_tag, dtypes in selective_builder.kernel_metadata.items():
-            conditions = list(
-                map(lambda x: "scalar_type == at::ScalarType::" + x, dtypes)
-            )
+            conditions = ["scalar_type == at::ScalarType::" + x for x in dtypes]
             body_parts.append(
                 if_condition_template.substitute(
                     kernel_tag_name=kernel_tag,
@@ -151,7 +149,7 @@ def main() -> None:
         "--yaml_file_path",
         type=str,
         required=True,
-        help="Path to the yaml" " file with a list of operators used by the model.",
+        help="Path to the yaml file with a list of operators used by the model.",
     )
     parser.add_argument(
         "-o",

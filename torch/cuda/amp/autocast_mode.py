@@ -1,15 +1,18 @@
-import torch
-import functools
 import collections
+import functools
+
+import torch
+
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
-from torch._six import string_classes
 from typing import Any
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
+
 
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
@@ -17,13 +20,20 @@ class autocast(torch.amp.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
 
-    def __init__(self, enabled : bool = True, dtype : torch.dtype = torch.float16, cache_enabled : bool = True):
+    def __init__(
+        self,
+        enabled: bool = True,
+        dtype: torch.dtype = torch.float16,
+        cache_enabled: bool = True,
+    ):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = "cuda"
             self.fast_dtype = dtype
             return
-        super().__init__("cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled)
+        super().__init__(
+            "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
+        )
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
@@ -46,16 +56,20 @@ class autocast(torch.amp.autocast_mode.autocast):
 # may be falsely detected as "Iterables."
 def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
-        is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
+        is_eligible = (
+            value.is_floating_point()
+            and value.is_cuda
+            and (value.dtype is not torch.float64)
+        )
         return value.to(dtype) if is_eligible else value
-    elif isinstance(value, string_classes):
+    elif isinstance(value, (str, bytes)):
         return value
     elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
     elif isinstance(value, collections.abc.Iterable):
-        iterable = map(lambda v: _cast(v, dtype), value)
+        iterable = (_cast(v, dtype) for v in value)
         if isinstance(value, (list, tuple)):
             return type(value)(iterable)
         else:
@@ -105,6 +119,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
                     return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
             else:
                 return fwd(*args, **kwargs)
+
     return decorate_fwd
 
 
@@ -118,8 +133,10 @@ def custom_bwd(bwd):
     Ensures that ``backward`` executes with the same autocast state as ``forward``.
     See the :ref:`example page<amp-custom-examples>` for more detail.
     """
+
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
         with autocast(enabled=args[0]._fwd_used_autocast, dtype=args[0]._dtype):
             return bwd(*args, **kwargs)
+
     return decorate_bwd

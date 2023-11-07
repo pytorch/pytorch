@@ -104,8 +104,8 @@ The *Pow* op takes an input data tensor $X$ and an exponent parameter *exponent*
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pow_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/pow_op.cc
 
 
 <details>

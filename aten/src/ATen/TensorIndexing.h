@@ -22,13 +22,12 @@
 
 #include <utility>
 
-namespace at {
-namespace indexing {
+namespace at::indexing {
 
 const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
 const int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
-enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
+enum class TensorIndexType { None, Ellipsis, SymInt, Boolean, Slice, Tensor };
 
 constexpr c10::nullopt_t None = c10::nullopt;
 
@@ -124,10 +123,11 @@ struct TORCH_API TensorIndex final {
         "\"");
   }
 
-  // Case 3: Integer value
-  TensorIndex(int64_t integer)
-      : integer_(integer), type_(TensorIndexType::Integer) {}
-  TensorIndex(int integer) : TensorIndex((int64_t)integer) {}
+  // Case 3: (Sym) Integer value
+  TensorIndex(SymInt integer)
+      : integer_(std::move(integer)), type_(TensorIndexType::SymInt) {}
+  TensorIndex(int64_t integer) : TensorIndex(SymInt(integer)) {}
+  TensorIndex(int integer) : TensorIndex(SymInt(integer)) {}
 
   // Case 4: Boolean value
   template <
@@ -152,10 +152,10 @@ struct TORCH_API TensorIndex final {
   }
 
   inline bool is_integer() const {
-    return type_ == TensorIndexType::Integer;
+    return type_ == TensorIndexType::SymInt;
   }
 
-  inline int64_t integer() const {
+  inline SymInt integer() const {
     return integer_;
   }
 
@@ -184,7 +184,7 @@ struct TORCH_API TensorIndex final {
   }
 
  private:
-  int64_t integer_ = 0;
+  SymInt integer_ = 0;
   bool boolean_ = false;
   Slice slice_;
   Tensor tensor_;
@@ -230,16 +230,19 @@ static inline Tensor applySlice(
 static inline Tensor applySelect(
     const Tensor& self,
     int64_t dim,
-    int64_t index,
+    SymInt index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
     const c10::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
-    TORCH_CHECK_INDEX(
-        !(index == 0 && dim == 0 && self_sizes->empty()),
-        "invalid index of a 0-dim tensor. ",
-        "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    auto maybe_index = index.maybe_as_int();
+    if (maybe_index.has_value()) {
+      TORCH_CHECK_INDEX(
+          !(maybe_index.value() == 0 && dim == 0 && self_sizes->empty()),
+          "invalid index of a 0-dim tensor. ",
+          "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
+    }
 
     auto size = (*self_sizes)[dim];
     TORCH_CHECK_INDEX(
@@ -255,7 +258,7 @@ static inline Tensor applySelect(
   // if the index is negative, do not normalize it because that would fix the
   // index on the current tensor size in the tracer. aten::select also works on
   // negative indices
-  return self.select(dim, index);
+  return self.select_symint(dim, index);
 }
 
 static inline Tensor boolToIndexingTensorCPUOrCUDA(
@@ -368,7 +371,7 @@ static inline Tensor scalarToTensor(
     const Scalar& v,
     const TensorOptions& options,
     const at::Device& self_device) {
-  if (self_device == at::kCPU) {
+  if (self_device == at::kCPU && !v.isSymbolic()) {
     return at::detail::scalar_tensor_static(
         v, options.dtype_opt()->toScalarType(), self_device);
   } else {
@@ -382,7 +385,10 @@ static inline Tensor scalarToTensor(
 static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] != 1) {
+    // Unbacked SymInt has different behavior, but this is sound because
+    // failing to slice will only ever cause an error, not divergent
+    // behavior
+    if (!sizes[i].has_hint() || sizes[i] != 1) {
       first_non1_src = i;
       break;
     }
@@ -721,5 +727,4 @@ static inline void set_item(
   return;
 }
 
-} // namespace indexing
-} // namespace at
+} // namespace at::indexing

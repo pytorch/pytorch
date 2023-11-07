@@ -102,7 +102,7 @@ output = 1.0, 2.0
 *** Note that we alternate `data` and `mask` inputs
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_unmask_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/boolean_unmask_ops.cc
 
 <details>
 

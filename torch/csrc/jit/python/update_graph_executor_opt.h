@@ -1,8 +1,6 @@
 #pragma once
 #include <torch/csrc/Export.h>
-namespace torch {
-namespace jit {
+namespace torch::jit {
 TORCH_API void setGraphExecutorOptimize(bool o);
 TORCH_API bool getGraphExecutorOptimize();
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

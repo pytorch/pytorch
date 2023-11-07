@@ -17,8 +17,7 @@
 #include <memory>
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 std::mutex lock;
 
@@ -70,7 +69,7 @@ void loadDecompositionFunctions() {
 
 } // anonymous namespace
 
-void DecomposeOp(Node* n) {
+static void DecomposeOp(Node* n) {
   auto schema = n->maybeSchema();
   if (!schema) {
     return;
@@ -89,7 +88,7 @@ void DecomposeOp(Node* n) {
   n->destroy();
 }
 
-void RunDecompositions(Block* block) {
+static void RunDecompositions(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // advance iterator bc the current node may be destroyed
@@ -133,7 +132,7 @@ c10::optional<GraphFunction*> GetDecompositionFunction(
   auto& func = toGraphFunction(*cache_it->second);
   // Simple Executor:
   // To allow decomposition to run on tensor subclasses such as batched tensors,
-  // we set decompostion execution to use the simple executor so that
+  // we set decomposition execution to use the simple executor so that
   // optimizations that do not compose with arbitrary subclasses (such as
   // fusion) do not run
   func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
@@ -213,5 +212,4 @@ Function* GetDecompositionExecutor(const char* schema_literal) {
   return GetDecompositionExecutor(schema);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

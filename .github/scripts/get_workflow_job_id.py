@@ -11,8 +11,9 @@ import time
 import urllib
 import urllib.parse
 
-from typing import Any, Callable, Dict, List, Tuple, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.request import Request, urlopen
+
 
 def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
     links = {}
@@ -26,18 +27,26 @@ def parse_json_and_links(conn: Any) -> Tuple[Any, Dict[str, Dict[str, str]]]:
                 continue
             url = urllib.parse.unquote(url.strip("<> "))
             qparams = urllib.parse.parse_qs(params_.strip(), separator=";")
-            params = {k: v[0].strip('"') for k, v in qparams.items() if type(v) is list and len(v) > 0}
+            params = {
+                k: v[0].strip('"')
+                for k, v in qparams.items()
+                if type(v) is list and len(v) > 0
+            }
             params["url"] = url
             if "rel" in params:
                 links[params["rel"]] = params
 
     return json.load(conn), links
 
-def fetch_url(url: str, *,
-              headers: Optional[Dict[str, str]] = None,
-              reader: Callable[[Any], Any] = lambda x: x.read(),
-              retries: Optional[int] = 3,
-              backoff_timeout: float = .5) -> Any:
+
+def fetch_url(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    reader: Callable[[Any], Any] = lambda x: x.read(),
+    retries: Optional[int] = 3,
+    backoff_timeout: float = 0.5,
+) -> Any:
     if headers is None:
         headers = {}
     try:
@@ -46,13 +55,20 @@ def fetch_url(url: str, *,
     except urllib.error.HTTPError as err:
         if isinstance(retries, (int, float)) and retries > 0:
             time.sleep(backoff_timeout)
-            return fetch_url(url, headers=headers, reader=reader, retries=retries - 1, backoff_timeout=backoff_timeout)
+            return fetch_url(
+                url,
+                headers=headers,
+                reader=reader,
+                retries=retries - 1,
+                backoff_timeout=backoff_timeout,
+            )
         exception_message = (
             "Is github alright?",
             f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
-            f"{err.reason}\n\nheaders={err.headers}"
+            f"{err.reason}\n\nheaders={err.headers}",
         )
         raise RuntimeError(exception_message) from err
+
 
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()
@@ -72,7 +88,9 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
     jobs = response["jobs"]
     assert type(jobs) is list
     while "next" in links.keys():
-        response, links = fetch_url(links["next"]["url"], headers=headers, reader=parse_json_and_links)
+        response, links = fetch_url(
+            links["next"]["url"], headers=headers, reader=parse_json_and_links
+        )
         jobs.extend(response["jobs"])
 
     return jobs
@@ -92,7 +110,8 @@ def fetch_jobs(url: str, headers: Dict[str, str]) -> List[Dict[str, str]]:
 # looking for RUNNER_NAME will uniquely identify the job we're currently
 # running.
 
-def find_job_id(args: Any) -> str:
+
+def find_job_id_name(args: Any) -> Tuple[str, str]:
     # From https://docs.github.com/en/actions/learn-github-actions/environment-variables
     PYTORCH_REPO = os.environ.get("GITHUB_REPOSITORY", "pytorch/pytorch")
     PYTORCH_GITHUB_API = f"https://api.github.com/repos/{PYTORCH_REPO}"
@@ -111,17 +130,31 @@ def find_job_id(args: Any) -> str:
 
     for job in jobs:
         if job["runner_name"] == args.runner_name:
-            return job["id"]
+            return (job["id"], job["name"])
 
     raise RuntimeError(f"Can't find job id for runner {args.runner_name}")
+
+
+def set_output(name: str, val: Any) -> None:
+    if os.getenv("GITHUB_OUTPUT"):
+        with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
+            print(f"{name}={val}", file=env)
+    else:
+        print(f"::set-output name={name}::{val}")
+
 
 def main() -> None:
     args = parse_args()
     try:
-        print(find_job_id(args))
+        # Get both the job ID and job name because we have already spent a request
+        # here to get the job info
+        job_id, job_name = find_job_id_name(args)
+        set_output("job-id", job_id)
+        set_output("job-name", job_name)
     except Exception as e:
         print(repr(e), file=sys.stderr)
         print(f"workflow-{args.workflow_run_id}")
+
 
 if __name__ == "__main__":
     main()

@@ -14,57 +14,45 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser
+/torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
-/test/allowlist_for_publicAPI.json @albanD @anjali411
+/test/allowlist_for_publicAPI.json @albanD
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/tags.yaml @anjali411
+/aten/src/ATen/native/tags.yaml @ezyang
 
 # Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda @jerryzh168
 /aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168 @z-a-f @hdcharles
-/test/quantization/ @jerryzh168 @z-a-f
+/test/ao/ @jerryzh168 @hdcharles
+/test/quantization/ @jerryzh168
 /torch/quantization/ @jerryzh168
-ao/sparisty/ @z-a-f @hdcharles
+ao/sparisty/ @hdcharles
 ao/quantization/ @jerryzh168
 nn/intrinsic/ @jerryzh168
 nn/quantized/ @jerryzh168
-nn/quantizable/ @jerryzh168 @z-a-f
+nn/quantizable/ @jerryzh168
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
-# Distributed package
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
-/torch/distributed/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
-/torch/distributed/_composable @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @yhcharles @fegin
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
-
-# Distributed tests
-# This list is mostly if you'd like to be tagged as reviewer, feel free to add
-# or remove yourself from it.
-/test/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
-/torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin
-
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @abock
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock
-/torch/csrc/jit/passes/onnx/ @bowenbao @abock
-/torch/onnx/ @bowenbao @abock
-/test/onnx/ @bowenbao @abock
+/torch/_dynamo/backends/onnxrt.py @bowenbao @abock @thiagocrepaldi @wschin
+/torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
+/torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
+/torch/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
+/test/onnx/ @bowenbao @abock @thiagocrepaldi @wschin
 
 # Docker
 /.ci/docker/ @jeffdaily
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @shunting314 @ngimel @bertmaher @jeffdaily @jataylo @jithunnair-amd @pruthvistony
 
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
@@ -101,8 +89,8 @@ test/test_type_promotion.py @mruberry @ngimel
 # functorch-related things
 # This list is for people wanting to be notified every time there's a change
 # Useful for e.g. auditing xfails that other folks add to tests
-test/functorch/test_ops.py @zou3519 @chillee
-test/functorch/test_vmap.py @zou3519 @chillee
+test/functorch/test_ops.py @zou3519 @chillee @kshitij12345
+test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 
 # torch MPS
 test/test_mps.py @kulinseth
@@ -110,10 +98,21 @@ aten/src/ATen/mps/ @kulinseth
 aten/src/ATen/native/mps/ @kulinseth
 
 # Profiler
-torch/csrc/autograd/profiler* @robieta
-torch/autograd/profiler* @robieta
-torch/csrc/profiler/ @robieta
-torch/profiler/ @robieta
+torch/csrc/autograd/profiler* @aaronenyeshi
+torch/autograd/profiler* @aaronenyeshi
+torch/csrc/profiler/ @aaronenyeshi
+torch/profiler/ @aaronenyeshi
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
+
+# Dataloader
+torch/utils/data/ @ejguan
+
+# hipify
+torch/utils/hipify/ @jeffdaily @jithunnair-amd
+tools/amd_build/ @jeffdaily @jithunnair-amd
+
+# torch.export
+/torch/export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17
+/torch/_export/ @avikchaudhuri @gmagogsfm @tugsbayasgalan @zhxchen17

@@ -27,7 +27,7 @@ from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -144,7 +144,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_user_script_bash(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -175,7 +175,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_user_script_default_nproc(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -204,7 +204,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_with_env_vars(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -262,27 +262,27 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_auto_configurations(self):
         self._test_nproc_launch_configuration("auto", os.cpu_count())
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_number_configurations(self):
         self._test_nproc_launch_configuration("4", 4)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_unknown_configurations(self):
         with self.assertRaises(ValueError):
             self._test_nproc_launch_configuration("unknown", 4)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     @patch("torch.cuda.is_available", return_value=True)
     @patch("torch.cuda.device_count", return_value=3)
     def test_nproc_gpu_launch_configurations(self, _mock1, _mock2):
         self._test_nproc_launch_configuration("auto", 3)
         self._test_nproc_launch_configuration("gpu", 3)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         run_id = str(uuid.uuid4().int)
         min_nodes = 1
@@ -310,7 +310,7 @@ class ElasticLaunchTest(unittest.TestCase):
         )
 
     @mock.patch("torch.distributed.elastic.events.record")
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_worker_raise_exception(self, record_mock):
         """
         Asserts that when the worker program fails and lancher raieses exception
@@ -338,7 +338,7 @@ class ElasticLaunchTest(unittest.TestCase):
 
         record_mock.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     @mock.patch(
         "torch.distributed.elastic.agent.server.local_elastic_agent.LocalElasticAgent.run"
     )
@@ -370,7 +370,7 @@ class ElasticLaunchTest(unittest.TestCase):
             launch.main(args)
         record_mock.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_standalone(self):
         nnodes = 1
         nproc_per_node = 4
@@ -392,7 +392,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_run_path(self):
         nnodes = 1
         nproc_per_node = 4
@@ -414,7 +414,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_multiple_agents(self):
         run_id = str(uuid.uuid4().int)
         min_nodes = 1
@@ -483,7 +483,7 @@ class ElasticLaunchTest(unittest.TestCase):
             launch.main(args)
             rdzv_handler_mock.shutdown.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_is_torchelastic_launched(self):
         # launch test script with torchelastic and validate that
         # torch.distributed.is_torchelastic_launched() returns True
@@ -501,7 +501,7 @@ class ElasticLaunchTest(unittest.TestCase):
             ]
         )
 
-        with open(out_file, "r") as fp:
+        with open(out_file) as fp:
             is_torchelastic_launched = fp.readline()
             self.assertEqual("True", is_torchelastic_launched)
 
@@ -523,7 +523,7 @@ class ElasticLaunchTest(unittest.TestCase):
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
-            with open(out_file, "r") as fp:
+            with open(out_file) as fp:
                 is_torchelastic_launched = fp.readline()
                 self.assertEqual("False", is_torchelastic_launched)
 
@@ -542,7 +542,7 @@ class ElasticLaunchTest(unittest.TestCase):
             runpy.run_path(sys.argv[0], run_name="__main__")
             # nothing to validate, just make sure it runs
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_init_method_tcp_with_torchelastic(self):
         port = get_free_port()
         launch.main(
@@ -580,7 +580,7 @@ class ElasticLaunchTest(unittest.TestCase):
             runpy.run_path(sys.argv[0], run_name="__main__")
             # nothing to validate, just make sure it runs
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_init_method_env_with_torchelastic(self):
         port = get_free_port()
         launch.main(

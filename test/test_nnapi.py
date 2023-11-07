@@ -393,9 +393,6 @@ class TestNNAPI(TestCase):
 
     def test_detach(self):
         class DetachModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 y = x.detach()
                 return torch.nn.functional.relu(y)
@@ -511,7 +508,7 @@ class TestNNAPI(TestCase):
         for kind in ["float", "float-nhwc", "quant", "quant-nhwc"]:
             for case in cases:
                 in_ch, out_ch, kernel, stride, padding, groups, bias, input_dim, name = case
-                with self.subTest("{}-{}".format(kind, name)):
+                with self.subTest(f"{kind}-{name}"):
                     inp = torch.randn(input_dim)
                     model = torch.nn.Conv2d(in_ch, out_ch, kernel, stride, padding, groups=groups, bias=bool(bias))
                     output_size = model(inp).numel()

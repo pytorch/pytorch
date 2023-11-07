@@ -83,14 +83,14 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
     for a in args:
         impl_args.append(_helper(a, map_fn))
     impl_kwargs = {}
-    for k, v in kwargs.items():
+    for k in kwargs.keys():
         impl_kwargs[k] = _helper(a, map_fn)
     return impl_args, impl_kwargs
 
 
 def _wrap_result(result_data, result_mask):
     if isinstance(result_data, list):
-        return list(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
+        return [_wrap_result(r, m) for (r, m) in zip(result_data, result_mask)]
     if isinstance(result_data, tuple):
         return tuple(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
     if torch.is_tensor(result_data):
@@ -109,7 +109,7 @@ def _masked_tensor_str(data, mask, formatter):
             for d in data
         ]
         max_len = max(
-            map(lambda x: 8 if x[1] else len(x[0]), zip(formatted_elements, ~mask))
+            8 if x[1] else len(x[0]) for x in zip(formatted_elements, ~mask)
         )
         return (
             "["
@@ -331,5 +331,6 @@ class MaskedTensor(torch.Tensor):
         return self.layout == torch.sparse_csr
 
     # Update later to support more sparse layouts
+    @property
     def is_sparse(self):
         return self.is_sparse_coo() or self.is_sparse_csr()

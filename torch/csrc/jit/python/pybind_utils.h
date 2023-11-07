@@ -21,7 +21,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
@@ -54,17 +53,18 @@
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
+
+using ResolutionCallback = std::function<py::object(std::string)>;
 
 void clear_registered_instances(void* ptr);
 
-TORCH_API IValue toIValue(
+TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
     c10::optional<int32_t> N = c10::nullopt);
 
-TORCH_API py::object toPyObject(IValue ivalue);
+TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
 // Hack to overload the behavior of toIValue to accept Python
 // numbers in places where a Tensor is expected
@@ -397,6 +397,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPGenerator_Check(input.ptr())) {
+    return InferredType(GeneratorType::get());
   } else if (THPStream_Check(input.ptr())) {
     return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
@@ -700,10 +702,6 @@ inline void guardAgainstNamedTensor(const T& var) {
       "NYI: Named tensors are currently unsupported in TorchScript. As a  "
       "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
-
-// Defined in pybind_utils.cpp to break a circular dependency with
-// python_ivalue.h
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
 // Extract custom class registered with torchbind
 template <typename T>
@@ -1019,7 +1017,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   py::tuple args = py::cast(args_vec);
 
   // Handle __torch_function__ dispatch
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto& arg : args) {
     is_tensor_and_append_overloaded(arg.ptr(), &overloaded_args);
@@ -1095,18 +1093,18 @@ inline py::object invokeScriptMethodFromPython(
       });
 }
 
-TORCH_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs);
 
-TORCH_API py::object invokeOperatorFromPython(
+TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-TORCH_API py::object _get_operation_for_overload_or_packet(
+TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
     Symbol symbol,
     py::args args,
@@ -1114,5 +1112,4 @@ TORCH_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

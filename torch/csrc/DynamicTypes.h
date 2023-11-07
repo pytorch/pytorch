@@ -27,12 +27,10 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout);
 
 TORCH_PYTHON_API PyObject* createPyObject(const at::Storage& storage);
 at::Storage createStorage(PyObject* obj);
-at::Storage createStorageGetType(
-    PyObject* obj,
-    at::ScalarType& scalar_type,
-    bool& is_typed_storage);
+std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
+    PyObject* obj);
 bool isStorage(PyObject* obj);
 
-THPDtype* getTHPDtype(at::ScalarType scalarType);
+TORCH_PYTHON_API THPDtype* getTHPDtype(at::ScalarType scalarType);
 THPLayout* getTHPLayout(at::Layout layout);
 } // namespace torch

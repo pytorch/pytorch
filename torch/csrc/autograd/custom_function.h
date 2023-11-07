@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
@@ -12,6 +13,7 @@ namespace autograd {
 
 using optional_variable_list = std::vector<c10::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
+using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
 TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
@@ -19,12 +21,14 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function);
+    const _jvp_fn_t& jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    const _view_as_self_fn_t& view_as_self_fn);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name);
+    const std::string& hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template <typename X, typename... Args>
@@ -163,7 +167,7 @@ struct TORCH_API VariableInfo {
   at::Layout layout = at::Layout::Strided;
   at::Device device = at::kCPU;
   at::ScalarType scalar_type = at::kFloat;
-  std::vector<int64_t> size;
+  std::vector<c10::SymInt> size;
   bool requires_grad;
   bool is_empty;
 };
@@ -261,6 +265,14 @@ template <class T>
 template <typename X, typename... Args>
 auto Function<T>::apply(Args&&... args)
     -> std::enable_if_t<std::is_same<X, T>::value, forward_t<X, Args...>> {
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    // Function support for functorch is handled in Python.
+    // Here we are dealing with a (C++) Function, which is not supported.
+    // Let's raise an error instead of being silently incorrect.
+    functorch_tls->checkSupportsCppAutogradFunction();
+  }
+
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list input_vars;
@@ -301,13 +313,19 @@ auto Function<T>::apply(Args&&... args)
         "Please open a feature request on GitHub if you need this.");
   };
 
+  auto view_as_self_fn = [](const at::Tensor& x) -> at::Tensor {
+    return x.view_as(x);
+  };
+
   auto wrapped_outputs = _wrap_outputs(
       input_vars,
       node->ctx_.get_non_differentiable(),
       node->ctx_.get_and_bump_dirty(),
       to_optional(outputs),
       is_executable ? node : nullptr,
-      jvp_fn);
+      jvp_fn,
+      {},
+      view_as_self_fn);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

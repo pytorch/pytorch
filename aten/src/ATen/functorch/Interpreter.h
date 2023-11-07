@@ -4,10 +4,10 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
 #include <bitset>
+#include <variant>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch interpreter stack]
 //
@@ -40,7 +40,7 @@ namespace at { namespace functorch {
 // The VmapInterpreter just does this via a call to ophandle.callBoxed(stack)
 // and most Interpreters will implement it this way.
 
-enum RandomnessType {
+enum class RandomnessType {
     Error,      // always errors when calling a random function
     Same,       // randomness appears the same across batches
     Different,  // randomness appears different across batches
@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 //
 // `Interpreter` is the struct for Interpreters. It holds ALL of the
 // relevant information (what type of interpreter it is and the metadata).
-// Metadata for each interpreter is represented as a Union (c10::variant)
+// Metadata for each interpreter is represented as a Union (std::variant)
 // of all possible metadata (VmapInterpreterMeta, GradInterpreterMeta, ...).
 //
 // Given an Interpreter, how do I get a "VmapInterpreter"? You may wish to do this
@@ -88,9 +88,9 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 // Same for Interpreter::sendToNextInterpreter :)
 
 struct VmapInterpreterMeta {
-  explicit VmapInterpreterMeta(int64_t batchSize, RandomnessType randomness) :
-    batchSize_(batchSize), randomness_(randomness) {}
-  int64_t batchSize_;
+  explicit VmapInterpreterMeta(c10::SymInt batchSize, RandomnessType randomness) :
+    batchSize_(std::move(batchSize)), randomness_(randomness) {}
+  c10::SymInt batchSize_;
   RandomnessType randomness_;
 };
 
@@ -110,7 +110,7 @@ struct FunctionalizeInterpreterMeta {
   bool functionalizeAddBackViews_;
 };
 
-typedef c10::variant<
+typedef std::variant<
   int64_t,
   GradInterpreterMeta,
   JvpInterpreterMeta,
@@ -121,8 +121,8 @@ typedef c10::variant<
 
 struct Interpreter {
   // factory functions
-  static Interpreter Vmap(int64_t level, int64_t batchSize, RandomnessType randomness) {
-    return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(batchSize, randomness));
+  static Interpreter Vmap(int64_t level, c10::SymInt batchSize, RandomnessType randomness) {
+    return Interpreter(TransformType::Vmap, level, VmapInterpreterMeta(std::move(batchSize), randomness));
   }
   static Interpreter Grad(int64_t level, bool prevGradMode) {
     return Interpreter(TransformType::Grad, level, GradInterpreterMeta(prevGradMode));
@@ -201,8 +201,8 @@ std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begi
 
 DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key);
 
-void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include);
+void setup_dispatch_key_tls(TransformType key, DispatchKeySet include);
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
-}} // namespace at::functorch
+} // namespace at::functorch

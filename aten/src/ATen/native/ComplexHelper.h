@@ -15,7 +15,7 @@
 // WARNING: this header contains non-inline functions and should be only
 // included from ONE cpp file
 
-namespace at { namespace native {
+namespace at::native {
 
 // View tensor with new dtype, storage offset, sizes and strides
 inline Tensor view_tensor(
@@ -39,7 +39,7 @@ inline SymDimVector computeStrideForViewAsReal(SymIntArrayRef oldstride) {
   return res;
 }
 
-Tensor _view_as_real_physical(const Tensor& self) {
+inline Tensor _view_as_real_physical(const Tensor& self) {
   TORCH_CHECK(self.is_complex(), "view_as_real is only supported for complex tensors");
   auto old_sizes = self.sym_sizes();
   SymDimVector new_sizes(old_sizes.size() + 1);
@@ -94,4 +94,4 @@ Tensor view_as_complex(const Tensor& self) {
   return view_tensor(self, complex_type, new_storage_offset, new_sizes, new_strides);
 }
 
-}} // namespace at::native
+} // namespace at::native

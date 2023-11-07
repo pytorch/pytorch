@@ -15,6 +15,7 @@ from torchgen.api.autograd import (
 )
 from torchgen.api.types import (
     ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -34,6 +35,7 @@ from torchgen.api.types import (
     TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
+    VectorCType,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.model import Argument, FunctionSchema
@@ -43,7 +45,12 @@ from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 FUNCTION_DECLARATION = CodeTemplate(
     """\
+#ifdef _WIN32
+struct ${op} : public ${superclass} {
+  TORCH_API ${op}() = default;
+#else
 struct TORCH_API ${op} : public ${superclass} {
+#endif
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -52,6 +59,8 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
 };
@@ -77,6 +86,15 @@ variable_list ${op}::apply(variable_list&& grads) {
   variable_list grad_inputs(gen.size());
   ${body}
   return grad_inputs;
+}
+void ${op}::compiled_args(CompiledNodeArgs& args) {
+    ${compiled_args}
+}
+variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
+    ${apply_with_saved_before}
+    variable_list result = apply(variable_list(grads));
+    ${apply_with_saved_after}
+    return result;
 }
 """
 )
@@ -108,7 +126,11 @@ if (task_should_compute_output({ ${name}_ix })) {
   std::vector<Tensor> grad_result;
   grad_result.reserve(grads.size());
   for (const auto & i : c10::irange(grads.size())) {
-    grad_result.emplace_back(${derivative});
+    if (grads[i].defined()) {
+      grad_result.emplace_back(${derivative});
+    } else {
+      grad_result.emplace_back(Tensor());
+    }
   }
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
@@ -307,11 +329,11 @@ GETTER_BODY_ARRAYREF_SYMINT = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(*m));
+    } else {
       auto py_symint = py::cast(si).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
-    } else {
-       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
     }
 }
 return tup;
@@ -330,7 +352,11 @@ return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
 GETTER_BODY_SYMINT = """\
-return prop.is_symbolic() ? py::cast(prop).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+if (auto m = prop.maybe_as_int()) {
+  return PyLong_FromUnsignedLong(*m);
+} else {
+  return py::cast(prop).release().ptr();
+}
 """
 
 GETTER_BODY_DOUBLE = """\
@@ -369,6 +395,34 @@ if (prop.isComplex()) {
 }
 """
 
+
+GETTER_BODY_VEC_SCALAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i: c10::irange(prop.size())) {
+  if (prop[i].isComplex()) {
+    auto cprop = prop[i].to<c10::complex<double>>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyComplex_FromDoubles(cprop.real(), cprop.imag()));
+  } else if (prop[i].isFloatingPoint()) {
+    auto double_prop = prop[i].to<double>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble(double_prop));
+  } else if (prop[i].isIntegral(/*includeBool=*/false)) {
+    auto long_prop = prop[i].to<int64_t>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromLong(long_prop));
+  } else if (prop[i].isBoolean()) {
+    if (prop[i].to<bool>()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_True);
+    } else {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_False);
+    }
+  } else {
+    PyErr_SetString(PyExc_RuntimeError, "Unknown scalar type");
+    return nullptr;
+  }
+}
+return tup;
+"""
+
+
 MISC_GETTER_DEFS = {
     OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
     OptionalCType(BaseCType(SymIntT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SYMINT),
@@ -391,7 +445,6 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 def get_infos_with_derivatives_list(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
 ) -> List[DifferentiabilityInfo]:
-
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
@@ -415,8 +468,8 @@ def gen_autograd_functions_lib(
     # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
     # infos with the diff dispatchkeys but the same name will still be in the same shard.
     infos = get_infos_with_derivatives_list(differentiability_infos)
-    declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
-    definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
+    declarations = [process_function(f, FUNCTION_DECLARATION) for f in infos]
+    definitions = [process_function(f, FUNCTION_DEFINITION) for f in infos]
 
     file_basename = "Functions"
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
@@ -440,7 +493,6 @@ def gen_autograd_functions_python(
     differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     num_shards = 5
     fm.write(
@@ -492,6 +544,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     compute_index_ranges: List[str] = []
     getter_definitions: List[str] = []
     py_getsetdef_structs: List[str] = []
+    compiled_args: List[str] = []
+    apply_with_saved_before: List[str] = []
+    apply_with_saved_after: List[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
@@ -506,6 +561,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         type = var.nctype.type
         should_append_getsetdef = True
         should_append_raw_getsetdef = False
+        visit_name = name
 
         if (
             type == BaseCType(tensorT)
@@ -528,14 +584,32 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
-        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
+            visit_name = f"{name}_"
+        elif (
+            type == BaseCType(tensorListT)
+            or type == BaseCType(iTensorListRefT)
+            or type == VectorCType(BaseCType(tensorT))
+        ):
+            # note(crcrpar): [nuanced return type of out-of-place foreach functions]
+            # When an out-of-place foreach function whose return signature is `Tensor[]`
+            # spells out its backward definitions in `derivatives.yaml`, and some of them depend on
+            # `result`, `result`'s type is interpreted and treated as `std::vector<Tensor>`.
+            # An out-of-place foreach whose backwards rely on their output doesn't suffer from this
+            # difference if the definitions are codegen'ed.
+            # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
+            # as of https://github.com/pytorch/pytorch/pull/105504.
+            if type == VectorCType(BaseCType(tensorT)):
+                assert (
+                    info.func.func.name.name.base.startswith("_foreach") and is_output
+                )
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            unpack.append(f"auto {name} = unpack_list({name}_);")
+            ptr = "shared_from_this()" if is_output else "nullptr"
+            unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
             asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
                 GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
@@ -548,6 +622,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
@@ -568,6 +643,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
+            visit_name = f"{name}_"
         elif type == BaseCType(intArrayRefT):
             saved_variables.append(f"std::vector<int64_t> {name};")
             getter_definitions.append(
@@ -645,6 +721,38 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     op=info.op, name=name, body=GETTER_BODY_STRING
                 )
             )
+        elif type == ArrayRefCType(
+            elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+        ):
+            saved_variables.append(f"std::vector<at::Scalar> {name};")
+            saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            release_variables.append(f"{name}.clear();")
+            # release_variables.append(f"{name}_released_ = true;")
+            # unpack.append(f"auto {name} = unpack_list({name}_);")
+            # asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+            getter_definitions.append(
+                CodeTemplate(
+                    """\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name};
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+                            """
+                ).substitute(
+                    op=info.op,
+                    name=name,
+                    body=GETTER_BODY_VEC_SCALAR,
+                )
+            )
         else:
             # Check for indicators that you're putting a non-owning reference
             # into the saved variable field.  If this is spuriously firing,
@@ -678,9 +786,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-    for var in info.all_saved_inputs:
+        compiled_args.append(f"args.collect({visit_name});")
+        apply_with_saved_before.append(f"saved.before({visit_name});")
+        apply_with_saved_after.append(f"saved.after({visit_name});")
+
+    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=False)
-    for var in info.all_saved_outputs:
+    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=True)
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
@@ -703,7 +815,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         # Generate aliases for gradients named for returned values.
         body.extend(
             f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
-            for name in info.used_named_gradients
+            for name in sorted(info.used_named_gradients)
         )
 
     def emit_derivative(
@@ -794,4 +906,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         superclass=superclass,
         all_getter_definitions=all_getter_definitions,
         all_getsetdef_structs=all_getsetdef_structs,
+        compiled_args=compiled_args,
+        apply_with_saved_before=apply_with_saved_before,
+        apply_with_saved_after=apply_with_saved_after,
     )

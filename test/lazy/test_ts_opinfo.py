@@ -31,11 +31,11 @@ def init_lists():
     path_to_script = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
     TS_NATIVE_FUNCTIONS_PATH = path_to_script.parent.parent / "aten/src/ATen/native/ts_native_functions.yaml"
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
-        yaml_ts = yaml.load(f, yaml.Loader)
+        yaml_ts = yaml.load(f, yaml.SafeLoader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
     HAS_SYMINT_SUFFIX = yaml_ts["symint"]
-    FALLBACK_LIST = set(["clamp"])
-    SKIP_RUNTIME_ERROR_LIST = set([
+    FALLBACK_LIST = {"clamp"}
+    SKIP_RUNTIME_ERROR_LIST = {
         'index_select',  # Empty output_sizes is not supported
         'clone',  # is clone decomposed?
 
@@ -46,19 +46,19 @@ def init_lists():
         'all',  # ASAN failure
         'any',  # ASAN failure
         'logdet',  # ASAN failure
-    ])
-    SKIP_INCORRECT_RESULTS_LIST = set([
+    }
+    SKIP_INCORRECT_RESULTS_LIST = {
         'squeeze',  # Value out of range
         't',  # Value out of range
         'transpose',  # Value out of range
         'bernoulli',  # incorrect results
         'pow',  # incorrect results
         'addcdiv',  # incorrect results (on CI not locally?)
-    ])
+    }
     # The following ops all show up directly in ts_native_functions.yaml,
     # but run functionalized versions of the composite kernels in core.
     # This means that we don't expect the ops to show directly in the LTC metrics.
-    FUNCTIONAL_DECOMPOSE_LIST = set([
+    FUNCTIONAL_DECOMPOSE_LIST = {
         'diag_embed',
         'block_diag',
         'new_empty_strided',
@@ -70,13 +70,13 @@ def init_lists():
         'linalg_inv_ex',
         'linalg_pinv.atol_rtol_tensor',
         'logsumexp',
-    ])
+    }
     # For some ops, we don't support all variants. Here we use formatted_name
     # to uniquely identify the variant.
-    SKIP_VARIANT_LIST = set([
+    SKIP_VARIANT_LIST = {
         'norm_nuc',
         'min_reduction_with_dim'
-    ])
+    }
 
     return (LAZY_OPS_LIST,
             FALLBACK_LIST,
@@ -231,6 +231,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)
@@ -238,6 +241,7 @@ class TestLazyOpInfo(TestCase):
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
 
+            torch._lazy.mark_step()
             assert_allclose_rec((r_actual, r_exp))
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
@@ -263,6 +267,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)
@@ -310,6 +317,16 @@ class TestLazyDynamicOps(TestCase):
         x2_eager = x2_lazy.cpu()
         self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
+    def test_adaptiveavgpool3d_dynamic(self):
+        # Test that adaptive_avg_pool3d gives correct shapes with lazy backend
+        img_cpu = torch.zeros([2, 3, 4, 5, 6], device="cpu")
+        out_cpu = torch.nn.AdaptiveAvgPool3d(2).to(device="cpu")(img_cpu)
+
+        test_device = get_test_device()
+        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=test_device)
+        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(test_device)(img_lazy)
+
+        self.assertEqual(out_cpu.shape, out_lazy.shape)
 
 if __name__ == '__main__':
     run_tests()

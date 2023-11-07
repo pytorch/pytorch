@@ -1,5 +1,3 @@
-"""ONNX exporter."""
-
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import (
@@ -45,6 +43,25 @@ from .utils import (
     unregister_custom_op_symbolic,
 )
 
+from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
+    DiagnosticOptions,
+    ExportOptions,
+    ONNXProgram,
+    ONNXProgramSerializer,
+    InvalidExportOptionsError,
+    OnnxExporterError,
+    OnnxRegistry,
+    dynamo_export,
+    enable_fake_mode,
+)
+
+from ._internal.onnxruntime import (
+    is_onnxrt_backend_supported,
+    OrtBackend as _OrtBackend,
+    OrtBackendOptions as _OrtBackendOptions,
+    OrtExecutionProvider as _OrtExecutionProvider,
+)
+
 __all__ = [
     # Modules
     "symbolic_helper",
@@ -81,11 +98,36 @@ __all__ = [
     "enable_log",
     # Errors
     "CheckerError",  # Backwards compatibility
+    # Dynamo Exporter
+    "DiagnosticOptions",
+    "ExportOptions",
+    "ONNXProgram",
+    "ONNXProgramSerializer",
+    "InvalidExportOptionsError",
+    "OnnxExporterError",
+    "OnnxRegistry",
+    "dynamo_export",
+    "enable_fake_mode",
+    # DORT / torch.compile
+    "is_onnxrt_backend_supported",
 ]
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
+ExportOptions.__module__ = "torch.onnx"
+ONNXProgram.__module__ = "torch.onnx"
+ONNXProgramSerializer.__module__ = "torch.onnx"
+dynamo_export.__module__ = "torch.onnx"
+InvalidExportOptionsError.__module__ = "torch.onnx"
+OnnxExporterError.__module__ = "torch.onnx"
+enable_fake_mode.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
+DiagnosticOptions.__module__ = "torch.onnx"
+is_onnxrt_backend_supported.__module__ = "torch.onnx"
+_OrtExecutionProvider.__module__ = "torch.onnx"
+_OrtBackendOptions.__module__ = "torch.onnx"
+_OrtBackend.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION

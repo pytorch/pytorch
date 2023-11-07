@@ -6,7 +6,7 @@ from ._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._TensorBase, method), docstr)
+    add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
 common_args = parse_kwargs(
@@ -697,6 +697,15 @@ add_docstr_all(
 as_strided(size, stride, storage_offset=None) -> Tensor
 
 See :func:`torch.as_strided`
+""",
+)
+
+add_docstr_all(
+    "as_strided_",
+    r"""
+as_strided_(size, stride, storage_offset=None) -> Tensor
+
+In-place version of :meth:`~Tensor.as_strided`
 """,
 )
 
@@ -3124,10 +3133,12 @@ add_docstr_all(
 masked_scatter_(mask, source)
 
 Copies elements from :attr:`source` into :attr:`self` tensor at positions where
-the :attr:`mask` is True.
+the :attr:`mask` is True. Elements from :attr:`source` are copied into :attr:`self`
+starting at position 0 of :attr:`source` and continuing in order one-by-one for each
+occurrence of :attr:`mask` being True.
 The shape of :attr:`mask` must be :ref:`broadcastable <broadcasting-semantics>`
 with the shape of the underlying tensor. The :attr:`source` should have at least
-as many elements as the number of ones in :attr:`mask`
+as many elements as the number of ones in :attr:`mask`.
 
 Args:
     mask (BoolTensor): the boolean mask
@@ -3137,6 +3148,16 @@ Args:
 
     The :attr:`mask` operates on the :attr:`self` tensor, not on the given
     :attr:`source` tensor.
+
+Example:
+
+    >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter_(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -3589,6 +3610,58 @@ See :func:`torch.nonzero`
 )
 
 add_docstr_all(
+    "nonzero_static",
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> Tensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned Tensor has the same `torch.dtype` as `torch.nonzero()`.
+
+Args:
+    input (Tensor): the input tensor to count non-zero elements.
+
+Keyword args:
+    size (int): the size of non-zero elements expected to be included in the out
+        tensor. Pad the out tensor with `fill_value` if the `size` is larger
+        than total number of non-zero elements, truncate out tensor if `size`
+        is smaller. The size must be a non-negative integer.
+    fill_value (int): the value to fill the output tensor with when `size` is larger
+        than the total number of non-zero elements. Default is `-1` to represent
+        invalid index.
+
+Example:
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0],
+            [  1,   1],
+            [  -1, -1]], dtype=torch.int64)
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([[  0,   0],
+            [  1,   0]], dtype=torch.int64)
+
+    # Example 3: 0 size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: 0 rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""",
+)
+
+add_docstr_all(
     "norm",
     r"""
 norm(p=2, dim=None, keepdim=False) -> Tensor
@@ -3966,6 +4039,66 @@ current work queued on :attr:`stream` are complete.
     unexpectedly. Calling this method lets the allocator know which streams
     have used the tensor.
 
+.. warning::
+
+    This method is most suitable for use cases where you are providing a
+    function that created a tensor on a side stream, and want users to be able
+    to make use of the tensor without having to think carefully about stream
+    safety when making use of them.  These safety guarantees come at some
+    performance and predictability cost (analogous to the tradeoff between GC
+    and manual memory management), so if you are in a situation where
+    you manage the full lifetime of your tensors, you may consider instead
+    manually managing CUDA events so that calling this method is not necessary.
+    In particular, when you call this method, on later allocations the
+    allocator will poll the recorded stream to see if all operations have
+    completed yet; you can potentially race with side stream computation and
+    non-deterministically reuse or fail to reuse memory for an allocation.
+
+    You can safely use tensors allocated on side streams without
+    :meth:`~Tensor.record_stream`; you must manually ensure that
+    any non-creation stream uses of a tensor are synced back to the creation
+    stream before you deallocate the tensor.  As the CUDA caching allocator
+    guarantees that the memory will only be reused with the same creation stream,
+    this is sufficient to ensure that writes to future reallocations of the
+    memory will be delayed until non-creation stream uses are done.
+    (Counterintuitively, you may observe that on the CPU side we have already
+    reallocated the tensor, even though CUDA kernels on the old tensor are
+    still in progress.  This is fine, because CUDA operations on the new
+    tensor will appropriately wait for the old operations to complete, as they
+    are all on the same stream.)
+
+    Concretely, this looks like this::
+
+        with torch.cuda.stream(s0):
+            x = torch.zeros(N)
+
+        s1.wait_stream(s0)
+        with torch.cuda.stream(s1):
+            y = some_comm_op(x)
+
+        ... some compute on s0 ...
+
+        # synchronize creation stream s0 to side stream s1
+        # before deallocating x
+        s0.wait_stream(s1)
+        del x
+
+    Note that some discretion is required when deciding when to perform
+    ``s0.wait_stream(s1)``.  In particular, if we were to wait immediately
+    after ``some_comm_op``, there wouldn't be any point in having the side
+    stream; it would be equivalent to have run ``some_comm_op`` on ``s0``.
+    Instead, the synchronization must be placed at some appropriate, later
+    point in time where you expect the side stream ``s1`` to have finished
+    work.  This location is typically identified via profiling, e.g., using
+    Chrome traces produced
+    :meth:`torch.autograd.profiler.profile.export_chrome_trace`.  If you
+    place the wait too early, work on s0 will block until ``s1`` has finished,
+    preventing further overlapping of communication and computation.  If you
+    place the wait too late, you will use more memory than is strictly
+    necessary (as you are keeping ``x`` live for longer.)  For a concrete
+    example of how this guidance can be applied in practice, see this post:
+    `FSDP and CUDACachingAllocator
+    <https://dev-discuss.pytorch.org/t/fsdp-cudacachingallocator-an-outsider-newb-perspective/1486>`_.
 """,
 )
 
@@ -4141,6 +4274,15 @@ memory is uninitialized.
     will instead want to use :meth:`~Tensor.view()`, which checks for
     contiguity, or :meth:`~Tensor.reshape()`, which copies data if needed. To
     change the size in-place with custom strides, see :meth:`~Tensor.set_()`.
+
+.. note::
+
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, new elements are initialized to prevent nondeterministic behavior
+    from using the result as an input to an operation. Floating point and
+    complex values are set to NaN, and integer values are set to the maximum
+    value.
 
 Args:
     sizes (torch.Size or int...): the desired size
@@ -4648,6 +4790,26 @@ Example::
 )
 
 add_docstr_all(
+    "shape",
+    r"""
+shape() -> torch.Size
+
+Returns the size of the :attr:`self` tensor. Alias for :attr:`size`.
+
+See also :meth:`Tensor.size`.
+
+Example::
+
+    >>> t = torch.empty(3, 4, 5)
+    >>> t.size()
+    torch.Size([3, 4, 5])
+    >>> t.shape
+    torch.Size([3, 4, 5])
+
+""",
+)
+
+add_docstr_all(
     "sort",
     r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -4978,7 +5140,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(*reps) -> Tensor
+tile(dims) -> Tensor
 
 See :func:`torch.tile`
 """,
@@ -5348,9 +5510,15 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense() -> Tensor
+to_dense(dtype=None, *, masked_grad=True) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
+
+Keyword args:
+    {dtype}
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
+      :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::
 
@@ -5858,7 +6026,7 @@ Example::
 add_docstr_all(
     "uniform_",
     r"""
-uniform_(from=0, to=1) -> Tensor
+uniform_(from=0, to=1, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
@@ -6362,6 +6530,21 @@ add_docstr_all(
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+
+.. note::
+
+    The inputs :attr:`self` and :attr:`mask`
+    :ref:`broadcast <broadcasting-semantics>`.
+
+Example:
+
+    >>> self = torch.tensor([0, 0, 0, 0, 0])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
+    >>> self.masked_scatter(mask, source)
+    tensor([[0, 0, 0, 0, 1],
+            [2, 3, 0, 4, 5]])
+
 """,
 )
 
@@ -6510,6 +6693,13 @@ Is ``True`` if the Tensor is stored on the CPU, ``False`` otherwise.
 )
 
 add_docstr_all(
+    "is_xla",
+    r"""
+Is ``True`` if the Tensor is stored on an XLA device, ``False`` otherwise.
+""",
+)
+
+add_docstr_all(
     "is_ipu",
     r"""
 Is ``True`` if the Tensor is stored on the IPU, ``False`` otherwise.
@@ -6548,7 +6738,7 @@ Is ``True`` if the Tensor is stored on the MPS device, ``False`` otherwise.
 add_docstr_all(
     "is_sparse",
     r"""
-Is ``True`` if the Tensor uses sparse storage layout, ``False`` otherwise.
+Is ``True`` if the Tensor uses sparse COO storage layout, ``False`` otherwise.
 """,
 )
 
@@ -6570,6 +6760,22 @@ add_docstr_all(
     "ndim",
     r"""
 Alias for :meth:`~Tensor.dim()`
+""",
+)
+
+add_docstr_all(
+    "itemsize",
+    r"""
+Alias for :meth:`~Tensor.element_size()`
+""",
+)
+
+add_docstr_all(
+    "nbytes",
+    r"""
+Returns the number of bytes consumed by the "view" of elements of the Tensor
+if the Tensor does not use sparse storage layout.
+Defined to be :meth:`~Tensor.numel()` * :meth:`~Tensor.element_size()`
 """,
 )
 

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
@@ -23,6 +24,7 @@
 #include <ATen/ops/cosine_similarity_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/pairwise_distance_native.h>
@@ -85,8 +87,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
   // TODO: This is bad; this test should apply universally
   TORCH_CHECK(!x1.is_cuda() || x1.get_device() == x2.get_device(), "device of X1 (", x1.get_device(), ") must match device of X2 (", x2.get_device(), ")");
-  int64_t c1 = x1.size(-1);
-  int64_t c2 = x2.size(-1);
+  SymInt c1 = x1.sym_size(-1);
+  SymInt c2 = x2.sym_size(-1);
   // 0 - default value. If p = 2 and r1 > 25 or r2 > 25 (these values are based on performance metrics),
   // it will try to compute distance using matrix multiplication approach
   // 1 - force to use matrix multiplication for p = 2
@@ -94,8 +96,8 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
   int64_t mode = compute_mode.value_or(0);
   TORCH_CHECK(mode >= 0 && mode <= 2, "possible modes: 0, 1, 2, but was: ", mode);
 
-  int64_t r1 = x1.size(-2);
-  int64_t r2 = x2.size(-2);
+  SymInt r1 = x1.sym_size(-2);
+  SymInt r2 = x2.sym_size(-2);
 
   // See Note [cdist relies on cdist_impl redispatching]
   // Keep this condition in sync with the condition at the Note
@@ -109,37 +111,37 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
 
   //For batch calculation we expand all dimensions(except the last two) to one, with size that equals to product of them.
   //The last two dimensions will stay the same
-  IntArrayRef batch_tensor1(x1.sizes().data(), dim1 - 2);
-  IntArrayRef batch_tensor2(x2.sizes().data(), dim2 - 2);
-  std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
-  std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
+  SymIntArrayRef batch_tensor1(x1.sym_sizes().data(), dim1 - 2);
+  SymIntArrayRef batch_tensor2(x2.sym_sizes().data(), dim2 - 2);
+  std::vector<SymInt> expand_batch_portion = infer_size_symint(batch_tensor1, batch_tensor2);
+  std::vector<SymInt> tensor1_expand_size(expand_batch_portion);
   tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
-  std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
+  std::vector<SymInt> tensor2_expand_size(expand_batch_portion);
   tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
 
-  const int64_t expand_batch_product = c10::multiply_integers(expand_batch_portion);
-  std::vector<int64_t> tensor1_view{expand_batch_product, r1, c1};
-  std::vector<int64_t> tensor2_view{expand_batch_product, r2, c2};
+  const SymInt expand_batch_product = c10::multiply_integers(expand_batch_portion);
+  std::vector<SymInt> tensor1_view{expand_batch_product, r1, c1};
+  std::vector<SymInt> tensor2_view{expand_batch_product, r2, c2};
 
-  Tensor tensor1_expanded = x1.expand(tensor1_expand_size).contiguous().view(tensor1_view);
-  Tensor tensor2_expanded = x2.expand(tensor2_expand_size).contiguous().view(tensor2_view);
+  Tensor tensor1_expanded = x1.expand_symint(tensor1_expand_size).contiguous().view_symint(tensor1_view);
+  Tensor tensor2_expanded = x2.expand_symint(tensor2_expand_size).contiguous().view_symint(tensor2_view);
 
-  std::vector<int64_t> output_shape(std::move(expand_batch_portion));
+  std::vector<SymInt> output_shape(std::move(expand_batch_portion));
   output_shape.insert(output_shape.end(), {r1, r2});
 
   Tensor result;
   if (r1 == 0 || r2 == 0 || expand_batch_product == 0) {
-    result = at::empty(output_shape, x1.options());
+    result = at::empty_symint(output_shape, x1.options());
   } else if (c1 == 0) {
-    result = at::zeros(output_shape, x1.options());
+    result = at::zeros_symint(output_shape, x1.options());
   } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
     // See Note [cdist relies on cdist_impl redispatching]
     // Keep the condition above in sync with the condition at the Note
     Tensor dist = (expand_batch_product == 1) ? at::_euclidean_dist(x1, x2) :
                   at::_euclidean_dist(tensor1_expanded, tensor2_expanded);
-    result = dist.view(output_shape);
+    result = dist.view_symint(output_shape);
   } else {
-    result = at::empty(output_shape, x1.options());
+    result = at::empty_symint(output_shape, x1.options());
     cdist_stub(device1, result, tensor1_expanded, tensor2_expanded, p);
   }
   return result;
@@ -148,14 +150,14 @@ static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10
 Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
-  TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
+  TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
   auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
     NoNamesGuard guard;
-    int64_t r1 = x1.size(-2);
-    int64_t r2 = x2.size(-2);
+    SymInt r1 = x1.sym_size(-2);
+    SymInt r2 = x2.sym_size(-2);
     // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
-    if (x1.numel() == 0 || x2.numel() == 0) {
+    if (x1.sym_numel() == 0 || x2.sym_numel() == 0) {
         return at::_cdist_forward(x1, x2, p, compute_mode);
     }
     int64_t mode = compute_mode.value_or(0);
@@ -270,7 +272,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
-  /*
+    /*
    * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
    *
    * The current implementation is an improvement over the previous version.
@@ -299,42 +301,33 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
    * 3. Makes sure |cosing_similarity(x1, x2)| <= 1.0.
    *
    */
+
   auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
 
-  auto common_size = at::infer_size_dimvector(x1_.sizes(), x2_.sizes());
-  auto x1 = x1_.to(commonDtype).expand(common_size);
-  auto x2 = x2_.to(commonDtype).expand(common_size);
+  // We accept integral types (and bools lol) but vector_norm does not
+  auto x1_is_int = c10::isIntegralType(x1_.scalar_type(), /*încludeBool=*/true);
+  auto x2_is_int = c10::isIntegralType(x2_.scalar_type(), /*încludeBool=*/true);
+  auto x1_t = x1_is_int ? x1_.to(commonDtype) : x1_;
+  auto x2_t = x2_is_int ? x2_.to(commonDtype) : x2_;
+  c10::MaybeOwned<Tensor> x1, x2;
+  std::tie(x1, x2) = expand_outplace(x1_t, x2_t);
 
-  auto x1_squared_norm = at::pow(x1, 2).sum(dim, /*keepdim=*/true);
-  auto x2_squared_norm = at::pow(x2, 2).sum(dim, /*keepdim=*/true);
+
+  // We want to divide each tensor by its norm first, as it's more numerically stable.
+  // This keeps the result between -1.0 and 1.0
+  // We clone them, as we're going to modify them in-place
+  // This allows the gradients to propagate propertly all the way to x1 and x2
+  auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
+  auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
   {
     at::NoGradGuard guard;
-    x1_squared_norm.clamp_min_(eps * eps);
-    x2_squared_norm.clamp_min_(eps * eps);
+    x1_norm.clamp_min_(eps);
+    x2_norm.clamp_min_(eps);
   }
 
-  auto x1_norm = x1_squared_norm.sqrt_();
-  auto x2_norm = x2_squared_norm.sqrt_();
-
-  auto x1_normalized = x1.div(x1_norm);
-  auto x2_normalized = x2.div(x2_norm);
-
-  Tensor cos_sim_value = at::sum(x1_normalized * x2_normalized, dim);
-
-  // The code above is resistant to over +/-1 overshoots.
-  // However, if this happens and if it is critical, uncommenting
-  // the lines below will solve the issue.
-  // We keep these lines commented as to reduce the number of kernel
-  // launches for better runtime performance.
-  //{
-  //  at::NoGradGuard guard;
-  //  cos_sim_value.clamp_min_(-1.0);
-  //  cos_sim_value.clamp_max_(1.0);
-  //}
-
-  return cos_sim_value;
+  return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
 }
 
 }}  // namespace at::native

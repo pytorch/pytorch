@@ -158,7 +158,7 @@ A second (optional) input, `lengths`, can be passed, which enforces that only a 
 For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1,2]$, then $Y = [max(1,4), max(5,1,7), max(2), max(9,2)] = [4, 7, 2, 9]$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_front_back_max_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_front_back_max_ops.cc
 
 <details>
 
@@ -231,7 +231,7 @@ For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1]$, th
 
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_front_back_max_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_front_back_max_ops.cc
 
 <details>
 

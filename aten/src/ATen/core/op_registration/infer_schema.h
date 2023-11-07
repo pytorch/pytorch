@@ -38,8 +38,8 @@ constexpr int checkStaticTypes() {
  // Give nice error messages for some of the common error cases.
  // Use a LOUD ERROR MESSAGE SO USERS SEE THE STATIC_ASSERT
  static_assert(guts::conjunction<
-     bool_t<!std::is_integral<Types>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
-   >::value, "INVALID TYPE: Only int64_t and bool are supported as an integral argument type");
+     bool_t<!std::is_integral<Types>::value || std::is_same<Types, int8_t>::value || std::is_same<Types, int64_t>::value || std::is_same<Types, bool>::value>...
+   >::value, "INVALID TYPE: Only int8_t, int64_t and bool are supported as an integral argument type");
  static_assert(guts::conjunction<
      bool_t<!std::is_same<Types, float>::value>...
    >::value, "INVALID TYPE: float is not supported as an argument type, use double instead");
@@ -108,8 +108,8 @@ struct createSingleReturn {
   }
 };
 
-C10_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
-C10_API FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
+TORCH_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
+TORCH_API FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
 
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
 /// function. Flattens std::tuple returns into multiple return types

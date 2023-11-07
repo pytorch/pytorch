@@ -174,7 +174,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
 
 // NOTE: [Computing output strides]
 // We use the following algorithm to compute output strides
-// If correctly sized output is provided, we respect its stides and don't change them
+// If correctly sized output is provided, we respect its strides and don't change them
 // Otherwise, if provided output is of incorrect size or no output is provided,
 // we try to recover permutation that was applied to the inputs
 // by sorting the strides of the inputs. Precedence is given to the inputs in the order they were added,
@@ -306,7 +306,7 @@ ScalarType TensorIteratorBase::compute_common_dtype() {
   return common_dtype_;
 }
 
-TensorOptions original_options(const OperandInfo& op) {
+static TensorOptions original_options(const OperandInfo& op) {
   if (op.original_tensor_base().defined()) {
     return op.original_tensor_base().options();
   } else {
@@ -314,7 +314,7 @@ TensorOptions original_options(const OperandInfo& op) {
   }
 }
 
-// Implements the the behavior of the following flags:
+// Implements the behavior of the following flags:
 //   - check_all_same_dtype_
 //   - check_all_same_device_
 //   - enforce_safe_casting_to_output_
@@ -622,7 +622,7 @@ void TensorIteratorBase::coalesce_dimensions() {
   }
 
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
-  // shape[n] * stride[n] == shape[n + 1].
+  // shape[n] * stride[n] == stride[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
@@ -947,6 +947,7 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
       .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
       .add_owned_input(a)
@@ -1507,6 +1508,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
   if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||

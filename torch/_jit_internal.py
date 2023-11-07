@@ -14,6 +14,7 @@ import io
 import pickle
 import sys
 import threading
+import types
 import typing
 import warnings
 import weakref
@@ -23,7 +24,10 @@ from typing import (  # noqa: F401
     Callable,
     Dict,
     Final,
+    ForwardRef,
     Generic,
+    get_args,  # new in 3.8
+    get_origin,  # new in 3.8
     List,
     Optional,
     Tuple,
@@ -43,6 +47,17 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
+IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
+IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
+
+BuiltinUnionType: Union[Type, Tuple[Type, ...]]
+if sys.version_info >= (3, 10):
+    # NOTE: IS_PY310_PLUS doesn't work with mypy.
+    # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+    BuiltinUnionType = types.UnionType
+else:
+    BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
 
 LockType: Type
 try:
@@ -320,7 +335,7 @@ def get_callable_argument_names(fn) -> List[str]:
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
         if not param.kind == param.POSITIONAL_OR_KEYWORD:
-            return []
+            continue
 
         argument_names.append(name)
 
@@ -338,7 +353,7 @@ def get_annotation_str(annotation):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
         # In Python3.9+ subscript indicies are not wrapped in ast.Index
-        subscript_slice = annotation.slice if sys.version_info >= (3, 9) else annotation.slice.value  # type: ignore[attr-defined]
+        subscript_slice = annotation.slice if IS_PY39_PLUS else annotation.slice.value  # type: ignore[attr-defined]
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
@@ -446,7 +461,7 @@ def createResolutionCallbackForClassMethods(cls):
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if not inspect.isbuiltin(fn)]
+    fns = [fn for fn in fns if not inspect.isbuiltin(fn) and hasattr(fn, "__globals__")]
     captures = {}
 
     for fn in fns:
@@ -472,7 +487,7 @@ def boolean_dispatch(
     """
 
     def fn(*args, **kwargs):
-        dispatch_flag = False
+        dispatch_flag = default
         if arg_name in kwargs:
             dispatch_flag = kwargs[arg_name]
         elif arg_index < len(args):
@@ -587,7 +602,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
@@ -908,7 +923,7 @@ def get_class_name_lineno(method) -> Tuple[str, int]:
     return class_name, line_no
 
 
-# At the the point the decorator is applied to class methods the method
+# At the point the decorator is applied to class methods the method
 # has no reference to its owning class. _qualified_name would not include
 # the class it is defined in, so any methods with the same name in the same file
 # would have the same _qualified_name, even if they were defined in different
@@ -982,10 +997,11 @@ def is_tuple(ann) -> bool:
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is Tuple
-        or getattr(ann, "__origin__", None) is tuple
-    )
+
+    ann_origin = get_origin(ann)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
 
 
 def is_list(ann) -> bool:
@@ -994,10 +1010,11 @@ def is_list(ann) -> bool:
 
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is List
-        or getattr(ann, "__origin__", None) is list
-    )
+
+    ann_origin = get_origin(ann)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
 
 
 def is_dict(ann) -> bool:
@@ -1006,20 +1023,21 @@ def is_dict(ann) -> bool:
 
     if not hasattr(ann, "__module__"):
         return False
-    return ann.__module__ == "typing" and (
-        getattr(ann, "__origin__", None) is Dict
-        or getattr(ann, "__origin__", None) is dict
-    )
+
+    ann_origin = get_origin(ann)
+    if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
 
 
 def is_union(ann):
     if ann is Union:
         raise_error_container_parameter_missing("Union")
 
-    return (
+    return isinstance(ann, BuiltinUnionType) or (
         hasattr(ann, "__module__")
         and ann.__module__ == "typing"
-        and (getattr(ann, "__origin__", None) is Union)
+        and (get_origin(ann) is Union)
     )
 
 
@@ -1031,11 +1049,11 @@ def is_optional(ann):
         return (
             hasattr(ann, "__module__")
             and ann.__module__ == "typing"
-            and (getattr(ann, "__origin__", None) is Optional)
+            and (get_origin(ann) is Optional)
         )
 
     def is_union_as_optional(ann):
-        ann_args = ann.__args__
+        ann_args = get_args(ann)
         return len(ann_args) == 2 and (None in ann_args or type(None) in ann_args)
 
     return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
@@ -1048,13 +1066,13 @@ def is_future(ann) -> bool:
             "contained type. Please add a contained type, e.g. "
             "Future[int]"
         )
-    return getattr(ann, "__origin__", None) is Future
+    return get_origin(ann) is Future
 
 
 def is_await(ann) -> bool:
     if ann is _Await:
         return True
-    return getattr(ann, "__origin__", None) is _Await
+    return get_origin(ann) is _Await
 
 
 if torch.distributed.rpc.is_available():
@@ -1068,7 +1086,7 @@ if torch.distributed.rpc.is_available():
                 "contained type. Please add a contained type, e.g. "
                 "RRef[int]"
             )
-        return getattr(ann, "__origin__", None) is RRef
+        return get_origin(ann) is RRef
 
     def is_rref_instance(obj) -> bool:
         return isinstance(obj, PyRRef)
@@ -1082,7 +1100,7 @@ else:
 
 def is_final(ann) -> bool:
     return ann.__module__ in {"typing", "typing_extensions"} and (
-        getattr(ann, "__origin__", None) is Final or isinstance(ann, type(Final))
+        get_origin(ann) is Final or isinstance(ann, type(Final))
     )
 
 
@@ -1163,7 +1181,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # if getattr(sys.modules[module_name], name) is not obj:
     #     raise RuntimeError(f"Could not get qualified name for class '{name}': "
-    #                        f"the attr {name} on module {module_name} is not the the class")
+    #                        f"the attr {name} on module {module_name} is not the class")
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
@@ -1198,7 +1216,12 @@ def _try_get_dispatched_fn(fn):
     return boolean_dispatched.get(fn)
 
 
-def _get_named_tuple_properties(obj):
+def _get_named_tuple_properties(
+    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None, rcb=None
+):
+    if loc is None:
+        loc = fake_range()
+
     assert issubclass(obj, tuple) and hasattr(obj, "_fields")
     if hasattr(obj, "_field_defaults"):
         defaults = [
@@ -1220,9 +1243,53 @@ def _get_named_tuple_properties(obj):
     annotations = []
     for field in obj._fields:
         if field in obj_annotations:
-            the_type = torch.jit.annotations.ann_to_type(
-                obj_annotations[field], fake_range()
-            )
+            field_type = obj_annotations[field]
+            # [Note: ForwardRef annotations in NamedTuple attributes]
+            # NamedTuple types are slightly different from normal types.
+            #
+            # Normally, annotations are evaluted like this (during jit.script):
+            # 1. Load strings of python code into c++ and parse.
+            # 2. Get annotations as strings
+            # 3. Use the PythonResolver's resolution callback (rcb) to convert
+            #    the string into a python object
+            # 4. We call into annotations.py:ann_to_type to convert python obj
+            #    from step 3 into a type that torchscript understands.
+            #
+            # NamedTuples are more complicated, because it has sub-types.
+            # Normally, once we have the NamedTuple type object from #3,
+            # we can just look at the annotation literal values and use
+            # ann_to_type directly on them.
+            #
+            # But sometimes, users will annotate with string literals, e.g.
+            #    x: 'int'
+            # This also happens with PEP563 (from __forward__ import annotations)
+            #
+            # These annotations appear in the annotation dict as ForwardRef('int').
+            #
+            # Then, we need to convert the string into a python object. This
+            # requires having local context for custom objects or imported types.
+            # rcb() is what gives us this. So, we plumb rcb through the stack so
+            # it can be used in this context for the if block below.
+            #
+            # FAQ:
+            # - Why do we need this special handling for NamedTuple but string
+            #   annotations work fine for normal types? Normally, we parse the
+            #   string directly and then call rcb() directly from C++.
+            # - Why not use ForwardRef._evaluate? For that, we need globals()
+            #   and locals() for the local context where the NamedTuple was defined.
+            #   rcb is what lets us look up into these. So, basically rcb does the
+            #   hard work for us.
+            if isinstance(field_type, ForwardRef) and rcb is not None:
+                rcb_type = rcb(field_type.__forward_arg__)
+                # rcb returns None if it can't find anything.
+                if rcb_type is None:
+                    raise ValueError(
+                        f"Unknown type annotation: '{field_type}' in NamedTuple {obj.__name__}."
+                        f" Likely due to partial support for ForwardRef parameters in NamedTuples, see #95858."
+                        f" Issue occurred at {loc.highlight()}"
+                    )
+                field_type = rcb_type
+            the_type = torch.jit.annotations.ann_to_type(field_type, loc, rcb)
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
@@ -1240,8 +1307,10 @@ def _create_named_tuple(
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
-    yield
-    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+    try:
+        yield
+    finally:
+        torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
 def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811
@@ -1273,14 +1342,6 @@ def raise_error_container_parameter_missing(target_type) -> None:
     )
 
 
-def get_origin(target_type):
-    return getattr(target_type, "__origin__", None)
-
-
-def get_args(target_type):
-    return getattr(target_type, "__args__", None)
-
-
 def check_args_exist(target_type) -> None:
     if target_type is List or target_type is list:
         raise_error_container_parameter_missing("List")
@@ -1308,7 +1369,9 @@ def check_empty_containers(obj) -> None:
 def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
-    if origin_type is list or origin_type is List:
+    if origin_type is None:
+        return False
+    elif origin_type is list or origin_type is List:
         check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
@@ -1354,7 +1417,9 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, el_type):
                 return False
         return True
-    elif origin_type is Union:  # also handles Optional
+    elif origin_type is Union or issubclass(
+        origin_type, BuiltinUnionType
+    ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
         inner_types = get_args(target_type)
@@ -1433,3 +1498,13 @@ def _extract_tensors(obj):
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors
+
+
+# In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
+# that were previously dropped. To preserve the behavior, explicitly drop them there
+
+if sys.version_info > (3, 10):
+    _drop(enum.Enum.__new__)
+    _drop(enum.Enum.__format__)
+    _drop(enum.Enum.__repr__)
+    _drop(enum.Enum.__str__)

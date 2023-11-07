@@ -37,7 +37,7 @@ class Linear(nnq.Linear):
     _version = 4
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
+        super().__init__(in_features, out_features, bias_, dtype=dtype)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -68,15 +68,15 @@ class Linear(nnq.Linear):
             self.in_features, self.out_features, self._packed_params.dtype
         )
         if self._packed_params.dtype == torch.qint8:
-            extra_repr_str += ', qscheme={}'.format(self.weight().qscheme())
+            extra_repr_str += f', qscheme={self.weight().qscheme()}'
         return extra_repr_str
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
         self.version = version
-        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                  missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod):
@@ -105,7 +105,7 @@ class Linear(nnq.Linear):
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
         assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
-            "dynamic quantized linear are qint8 and float16 got: {}".format(dtype)
+            f"dynamic quantized linear are qint8 and float16 got: {dtype}"
         weight_observer(mod.weight)
         if dtype == torch.qint8:
             qweight = _quantize_weight(mod.weight.float(), weight_observer)

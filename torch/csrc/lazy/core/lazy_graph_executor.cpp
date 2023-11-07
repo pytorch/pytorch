@@ -331,12 +331,18 @@ bool LazyGraphExecutor::DataCacheArena::TensorComparer::operator()(
 auto LazyGraphExecutor::DataCacheArena::GetDataCache(
     const BackendDevice& device) -> DataCache* {
   std::lock_guard<std::mutex> lock(mutex_);
-  auto it = device_caches_.find(device);
-  if (it == device_caches_.end()) {
-    std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
-    it = device_caches_.emplace(device, std::move(cache)).first;
+  if (FLAGS_torch_lazy_enable_device_data_cache) {
+    auto it = device_caches_.find(device);
+    if (it == device_caches_.end()) {
+      std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
+      it = device_caches_.emplace(device, std::move(cache)).first;
+    }
+    return it->second.get();
+  } else {
+    // If cache is disabled then always return a zero size cache
+    static std::unique_ptr<DataCache> s_empty_cache(new DataCache(0));
+    return s_empty_cache.get();
   }
-  return it->second.get();
 }
 
 void LazyGraphExecutor::Register(LazyGraphExecutor* executor) {
@@ -560,7 +566,7 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
-bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr& tensor) const {
   return tensor->GetIrValue()->op() != ltc_not_supported;
 }
 
@@ -668,7 +674,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
     const std::vector<BackendDataPtr>& tensor_data_vec) {
   std::vector<BackendDataPtr> tensors_data;
   tensors_data.reserve(indices.size());
-  for (int i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto index = indices[i];
     LazyTensorPtr& tensor = (*tensors)[index];
     // If the config.force_ltc_data flag is true, the purpose of this tensor
@@ -783,7 +789,8 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     // TODO(whc) should computation be allowed null here? (because it is in one
     // case)
     TORCH_CHECK(
-        computation->parameters_size() == po_data->parameters_data.size());
+        computation->parameters_size() ==
+        static_cast<int>(po_data->parameters_data.size()));
   }
 
   return {

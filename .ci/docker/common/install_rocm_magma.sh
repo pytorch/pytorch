@@ -5,8 +5,10 @@ set -ex
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
 git clone https://bitbucket.org/icl/magma.git
 pushd magma
-# Fixes memory leaks of magma found while executing linalg UTs
-git checkout 5959b8783e45f1809812ed96ae762f38ee701972
+
+# Version 2.7.2 + ROCm related updates
+git checkout 823531632140d0edcb7e77c3edc0e837421471c5
+
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
 echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
@@ -18,7 +20,7 @@ else
   amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
 fi
 for arch in $amdgpu_targets; do
-  echo "DEVCCFLAGS += --amdgpu-target=$arch" >> make.inc
+  echo "DEVCCFLAGS += --offload-arch=$arch" >> make.inc
 done
 # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
 sed -i 's/^FOPENMP/#FOPENMP/g' make.inc

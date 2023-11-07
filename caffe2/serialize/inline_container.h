@@ -16,6 +16,7 @@
 #include "caffe2/serialize/read_adapter_interface.h"
 #include "caffe2/serialize/versions.h"
 
+
 extern "C" {
 typedef struct mz_zip_archive mz_zip_archive;
 }
@@ -93,6 +94,31 @@ typedef struct mz_zip_archive mz_zip_archive;
 namespace caffe2 {
 namespace serialize {
 
+static constexpr const char* kSerializationIdRecordName = ".data/serialization_id";
+
+struct MzZipReaderIterWrapper;
+
+class TORCH_API ChunkRecordIterator {
+ public:
+  ~ChunkRecordIterator();
+
+  // Read at most `chunkSize` into `buf`. Return the number of actual bytes read.
+  size_t next(void* buf);
+
+ private:
+ ChunkRecordIterator(
+      size_t recordSize,
+      size_t chunkSize,
+      std::unique_ptr<MzZipReaderIterWrapper> iter);
+
+  const size_t recordSize_;
+  const size_t chunkSize_;
+  size_t offset_;
+  std::unique_ptr<MzZipReaderIterWrapper> iter_;
+
+  friend class PyTorchStreamReader;
+};
+
 class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
@@ -101,19 +127,62 @@ class TORCH_API PyTorchStreamReader final {
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
+  // multi-thread getRecord
+  std::tuple<at::DataPtr, size_t> getRecord(const std::string& name, std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders);
+  // inplace memory writing
+  size_t getRecord(const std::string& name, void* dst, size_t n);
+  // inplace memory writing, multi-threads.
+  // When additionalReaders is empty, the default behavior is call getRecord(name, dst, n) with default reader
+  // This approach can be used for reading large tensors.
+  size_t getRecord(const std::string& name, void* dst, size_t n,
+    std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders);
+  size_t getRecord(
+      const std::string& name,
+      void* dst,
+      size_t n,
+      size_t chunk_size,
+      void* buf,
+      const std::function<void(void*, const void*, size_t)>& memcpy_func = nullptr);
+
+  // Concurrent reading records with multiple readers.
+  // additionalReaders are additional clients to access the underlying record at different offsets
+  // and write to different trunks of buffers.
+  // If the overall size of the tensor is 10, and size of additionalReader is 2.
+  // The default thread will read [0,4), the additional reader will read [4,8).
+  // The default reader will read [8,10).
+  // The default reader will write to buffer[0,4), the additional reader will write to buffer[4,8),
+  // the additional reader will write to buffer[8,10).
+  // When additionalReaders is empty, the default behavior is call getRecord(name) with default reader
+  // This approach can be used for reading large tensors.
+  size_t getRecordMultiReaders(const std::string& name,
+  std::vector<std::shared_ptr<ReadAdapterInterface>>& additionalReaders,
+  void *dst, size_t n);
+
+  size_t getRecordSize(const std::string& name);
+
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
+
+  ChunkRecordIterator createChunkReaderIter(
+      const std::string& name,
+      const size_t recordSize,
+      const size_t chunkSize);
 
   ~PyTorchStreamReader();
   uint64_t version() const {
     return version_;
   }
+  const std::string& serializationId() {
+    return serialization_id_;
+  }
 
   void setShouldLoadDebugSymbol(bool should_load_debug_symbol) {
     load_debug_symbol_ = should_load_debug_symbol;
   }
-
+  void setAdditionalReaderSizeThreshold(const size_t& size){
+    additional_reader_size_threshold_ = size;
+  }
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
@@ -129,11 +198,13 @@ class TORCH_API PyTorchStreamReader final {
   int64_t version_;
   std::mutex reader_lock_;
   bool load_debug_symbol_ = true;
+  std::string serialization_id_;
+  size_t additional_reader_size_threshold_;
 };
 
 class TORCH_API PyTorchStreamWriter final {
  public:
-  explicit PyTorchStreamWriter(std::string archive_name);
+  explicit PyTorchStreamWriter(const std::string& archive_name);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func);
 
@@ -156,11 +227,16 @@ class TORCH_API PyTorchStreamWriter final {
     return archive_name_;
   }
 
+  const std::string& serializationId() {
+    return serialization_id_;
+  }
+
   ~PyTorchStreamWriter();
 
  private:
   void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
+  void writeSerializationId();
   size_t current_pos_ = 0;
   std::unordered_set<std::string> files_written_;
   std::unique_ptr<mz_zip_archive> ar_;
@@ -169,6 +245,9 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  uint64_t combined_uncomp_crc32_ = 0;
+  std::string serialization_id_;
+
   // This number will be updated when the model has operators
   // that have valid upgraders.
   uint64_t version_ = kMinProducedFileFormatVersion;

@@ -2,7 +2,7 @@ import torch
 from collections import OrderedDict
 import weakref
 import warnings
-from typing import Any
+from typing import Any, Tuple
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
@@ -12,8 +12,9 @@ class RemovableHandle:
 
     Args:
         hooks_dict (dict): A dictionary of hooks, indexed by hook ``id``.
-        extra_dict (dict): An additional dictionary whose keys will be deleted
-            when the same keys are removed from ``hooks_dict``.
+        extra_dict (Union[dict, List[dict]]): An additional dictionary or list of
+            dictionaries whose keys will be deleted when the same keys are
+            removed from ``hooks_dict``.
     """
 
     id: int
@@ -24,28 +25,27 @@ class RemovableHandle:
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
 
-        self.extra_dict_ref = (
-            weakref.ref(extra_dict)
-            if extra_dict is not None
-            else None
-        )
+        self.extra_dict_ref: Tuple = ()
+        if isinstance(extra_dict, dict):
+            self.extra_dict_ref = (weakref.ref(extra_dict),)
+        elif isinstance(extra_dict, list):
+            self.extra_dict_ref = tuple(weakref.ref(d) for d in extra_dict)
 
     def remove(self) -> None:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
 
-        if self.extra_dict_ref is not None:
-            extra_dict = self.extra_dict_ref()
+        for ref in self.extra_dict_ref:
+            extra_dict = ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
 
     def __getstate__(self):
-        return (
-            (self.hooks_dict_ref(), self.id)
-            if self.extra_dict_ref is None
-            else (self.hooks_dict_ref(), self.id, self.extra_dict_ref())
-        )
+        if self.extra_dict_ref is None:
+            return (self.hooks_dict_ref(), self.id)
+        else:
+            return (self.hooks_dict_ref(), self.id, tuple(ref() for ref in self.extra_dict_ref))
 
     def __setstate__(self, state) -> None:
         if state[0] is None:
@@ -56,11 +56,10 @@ class RemovableHandle:
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
 
-        self.extra_dict_ref = (
-            None
-            if len(state) < 3
-            else weakref.ref(OrderedDict() if state[2] is None else state[2])
-        )
+        if len(state) < 3 or state[2] is None:
+            self.extra_dict_ref = ()
+        else:
+            self.extra_dict_ref = tuple(weakref.ref(d) for d in state[2])
 
     def __enter__(self) -> "RemovableHandle":
         return self
@@ -84,10 +83,10 @@ def warn_if_has_hooks(tensor):
         for k in tensor._backward_hooks:
             hook = tensor._backward_hooks[k]
             if not hasattr(k, "__torch_unserializable__"):
-                warnings.warn("backward hook {} on tensor will not be "
+                warnings.warn(f"backward hook {repr(hook)} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
-                              "to suppress this warning".format(repr(hook)))
+                              "to suppress this warning")
 
 class BackwardHook:
     """
@@ -141,7 +140,7 @@ class BackwardHook:
 
                 if len(out) != len(res):
                     raise RuntimeError("Backward hook returned an invalid number of grad_input, "
-                                       "got {}, but expected {}".format(len(out), len(res)))
+                                       f"got {len(out)}, but expected {len(res)}")
 
                 res = out
 
@@ -182,7 +181,11 @@ class BackwardHook:
         for idx, val in zip(tensors_idx, new_tensors):
             arg_list[idx] = val
 
-        return tuple(arg_list), tensors_idx
+        if type(args) is tuple:
+            out = tuple(arg_list)
+        else:
+            out = type(args)(*arg_list)
+        return out, tensors_idx
 
     def setup_input_hook(self, args):
         def fn(grad_fn):
@@ -210,7 +213,7 @@ class BackwardHook:
                         actual_len = len(hook_grad_outputs)
                         if actual_len != expected_len:
                             raise RuntimeError("Backward pre hook returned an invalid number of grad_output, "
-                                               "got {}, but expected {}".format(actual_len, expected_len))
+                                               f"got {actual_len}, but expected {expected_len}")
                         self.grad_outputs = hook_grad_outputs
 
                 # Special case if no input required gradients, this hook should call the user
@@ -223,6 +226,11 @@ class BackwardHook:
                             raise RuntimeError("Backward hook for Modules where no input requires "
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
+
+                if self.grad_outputs is not None:
+                    assert self.output_tensors_index is not None  # mypy
+                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
+
             grad_fn.register_hook(hook)
 
         is_tuple = True

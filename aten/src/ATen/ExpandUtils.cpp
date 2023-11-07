@@ -9,7 +9,7 @@ namespace internal {
 TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
   return OptionalTensorRef(self)->expand(size);
 }
-}
+} // namespace internal
 
 namespace {
 // NOTE: are_expandable did a similar check, please keep them sync if change is needed
@@ -44,6 +44,10 @@ Container infer_size_impl(ArrayType a, ArrayType b) {
 
 std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   return infer_size_impl<std::vector<int64_t>>(a, b);
+}
+
+std::vector<SymInt> infer_size_symint(SymIntArrayRef a, SymIntArrayRef b) {
+  return infer_size_impl<std::vector<SymInt>>(a, b);
 }
 
 DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {

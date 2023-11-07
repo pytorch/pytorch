@@ -175,14 +175,13 @@ TEST(OrderedPreservingDictTest, test_range_insert) {
   const int nb_values = 1000;
   std::vector<std::pair<int, int>> values;
   for (const auto i : c10::irange(nb_values)) {
-    // NOLINTNEXTLINE(modernize-use-emplace,performance-inefficient-vector-operation)
-    values.push_back(std::make_pair(i, i + 1));
+    values.emplace_back(i, i + 1);
   }
 
   dict_int_int map = {{-1, 0}, {-2, 0}};
   map.insert(values.begin() + 10, values.end() - 5);
 
-  TORCH_INTERNAL_ASSERT(map.size(), 987);
+  ASSERT_EQUAL_PRIM(map.size(), 987);
 
   ASSERT_EQUAL_PRIM(map.at(-1), 0);
 
@@ -197,7 +196,7 @@ TEST(OrderedPreservingDictTest, test_range_erase_all) {
   // insert x values, delete all
   const std::size_t nb_values = 1000;
   dict_int_int map;
-  for (const auto i : c10::irange(nb_values)) {
+  for (const int64_t i : c10::irange<int64_t>(nb_values)) {
     map[i] = i + 1;
   }
   auto it = map.erase(map.begin(), map.end());
@@ -214,7 +213,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   const int64_t nb_values = 1000;
   HMap map;
   for (const auto i : c10::irange(nb_values)) {
-    map[c10::guts::to_string(i)] = i;
+    map[std::to_string(i)] = i;
     auto begin = map.begin();
     for (int64_t j = 0; j <= i; ++j, begin++) {
       TORCH_INTERNAL_ASSERT(begin->second == j);
@@ -239,8 +238,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     if (i >= 10 && i < 220) {
       continue;
     }
-    auto exp_it =
-        std::pair<std::string, std::int64_t>(c10::guts::to_string(i), i);
+    auto exp_it = std::pair<std::string, std::int64_t>(std::to_string(i), i);
     TORCH_INTERNAL_ASSERT(*it == exp_it);
     ++it;
   }
@@ -282,8 +280,8 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_constructor) {
   HMap map_move(std::move(map));
 
   ASSERT_EQUAL_PRIM(map_move.size(), 3);
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-  ASSERT_EQUAL_PRIM(map.size(), 0);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  ASSERT_TRUE(map.empty());
 
   map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
   TORCH_INTERNAL_ASSERT(
@@ -298,8 +296,8 @@ TEST(OrderedPreservingDictTest, test_reassign_moved_object_move_operator) {
   HMap map_move = std::move(map);
 
   ASSERT_EQUAL_PRIM(map_move.size(), 3);
-  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
-  ASSERT_EQUAL_PRIM(map.size(), 0);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  ASSERT_TRUE(map.empty());
 
   map = {{"Key4", "Value4"}, {"Key5", "Value5"}};
   TORCH_INTERNAL_ASSERT(
@@ -313,13 +311,13 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   const std::size_t nb_values = 100;
   HMap map;
   for (const auto i : c10::irange(nb_values)) {
-    map[c10::guts::to_string(i)] = c10::guts::to_string(i);
+    map[std::to_string(i)] = std::to_string(i);
   }
 
   HMap map_copy = map;
   HMap map_copy2(map);
   HMap map_copy3;
-  map_copy3[c10::guts::to_string(0)] = c10::guts::to_string(0);
+  map_copy3[std::to_string(0)] = std::to_string(0);
 
   map_copy3 = map;
 
@@ -446,6 +444,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
   swap(map, map2);
 
   TORCH_INTERNAL_ASSERT(
+      // NOLINTNEXTLINE(readability-container-size-empty)
       map ==
       (ska_ordered::
            order_preserving_flat_hash_map<std::int64_t, std::int64_t>{}));

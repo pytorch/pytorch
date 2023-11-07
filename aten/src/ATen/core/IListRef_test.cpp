@@ -1,9 +1,11 @@
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 #include <ATen/core/IListRef.h>
-#include <ATen/core/Tensor.h>
 #include <gtest/gtest.h>
 #include <algorithm>
-#include <iterator>
 
 using namespace c10;
 
@@ -27,12 +29,13 @@ static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
 }
 
 static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
+  static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
-  const size_t SIZE = 5;
-  for (size_t i = 0; i < SIZE * 2; i++) {
-    auto opt_tensor = (i % 2 == 0) ? at::OptionalTensorRef(at::empty({0}))
-                                   : at::OptionalTensorRef();
-    optional_tensors.emplace_back(opt_tensor);
+  constexpr size_t SIZE = 5;
+  for (size_t i = 0; i < SIZE; i++) {
+    tensors.push_back(at::empty({0}));
+    optional_tensors.emplace_back(tensors[i]);
+    optional_tensors.emplace_back();
   }
   return optional_tensors;
 }
@@ -72,7 +75,7 @@ TEST(ITensorListRefTest, CtorUnboxed_IsUnboxed) {
 
 TEST(ITensorListRefTest, CtorUnboxedIndirect_IsUnboxed) {
   auto vec = get_tensor_vector();
-  auto check_is_unboxed = [](at::ITensorListRef list) {
+  auto check_is_unboxed = [](const at::ITensorListRef& list) {
     EXPECT_TRUE(list.isUnboxed());
   };
   check_is_unboxed(at::ITensorListRef{vec[0]});
@@ -83,7 +86,7 @@ TEST(ITensorListRefTest, CtorUnboxedIndirect_IsUnboxed) {
 }
 
 TEST(ITensorListRefTest, CtorTemp_IsUnboxed) {
-  auto check_is_unboxed = [](at::ITensorListRef list) {
+  auto check_is_unboxed = [](const at::ITensorListRef& list) {
     EXPECT_TRUE(list.isUnboxed());
   };
 

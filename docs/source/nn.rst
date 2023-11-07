@@ -51,7 +51,11 @@ Global Hooks For Module
     register_module_forward_pre_hook
     register_module_forward_hook
     register_module_backward_hook
+    register_module_full_backward_pre_hook
     register_module_full_backward_hook
+    register_module_buffer_registration_hook
+    register_module_module_registration_hook
+    register_module_parameter_registration_hook
 
 .. currentmodule:: torch
 
@@ -120,7 +124,9 @@ Padding Layers
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
+    nn.ZeroPad1d
     nn.ZeroPad2d
+    nn.ZeroPad3d
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
@@ -349,7 +355,9 @@ Utilities
 ---------
 .. automodule:: torch.nn.utils
 
-From the ``torch.nn.utils`` module
+From the ``torch.nn.utils`` module:
+
+Utility functions to clip parameter gradients.
 
 .. currentmodule:: torch.nn.utils
 .. autosummary::
@@ -357,15 +365,63 @@ From the ``torch.nn.utils`` module
     :nosignatures:
 
     clip_grad_norm_
+    clip_grad_norm
     clip_grad_value_
-    parameters_to_vector
-    vector_to_parameters
-    prune.BasePruningMethod
+
+Utility functions to flatten and unflatten Module parameters to and from a single vector.
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
+    parameters_to_vector
+    vector_to_parameters
+
+Utility functions to fuse Modules with BatchNorm modules.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    fuse_conv_bn_eval
+    fuse_conv_bn_weights
+    fuse_linear_bn_eval
+    fuse_linear_bn_weights
+
+Utility functions to convert Module parameter memory formats.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    convert_conv2d_weight_memory_format
+
+Utility functions to apply and remove weight normalization from Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    weight_norm
+    remove_weight_norm
+    spectral_norm
+    remove_spectral_norm
+
+Utility functions for initializing Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    skip_init
+
+Utility classes and functions for pruning Module parameters.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    prune.BasePruningMethod
     prune.PruningContainer
     prune.Identity
     prune.RandomUnstructured
@@ -382,11 +438,6 @@ From the ``torch.nn.utils`` module
     prune.custom_from_mask
     prune.remove
     prune.is_pruned
-    weight_norm
-    remove_weight_norm
-    spectral_norm
-    remove_spectral_norm
-    skip_init
 
 Parametrizations implemented using the new parametrization functionality
 in :func:`torch.nn.utils.parameterize.register_parametrization`.
@@ -422,7 +473,7 @@ for more information on how to implement your own parametrizations.
 
     parametrize.ParametrizationList
 
-Utility functions to calls a given Module in a stateless manner.
+Utility functions to call a given Module in a stateless manner.
 
 .. autosummary::
     :toctree: generated
@@ -442,6 +493,8 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+    nn.utils.rnn.unpack_sequence
+    nn.utils.rnn.unpad_sequence
 
 .. autosummary::
     :toctree: generated
@@ -469,6 +522,55 @@ Lazy Modules Initialization
     nn.modules.lazy.LazyModuleMixin
 
 
-.. This module is kept only for backward compatibility
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
 .. py:module:: torch.nn.backends
 .. py:module:: torch.nn.utils.stateless
+.. py:module:: torch.nn.backends.thnn
+.. py:module:: torch.nn.common_types
+.. py:module:: torch.nn.cpp
+.. py:module:: torch.nn.functional
+.. py:module:: torch.nn.grad
+.. py:module:: torch.nn.init
+.. py:module:: torch.nn.modules.activation
+.. py:module:: torch.nn.modules.adaptive
+.. py:module:: torch.nn.modules.batchnorm
+.. py:module:: torch.nn.modules.channelshuffle
+.. py:module:: torch.nn.modules.container
+.. py:module:: torch.nn.modules.conv
+.. py:module:: torch.nn.modules.distance
+.. py:module:: torch.nn.modules.dropout
+.. py:module:: torch.nn.modules.flatten
+.. py:module:: torch.nn.modules.fold
+.. py:module:: torch.nn.modules.instancenorm
+.. py:module:: torch.nn.modules.lazy
+.. py:module:: torch.nn.modules.linear
+.. py:module:: torch.nn.modules.loss
+.. py:module:: torch.nn.modules.module
+.. py:module:: torch.nn.modules.normalization
+.. py:module:: torch.nn.modules.padding
+.. py:module:: torch.nn.modules.pixelshuffle
+.. py:module:: torch.nn.modules.pooling
+.. py:module:: torch.nn.modules.rnn
+.. py:module:: torch.nn.modules.sparse
+.. py:module:: torch.nn.modules.transformer
+.. py:module:: torch.nn.modules.upsampling
+.. py:module:: torch.nn.modules.utils
+.. py:module:: torch.nn.parallel.comm
+.. py:module:: torch.nn.parallel.data_parallel
+.. py:module:: torch.nn.parallel.distributed
+.. py:module:: torch.nn.parallel.parallel_apply
+.. py:module:: torch.nn.parallel.replicate
+.. py:module:: torch.nn.parallel.scatter_gather
+.. py:module:: torch.nn.parameter
+.. py:module:: torch.nn.utils.clip_grad
+.. py:module:: torch.nn.utils.convert_parameters
+.. py:module:: torch.nn.utils.fusion
+.. py:module:: torch.nn.utils.init
+.. py:module:: torch.nn.utils.memory_format
+.. py:module:: torch.nn.utils.parametrizations
+.. py:module:: torch.nn.utils.parametrize
+.. py:module:: torch.nn.utils.prune
+.. py:module:: torch.nn.utils.rnn
+.. py:module:: torch.nn.utils.spectral_norm
+.. py:module:: torch.nn.utils.weight_norm

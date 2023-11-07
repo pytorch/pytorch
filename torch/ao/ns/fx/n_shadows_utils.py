@@ -173,7 +173,7 @@ def _get_dedup_subgraphs(
                 last_node = None
                 for n in nodes:
                     prev_n = n.args[0]
-                    next_n = list(n.users)[0]
+                    next_n = next(iter(n.users))
                     if prev_n not in nodes:
                         first_node = n
                     elif next_n not in nodes:
@@ -418,7 +418,7 @@ def create_submodule_from_subgraph(
         # go to next node
         assert len(cur_node_orig.users.keys()) == 1, \
             f'{cur_node_orig} has more than 1 users, not supported yet'
-        cur_node_orig = list(cur_node_orig.users.keys())[0]
+        cur_node_orig = next(iter(cur_node_orig.users.keys()))
         cur_args_orig = cur_node_orig.args
         cur_kwargs_orig = cur_node_orig.kwargs
 
@@ -443,7 +443,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     example_inputs: Any,
     last_added_shadow_node_list: List[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Dict[str, Any] = None,
+    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -575,7 +575,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     qconfig_mappings: List[QConfigMapping],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
     custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Dict[str, Any] = None,
+    custom_prepare_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -669,7 +669,7 @@ def create_add_loggers_graph(
     qconfig_mapping: QConfigMapping,
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:
-    """
+    r"""
     Given a model, a model graph partition (currently a set of matched
     subgraphs) and instructions how to transform each subgraph
     (currently quantizing it according to qconfig_mapping), modifies
@@ -704,7 +704,7 @@ def create_add_loggers_graph(
     from torch.ao.ns._numeric_suite_fx import OutputLogger, OutputComparisonLogger
 
     def _get_subgraph_containing_node(node, subgraphs_dedup):
-        for name, subgraph in subgraphs_dedup.items():
+        for subgraph in subgraphs_dedup.values():
             if node in subgraph:
                 return subgraph
         return None
@@ -756,7 +756,7 @@ def create_add_loggers_graph(
             create_n_transformed_and_logged_copies_of_subgraph(
                 model, cur_subgraph_idx, match_name, maybe_subgraph,
                 [qconfig_mapping], [node_name_to_qconfig],
-                None, None
+                None, None  # type: ignore[arg-type]
             )
             # find the created shadow module and record it so we
             # can find it easily in step 2
@@ -821,7 +821,7 @@ def create_add_loggers_graph(
                 # except the last one must have only one user
                 if cur_node_orig != last_node:
                     assert len(cur_node_orig.users.keys()) == 1
-                cur_node_orig = list(cur_node_orig.users.keys())[0]
+                cur_node_orig = next(iter(cur_node_orig.users.keys()))
                 assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
@@ -947,7 +947,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
         #  to get `_input_scale_1` and `_input_zero_point_1`
 
         assert len(shadow_n.users) == 1
-        quant_node = list(shadow_n.users.keys())[0]
+        quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
         if quant_node.target == torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
@@ -991,9 +991,9 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
     # use functions.
 
     # TODO(future PR): move this to config
-    weighted_ops = set([
+    weighted_ops = {
         torch.nn.functional.linear,
-    ])
+    }
 
     results: NSResultsType = {
         'model': {NSSingleResultValuesType.WEIGHT.value: {}}
@@ -1145,7 +1145,7 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
     # node_output or weight
-    key_to_use = list(results['model'].keys())[0]
+    key_to_use = next(iter(results['model'].keys()))
 
     for subgraph_name_with_idx, subgraph_candidate_results in \
             results['model'][key_to_use].items():
@@ -1289,7 +1289,7 @@ def print_n_shadows_summary(
         return
 
     results = []
-    for subgraph_name, subgraph_data in results_comparison.items():
+    for subgraph_data in results_comparison.values():
         mean_all_candidates = [
             candidate['cmp_mean']
             for candidate_name, candidate in subgraph_data['candidates'].items()

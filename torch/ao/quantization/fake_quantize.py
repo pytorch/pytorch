@@ -222,13 +222,13 @@ class FakeQuantize(FakeQuantizeBase):
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually
         # specify serialization here.
-        super(FakeQuantize, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = self.scale
         destination[prefix + 'zero_point'] = self.zero_point
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        # Removing this function throws an error that the the size of the loaded tensor does not match the original size
+        # Removing this function throws an error that the size of the loaded tensor does not match the original size
         # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
         local_state = ['scale', 'zero_point']
         for name in local_state:
@@ -254,8 +254,8 @@ class FakeQuantize(FakeQuantizeBase):
                         self.zero_point.copy_(val)
             elif strict:
                 missing_keys.append(key)
-        super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
-                                                        missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
 class FixedQParamsFakeQuantize(FakeQuantize):
@@ -264,10 +264,11 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     is supported.
     """
 
+    # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
         assert type(self.activation_post_process) == FixedQParamsObserver,\
-            "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
+            f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
         self.zero_point = self.activation_post_process.zero_point

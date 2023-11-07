@@ -11,7 +11,7 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
-    upload_to_s3,
+    upload_workflow_stats_to_s3,
 )
 from tools.stats.upload_test_stats import process_xml_element
 
@@ -39,21 +39,25 @@ def process_report(
     # We want to keep track of how many times the test fails (num_red) or passes (num_green)
     all_tests: Dict[str, Dict[str, int]] = {}
 
-    if not is_rerun_disabled_tests(root):
-        return all_tests
-
     for test_case in root.iter(TESTCASE_TAG):
         parsed_test_case = process_xml_element(test_case)
 
         # Under --rerun-disabled-tests mode, a test is skipped when:
-        # * it's skipped explicitly inside PyToch code
+        # * it's skipped explicitly inside PyTorch code
         # * it's skipped because it's a normal enabled test
         # * or it's falky (num_red > 0 and num_green > 0)
         # * or it's failing (num_red > 0 and num_green == 0)
         #
         # We care only about the latter two here
         skipped = parsed_test_case.get("skipped", None)
-        if skipped and "num_red" not in skipped.get("message", ""):
+
+        # NB: Regular ONNX tests could return a list of subskips here where each item in the
+        # list is a skipped message.  In the context of rerunning disabled tests, we could
+        # ignore this case as returning a list of subskips only happens when tests are run
+        # normally
+        if skipped and (
+            type(skipped) is list or "num_red" not in skipped.get("message", "")
+        ):
             continue
 
         name = parsed_test_case.get("name", "")
@@ -218,7 +222,7 @@ def save_results(
             f"  {disabled_test_name} from {filename}, failing {num_red}/{num_red + num_green}"
         )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         workflow_id,
         workflow_run_attempt,
         "rerun_disabled_tests",
@@ -237,6 +241,12 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
         args.repo, args.workflow_run_id, args.workflow_run_attempt
     ):
         tests = process_report(report)
+
+        # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
+        # We are only interested in the former here
+        if not is_rerun_disabled_tests(tests):
+            continue
+
         for name, stats in tests.items():
             if name not in all_tests:
                 all_tests[name] = stats.copy()

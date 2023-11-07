@@ -28,7 +28,10 @@ PRUNE_FUNCTIONS = {
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "cudaStreamIsCapturing": PRUNE_ALL,
-    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
+
+    # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
+    "cudaGetDeviceCount": PRUNE_ALL,
+    "cudaGetDeviceProperties_v2": PRUNE_ALL,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We
@@ -128,7 +131,15 @@ class ProfilerTree:
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
 
         # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
+        # and may also insert 'Context Sync' CUDA synchronization event.
+        if flat_nodes and flat_nodes[-2][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-2]
+
         if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-1]
+
+        # Profiler inserts a `hipDeviceSynchronize` at the end of profiling.
+        if flat_nodes and flat_nodes[-1][1] == "hipDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
         min_depth = min([d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0])
@@ -538,87 +549,95 @@ class TestProfilerTree(TestCase):
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
-                <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): forward
-                  nn.Module: ReLU_0
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/activation.py(...): forward
-                      torch/nn/functional.py(...): relu
-                        <built-in function _has_torch_function_unary>
-                        <built-in method relu of type object at 0xXXXXXXXXXXXX>
-                          aten::relu
-                            aten::clamp_min
-                  nn.Module: Linear_0
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/linear.py(...): forward
-                      torch/nn/modules/module.py(...): __getattr__
-                      torch/nn/modules/module.py(...): __getattr__
-                      <built-in function linear>
-                        aten::linear
-                          aten::t
-                            aten::transpose
-                              aten::as_strided
-                          aten::matmul
-                            aten::unsqueeze
-                              aten::as_strided
-                            aten::mm
-                              aten::resolve_conj
-                              aten::resolve_conj
-                              aten::resolve_conj
-                            aten::squeeze_
-                              aten::as_strided_
-                          aten::add_
-                  nn.Module: ReLU_1
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/activation.py(...): forward
-                      torch/nn/functional.py(...): relu
-                        <built-in function _has_torch_function_unary>
-                        <built-in method relu of type object at 0xXXXXXXXXXXXX>
-                          aten::relu
-                            aten::clamp_min
+                torch/nn/modules/module.py(...): _call_impl
+                  <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                  test_profiler_tree.py(...): forward
+                    nn.Module: ReLU_0
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/activation.py(...): forward
+                          torch/nn/functional.py(...): relu
+                            <built-in function _has_torch_function_unary>
+                            <built-in method relu of type object at 0xXXXXXXXXXXXX>
+                              aten::relu
+                                aten::clamp_min
+                    nn.Module: Linear_0
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/linear.py(...): forward
+                          torch/nn/modules/module.py(...): __getattr__
+                          torch/nn/modules/module.py(...): __getattr__
+                          <built-in function linear>
+                            aten::linear
+                              aten::reshape
+                                aten::view
+                              aten::t
+                                aten::transpose
+                                  aten::as_strided
+                              aten::addmm
+                                aten::expand
+                                  aten::as_strided
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
+                    nn.Module: ReLU_1
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/activation.py(...): forward
+                          torch/nn/functional.py(...): relu
+                            <built-in function _has_torch_function_unary>
+                            <built-in method relu of type object at 0xXXXXXXXXXXXX>
+                              aten::relu
+                                aten::clamp_min
               <built-in method ones of type object at 0xXXXXXXXXXXXX>
                 aten::ones
                   aten::empty
                   aten::fill_
               nn.Module: MyModule_0
-                <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): forward
-                  nn.Module: ReLU_0
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/activation.py(...): forward
-                      torch/nn/functional.py(...): relu
-                        <built-in function _has_torch_function_unary>
-                        <built-in method relu of type object at 0xXXXXXXXXXXXX>
-                          aten::relu
-                            aten::clamp_min
-                  nn.Module: Linear_0
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/linear.py(...): forward
-                      torch/nn/modules/module.py(...): __getattr__
-                      torch/nn/modules/module.py(...): __getattr__
-                      <built-in function linear>
-                        aten::linear
-                          aten::t
-                            aten::transpose
-                              aten::as_strided
-                          aten::matmul
-                            aten::unsqueeze
-                              aten::as_strided
-                            aten::mm
-                              aten::resolve_conj
-                              aten::resolve_conj
-                              aten::resolve_conj
-                            aten::squeeze_
-                              aten::as_strided_
-                          aten::add_
-                  nn.Module: ReLU_1
-                    <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                    torch/nn/modules/activation.py(...): forward
-                      torch/nn/functional.py(...): relu
-                        <built-in function _has_torch_function_unary>
-                        <built-in method relu of type object at 0xXXXXXXXXXXXX>
-                          aten::relu
-                            aten::clamp_min
+                torch/nn/modules/module.py(...): _call_impl
+                  <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                  test_profiler_tree.py(...): forward
+                    nn.Module: ReLU_0
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/activation.py(...): forward
+                          torch/nn/functional.py(...): relu
+                            <built-in function _has_torch_function_unary>
+                            <built-in method relu of type object at 0xXXXXXXXXXXXX>
+                              aten::relu
+                                aten::clamp_min
+                    nn.Module: Linear_0
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/linear.py(...): forward
+                          torch/nn/modules/module.py(...): __getattr__
+                          torch/nn/modules/module.py(...): __getattr__
+                          <built-in function linear>
+                            aten::linear
+                              aten::reshape
+                                aten::view
+                              aten::t
+                                aten::transpose
+                                  aten::as_strided
+                              aten::addmm
+                                aten::expand
+                                  aten::as_strided
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
+                    nn.Module: ReLU_1
+                      torch/nn/modules/module.py(...): _call_impl
+                        <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
+                        torch/nn/modules/activation.py(...): forward
+                          torch/nn/functional.py(...): relu
+                            <built-in function _has_torch_function_unary>
+                            <built-in method relu of type object at 0xXXXXXXXXXXXX>
+                              aten::relu
+                                aten::clamp_min
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   ..."""

@@ -1,3 +1,4 @@
+import bisect
 import dataclasses
 import dis
 import sys
@@ -13,18 +14,32 @@ if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
+    TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
+JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
 HASFREE = set(dis.hasfree)
 
 stack_effect = dis.stack_effect
 
 
+def get_indexof(insts):
+    """
+    Get a mapping from instruction memory address to index in instruction list.
+    Additionally checks that each instruction only appears once in the list.
+    """
+    indexof = {}
+    for i, inst in enumerate(insts):
+        assert inst not in indexof
+        indexof[inst] = i
+    return indexof
+
+
 def remove_dead_code(instructions):
     """Dead code elimination"""
-    indexof = {id(inst): i for i, inst in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     live_code = set()
 
     def find_live_code(start):
@@ -33,12 +48,37 @@ def remove_dead_code(instructions):
                 return
             live_code.add(i)
             inst = instructions[i]
+            if inst.exn_tab_entry:
+                find_live_code(indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
-                find_live_code(indexof[id(inst.target)])
+                find_live_code(indexof[inst.target])
             if inst.opcode in TERMINAL_OPCODES:
                 return
 
     find_live_code(0)
+
+    # change exception table entries if start/end instructions are dead
+    # assumes that exception table entries have been propagated,
+    # e.g. with bytecode_transformation.propagate_inst_exn_table_entries,
+    # and that instructions with an exn_tab_entry lies within its start/end.
+    if sys.version_info >= (3, 11):
+        live_idx = sorted(live_code)
+        for i, inst in enumerate(instructions):
+            if i in live_code and inst.exn_tab_entry:
+                # find leftmost live instruction >= start
+                start_idx = bisect.bisect_left(
+                    live_idx, indexof[inst.exn_tab_entry.start]
+                )
+                assert start_idx < len(live_idx)
+                # find rightmost live instruction <= end
+                end_idx = (
+                    bisect.bisect_right(live_idx, indexof[inst.exn_tab_entry.end]) - 1
+                )
+                assert end_idx >= 0
+                assert live_idx[start_idx] <= i <= live_idx[end_idx]
+                inst.exn_tab_entry.start = instructions[live_idx[start_idx]]
+                inst.exn_tab_entry.end = instructions[live_idx[end_idx]]
+
     return [inst for i, inst in enumerate(instructions) if i in live_code]
 
 
@@ -93,7 +133,7 @@ class ReadsWrites:
 
 
 def livevars_analysis(instructions, instruction):
-    indexof = {id(inst): i for i, inst in enumerate(instructions)}
+    indexof = get_indexof(instructions)
     must = ReadsWrites(set(), set(), set())
     may = ReadsWrites(set(), set(), set())
 
@@ -110,15 +150,19 @@ def livevars_analysis(instructions, instruction):
                         state.reads.add(inst.argval)
                 elif "STORE" in inst.opname:
                     state.writes.add(inst.argval)
+                elif inst.opname == "MAKE_CELL":
+                    pass
                 else:
                     raise NotImplementedError(f"unhandled {inst.opname}")
+            if inst.exn_tab_entry:
+                walk(may, indexof[inst.exn_tab_entry.target])
             if inst.opcode in JUMP_OPCODES:
-                walk(may, indexof[id(inst.target)])
+                walk(may, indexof[inst.target])
                 state = may
             if inst.opcode in TERMINAL_OPCODES:
                 return
 
-    walk(must, indexof[id(instruction)])
+    walk(must, indexof[instruction])
     return must.reads | may.reads
 
 
@@ -145,6 +189,13 @@ class StackSize:
         if (self.low, self.high) != prior:
             self.fixed_point.value = False
 
+    def exn_tab_jump(self, depth):
+        prior = (self.low, self.high)
+        self.low = min(self.low, depth)
+        self.high = max(self.high, depth)
+        if (self.low, self.high) != prior:
+            self.fixed_point.value = False
+
 
 def stacksize_analysis(instructions):
     assert instructions
@@ -162,15 +213,29 @@ def stacksize_analysis(instructions):
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
+            # CALL_FINALLY in Python 3.8 is handled differently when determining stack depth.
+            # See https://github.com/python/cpython/blob/3.8/Python/compile.c#L5450.
+            # Essentially, the stack effect of CALL_FINALLY is computed with jump=True,
+            # but the resulting stack depth is propagated to the next instruction, not the
+            # jump target.
+            is_call_finally = (
+                sys.version_info < (3, 9) and inst.opcode == dis.opmap["CALL_FINALLY"]
+            )
             if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
-                    stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
+                    stack_size,
+                    stack_effect(inst.opcode, inst.arg, jump=is_call_finally),
                 )
-            if inst.opcode in JUMP_OPCODES:
+            if inst.opcode in JUMP_OPCODES and not is_call_finally:
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
+            if inst.exn_tab_entry:
+                # see https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+                # on why depth is computed this way.
+                depth = inst.exn_tab_entry.depth + int(inst.exn_tab_entry.lasti) + 1
+                stack_sizes[inst.exn_tab_entry.target].exn_tab_jump(depth)
 
     if False:
         for inst in instructions:

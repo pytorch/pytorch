@@ -65,7 +65,7 @@ class LinearPackedParams(torch.nn.Module):
     #                         of LinearPackedParams
     #   |--- dtype : torch.dtype
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'dtype'] = self.dtype
         destination[prefix + '_packed_params'] = self._weight_bias()
 
@@ -88,8 +88,8 @@ class LinearPackedParams(torch.nn.Module):
             state_dict.pop(prefix + '_packed_params')
             self.set_weight_bias(weight, bias)
 
-        super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                              missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
     def __repr__(self):
@@ -262,7 +262,7 @@ class Linear(WeightedQuantizedModule):
             if not isinstance(cls._FLOAT_MODULE, Iterable):
                 cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
             supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
-            error_msg = 'nnq.{}.from_float only works for {}, but got: {}'.format(cls.__name__, supported_modules, type(mod))
+            error_msg = f'nnq.{cls.__name__}.from_float only works for {supported_modules}, but got: {type(mod)}'
             assert type_before_parametrizations(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process

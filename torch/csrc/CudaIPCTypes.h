@@ -3,8 +3,6 @@
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Logging.h>
 #include <cuda_runtime_api.h>
 #include <torch/csrc/Export.h>
@@ -22,8 +20,8 @@ struct CudaIPCReceivedData final {
 
 struct CudaIPCSentData final {
   std::string handle_;
-  int64_t offset_;
-  int64_t* counter_ptr_; // Reference counter shared memory block
+  uint64_t offset_;
+  uint64_t* counter_ptr_; // Reference counter shared memory block
   at::DataPtr original_ptr_; // Original mem allocation
   cudaEvent_t event_; // Sync cuEventDestroy
   bool event_sync_required_;
@@ -31,16 +29,16 @@ struct CudaIPCSentData final {
 
   CudaIPCSentData(
       std::string handle,
-      int64_t offset,
-      int64_t* counter_ptr,
+      uint64_t offset,
+      uint64_t* counter_ptr,
       at::Device device);
   ~CudaIPCSentData();
 
-  int64_t counter_value();
+  uint64_t counter_value();
   std::string handle() {
     return handle_;
   }
-  int64_t offset() {
+  uint64_t offset() {
     return offset_;
   }
   void set_original_ptr(at::DataPtr data_ptr) {
@@ -54,13 +52,13 @@ TORCH_CUDA_CU_API at::DataPtr GetNewRefCountedSentData(
 
 namespace {
 
-constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
-constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
+inline constexpr int64_t CUDA_IPC_REF_COUNTER_FILE_SIZE = 10000;
+inline constexpr int64_t CUDA_IPC_WARN_AFTER_X_BLOCKS_IN_LIMBO = 1000;
 // This was determined empirically that CUDA (v10.1 and below) have the limit
 // on the number of recorded blocking interprocess events. It is around ~22,000.
 // And to give us leeway, we picked 1000 as it gives us enough events to share
 // tensors effectively.
-constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
+inline constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 
 // All to be deleted data blocks with non zero reference counter goes there
 struct CudaIPCSentDataLimbo final {
@@ -87,8 +85,8 @@ struct CudaIPCRefCountersFile final {
         handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
-  int64_t* counter_ptr() {
-    return static_cast<int64_t*>(refcounted_shared_mem_.get()) + next_offset_;
+  uint64_t* counter_ptr() {
+    return static_cast<uint64_t*>(refcounted_shared_mem_.get()) + next_offset_;
   }
 
   void set_counter(uint64_t value) {
@@ -103,7 +101,7 @@ struct CudaIPCRefCountersFile final {
     return used_slots_;
   }
 
-  int64_t get_offset() {
+  uint64_t get_offset() {
     return next_offset_;
   }
 

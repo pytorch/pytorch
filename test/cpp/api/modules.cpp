@@ -67,6 +67,12 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
       "padding='same' is not supported for strided convolutions");
 }
 
+TEST_F(ModulesTest, Conv1dIvalidArg) {
+  auto options = Conv1dOptions(3, 2, 3).groups(-1);
+  ASSERT_THROWS_WITH(
+      Conv1d(options), "in_channels, groups and out_channels must");
+}
+
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(
@@ -4061,6 +4067,27 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
+TEST_F(ModulesTest, ZeroPad1d) {
+  {
+    ZeroPad1d m(ZeroPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{0., 0., 0., 1., 2., 3., 0., 0.}, {0., 0., 4., 5., 6., 7., 0., 0.}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad1d m(ZeroPad1dOptions({3, 1}));
+    auto input = torch::arange(6, torch::kFloat).reshape({1, 2, 3});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{0., 0., 0., 0., 1., 2., 0.}, {0., 0., 0., 3., 4., 5., 0.}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, ZeroPad2d) {
   {
     ZeroPad2d m(ZeroPad2dOptions(2));
@@ -4087,6 +4114,66 @@ TEST_F(ModulesTest, ZeroPad2d) {
            {0., 0., 1., 2., 0.},
            {0., 3., 4., 5., 0.},
            {0., 6., 7., 8., 0.}}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ZeroPad3d) {
+  {
+    ZeroPad3d m(ZeroPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{{{0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 0., 1., 0.},
+            {0., 2., 3., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 4., 5., 0.},
+            {0., 6., 7., 0.},
+            {0., 0., 0., 0.}},
+           {{0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.},
+            {0., 0., 0., 0.}}}}},
+        torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad3d m(ZeroPad3dOptions({1, 2, 1, 2, 1, 2}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor(
+        {{{{{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 1., 0., 0.},
+            {0., 2., 3., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 4., 5., 0., 0.},
+            {0., 6., 7., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}},
+           {{0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.},
+            {0., 0., 0., 0., 0.}}}}},
         torch::kFloat);
     ASSERT_TRUE(output.allclose(expected));
   }
@@ -4274,6 +4361,7 @@ TEST_F(ModulesTest, CrossMapLRN2d) {
 TEST_F(ModulesTest, RNNCell) {
   torch::manual_seed(0);
   auto rnn = RNNCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto output = rnn(input, hx);
@@ -4285,15 +4373,51 @@ TEST_F(ModulesTest, RNNCell) {
   expected =
       torch::tensor({{-0.0775, 0.6688}, {-0.0734, 0.4759}, {-0.0725, 0.4225}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  output = rnn(input, hx);
+  expected = torch::tensor({0.2808, 0.6505});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        rnn(input, hx), "Expected hidden to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, LSTMCell) {
   torch::manual_seed(0);
-  auto rnn = LSTMCell(1, 2);
+  auto lstm = LSTMCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
   auto cx = torch::randn({3, 2});
-  auto output = rnn(input, std::make_tuple(hx, cx));
+  auto output = lstm(input, std::make_tuple(hx, cx));
   auto output_hx = std::get<0>(output);
   auto output_cx = std::get<1>(output);
   auto expected_hx =
@@ -4303,7 +4427,7 @@ TEST_F(ModulesTest, LSTMCell) {
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
 
-  output = rnn(input);
+  output = lstm(input);
   output_hx = std::get<0>(output);
   output_cx = std::get<1>(output);
   expected_hx =
@@ -4312,22 +4436,123 @@ TEST_F(ModulesTest, LSTMCell) {
       torch::tensor({{-0.2679, 0.2180}, {-0.3049, 0.3493}, {-0.2896, 0.2853}});
   ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
   ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  cx = torch::randn({2});
+  output = lstm(input, std::make_tuple(hx, cx));
+  output_hx = std::get<0>(output);
+  output_cx = std::get<1>(output);
+  expected_hx = torch::tensor({-0.0443, 0.1537});
+  expected_cx = torch::tensor({-0.1195, 0.2144});
+  ASSERT_TRUE(torch::allclose(output_hx, expected_hx, 1e-05, 2e-04));
+  ASSERT_TRUE(torch::allclose(output_cx, expected_cx, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "hidden1 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 1});
+    auto cx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    auto cx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected hx[0] to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 2});
+    auto cx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        lstm(input, std::make_tuple(hx, cx)),
+        "Expected hx[1] to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, GRUCell) {
   torch::manual_seed(0);
-  auto rnn = GRUCell(1, 2);
+  auto gru = GRUCell(1, 2);
+
   auto input = torch::randn({3, 1});
   auto hx = torch::randn({3, 2});
-  auto output = rnn(input, hx);
+  auto output = gru(input, hx);
   auto expected =
       torch::tensor({{1.0243, 0.3227}, {-0.5659, 0.0330}, {-0.4030, -0.2800}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
 
-  output = rnn(input);
+  output = gru(input);
   expected =
       torch::tensor({{-0.0085, 0.1095}, {-0.1291, 0.2675}, {-0.1339, 0.2725}});
   ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  input = torch::randn({1});
+  hx = torch::randn({2});
+  output = gru(input, hx);
+  expected = torch::tensor({-1.0058, -0.3025});
+  ASSERT_TRUE(torch::allclose(output, expected, 1e-05, 2e-04));
+
+  {
+    auto input = torch::randn({3, 2});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "input has inconsistent input_size: got 2 expected 1");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1});
+    ASSERT_THROWS_WITH(
+        gru(input, hx),
+        "hidden0 has inconsistent hidden_size: got 1, expected 2");
+  }
+
+  {
+    auto input = torch::randn({3, 1, 1, 1, 1});
+    auto hx = torch::randn({3, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "Expected input to be 1D or 2D, got 5D instead");
+  }
+
+  {
+    auto input = torch::randn({3, 1});
+    auto hx = torch::randn({3, 1, 1, 1, 2});
+    ASSERT_THROWS_WITH(
+        gru(input, hx), "Expected hidden to be 1D or 2D, got 5D instead");
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
@@ -4935,13 +5160,25 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
-TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
+TEST_F(ModulesTest, PrettyPrintZeroPad) {
+  ASSERT_EQ(
+      c10::str(ZeroPad1d(ZeroPad1dOptions(2))),
+      "torch::nn::ZeroPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ZeroPad1d(ZeroPad1dOptions({3, 1}))),
+      "torch::nn::ZeroPad1d(padding=[3, 1])");
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
       "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions(1))),
+      "torch::nn::ZeroPad3d(padding=[1, 1, 1, 1, 1, 1])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions({1, 2, 1, 2, 1, 2}))),
+      "torch::nn::ZeroPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintConstantPad) {

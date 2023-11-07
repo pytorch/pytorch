@@ -55,11 +55,11 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   } else {
     TORCH_CHECK(sorted_indices.defined(),
       "return_inverse is set to true, but sorted_indices is undefined. Send a bug report!");
-    const int64_t *sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
+    const int64_t *sorted_indices_ptr = sorted_indices.const_data_ptr<int64_t>();
     Tensor inv_loc = at::empty({num_inp}, options);
     inverse_indices = at::empty({num_inp}, options);
-    int64_t* inv_loc_ptr = inv_loc.data_ptr<int64_t>();
-    int64_t* inverse_indices_ptr = inverse_indices.data_ptr<int64_t>();
+    int64_t* inv_loc_ptr = inv_loc.mutable_data_ptr<int64_t>();
+    int64_t* inverse_indices_ptr = inverse_indices.mutable_data_ptr<int64_t>();
     thrust::adjacent_difference(policy, data, data + num_inp, inv_loc_ptr, not_equal);
     inv_loc[0] = 0;
     thrust::inclusive_scan(policy, inv_loc_ptr, inv_loc_ptr + num_inp, inv_loc_ptr);
@@ -73,11 +73,11 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
     num_out = thrust::unique(policy, data, data + num_inp, equal) - data;
   } else {
     Tensor range = at::arange(0, num_inp + 1, options);
-    int64_t *range_ptr = range.data_ptr<int64_t>();
+    int64_t *range_ptr = range.mutable_data_ptr<int64_t>();
     num_out = thrust::unique_by_key(policy, data, data + num_inp, range_ptr, equal).first - data;
     range[num_out] = num_inp;
     counts.resize_(num_out);
-    int64_t* counts_ptr = counts.data_ptr<int64_t>();
+    int64_t* counts_ptr = counts.mutable_data_ptr<int64_t>();
     thrust::adjacent_difference(policy, range_ptr + 1, range_ptr + num_out + 1, counts_ptr);
   }
 
@@ -129,12 +129,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
 
   int64_t num_inp = self.size(dim);
   auto options = self.options().dtype(kLong);
-  Tensor input_flat = self.transpose(dim, 0).contiguous().view({num_inp, -1});
+  Tensor input_flat = self.moveaxis(dim, 0).contiguous().view({num_inp, -1});
   int64_t n = input_flat.size(1);
-  scalar_t *input_flat_ptr = input_flat.data_ptr<scalar_t>();
+  const scalar_t *input_flat_ptr = input_flat.const_data_ptr<scalar_t>();
 
   Tensor indices = at::arange(0, num_inp, options);
-  int64_t *indices_data = indices.data_ptr<int64_t>();
+  int64_t *indices_data = indices.mutable_data_ptr<int64_t>();
   if (!consecutive) {
     thrust::sort(policy, indices_data, indices_data + num_inp,
       [=] __device__ (int64_t a, int64_t b) -> bool {

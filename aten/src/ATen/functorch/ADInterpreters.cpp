@@ -28,10 +28,16 @@ static void checkForInvalidMutationOnCaptures(
       "as inputs.");
 }
 
-Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
+static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   if (!tensor.defined()) {
     return tensor;
   }
+  // TensorWrapper creation may call dispatcher ops (e.g. aten.sym_storage_offset).
+  // We need to ensure that they pass through the functorch stack properly.
+  // In order to do that, we want to call those dispatcher ops at the next layer,
+  // hence we disable DynamicLayerFrontMode so the call to the op automatically
+  // goes to DynamicLayerBackMode which will then send it to the next layer.
+  c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
@@ -69,8 +75,7 @@ static void autogradBasedTransformProcess(
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
 
-  auto exclude = keysToExcludeWhenEnteringDynamicLayer(transform_type);
-  setup_dispatch_key_tls(exclude, {});
+  setup_dispatch_key_tls(transform_type, {});
   op.callBoxed(stack);
 }
 

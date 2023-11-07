@@ -17,12 +17,13 @@ static PyObject* THPStream_pynew(
   int64_t device_index = 0;
   int64_t device_type = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -43,17 +44,32 @@ static PyObject* THPStream_pynew(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPStream_Wrap(const c10::Stream& stream) {
+  HANDLE_TH_ERRORS
+  auto type = (PyTypeObject*)THPStreamClass;
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    throw python_error();
+  }
+
+  THPStream* self = (THPStream*)ptr.get();
+  self->stream_id = stream.id();
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  self->device_index = static_cast<int64_t>(stream.device_index());
+  self->device_type = static_cast<int64_t>(stream.device_type());
+  return ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+
 static void THPStream_dealloc(THPStream* self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(c10::Stream::unpack3(
-                           self->stream_id,
-                           self->device_index,
-                           static_cast<c10::DeviceType>(self->device_type))
-                           .device());
+  return THPDevice_New(c10::Device(
+      static_cast<c10::DeviceType>(self->device_type),
+      static_cast<c10::DeviceIndex>(self->device_index)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -68,17 +84,17 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPStream_members[] = {
-    {(char*)"stream_id",
+    {"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
      READONLY,
      nullptr},
-    {(char*)"device_index",
+    {"device_index",
      T_LONGLONG,
      offsetof(THPStream, device_index),
      READONLY,
      nullptr},
-    {(char*)"device_type",
+    {"device_type",
      T_LONGLONG,
      offsetof(THPStream, device_type),
      READONLY,
@@ -92,7 +108,7 @@ static struct PyGetSetDef THPStream_properties[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStream_methods[] = {
-    {(char*)"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
+    {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPStreamType = {
@@ -114,6 +130,7 @@ PyTypeObject THPStreamType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */

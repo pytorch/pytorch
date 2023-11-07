@@ -49,7 +49,7 @@ class Threshold(Module):
     inplace: bool
 
     def __init__(self, threshold: float, value: float, inplace: bool = False) -> None:
-        super(Threshold, self).__init__()
+        super().__init__()
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
@@ -60,9 +60,7 @@ class Threshold(Module):
 
     def extra_repr(self):
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'threshold={}, value={}{}'.format(
-            self.threshold, self.value, inplace_str
-        )
+        return f'threshold={self.threshold}, value={self.value}{inplace_str}'
 
 
 class ReLU(Module):
@@ -96,7 +94,7 @@ class ReLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(ReLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -108,7 +106,7 @@ class ReLU(Module):
 
 
 class RReLU(Module):
-    r"""Applies the randomized leaky rectified liner unit function, element-wise,
+    r"""Applies the randomized leaky rectified linear unit function, element-wise,
     as described in the paper:
 
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
@@ -123,7 +121,8 @@ class RReLU(Module):
         \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
-    :math:`\mathcal{U}(\text{lower}, \text{upper})`.
+    :math:`\mathcal{U}(\text{lower}, \text{upper})` during training while during
+    evaluation :math:`a` is fixed with :math:`a = \frac{\text{lower} + \text{upper}}{2}`.
 
      See: https://arxiv.org/pdf/1505.00853.pdf
 
@@ -159,7 +158,7 @@ class RReLU(Module):
         upper: float = 1. / 3,
         inplace: bool = False
     ):
-        super(RReLU, self).__init__()
+        super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
@@ -169,7 +168,7 @@ class RReLU(Module):
 
     def extra_repr(self):
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'lower={}, upper={}{}'.format(self.lower, self.upper, inplace_str)
+        return f'lower={self.lower}, upper={self.upper}{inplace_str}'
 
 
 class Hardtanh(Module):
@@ -218,7 +217,7 @@ class Hardtanh(Module):
         min_value: Optional[float] = None,
         max_value: Optional[float] = None
     ) -> None:
-        super(Hardtanh, self).__init__()
+        super().__init__()
         if min_value is not None:
             warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
@@ -236,9 +235,7 @@ class Hardtanh(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'min_val={}, max_val={}{}'.format(
-            self.min_val, self.max_val, inplace_str
-        )
+        return f'min_val={self.min_val}, max_val={self.max_val}{inplace_str}'
 
 
 class ReLU6(Hardtanh):
@@ -264,7 +261,7 @@ class ReLU6(Hardtanh):
     """
 
     def __init__(self, inplace: bool = False):
-        super(ReLU6, self).__init__(0., 6., inplace)
+        super().__init__(0., 6., inplace)
 
     def extra_repr(self) -> str:
         inplace_str = 'inplace=True' if self.inplace else ''
@@ -327,7 +324,7 @@ class Hardsigmoid(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardsigmoid, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -389,7 +386,7 @@ class SiLU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(SiLU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -425,7 +422,7 @@ class Mish(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False):
-        super(Mish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -468,7 +465,7 @@ class Hardswish(Module):
     inplace: bool
 
     def __init__(self, inplace : bool = False) -> None:
-        super(Hardswish, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -509,7 +506,7 @@ class ELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(ELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -518,7 +515,7 @@ class ELU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'alpha={}{}'.format(self.alpha, inplace_str)
+        return f'alpha={self.alpha}{inplace_str}'
 
 
 class CELU(Module):
@@ -553,7 +550,7 @@ class CELU(Module):
     inplace: bool
 
     def __init__(self, alpha: float = 1., inplace: bool = False) -> None:
-        super(CELU, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.inplace = inplace
 
@@ -562,7 +559,7 @@ class CELU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'alpha={}{}'.format(self.alpha, inplace_str)
+        return f'alpha={self.alpha}{inplace_str}'
 
 
 class SELU(Module):
@@ -603,7 +600,7 @@ class SELU(Module):
     inplace: bool
 
     def __init__(self, inplace: bool = False) -> None:
-        super(SELU, self).__init__()
+        super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
@@ -637,14 +634,14 @@ class GLU(Module):
     dim: int
 
     def __init__(self, dim: int = -1) -> None:
-        super(GLU, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def forward(self, input: Tensor) -> Tensor:
         return F.glu(input, self.dim)
 
     def extra_repr(self) -> str:
-        return 'dim={}'.format(self.dim)
+        return f'dim={self.dim}'
 
 
 class GELU(Module):
@@ -656,7 +653,7 @@ class GELU(Module):
 
     When the approximate argument is 'tanh', Gelu is estimated with:
 
-    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
@@ -678,14 +675,14 @@ class GELU(Module):
     approximate: str
 
     def __init__(self, approximate: str = 'none') -> None:
-        super(GELU, self).__init__()
+        super().__init__()
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(repr(self.approximate))
+        return f'approximate={repr(self.approximate)}'
 
 
 class Hardshrink(Module):
@@ -720,14 +717,14 @@ class Hardshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Hardshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
         return F.hardshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
-        return '{}'.format(self.lambd)
+        return f'{self.lambd}'
 
 
 class LeakyReLU(Module):
@@ -747,7 +744,8 @@ class LeakyReLU(Module):
         \end{cases}
 
     Args:
-        negative_slope: Controls the angle of the negative slope. Default: 1e-2
+        negative_slope: Controls the angle of the negative slope (which is used for
+          negative input values). Default: 1e-2
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
@@ -768,7 +766,7 @@ class LeakyReLU(Module):
     negative_slope: float
 
     def __init__(self, negative_slope: float = 1e-2, inplace: bool = False) -> None:
-        super(LeakyReLU, self).__init__()
+        super().__init__()
         self.negative_slope = negative_slope
         self.inplace = inplace
 
@@ -777,7 +775,7 @@ class LeakyReLU(Module):
 
     def extra_repr(self) -> str:
         inplace_str = ', inplace=True' if self.inplace else ''
-        return 'negative_slope={}{}'.format(self.negative_slope, inplace_str)
+        return f'negative_slope={self.negative_slope}{inplace_str}'
 
 
 class LogSigmoid(Module):
@@ -834,7 +832,7 @@ class Softplus(Module):
     threshold: int
 
     def __init__(self, beta: int = 1, threshold: int = 20) -> None:
-        super(Softplus, self).__init__()
+        super().__init__()
         self.beta = beta
         self.threshold = threshold
 
@@ -842,7 +840,7 @@ class Softplus(Module):
         return F.softplus(input, self.beta, self.threshold)
 
     def extra_repr(self) -> str:
-        return 'beta={}, threshold={}'.format(self.beta, self.threshold)
+        return f'beta={self.beta}, threshold={self.threshold}'
 
 
 class Softshrink(Module):
@@ -875,7 +873,7 @@ class Softshrink(Module):
     lambd: float
 
     def __init__(self, lambd: float = 0.5) -> None:
-        super(Softshrink, self).__init__()
+        super().__init__()
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
@@ -883,6 +881,26 @@ class Softshrink(Module):
 
     def extra_repr(self) -> str:
         return str(self.lambd)
+
+
+def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
+    if x is not None:
+        return x.device.type in ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
+    return True
+
+
+def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+    if x is not None:
+        return x.requires_grad
+    return False
+
+
+def _is_make_fx_tracing():
+    if not torch.jit.is_scripting():
+        torch_dispatch_mode_stack = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+        return any(type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode for x in torch_dispatch_mode_stack)
+    else:
+        return False
 
 
 class MultiheadAttention(Module):
@@ -897,12 +915,14 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use the optimized implementation described in
-    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
-    conditions are met:
+    ``nn.MultiHeadAttention`` will use the optimized implementations of
+    ``scaled_dot_product_attention()`` when possible.
 
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
-      restriction will be loosened in the future.)
+    In addition to support for the new ``scaled_dot_product_attention()``
+    function, for speeding up Inference, MHA will use
+    fastpath inference with support for Nested Tensors, iff:
+
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor).
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -914,7 +934,7 @@ class MultiheadAttention(Module):
       nor ``attn_mask`` is passed
     - autocast is disabled
 
-    If the optimized implementation is in use, a
+    If the optimized inference fastpath implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
     ``query``/``key``/``value`` to represent padding more efficiently than using a
     padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
@@ -945,14 +965,20 @@ class MultiheadAttention(Module):
          https://arxiv.org/abs/2205.14135
 
     """
+
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False,
                  kdim=None, vdim=None, batch_first=False, device=None, dtype=None) -> None:
+        if embed_dim <= 0 or num_heads <= 0:
+            raise ValueError(
+                f"embed_dim and num_heads must be greater than 0,"
+                f" got embed_dim={embed_dim} and num_heads={num_heads} instead"
+            )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(MultiheadAttention, self).__init__()
+        super().__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
@@ -1012,7 +1038,7 @@ class MultiheadAttention(Module):
         if '_qkv_same_embed_dim' not in state:
             state['_qkv_same_embed_dim'] = True
 
-        super(MultiheadAttention, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
             self,
@@ -1045,6 +1071,8 @@ class MultiheadAttention(Module):
             For a binary mask, a ``True`` value indicates that the corresponding ``key`` value will be ignored for
             the purpose of attention. For a float mask, it will be directly added to the corresponding ``key`` value.
         need_weights: If specified, returns ``attn_output_weights`` in addition to ``attn_outputs``.
+            Set ``need_weights=False`` to use the optimized ``scaled_dot_product_attention``
+            and achieve the best performance for MHA.
             Default: ``True``.
         attn_mask: If specified, a 2D or 3D mask preventing attention to certain positions. Must be of shape
             :math:`(L, S)` or :math:`(N\cdot\text{num\_heads}, L, S)`, where :math:`N` is the batch size,
@@ -1054,11 +1082,16 @@ class MultiheadAttention(Module):
             corresponding position is not allowed to attend. For a float mask, the mask values will be added to
             the attention weight.
             If both attn_mask and key_padding_mask are supplied, their types should match.
-        is_causal: If specified, applies a causal mask as attention mask. Mutually exclusive with providing attn_mask.
-            Default: ``False``.
         average_attn_weights: If true, indicates that the returned ``attn_weights`` should be averaged across
             heads. Otherwise, ``attn_weights`` are provided separately per head. Note that this flag only has an
             effect when ``need_weights=True``. Default: ``True`` (i.e. average weights across heads)
+        is_causal: If specified, applies a causal mask as attention mask.
+            Default: ``False``.
+            Warning:
+            ``is_causal`` provides a hint that ``attn_mask`` is the
+            causal mask. Providing incorrect hints can result in
+            incorrect execution, including forward and backward
+            compatibility.
 
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
@@ -1074,8 +1107,11 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        if attn_mask is not None and is_causal:
-            raise AssertionError("Only allow causal mask or attn_mask")
+
+        why_not_fast_path = ''
+        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
+           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
+            why_not_fast_path = "floating-point masks are not supported for fast path."
 
         is_batched = query.dim() == 3
 
@@ -1087,7 +1123,16 @@ class MultiheadAttention(Module):
             target_type=query.dtype
         )
 
-        why_not_fast_path = ''
+        attn_mask = F._canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
         elif query is not key or key is not value:
@@ -1097,11 +1142,15 @@ class MultiheadAttention(Module):
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
         elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
+        elif self.in_proj_weight is None:
+            why_not_fast_path = "in_proj_weight was None"
+        elif query.dtype != self.in_proj_weight.dtype:
             # this case will fail anyway, but at least they'll get a useful error message.
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
             why_not_fast_path = "training is enabled"
+        elif (self.num_heads % 2) != 0:
+            why_not_fast_path = "self.num_heads is not even"
         elif not self.batch_first:
             why_not_fast_path = "batch_first was not True"
         elif self.bias_k is not None:
@@ -1132,28 +1181,32 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
-                why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x is not None and x.requires_grad for x in tensor_args]):
+            elif _is_make_fx_tracing():
+                why_not_fast_path = "we are running make_fx tracing"
+            elif not all(_check_arg_device(x) for x in tensor_args):
+                why_not_fast_path = ("some Tensor argument's device is neither one of "
+                                     f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}")
+            elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
                 merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
 
-                return torch._native_multi_head_attention(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    merged_mask,
-                    need_weights,
-                    average_attn_weights,
-                    mask_type)
+                if self.in_proj_bias is not None and self.in_proj_weight is not None:
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        merged_mask,
+                        need_weights,
+                        average_attn_weights,
+                        mask_type)
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
@@ -1165,10 +1218,10 @@ class MultiheadAttention(Module):
                 if query is key:
                     query = key = value = query.transpose(1, 0)
                 else:
-                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    query, key = (x.transpose(1, 0) for x in (query, key))
                     value = key
             else:
-                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+                query, key, value = (x.transpose(1, 0) for x in (query, key, value))
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
@@ -1219,29 +1272,27 @@ class MultiheadAttention(Module):
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
 
-        attn_mask = F._canonical_mask(
-            mask=attn_mask,
-            mask_name="attn_mask",
-            other_type=F._none_or_dtype(key_padding_mask),
-            other_name="key_padding_mask",
-            target_type=query.dtype,
-            check_other=False,
-        )
-
-        if attn_mask is not None:
-            mask_type = 0
-            merged_mask = attn_mask
         if key_padding_mask is not None:
             mask_type = 1
             merged_mask = key_padding_mask
-        if (attn_mask is not None) and (key_padding_mask is not None):
+
+        if attn_mask is not None:
             # In this branch query can't be a nested tensor, so it has a shape
             batch_size, seq_len, _ = query.shape
             mask_type = 2
-            key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len) \
-                                                        .expand(-1, self.num_heads, -1, -1)
-            attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
-            merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+            # Always expands attn_mask to 4D
+            if attn_mask.dim() == 3:
+                attn_mask_expanded = attn_mask.view(batch_size, -1, seq_len, seq_len)
+            else:  # attn_mask.dim() == 2:
+                attn_mask_expanded = attn_mask.view(1, 1, seq_len, seq_len).expand(batch_size, self.num_heads, -1, -1)
+            merged_mask = attn_mask_expanded
+
+            if key_padding_mask is not None:
+                key_padding_mask_expanded = key_padding_mask.view(batch_size, 1, 1, seq_len).expand(-1, self.num_heads, -1, -1)
+                merged_mask = attn_mask_expanded + key_padding_mask_expanded
+
+        # no attn_mask and no key_padding_mask, returns None, None
         return merged_mask, mask_type
 
 
@@ -1301,14 +1352,19 @@ class PReLU(Module):
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         self.num_parameters = num_parameters
-        super(PReLU, self).__init__()
-        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs).fill_(init))
+        super().__init__()
+        self.init = init
+        self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.prelu(input, self.weight)
 
     def extra_repr(self) -> str:
-        return 'num_parameters={}'.format(self.num_parameters)
+        return f'num_parameters={self.num_parameters}'
 
 
 class Softsign(Module):
@@ -1390,7 +1446,7 @@ class Softmin(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmin, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1402,7 +1458,7 @@ class Softmin(Module):
         return F.softmin(input, self.dim, _stacklevel=5)
 
     def extra_repr(self):
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'
 
 class Softmax(Module):
     r"""Applies the Softmax function to an n-dimensional input Tensor
@@ -1446,7 +1502,7 @@ class Softmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(Softmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1458,7 +1514,7 @@ class Softmax(Module):
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self) -> str:
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'
 
 
 class Softmax2d(Module):
@@ -1484,7 +1540,10 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
-        assert input.dim() == 4 or input.dim() == 3, 'Softmax2d requires a 3D or 4D tensor as input'
+        if input.dim() not in (3, 4):
+            raise ValueError(
+                f"Softmax2d: expected input to be 3D or 4D, got {input.dim()}D instead"
+            )
         return F.softmax(input, -3, _stacklevel=5)
 
 
@@ -1517,7 +1576,7 @@ class LogSoftmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
-        super(LogSoftmax, self).__init__()
+        super().__init__()
         self.dim = dim
 
     def __setstate__(self, state):
@@ -1529,4 +1588,4 @@ class LogSoftmax(Module):
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self):
-        return 'dim={dim}'.format(dim=self.dim)
+        return f'dim={self.dim}'

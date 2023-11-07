@@ -1,61 +1,95 @@
 #version 450 core
 #define PRECISION $precision
-#define FORMAT    $format
+#define FORMAT $format
 
+// To convince the SPIR-V compiler to unroll the loops optimally, need this
+// macro
+#define FOUR 4
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uM1;
-layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uM2;
-layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uT;
-layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
-  ivec4 size;
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D uOutput;
+layout(set = 0, binding = 1) uniform PRECISION sampler3D uM1;
+layout(set = 0, binding = 2) uniform PRECISION sampler3D uM2;
+layout(set = 0, binding = 3) uniform PRECISION sampler3D uT;
+layout(set = 0, binding = 4) uniform PRECISION restrict Block {
+  ivec4 shader_extents;
+  ivec4 bias_size;
   vec2 multiplier;
-} uBlock;
+}
+uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
-  const ivec3 posx = ivec3(pos.x*2, pos.y*2, pos.z);
+  if (all(lessThan(pos, uBlock.shader_extents.xyz))) {
+    const float alpha = uBlock.multiplier.x;
+    const float beta = uBlock.multiplier.y;
 
-  if (all(lessThan(posx, uBlock.size.xyz))) {
-    vec4 sum = vec4(0);
-
-    for (int k = 0; k < uBlock.size.w; ++k) {
-      const ivec3 inposx = ivec3(2*k, 2*pos.y, pos.z);
-      const vec4 intexx = texelFetch(uM1, inposx, 0);
-      const ivec3 inposy = ivec3(inposx.x + 1, inposx.y, pos.z);
-      const vec4 intexy = texelFetch(uM1, inposy, 0);
-      const ivec3 inposz = ivec3(inposx.x, inposx.y + 1, pos.z);
-      const vec4 intexz = texelFetch(uM1, inposz, 0);
-      const ivec3 inposw = ivec3(inposx.x + 1, inposx.y + 1, pos.z);
-      const vec4 intexw = texelFetch(uM1, inposw, 0);
-
-      vec4 texel1 = vec4(intexx.x, intexy.x, intexz.x, intexw.x);
-      vec4 texel2 = texelFetch(uM2, ivec3(pos.x, k, pos.z), 0);
-      sum = fma(texel1.xxzz, texel2.xyxy, sum);
-      sum = fma(texel1.yyww, texel2.zwzw, sum);
+    // we avoid mat4 and vec4 usage here as they compile to much less efficient
+    // SPIR-V
+    float results[FOUR][FOUR];
+    for (int i = 0; i < FOUR; i++) {
+      for (int j = 0; j < FOUR; j++) {
+        results[i][j] = 0;
+      }
     }
 
-    const vec4 outtex = uBlock.multiplier.x * sum + uBlock.multiplier.y * texelFetch(uT, pos, 0);
+    // add products
+    for (int j = 0; j < uBlock.shader_extents.w; j++) {
+      // we may potentially read out of bounds, but (0, 0, 0, 0) will be sampled
+      // safely read and cache 4x4 tile of uM1 (4 adjacent rows)
+      vec4 uM1_partial_rows[FOUR];
+      vec4 uM2_partial_cols[FOUR];
 
-    const ivec3 posy = posx + ivec3(int((posx.x + 1) < uBlock.size.x), 0, 0);
-    const vec4 outy = vec4(outtex.y, 0, 0, 0);
-    imageStore(uOutput, posy, outy);
+      for (int k = 0; k < FOUR; k++) {
+        const int pos_y_offset = (FOUR * pos.y) + k;
+        const ivec3 pos_rd = ivec3(j, pos_y_offset, pos.z);
+        uM1_partial_rows[k] = texelFetch(uM1, pos_rd, 0);
+      }
+      // read and cache 4x4 tile of uM2 (4 adjacent columns)
+      for (int k = 0; k < FOUR; k++) {
+        const int pos_x_offset = (FOUR * pos.x) + k;
+        const ivec3 pos_rd = ivec3(pos_x_offset, j, pos.z);
+        uM2_partial_cols[k] = texelFetch(uM2, pos_rd, 0);
+      }
+      // perform partial dot products and add partial result to results
+      for (int idx_r = 0; idx_r < FOUR; idx_r++) {
+        for (int idx_c = 0; idx_c < FOUR; idx_c++) {
+          results[idx_r][idx_c] +=
+              alpha * dot(uM1_partial_rows[idx_r], uM2_partial_cols[idx_c]);
+        }
+      }
+    }
 
-    const ivec3 posz = posx + ivec3(0, int((posx.y + 1) < uBlock.size.y), 0);
-    const vec4 outz = vec4(outtex.z, 0, 0, 0);
-    imageStore(uOutput, posz, outz);
+    // read biases
+    float partial_biases[FOUR][FOUR];
+    for (int i = 0; i < FOUR; i++) {
+      for (int j = 0; j < FOUR; j++) {
+        const ivec3 pos_rd =
+            ivec3((FOUR * pos.x) + i, (FOUR * pos.y) + j, pos.z) %
+            uBlock.bias_size.xyz;
+        partial_biases[i][j] = texelFetch(uT, pos_rd, 0)[0];
+      }
+    }
 
-    const int valid = int((posx.x + 1) < uBlock.size.x && (posx.y + 1) < uBlock.size.y);
-    const ivec3 posw = posx + ivec3(valid, valid, 0);
-    const vec4 outw = vec4(outtex.w, 0, 0, 0);
-    imageStore(uOutput, posw, outw);
+    // add biases
+    for (int i = 0; i < FOUR; i++) {
+      for (int j = 0; j < FOUR; j++) {
+        results[j][i] += beta * partial_biases[i][j];
+      }
+    }
 
-    const vec4 outx = vec4(outtex.x, 0, 0, 0);
-    imageStore(uOutput, posx, outx);
+    // results are in transposed order w.r.t. the desired output
+    for (int idx_c = 0; idx_c < FOUR; idx_c++) {
+      for (int idx_r = 0; idx_r < FOUR; idx_r++) {
+        const ivec3 out_pos =
+            ivec3(idx_r + FOUR * pos.x, idx_c + FOUR * pos.y, 0);
+        imageStore(
+            uOutput, out_pos, vec4(results[idx_c][idx_r], 0.0, 0.0, 0.0));
+      }
+    }
   }
 }

@@ -146,10 +146,9 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   TORCH_CHECK(
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
-
   if (targ_dim == 1) {
     TORCH_CHECK(
-        input1.dim() == 2,
+        input1.dim() == 2 && input2.dim() == 2,
         "1D target tensor expects 2D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -157,7 +156,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
         ".");
   } else {
     TORCH_CHECK(
-        input1.dim() == 1,
+        input1.dim() == 1 && input2.dim() == 1,
         "0D target tensor expects 1D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -246,13 +245,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
   if (log_target) {
     output = at::exp(target) * (target - input);
   } else {
-    if (input.is_mps() || target.is_mps()) {
-      // MPS fallback, as MPS does not currently implement xlogy.
-      // MPS will give the wrong results at `target[i] = 0`
-      output = target * (at::log(target) - input);
-    } else {
-      output = at::xlogy(target, target) - target * input;
-    }
+    output = at::xlogy(target, target) - target * input;
   }
   return apply_loss_reduction(output, reduction);
 }
@@ -287,6 +280,10 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                 TORCH_CHECK(
                     (input_val >= 0) && (input_val <= 1),
                     "all elements of input should be between 0 and 1"
+                );
+                TORCH_CHECK(
+                    (target_val >= 0) && (target_val <= 1),
+                    "all elements of target should be between 0 and 1"
                 );
 
                 // Binary cross entropy tensor is defined by the equation:

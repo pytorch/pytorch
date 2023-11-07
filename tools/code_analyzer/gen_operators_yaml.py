@@ -73,12 +73,11 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 #
 # 4. Model Metadata (--model-name, --model-versions, --model-assets,
 #    --model-backends): Self-descriptive. These are used to tell this
-#    script which model operator lists to fetch from the Unified Model
-#    Build Metadata YAML file.
+#    script which model operator lists to fetch from the Model
+#    Build Metadata YAML files.
 #
-# 5. Unified Model YAML file (--models-yaml-path): A path to the Unified
-#    model YAML operator list file. This yaml file contains (for each
-#    model/version/asset/backend) the set of used root and traced
+# 5. Model YAML files (--models-yaml-path): These yaml files contains
+#    (for each model/version/asset/backend) the set of used root and traced
 #    operators. This is used to extract the actual set of operators
 #    needed to be included in the build.
 #
@@ -183,7 +182,6 @@ def create_debug_info_from_selected_models(
     selected_models: List[dict],
     new_style_rule: bool,
 ):
-
     model_dict = {
         "asset_info": {},  # maps asset name -> dict of asset metadata like hashes
         "is_new_style_rule": new_style_rule,
@@ -215,8 +213,11 @@ def fill_output(output: Dict[str, object], options: object):
         options.model_assets.split(",") if options.model_assets is not None else None
     )
 
-    with open(options.models_yaml_path, "rb") as models_yaml_file:
-        all_models_yaml = yaml.safe_load(models_yaml_file) or []
+    all_models_yaml = []
+    if options.models_yaml_path:
+        for yaml_path in options.models_yaml_path:
+            with open(yaml_path, "rb") as f:
+                all_models_yaml.append(yaml.safe_load(f))
 
     model_filter_func = make_filter_from_options(
         options.model_name, model_versions, model_assets, options.model_backends
@@ -347,7 +348,7 @@ def fill_output(output: Dict[str, object], options: object):
             {
                 "is_root_operator": True,
                 "is_used_for_training": False,
-                "include_all_overloads": True,
+                "include_all_overloads": not options.not_include_all_overloads_static_root_ops,
                 "debug_info": [options.model_name],
             },
         )
@@ -361,7 +362,7 @@ def fill_output(output: Dict[str, object], options: object):
             {
                 "is_root_operator": False,
                 "is_used_for_training": False,
-                "include_all_overloads": True,
+                "include_all_overloads": not options.not_include_all_overloads_closure_ops,
                 "debug_info": [options.model_name],
             },
         )
@@ -465,13 +466,13 @@ def fill_output(output: Dict[str, object], options: object):
     # to True, since it indicates that this operator list came from something
     # other than a traced operator list.
     include_all_non_op_selectives = False
-    for (op_name, op_info) in operators.items():
+    for op_name, op_info in operators.items():
         include_all_non_op_selectives = (
             include_all_non_op_selectives or op_info.include_all_overloads
         )
 
     operators_as_dict = {}
-    for (k, v) in operators.items():
+    for k, v in operators.items():
         operators_as_dict[k] = v.to_dict()
 
     output["operators"] = operators_as_dict
@@ -488,7 +489,7 @@ def fill_output(output: Dict[str, object], options: object):
         output["kernel_metadata"] = kernel_metadata
 
 
-def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+def add_arguments_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--root-ops",
         "--root_ops",
@@ -547,15 +548,16 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         "--models-yaml-path",
         "--models_yaml_path",
         type=str,
-        help="The path to where the unified Mobile Model Config YAML resides.",
-        required=True,
+        help="The paths to the mobile model config YAML files.",
+        required=False,
+        nargs="+",
     )
     parser.add_argument(
         "--include-all-operators",
         "--include_all_operators",
         action="store_true",
         default=False,
-        help="Set this flag to request inclusion of all opeators (i.e. build is not selective).",
+        help="Set this flag to request inclusion of all operators (i.e. build is not selective).",
         required=False,
     )
     parser.add_argument(
@@ -565,8 +567,32 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         help="The name of pt_operator_library rule resulting in this generation",
         required=True,
     )
-    options = parser.parse_args()
-    return options
+    parser.add_argument(
+        "--not-include-all-overloads-static-root-ops",
+        "--not_include_all_overloads_static_root_ops",
+        action="store_true",
+        default=False,
+        help="Set this flag to not include all overloaded operators for static root ops bucket in fill_output() subroutine",
+        required=False,
+    )
+    parser.add_argument(
+        "--not-include-all-overloads-closure-ops",
+        "--not_include_all_overloads_closure_ops",
+        action="store_true",
+        default=False,
+        help="Set this flag to not include all overloaded operators for closure ops bucket in fill_output() subroutine",
+        required=False,
+    )
+    return parser
+
+
+def parse_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    return parser.parse_args()
+
+
+def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    parser = add_arguments_parser(parser)
+    return parse_options(parser)
 
 
 def main(argv) -> None:

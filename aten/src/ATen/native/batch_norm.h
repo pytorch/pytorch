@@ -3,9 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 using batch_norm_fn = void (*)(Tensor&, const Tensor&, const Tensor&,
     const Tensor&, const Tensor&, const Tensor&, const Tensor&, const Tensor&, bool, double);
@@ -32,6 +30,4 @@ static scalar_t* conditional_data_ptr(const Tensor& t) {
                      : nullptr;
 }
 
-} // namespace native
-
-} // namespace at
+} // namespace at::native

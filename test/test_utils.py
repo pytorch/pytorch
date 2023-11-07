@@ -26,7 +26,7 @@ from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
 from torch.utils._device import set_device
-from torch.utils._traceback import report_compile_source_on_error
+from torch.utils._traceback import report_compile_source_on_error, format_traceback_short, CapturedTraceback
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -104,7 +104,7 @@ class TestCheckpoint(TestCase):
         class Net(nn.Module):
 
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.counter = 0
 
             def forward(self, input_var):
@@ -145,7 +145,7 @@ class TestCheckpoint(TestCase):
         # checkpointed
         chunks = 2
         modules = list(model.children())
-        out = checkpoint_sequential(modules, chunks, input_var)
+        out = checkpoint_sequential(modules, chunks, input_var, use_reentrant=True)
         with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
@@ -190,7 +190,7 @@ class TestCheckpoint(TestCase):
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
             def __init__(self):
-                super(ModuleListNet, self).__init__()
+                super().__init__()
                 module_list = [
                     nn.Linear(100, 50),
                     nn.ReLU(),
@@ -256,7 +256,7 @@ class TestCheckpoint(TestCase):
             state = torch.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -284,7 +284,7 @@ class TestCheckpoint(TestCase):
             state = torch.cuda.get_rng_state()
 
             out = phase1(inp)
-            out = checkpoint(run_fn, out)
+            out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
@@ -320,7 +320,7 @@ class TestCheckpoint(TestCase):
             return tensor1 + tensor2
 
         input_var = torch.randn(1, 100, requires_grad=True)
-        out = checkpoint(run_fn, input_var, None)
+        out = checkpoint(run_fn, input_var, None, use_reentrant=True)
         out.sum().backward()
 
     def test_checkpoint_non_tensor_inputs_outputs(self):
@@ -335,7 +335,7 @@ class TestCheckpoint(TestCase):
         t2 = torch.rand(10, requires_grad=True)
         t3 = torch.rand(10)
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -373,7 +373,7 @@ class TestCheckpoint(TestCase):
         t2 = random.random()
         t3 = random.random()
         scale = random.randint(0, 10)
-        res = checkpoint(foo, t1, t2, scale, t3)
+        res = checkpoint(foo, t1, t2, scale, t3, use_reentrant=True)
         self.assertEqual(scale, res[0])
         self.assertEqual((t1 + t2 * t3) * scale, res[1])
         self.assertEqual(None, res[2])
@@ -388,7 +388,7 @@ class TestCheckpoint(TestCase):
             return tensor1, tensor2
         input_var = torch.randn(1, 4, requires_grad=True)
         input_var2 = torch.randn(1, 4, requires_grad=False)
-        out = checkpoint(run_fn, input_var, input_var2)
+        out = checkpoint(run_fn, input_var, input_var2, use_reentrant=True)
         out[0].sum().backward()
 
         def run_fn2(tensor1, tensor2):
@@ -399,7 +399,7 @@ class TestCheckpoint(TestCase):
             RuntimeError,
             r"none of output has requires_grad=True, this checkpoint\(\) is not necessary"
         ):
-            out = checkpoint(run_fn2, input_var, input_var2)
+            out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
@@ -449,16 +449,16 @@ class TestCheckpoint(TestCase):
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
         # In a retain_grad backward, buffers get preserved
-        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+        _unused_retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
 
         # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
 
-        # In a retain_grad backward with checkpoint, buffers get preserved
-        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+        # In a retain_grad backward with checkpoint, buffers get eagerly freed
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), True)
 
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
-        self.assertEqual(retain_stats, checkpoint_retain_stats)
+        self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
@@ -545,11 +545,11 @@ class TestBottleneck(TestCase):
 
     def _run_bottleneck(self, test_file, scriptargs=''):
         curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = '{}/{}'.format(curdir, test_file)
+        filepath = f'{curdir}/{test_file}'
         if scriptargs != '':
-            scriptargs = ' {}'.format(scriptargs)
+            scriptargs = f' {scriptargs}'
         rc, out, err = self._run(
-            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
+            f'{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}')
         return rc, out, err
 
     def _check_run_args(self):
@@ -562,7 +562,7 @@ class TestBottleneck(TestCase):
         self.assertEqual(rc, 0, atol=0, rtol=0, msg=self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
-        return '{}, output was:\n{}'.format(msg, output)
+        return f'{msg}, output was:\n{output}'
 
     def _check_environment_summary(self, output):
         results = re.search('Environment Summary', output)
@@ -603,7 +603,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(HAS_CUDA, 'CPU-only test')
     def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test.py')
-        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg=f'Run failed with\n{err}')
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -614,7 +614,7 @@ class TestBottleneck(TestCase):
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck_test/test_cuda.py')
-        self.assertEqual(rc, 0, msg='Run failed with\n{}'.format(err))
+        self.assertEqual(rc, 0, msg=f'Run failed with\n{err}')
 
         self._check_run_args()
         self._check_environment_summary(out)
@@ -740,7 +740,7 @@ class TestStandaloneCPPJIT(TestCase):
                     std::cout << x << std::endl;
                 }
             """)
-            with open(src_path, "wt") as f:
+            with open(src_path, "w") as f:
                 f.write(src)
 
             exec_path = torch.utils.cpp_extension.load(
@@ -784,8 +784,35 @@ class DummyXPUModule:
     def is_available():
         return True
 
+    @staticmethod
+    def is_autocast_enabled():
+        return True
+
+    @staticmethod
+    def get_autocast_dtype():
+        return torch.float16
+
+    @staticmethod
+    def set_autocast_enabled(enable):
+        pass
+
+    @staticmethod
+    def set_autocast_dtype(dtype):
+        pass
+
+    @staticmethod
+    def get_amp_supported_dtype():
+        return [torch.float16]
+
 
 class TestExtensionUtils(TestCase):
+    def tearDown(self):
+        # Clean up from test_external_module_register
+        if hasattr(torch, "xpu"):
+            delattr(torch, "xpu")
+        if "torch.xpu" in sys.modules:
+            del sys.modules["torch.xpu"]
+
     def test_external_module_register(self):
         # Built-in module
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
@@ -806,6 +833,39 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
 
+    def test_external_module_and_backend_register(self):
+        torch.utils.rename_privateuse1_backend('foo')
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            torch.utils.rename_privateuse1_backend('dummmy')
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        self.assertEqual(custom_backend_name, 'foo')
+
+        with self.assertRaises(AttributeError):
+            torch.foo.is_available()
+
+        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
+            with torch.autocast(device_type=custom_backend_name):
+                pass
+        torch._register_device_module('foo', DummyXPUModule)
+
+        torch.foo.is_available()
+        with torch.autocast(device_type=custom_backend_name):
+            pass
+
+        self.assertEqual(torch._utils._get_device_index('foo:1'), 1)
+        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
+
+class TestRenderUtils(TestCase):
+    def test_basic(self):
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100,)), dim=0)'''
+        )
+        self.assertExpectedInline(
+            torch._utils.render_call(torch.sum, [torch.randn(100, 100)], {'dim': 0}),
+            '''torch.sum(tensor([...], size=(100, 100)), dim=0)'''
+        )
 
 class TestDeviceUtils(TestCase):
     def test_basic(self):
@@ -885,15 +945,13 @@ class TestCppExtensionUtils(TestCase):
 
 class TestTraceback(TestCase):
     def test_basic(self):
-        # We can't xfail this test as it leaves the traceback in such a bad
-        # state that xfail itself fails.
-        if sys.version_info >= (3, 11):
-            self.skipTest("Fails on 3.11")
-
         source = '''\
 def f(x):
+    def g(x):
+        raise RuntimeError()  # HEYA
+
     x = x * 3
-    raise RuntimeError()  # HEYA
+    return g(x) + 1
 '''
 
         out: Dict[str, Any] = {}
@@ -905,6 +963,27 @@ def f(x):
                 out["f"](1)
         except RuntimeError as e:
             self.assertIn("HEYA", ''.join(traceback.format_tb(e.__traceback__)))
+
+    def test_format_traceback_short(self):
+        try:
+            raise RuntimeError()
+        except RuntimeError as e:
+            self.assertRegex(format_traceback_short(e.__traceback__), r'.*test_utils.py:\d+ in test_format_traceback_short')
+
+    def test_captured_traceback(self):
+        self.assertIn('test_captured_traceback', ''.join(CapturedTraceback.extract().format()))
+
+    def test_captured_traceback_format_all(self):
+        rs = CapturedTraceback.format_all([CapturedTraceback.extract(), CapturedTraceback.extract()])
+        self.assertEqual(len(rs), 2)
+        self.assertIn('test_captured_traceback_format_all', ''.join(rs[0]))
+
+    def test_captured_traceback_format_all_cached(self):
+        tb = CapturedTraceback.extract()
+        tb.format()  # cached
+        rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
+        self.assertEqual(len(rs), 2)
+        self.assertIn('test_captured_traceback_format_all', ''.join(rs[0]))
 
 
 if __name__ == '__main__':

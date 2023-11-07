@@ -89,6 +89,8 @@ namespace at { namespace functorch {
 // Note [Writing batch rule for in-place operators]
 // TODO: This is kinda complicated. Saving this for a future date.
 
+namespace{
+
 std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
@@ -115,32 +117,13 @@ std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
 }
 
 
-std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
-    const Tensor& input,
-    optional<int64_t> input_bdim,
-    int64_t diagonal) {
-  if (!input_bdim) {
-    return std::make_tuple(at::diag(input, diagonal), nullopt);
-  }
-  auto input_ = moveBatchDimToFront(input, input_bdim);
-  auto rank = rankWithoutBatchDim(input, input_bdim);
-
-  if (rank == 1) {
-    return std::make_tuple(at::diag_embed(input_, diagonal), 0);
-  } else if (rank == 2) {
-    return std::make_tuple(at::diagonal(input_.movedim(0, -1), diagonal).clone(), rank - 2);
-  } else {
-    throw std::runtime_error("Passed in an invalid shape to at::diag");
-  }
-}
-
 std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     c10::SymIntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   SymDimVector view_size(size);
-  view_size.insert(view_size.begin(), self_.size(0));
+  view_size.insert(view_size.begin(), self_.sym_size(0));
 
   // See if the view is valid. If it's not, then we copy.
   // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
@@ -215,8 +198,8 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   // Manually calculate the output shape by eliding all dimensions of
   // size 1 keeping track of where the batch index started and where it
   // ended up moving to. We also ensure we do not drop the batch index.
-  auto shape = self.sizes();
-  DimVector squeezed_sizes;
+  auto shape = self.sym_sizes();
+  SymDimVector squeezed_sizes;
   bool before_batch_idx = true;
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
@@ -236,7 +219,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
     ++original_idx;
   }
 
-  auto result = self.view(squeezed_sizes);
+  auto result = self.view_symint(squeezed_sizes);
   return std::make_tuple(std::move(result), c10::optional<int64_t>(new_batch_idx));
 }
 
@@ -277,12 +260,6 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dim_batch_rule(
   return squeeze_dims_batch_rule(self, bdim, {dim});
 }
 
-std::tuple<std::vector<Tensor>, optional<int64_t>> chunk_batching_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t chunks, int64_t dim) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
-  return std::make_tuple(at::chunk(self_, chunks, new_dim), 0);
-}
-
 std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim, c10::SymInt index) {
   if (!bdim) {
     return std::make_tuple(self.select_symint(dim, std::move(index)), nullopt);
@@ -305,7 +282,7 @@ std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& se
   return std::make_tuple(at::reshape_symint(self_, new_shape), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {
+std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, SymIntArrayRef shifts, IntArrayRef dims) {
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
   auto self_ = moveBatchDimToFront(self, bdim);
@@ -314,12 +291,19 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     for (auto i: dims) {
       new_dims.push_back(getPhysicalDim(self, true, i));
     }
-    return std::make_tuple(at::roll(self_, shifts, new_dims), 0);
+    return std::make_tuple(at::roll_symint(self_, shifts, new_dims), 0);
   }
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
   auto old_shape = self_.sizes();
   new_dims.push_back(1);
-  auto output = at::roll(self_.flatten(1), shifts, new_dims);
+  auto logical_rank = rankWithoutBatchDim(self, bdim);
+  if (logical_rank == 0) {
+    self_ = self_.unsqueeze(0);
+  }
+
+  auto output = at::roll_symint(self_.flatten(1), shifts, new_dims);
+  // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
+  // with `old_shape` takes care of it.
   output = output.reshape(old_shape);
   return std::make_tuple(output, 0);
 }
@@ -441,7 +425,7 @@ std::tuple<Tensor, optional<int64_t>> view_batching_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   c10::SmallVector<c10::SymInt> size_(sym_size.size() + 1);
   // copy batch size
-  size_[0] = self_.size(0);
+  size_[0] = self_.sym_size(0);
   std::copy(sym_size.cbegin(), sym_size.cend(), size_.begin() + 1);
   return std::make_tuple(self_.view_symint(size_), 0);
 }
@@ -469,7 +453,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
               "must be greater or equal to the number of dimensions in the tensor (", static_cast<uint64_t>(self_dim - 1), ")");
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto self_sizes = self_.sizes();
+  auto self_sizes = self_.sym_sizes();
   auto batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);
@@ -536,13 +520,6 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef source, IntArrayRef destination) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto source_ = getPhysicalDims(self_, self_bdim.has_value(), source);
-  auto destination_ = getPhysicalDims(self_, self_bdim.has_value(), destination);
-  return std::make_tuple(self_.movedim(source_, destination_), 0);
-}
-
 std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t offset, int64_t dim1, int64_t dim2) {
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -556,12 +533,33 @@ Tensor trace_decomp(const Tensor& tensor) {
   return tensor.diagonal().sum();
 }
 
+std::tuple<Tensor,optional<int64_t>> tril_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    int64_t diagonal = 0) {
+  TORCH_CHECK(self.dim() >= 2, "tril: The input tensor must have at least 2 dimensions.");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto result = at::tril(self_, diagonal);
+  return std::make_tuple(std::move(result), 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
+    const Tensor& self,
+    optional<int64_t> self_bdim,
+    int64_t diagonal = 0) {
+  TORCH_CHECK(self.dim() >= 2, "triu: The input tensor must have at least 2 dimensions.");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto result = at::triu(self_, diagonal);
+  return std::make_tuple(std::move(result), 0);
+}
+
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
-  VMAP_SUPPORT(tril, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
-  VMAP_SUPPORT(triu, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
+  VMAP_SUPPORT(tril, tril_batch_rule);
+  VMAP_SUPPORT(triu, triu_batch_rule);
   VMAP_SUPPORT(repeat, repeat_batch_rule);
   VMAP_SUPPORT(_unsafe_view, _unsafe_view_batch_rule);
   VMAP_SUPPORT(unsqueeze, unsqueeze_batch_rule);
@@ -582,9 +580,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(expand, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand)), &ATEN_FN(expand)>));
   VMAP_SUPPORT(expand_copy, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand_copy)), &ATEN_FN(expand_copy)>));
   VMAP_SUPPORT(unfold, unfold_batch_rule);
-  VMAP_SUPPORT2(movedim, intlist, movedim_batch_rule);
   VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
+  m.impl("t", native::t);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
+  m.impl("t_", native::t_);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);

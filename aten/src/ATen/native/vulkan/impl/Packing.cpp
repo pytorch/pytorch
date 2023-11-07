@@ -31,29 +31,39 @@ api::ShaderInfo get_nchw_to_image_shader(const vTensor& v_dst) {
     }
   }
 
-  switch (v_dst.storage_type()) {
-    case api::StorageType::TEXTURE_3D:
-      return VK_KERNEL(nchw_to_image);
-    case api::StorageType::TEXTURE_2D:
-      return VK_KERNEL(nchw_to_image2d);
-    default:
-      TORCH_CHECK(false, "No kernel available!");
+  if (v_dst.dtype() == at::kFloat) {
+    switch (v_dst.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(nchw_to_image);
+      case api::StorageType::TEXTURE_2D:
+        return VK_KERNEL(nchw_to_image2d);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else if (v_dst.dtype() == at::kBool) {
+    switch (v_dst.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(nchw_to_image_bool);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype!");
   }
 }
 
 api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
-  if (v_src.is_quantized()) {
+  if (v_src.is_quantized() || v_src.dtype() == at::kBool) {
     auto plane_size =
         dim_at<Dim4D::Height>(v_src) * dim_at<Dim4D::Width>(v_src);
     switch (v_src.storage_type()) {
       case api::StorageType::TEXTURE_3D:
         switch (v_src.dtype()) {
           case c10::ScalarType::QUInt8:
-            return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
-                                       : VK_KERNEL(image_to_nchw_quantized);
           case c10::ScalarType::QInt8:
+          case at::kBool:
             return plane_size % 4 == 0 ? VK_KERNEL(image_to_nchw_quantized_mul4)
-                                       : VK_KERNEL(image_to_nchw_quantized);
+                                       : VK_KERNEL(image_to_nchw_uint);
           case c10::ScalarType::QInt32:
             return VK_KERNEL(image_to_nchw_int32);
           default:
@@ -70,19 +80,24 @@ api::ShaderInfo get_image_to_nchw_shader(const vTensor& v_src) {
     }
   }
 
-  switch (v_src.storage_type()) {
-    case api::StorageType::TEXTURE_3D:
-      return VK_KERNEL(image_to_nchw);
-    case api::StorageType::TEXTURE_2D:
-      return VK_KERNEL(image2d_to_nchw);
-    default:
-      TORCH_CHECK(false, "No kernel available!");
+  if (v_src.dtype() == at::kFloat) {
+    switch (v_src.storage_type()) {
+      case api::StorageType::TEXTURE_3D:
+        return VK_KERNEL(image_to_nchw);
+      case api::StorageType::TEXTURE_2D:
+        return VK_KERNEL(image2d_to_nchw);
+      default:
+        TORCH_CHECK(false, "No kernel available!");
+    }
+  } else {
+    TORCH_CHECK(false, "Unsupported dtype!");
   }
 }
 
 struct ToFromTextureParams final {
   api::utils::ivec3 extents;
   int32_t plane_size;
+  api::utils::ivec2 c_info;
 };
 
 void record_nchw_to_image_op(
@@ -99,11 +114,16 @@ void record_nchw_to_image_op(
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Height>(v_dst));
   int32_t width =
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Width>(v_dst));
+  int32_t channels =
+      api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Channel>(v_dst));
+
   int32_t plane_size = height * width;
+  int32_t c_depth = api::utils::div_up(channels, 4);
 
   ToFromTextureParams block{
       api::utils::make_ivec3(v_dst.extents()),
       plane_size,
+      {c_depth, channels},
   };
 
   api::UniformParamsBuffer params(context, block);
@@ -128,7 +148,7 @@ void record_nchw_to_image_op(
       params.buffer());
 }
 
-void record_image_to_nchw_op(
+bool record_image_to_nchw_op(
     api::Context* const context,
     api::ShaderInfo& compute_shader,
     vTensor& v_src,
@@ -142,21 +162,29 @@ void record_image_to_nchw_op(
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Height>(v_src));
   int32_t width =
       api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Width>(v_src));
+  int32_t channels =
+      api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Channel>(v_src));
+
   int32_t plane_size = height * width;
+  int32_t c_depth = api::utils::div_up(channels, 4);
 
   ToFromTextureParams block{
       api::utils::make_ivec3(v_src.extents()),
       plane_size,
+      {c_depth, channels},
   };
 
   if (v_src.dtype() == c10::ScalarType::QUInt8 ||
-      v_src.dtype() == c10::ScalarType::QInt8) {
+      v_src.dtype() == c10::ScalarType::QInt8 || v_src.dtype() == at::kBool) {
+    // Special case using optimized shader, image_to_nchw_quantized_mul4
     if (plane_size % 4 == 0) {
       global_size.data[0u] = plane_size / 4;
       global_size.data[1u] = 1;
       local_size.data[0u] *= local_size.data[1u];
       local_size.data[1u] = 1;
-    } else {
+    }
+    // Global and local size for regular 1D buffer.
+    else {
       uint32_t numel = v_src.numel();
       global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
       local_size = {64u, 1u, 1u};
@@ -164,7 +192,7 @@ void record_image_to_nchw_op(
   }
 
   api::UniformParamsBuffer params(context, block);
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       compute_shader,
       // pipeline barrier
@@ -220,7 +248,7 @@ void record_nchw_to_buffer_op(
       cpu_buffer_metadata.buffer());
 }
 
-void record_buffer_to_nchw_op(
+bool record_buffer_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
@@ -234,7 +262,7 @@ void record_buffer_to_nchw_op(
   api::UniformParamsBuffer cpu_buffer_metadata(
       context, v_src.get_cpu_buffer_metadata());
 
-  context->submit_compute_job(
+  return context->submit_compute_job(
       // shader descriptor
       VK_KERNEL(buffer_to_buffer),
       // pipeline barrier

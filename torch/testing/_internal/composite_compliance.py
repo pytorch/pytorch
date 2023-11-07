@@ -4,6 +4,7 @@ import itertools
 
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
@@ -158,7 +159,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
+            all_args = pytree.arg_tree_leaves(*args, **kwargs or {})
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
@@ -189,7 +190,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                 # then the first argument is being written to. Introspection please save us!
                 mutated_argument = args[0]
                 if not isinstance(mutated_argument, CompositeCompliantTensor) and \
-                        any([isinstance(a, CompositeCompliantTensor) for a in args[1:]]):
+                        any(isinstance(a, CompositeCompliantTensor) for a in args[1:]):
                     raise RuntimeError(
                         'Not composite compliant: performing in-place operation '
                         f'{func.__name__} where the Tensor being written to is '
@@ -237,9 +238,9 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # have consistent metadata. If they don't have consistent metadata,
             # that means the operator did something fishy.
             check = partial(check_metadata_consistency, CCT=CompositeCompliantTensor)
-            tree_map(check, args)
-            tree_map(check, kwargs)
-            tree_map(check, rs)
+            pytree.tree_map_(check, args)
+            pytree.tree_map_(check, kwargs)
+            pytree.tree_map_(check, rs)
             return rs
 
     return CompositeCompliantTensor, CompositeCompliantTensorMode()
@@ -249,10 +250,10 @@ def is_tensorlist(lst):
         return False
     if len(lst) == 0:
         return False
-    all_tensors = all([isinstance(elt, torch.Tensor) for elt in lst])
+    all_tensors = all(isinstance(elt, torch.Tensor) for elt in lst)
     if all_tensors:
         return True
-    exists_one_tensor = all([isinstance(elt, torch.Tensor) for elt in lst])
+    exists_one_tensor = all(isinstance(elt, torch.Tensor) for elt in lst)
     if exists_one_tensor:
         raise RuntimeError('This test assumes that PyTorch APIs cannot take '
                            'mixed lists of Tensor and other things')
@@ -420,7 +421,7 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
     if output_process_fn_grad is not None:
         results = output_process_fn_grad(results)
 
-    flat_results, _ = tree_flatten(results)
+    flat_results = pytree.tree_leaves(results)
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -465,7 +466,7 @@ def check_backward_formula(op: Callable, args, kwargs,
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
-        flat_results, _ = tree_flatten(results)
+        flat_results = pytree.tree_leaves(results)
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
 
@@ -507,7 +508,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
         if isinstance(t, torch.Tensor) and t.requires_grad:
             return torch.randn_like(t)
         elif is_tensorlist(t):
-            return list(torch.randn_like(e) if e.requires_grad else None for e in t)
+            return [torch.randn_like(e) if e.requires_grad else None for e in t]
         return None
 
     tangent_args = tuple(maybe_tangent(arg) for arg in args)

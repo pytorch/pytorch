@@ -1,5 +1,22 @@
-from typing import Tuple, Optional
-from .optimizer import _params_t, Optimizer
+from typing import Optional, Tuple, Union
+
+from torch import Tensor
+
+from .optimizer import Optimizer, ParamsT
 
 class AdamW(Optimizer):
-    def __init__(self, params: _params_t, lr: float=..., betas: Tuple[float, float]=..., eps: float=..., weight_decay: float=..., amsgrad: bool = ..., *, foreach: Optional[bool] = ..., maximize: bool = ..., capturable: bool = ..., differentiable: bool = ..., fused: bool = ...) -> None: ...
+    def __init__(
+        self,
+        params: ParamsT,
+        lr: Union[float, Tensor] = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 1e-2,
+        amsgrad: bool = False,
+        *,
+        maximize: bool = False,
+        foreach: Optional[bool] = None,
+        capturable: bool = False,
+        differentiable: bool = False,
+        fused: Optional[bool] = None,
+    ) -> None: ...

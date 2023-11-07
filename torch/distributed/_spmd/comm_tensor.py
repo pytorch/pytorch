@@ -2,23 +2,19 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, List, Optional, Tuple
 
-
 import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
-    get_innermost_proxy_mode,
     fetch_tensor_proxy,
+    get_innermost_proxy_mode,
     get_proxy_slot,
     set_proxy_slot,
     track_tensor_tree,
 )
+from torch.utils import _pytree as pytree
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import (
-    tree_flatten,
-    tree_map,
-    tree_map_only,
-)
+from torch.utils._pytree import tree_flatten, tree_map, tree_map_only
 
 
 @dataclass
@@ -65,7 +61,7 @@ class CommTensor(torch.Tensor):
 
     In eager mode, it will record whether the inplace collective communication
     has been launched using this Tensor and remember the corresponding work
-    handle. If yes, it will expliclty call wait() in the ``__torch_dispatch__``
+    handle. If yes, it will explicitly call wait() in the ``__torch_dispatch__``
     function before subsequent operations consuming the value of the Tensor.
 
     In tracing mode, ``CommTensor`` inserts two node into the graph using the
@@ -127,7 +123,7 @@ class CommTensor(torch.Tensor):
 
     @classmethod
     def _is_supported(cls, op_name):
-        return any([comm in op_name for comm in cls._supported_comms])
+        return any(comm in op_name for comm in cls._supported_comms)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -155,11 +151,11 @@ class CommTensor(torch.Tensor):
                     if tracer is not None:
                         # insert a node to the traced graph.
                         proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
-                            'call_function',
+                            "call_function",
                             _wait_comm,
                             (get_proxy_slot(e._tensor, tracer).proxy,),
                             {},
-                            name="wait_comm"
+                            name="wait_comm",
                         )
                         # HACK: update the proxy for the inplace output
                         set_proxy_slot(e._tensor, tracer, proxy_res)
@@ -198,7 +194,7 @@ class CommTensor(torch.Tensor):
                     tree_map_only(
                         torch.Tensor,
                         fetch_tensor_proxy(tracer),
-                        (unwrapped_args, unwrapped_kwargs)
+                        (unwrapped_args, unwrapped_kwargs),
                     ),
                 )
 
@@ -208,11 +204,11 @@ class CommTensor(torch.Tensor):
                 # insert a node that wraps the output tuple into
                 # _CommResult(tensor, work)
                 comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
-                    'call_function',
+                    "call_function",
                     _wrap_comm_result,
-                    (proxy_res, ),
+                    (proxy_res,),
                     {},
-                    name="comm_result"
+                    name="comm_result",
                 )
 
                 with no_dispatch():
@@ -227,7 +223,7 @@ class CommTensor(torch.Tensor):
                 # for it later to make sure the execution during tracing is
                 # correct. Also, remember comm is already launched
                 # args[0] is always the collection of output tensors
-                tree_map(partial(set_work, out[1]), args[0])
+                pytree.tree_map_(partial(set_work, out[1]), args[0])
 
                 # HACK: update the proxy on the input argument as this is an
                 # inplace collective communication.
@@ -240,7 +236,7 @@ class CommTensor(torch.Tensor):
             else:
                 # in eager mode, simply remember work handle as an attribute
                 out = func(*unwrapped_args, **unwrapped_kwargs)
-                tree_map(partial(set_work, out[1]), args[0])
+                pytree.tree_map_(partial(set_work, out[1]), args[0])
                 return out
         else:
             if work is not None:

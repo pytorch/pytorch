@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict, skipIfTorchDynamo
 )
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
+    (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipLazy, skipMeta, skipXLA)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types_and,
 )
@@ -476,7 +476,7 @@ class TestViewOps(TestCase):
         self.assertEqual(t[2, 0], v[0])
 
     # Lazy hasn't implemented unbind yet.
-    @onlyNativeDeviceTypes
+    @skipLazy
     def test_unbind_view(self, device) -> None:
         t = torch.zeros((5, 5), device=device)
         tup = torch.unbind(t)
@@ -509,7 +509,7 @@ class TestViewOps(TestCase):
 
     # TODO: Fix this test for LTC. There is an interaction with dynamic shapes here that is broken,
     # causing asserts to trigger.
-    @onlyNativeDeviceTypes
+    @skipLazy
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)
         v = t.expand(5, 5)
@@ -724,7 +724,7 @@ class TestViewOps(TestCase):
 
     @skipMeta
     # self.is_view_of reports false positives for lazy
-    @onlyNativeDeviceTypes
+    @skipLazy
     def test_contiguous_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = t.t().contiguous()
@@ -752,7 +752,7 @@ class TestViewOps(TestCase):
 
     @skipMeta
     # self.is_view_of reports false positives for lazy
-    @onlyNativeDeviceTypes
+    @skipLazy
     def test_reshape_nonview(self, device):
         t = torch.ones(5, 5, device=device)
         nv = torch.reshape(t.t(), (25,))
@@ -763,7 +763,8 @@ class TestViewOps(TestCase):
 
     # This test use as_strided to construct a tensor with overlapping memory,
     # which is not handled by the functionalization pass.
-    @onlyNativeDeviceTypes
+    @skipLazy
+    @skipXLA
     def test_flatten_view(self, device):
         def test_writes_propagate(t, v):
             idx_t = (0,) * t.ndim
@@ -1811,12 +1812,15 @@ class TestOldViewOps(TestCase):
             x.resize_([2, 4, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, 'overflow'):
             x.resize_([8, 8, 2**29, 2**29])
+        with self.assertRaisesRegex(RuntimeError, 'Stride calculation overflowed'):
+            x.resize_([0, 4, 2305843009213693952])
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     @onlyCPU
     def test_conj_neg_view_numpy_error(self, device):
         self.assertRaisesRegex(RuntimeError, "has conjugate bit set", lambda: torch.tensor([1 + 2j]).conj().numpy())

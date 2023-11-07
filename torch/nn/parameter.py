@@ -24,8 +24,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
     Args:
         data (Tensor): parameter tensor.
-        requires_grad (bool, optional): if the parameter requires gradient. See
-            :ref:`locally-disable-grad-doc` for more details. Default: `True`
+        requires_grad (bool, optional): if the parameter requires gradient. Note that
+            the torch.no_grad() context does NOT affect the default behavior of
+            Parameter creation--the Parameter will still have `requires_grad=True` in
+            :class:`~no_grad` mode. See :ref:`locally-disable-grad-doc` for more
+            details. Default: `True`
     """
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
@@ -57,7 +60,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n' + super().__repr__()
 
     def __reduce_ex__(self, proto):
         state = torch._utils._get_obj_state(self)
@@ -151,11 +154,11 @@ class UninitializedTensorMixin:
                 kwargs = {}
             return super().__torch_function__(func, types, args, kwargs)
         raise ValueError(
-            'Attempted to use an uninitialized parameter in {}. '
+            f'Attempted to use an uninitialized parameter in {func}. '
             'This error happens when you are using a `LazyModule` or '
-            'explicitly manipulating `torch.nn.parameter.{}` '
+            f'explicitly manipulating `torch.nn.parameter.{cls.__name__}` '
             'objects. When using LazyModules Call `forward` with a dummy batch '
-            'to initialize the parameters before calling torch functions'.format(func, cls.__name__))
+            'to initialize the parameters before calling torch functions')
 
 
 def is_lazy(param):

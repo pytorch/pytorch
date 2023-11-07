@@ -17,7 +17,7 @@ namespace at {
 namespace native {
 inline namespace CPU_CAPABILITY {
 
-template<typename T> using acc_t = at::opmath_type<T>;
+template<typename T> using opmath_t = at::opmath_type<T>;
 
 constexpr int64_t kChunkSize = 16;
 
@@ -56,14 +56,15 @@ C10_ALWAYS_INLINE void AddMomentsVec(
 }
 
 template <typename T>
-inline void UpdateMomentsVec(
+inline typename std::enable_if<std::is_same<T, opmath_t<T>>::value, void>::type
+UpdateMomentsVec(
     int64_t m0,
     const T* X_ptr,
-    const std::array<vec::Vectorized<acc_t<T>>, kChunkSize>& c_vecs,
+    const std::array<vec::Vectorized<opmath_t<T>>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
-    vec::Vectorized<acc_t<T>>& m1_stk0,
-    vec::Vectorized<acc_t<T>>& m2_stk0) {
-  using Vec = vec::Vectorized<acc_t<T>>;
+    vec::Vectorized<opmath_t<T>>& m1_stk0,
+    vec::Vectorized<opmath_t<T>>& m2_stk0) {
+  using Vec = vec::Vectorized<opmath_t<T>>;
   Vec m1_vec(0);
   Vec m2_vec(0);
   for (const auto j : c10::irange(m0)) {
@@ -77,22 +78,23 @@ inline void UpdateMomentsVec(
 
 // each bfloat16 vector will be converted to two float vectors,
 // and accumulated successively on m1_stk0/m2_stk0.
-template <>
-inline void UpdateMomentsVec<BFloat16>(
+template <typename T>
+inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value, void>::type
+UpdateMomentsVec(
     int64_t m0,
-    const BFloat16* X_ptr,
-    const std::array<vec::Vectorized<float>, kChunkSize>& c_vecs,
+    const T* X_ptr,
+    const std::array<vec::Vectorized<at::opmath_type<T>>, kChunkSize>& c_vecs,
     int64_t& m0_stk0,
-    vec::Vectorized<float>& m1_stk0,
-    vec::Vectorized<float>& m2_stk0) {
-  using bVec = vec::Vectorized<BFloat16>;
-  using fVec = vec::Vectorized<float>;
+    vec::Vectorized<at::opmath_type<T>>& m1_stk0,
+    vec::Vectorized<at::opmath_type<T>>& m2_stk0) {
+  using Vec = vec::Vectorized<T>;
+  using fVec = vec::Vectorized<at::opmath_type<T>>;
   fVec m1_fvec0(0), m1_fvec1(0);
   fVec m2_fvec0(0), m2_fvec1(0);
   for (const auto j : c10::irange(m0)) {
-    const bVec x_bvec = bVec::loadu(X_ptr + j * bVec::size());
+    const Vec x_bvec = Vec::loadu(X_ptr + j * Vec::size());
     fVec x_fvec0, x_fvec1;
-    std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+    std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
     const fVec delta_fvec0 = x_fvec0 - m1_fvec0;
     const fVec delta_fvec1 = x_fvec1 - m1_fvec1;
     m1_fvec0 += delta_fvec0 * c_vecs[j];
@@ -109,17 +111,17 @@ inline void UpdateMomentsVec<BFloat16>(
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 // https://en.wikipedia.org/wiki/Pairwise_summation
 template <typename T, int64_t kMaxDepth>
-std::pair<acc_t<T>, acc_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
-  using T_ACC = acc_t<T>;
+std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
+  using math_t = opmath_t<T>;
 
   constexpr int64_t kVecSize = vec::Vectorized<T>::size();
-  constexpr int64_t kAccVecSize = vec::Vectorized<T_ACC>::size();
+  constexpr int64_t kAccVecSize = vec::Vectorized<math_t>::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = utils::CeilLog2(m);
 
-  using Vec = vec::Vectorized<T_ACC>;
-  const Vec kZeroVec(T_ACC(0));
+  using Vec = vec::Vectorized<math_t>;
+  const Vec kZeroVec(math_t(0));
   c10::SmallVector<int64_t, kMaxDepth> m0_stk(depth, 0);
   c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
   c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
@@ -130,7 +132,7 @@ std::pair<acc_t<T>, acc_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t 
     static std::array<Vec, kChunkSize> c_vecs = ([]() {
       std::array<Vec, kChunkSize> result;
       for (const auto i : c10::irange(kChunkSize)) {
-        result[i] = Vec(T_ACC(1) / static_cast<T_ACC>(i + 1));
+        result[i] = Vec(math_t(1) / static_cast<math_t>(i + 1));
       }
       return result;
     })();
@@ -156,19 +158,19 @@ std::pair<acc_t<T>, acc_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t 
         m0_stk[i], m1_stk[i], m2_stk[i], m0_stk[0], m1_stk[0], m2_stk[0]);
   }
 
-  std::array<T_ACC, kAccVecSize> m1_arr{};
-  std::array<T_ACC, kAccVecSize> m2_arr{};
+  std::array<math_t, kAccVecSize> m1_arr{};
+  std::array<math_t, kAccVecSize> m2_arr{};
   m1_stk[0].store(m1_arr.data());
   m2_stk[0].store(m2_arr.data());
 
   int64_t m0 = 0;
-  T_ACC m1 = 0;
-  T_ACC m2 = 0;
+  math_t m1 = 0;
+  math_t m2 = 0;
   for (int64_t i = n * kVecSize; i < N; ++i) {
-    T_ACC x = static_cast<T_ACC>(X[i]);
-    const T_ACC delta = x - m1;
+    math_t x = static_cast<math_t>(X[i]);
+    const math_t delta = x - m1;
     ++m0;
-    m1 += delta / static_cast<T_ACC>(m0);
+    m1 += delta / static_cast<math_t>(m0);
     m2 += delta * (x - m1);
   }
   // for BFloat16, each vector in m1_arr/m2_arr holds 2*n accumulated result
@@ -177,11 +179,11 @@ std::pair<acc_t<T>, acc_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, int64_t 
     AddMoments(m0_add, m1_arr[i], m2_arr[i], m0, m1, m2);
   }
 
-  return std::make_pair(m1, m2 / static_cast<T_ACC>(N - ddof));
+  return std::make_pair(m1, m2 / static_cast<math_t>(N - ddof));
 }
 
 template <typename T>
-std::pair<acc_t<T>, acc_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
+std::pair<opmath_t<T>, opmath_t<T>> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
   constexpr int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;

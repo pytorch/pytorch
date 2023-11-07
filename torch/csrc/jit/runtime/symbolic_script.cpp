@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
@@ -90,7 +89,7 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, correction: int):
+        def AD_var_backward_0(grad, self, correction: number):
             # FIXME: torchscript: div(float, float)
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
@@ -115,7 +114,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              correction: int,
+                              correction: number,
                               keepdim: bool):
             if self.dim() == 0:
                 return AD_var_backward_0(grad, self, correction)
@@ -129,7 +128,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_2(grad,
                               self,
                               dim: Optional[List[int]],
-                              correction: Optional[int],
+                              correction: Optional[number],
                               keepdim: bool):
             if correction is None:
                 correction = 1
@@ -163,7 +162,7 @@ const std::vector<std::string> functions = {
         def std_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
             def backward(grad_output):
@@ -195,7 +194,7 @@ const std::vector<std::string> functions = {
         def var_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             def backward(grad_output):
                 grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
@@ -221,32 +220,6 @@ const std::vector<std::string> functions = {
 
             # FIXME: torchscript: torch.zeros(sizes, grad.options())
             return torch.zeros(sizes).to(grad).scatter_(dim, indices, grad)
-
-        def gather(self,
-                    dim: int,
-                    index,
-                    *,
-                    sparse_grad: bool = False):
-            output = torch.gather(self, dim, index, sparse_grad = sparse_grad)
-            def backward(grad_output):
-                if (sparse_grad):
-                    return torch.gather_backward(grad_output, self, dim, index, sparse_grad), None, None, None
-                grad_self = torch.zeros_like(self)
-                grad_self = torch.scatter_add(grad_self, dim, index, grad_output)
-                return grad_self, None, None, None
-            return output, backward
-
-        def index_select(self,
-                         dim: int,
-                         index):
-            output = torch.index_select(self, dim, index)
-            self_size = self.size()
-
-            def backward(grad_output):
-                grad_self = torch.zeros_like(self, memory_format=1).index_add(dim, index, grad_output)
-                return grad_self, None, None
-
-            return output, backward
 
         # def topk(self,
         #          k: int,
@@ -429,7 +402,7 @@ const std::vector<std::string> functions = {
 
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
-        # whice potentially uses large intermediate of size b*m*p,
+        # which potentially uses large intermediate of size b*m*p,
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):
@@ -1523,7 +1496,8 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
-std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
+static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
+    Value* closure) {
   TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
@@ -1536,7 +1510,7 @@ std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
-Argument originalReturnType(const TupleTypePtr& tup) {
+static Argument originalReturnType(const TupleTypePtr& tup) {
   TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
@@ -1549,7 +1523,7 @@ Argument originalReturnType(const TupleTypePtr& tup) {
 // overloaded functions of `func`.
 // Remove the suffix before adding the schema string to map
 // schema_to_graphs.
-std::string overloadedSchemaString(const FunctionSchema& schema) {
+static std::string overloadedSchemaString(const FunctionSchema& schema) {
   const auto& schema_name = schema.name();
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
@@ -1565,12 +1539,12 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   return schema_string;
 }
 
-bool isHelperFunction(const std::string& method_name) {
+static bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const CompilationUnit& module) {
+static void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
@@ -1633,7 +1607,7 @@ void loadModule(const CompilationUnit& module) {
   }
 }
 
-void loadFunctions() {
+static void loadFunctions() {
   for (const std::string& str : functions) {
     compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
   }
@@ -1668,5 +1642,4 @@ bool hasGradientInfoForSchema(const FunctionSchema& schema) {
   return gradientInfoForSchema(schema).has_value();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

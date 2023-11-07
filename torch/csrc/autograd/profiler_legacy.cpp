@@ -18,6 +18,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/Allocator.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/irange.h>
 
@@ -44,13 +45,13 @@ namespace profiler {
 // mapping. A corresponding entry is removed when the guard is destroyed,
 // potentially revealing the previously set value for the same slot.
 //
-// For the async tasks, slots previuosly set in the main thread before
+// For the async tasks, slots previously set in the main thread before
 // launching of an async task are shared and visible in the async task.
 //
 // On the other hand, any adding or overwriting of the mapping by the
 // async task is not visible to the main thread and any modification
 // (including removal of the entries) in the main thread is not visible
-// to the async task if it happends after launching the task.
+// to the async task if it happens after launching the task.
 //
 // We use ThreadLocalDebugInfo (slot PROFILER_STATE) to store profiler config,
 // as well as a list of events that happen during profiling.
@@ -477,7 +478,7 @@ void LegacyEvent::record(bool record_cuda) {
     torch::profiler::impl::cudaStubs()->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
-  cpu_ns_ = torch::profiler::impl::getTime();
+  cpu_ns_ = c10::getTime();
 }
 
 /* static */ LegacyEvent LegacyEvent::fromIValue(

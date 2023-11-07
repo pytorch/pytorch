@@ -17,13 +17,11 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <unordered_map>
 
-namespace torch {
-
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
-// A helper structure to mantain the mappings
+// A helper structure to maintain the mappings
 // between values from a scripted graph and
 // a traced graph
 struct TracingData {
@@ -315,5 +313,4 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

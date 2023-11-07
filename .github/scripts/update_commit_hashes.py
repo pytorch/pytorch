@@ -1,17 +1,18 @@
 import json
 import os
 import subprocess
-import requests
-from typing import Any, Dict
 from argparse import ArgumentParser
+from typing import Any, Dict
 
-MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
+import requests
+
+UPDATEBOT_TOKEN = os.environ["UPDATEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 OWNER, REPO = "pytorch", "pytorch"
 
 
 def git_api(
-    url: str, params: Dict[str, str], type: str = "get", token: str = MERGEBOT_TOKEN
+    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",
@@ -41,6 +42,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--repo-name", type=str)
     parser.add_argument("--branch", type=str)
+    parser.add_argument("--pin-folder", type=str)
     return parser.parse_args()
 
 
@@ -48,8 +50,8 @@ def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
         "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
         "head": branch_name,
-        "base": "master",
-        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
+        "base": "main",
+        "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/main/"
         + f".github/workflows/_update-commit-hash.yml).\nUpdate the pinned {repo_name} hash.",
     }
     response = git_api(f"/repos/{OWNER}/{REPO}/pulls", params, type="post")
@@ -134,7 +136,7 @@ def main() -> None:
         .stdout.decode("utf-8")
         .strip()
     )
-    with open(f".github/ci_commit_pins/{args.repo_name}.txt", "r+") as f:
+    with open(f"{args.pin_folder}/{args.repo_name}.txt", "r+") as f:
         old_hash = f.read().strip()
         subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name)
         f.seek(0)
@@ -143,7 +145,7 @@ def main() -> None:
     if is_newer_hash(hash, old_hash, args.repo_name):
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add .github/ci_commit_pins/{args.repo_name}.txt".split())
+        subprocess.run(f"git add {args.pin_folder}/{args.repo_name}.txt".split())
         subprocess.run(
             "git commit -m".split() + [f"update {args.repo_name} commit hash"]
         )
@@ -153,8 +155,7 @@ def main() -> None:
             # no existing pr, so make a new one and approve it
             pr_num = make_pr(args.repo_name, branch_name)
             approve_pr(pr_num)
-        # comment to merge if all checks are green
-        make_comment(pr_num, "@pytorchbot merge -g")
+        make_comment(pr_num, "@pytorchbot merge")
     else:
         print(
             f"tried to update from old hash: {old_hash} to new hash: {hash} but the old hash seems to be newer, not creating pr"

@@ -2,8 +2,7 @@ Extending PyTorch
 =================
 
 In this note we'll cover ways of extending :mod:`torch.nn`,
-:mod:`torch.autograd`, :mod:`torch`, and writing custom C extensions utilizing our C
-libraries.
+:mod:`torch.autograd`, :mod:`torch`, and writing custom C++ extensions.
 
 .. _extending-autograd:
 
@@ -112,7 +111,7 @@ the autograd engine.
 - :meth:`~torch.autograd.function.FunctionCtx.set_materialize_grads` can be
   used to tell the autograd engine to optimize gradient computations in the cases where
   the output does not depend on the input by not materializing grad tensors given to backward
-  function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
+  function. That is, if set to False, None object in Python or "undefined tensor" (tensor x for
   which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
@@ -415,7 +414,7 @@ This is how a ``Linear`` module can be implemented::
 
     class Linear(nn.Module):
         def __init__(self, input_features, output_features, bias=True):
-            super(Linear, self).__init__()
+            super().__init__()
             self.input_features = input_features
             self.output_features = output_features
 
@@ -450,17 +449,17 @@ This is how a ``Linear`` module can be implemented::
                 self.input_features, self.output_features, self.bias is not None
             )
 
-.. _extending-torch:
+.. _extending-torch-python:
 
-Extending :mod:`torch`
-----------------------
+Extending :mod:`torch` Python API
+---------------------------------
 
 You can create custom types that emulate :class:`Tensor` by defining a custom
 class with methods that match :class:`Tensor`. But what if you want to be able
 to pass these types to functions like :func:`torch.add` in the top-level
 :mod:`torch` namespace that accept :class:`Tensor` operands?
 
-If your custom python type defines a method named ``__torch_function__``, PyTorch
+If your custom Python type defines a method named ``__torch_function__``, PyTorch
 will invoke your ``__torch_function__`` implementation when an instance of your
 custom class is passed to a function in the :mod:`torch` namespace. This makes
 it possible to define custom implementations for any of the functions in the
@@ -764,7 +763,7 @@ implementation more permissive about what operations are allowed::
           if kwargs is None:
               kwargs = {}
           metadatas = tuple(a._metadata for a in args if hasattr(a, '_metadata'))
-          args = [a._t if hasattr(a, '_t') else a for a in args]
+          args = [getattr(a, '_t', a) for a in args]
           assert len(metadatas) > 0
           ret = func(*args, **kwargs)
           return MetadataTensor(ret, metadata=metadatas[0])
@@ -820,9 +819,9 @@ changes without warning in the future.
 First, to get a listing of all overridable functions, use
 ``torch.overrides._get_overridable_functions``. This returns a dictionary whose
 keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
-functions in that namespace that can be overriden. For example, let's print the
+functions in that namespace that can be overridden. For example, let's print the
 names of the first 5 functions in ``torch.nn.functional`` that can be
-overriden::
+overridden::
 
   >>> from torch.overrides import get_overridable_functions
   >>> func_dict = get_overridable_functions()
@@ -851,7 +850,122 @@ signature of the original ``PyTorch`` function::
 Finally, ``torch.overrides.get_ignored_functions`` returns a tuple of functions
 that explicitly cannot be overrided by ``__torch_function__``. This list can be
 useful to confirm that a function that isn't present in the dictionary returned
-by ``get_overridable_functions`` cannot be overriden.
+by ``get_overridable_functions`` cannot be overridden.
+
+
+.. _extending-torch-c++:
+
+Extending :mod:`torch` native API
+---------------------------------
+
+While ``__torch_function__`` allows one to effectively extend PyTorch's pure Python
+components' behavior, it does not allow one to extend the parts of
+PyTorch implemented in C++. To that end, a :class:`Tensor` subclass can also
+define ``__torch_dispatch__`` which will be able to override the behavior at the
+C++ level.
+
+To effectively use this feature, it is important to know how the native part of
+PyTorch is implemented. The most important component there is what we call the
+"dispatcher" (the best description can be found in this [blog post](http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/) even though it is slightly outdated). As
+hinted by its name, it is responsible for calling the right backend
+function for a specific call of a function. For example, when calling
+``torch.add(a, b)``, the dispatcher will inspect both arguments, figure out which
+"feature" (autograd, autocast, functionalization, etc) and which "backend" (CPU,
+CUDA, MPS, etc) should be used for this specific call and finally call all the
+right kernels.
+A very common thing done by a kernel is to "redispatch". For example, when running your
+neural network on GPU with autocast, the first call will be the autocast kernel that
+will handle any potential autocast logic and redispatch down. The next feature in line
+will be autograd that will properly create the autograd graph and then redispatch down.
+Finally, we reach the backend kernel for CUDA which will launch the right CUDA kernel
+and return the final result. On the way out, autograd will attach the graph to the
+output and, finally, autocast will have a chance to do any update it needs on exit.
+
+One configuration of the dispatcher is the order in which all these feature and backend keys are called. The latest list and their order can be found in ``DispatchKey.h`` inside the ``DispatchKey`` enum. For the purpose of extending torch, the important subset of the ordering for this discussion is: vmap -> Autocast -> Autograd -> ZeroTensor -> Neg/Conj -> Functionalize -> Python -> Backends. The most important key for the purpose of this discussion is ``Python`` as every Tensor subclass with the ``__torch_dispatch__`` method defined will call into this feature. It is from there that the user-defined method is called and where the behavior can be overwritten arbitrarily. From there, calling the provided ``func`` again will perform a "redispatch".
+
+Some important implications of this implementation are:
+- This code runs "below all features". It is thus only responsible, like a regular backend, for generating the output value of each Tensor (and can, and should, ignore all advanced features like autograd, autocast, etc).
+- If any high level feature implements a given function without redispatching, it will never reach the ``Python`` key and so the ``__torch_dispatch__`` callback will never be triggered. This happens in particular for CompositeImplicitAutograd functions which are evaluated at the Autograd level without redispatching. This is because a CompositeImplicitAutograd function specifies its autograd formula by implicitly calling other native ops, so at the Autograd level, the function is decomposed into its native ops and those are evaluated instead.
+- When calling back to Python and when wrapping the results, the same conversions are used as the regular PyTorch Python/C++ binding. In particular, some objects cannot be represented in Python and need special handling (undefined Tensors for example become None).
+- Our native functions are lazily populated as ``torch.ops.{namespace}.{func_name}.{overload_name}`` as callable Python objects to enable easily interacting with them from Python. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual Python API and binding code.
+
+
+In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able intercepting all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
+Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
+Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
+
+It is also possible to add `new` native functions using :mod:`torch.library`. This Python feature allows defining and/or adding new implementations to native functions. This can be used to add missing kernels, replace existing ones or define brand new native functions.
+
+
+You can find many examples of ``__torch_dispatch__``-based subclasses in the [subclass zoo](https://github.com/albanD/subclass_zoo) repo.
+
+
+Extending all :mod:`torch` API with Modes
+-----------------------------------------
+
+Unfortunately, there are functions that do not take Tensor inputs. This means that the subclass approach described above cannot be used to override the behavior of all of PyTorch's functions. Also, if the use case requires to intercept every function call, changing every Tensor to be a subclass can be overly intrusive.
+
+To address this use case, we introduced the concept of "Mode". These exist for ``__torch_function__`` and ``__torch_dispatch__`` overrides, are created by subclassing respectively :class:`torch.overrides.TorchFunctionMode` and :class:`torch.utils._python_dispatch.TorchDispatchMode`, and are used as a context manager.
+
+To simplify the description of how it interacts with subclasses and other modes, whenever the context manager for a mode is entered, every function behaves as if there was an extra Tensor argument at the beginning of the argument list with the mode as a subclass.
+This means in particular that all modes handlers will be called before any subclass handler and that modes corresponding to the inner context manager will always run first.
+
+It is also important to note that within a given mode handler, this specific mode is disabled and can be re-enabled manually by doing ``with self:``.
+
+Here is an example that shows logging modes of each type::
+
+  import torch
+  from torch.overrides import TorchFunctionMode, resolve_name
+  from torch.utils._python_dispatch import TorchDispatchMode
+
+  class FunctionLog(TorchFunctionMode):
+      def __torch_function__(self, func, types, args, kwargs=None):
+          print(f"Function Log: {resolve_name(func)}(*{args}, **{kwargs})")
+          return func(*args, **kwargs or {})
+
+  class DispatchLog(TorchDispatchMode):
+      def __torch_dispatch__(self, func, types, args, kwargs=None):
+          print(f"Dispatch Log: {func}(*{args}, **{kwargs})")
+          return func(*args, **kwargs or {})
+
+  def f():
+      a = torch.rand(10, requires_grad=True)
+      b = a * 2
+      b.sum().backward()
+
+  print("TorchFunctionMode logging:")
+  with FunctionLog():
+      f()
+
+  print("TorchDispatchMode logging:")
+  with DispatchLog():
+      f()
+
+Which prints the following, with extra comments::
+
+  TorchFunctionMode logging:
+  Function Log: torch.rand(*(10,), **{'requires_grad': True})
+  Function Log: torch.Tensor.mul(*(tensor([0.7164, 0.9897, 0.1745, 0.9336, 0.4287, 0.7989, 0.2169, 0.7474, 0.5624,
+          0.5970], requires_grad=True), 2), **None)
+  Function Log: torch.Tensor.sum(*(tensor([1.4328, 1.9794, 0.3490, 1.8671, 0.8573, 1.5977, 0.4338, 1.4948, 1.1249,
+          1.1939], grad_fn=<MulBackward0>),), **None)
+  # Note that at the python level, we only see the call to backward but not what happens in the autograd engine.
+  Function Log: torch.Tensor.backward(*(tensor(12.3307, grad_fn=<SumBackward0>),), **{'gradient': None, 'retain_graph': None, 'create_graph': False, 'inputs': None})
+
+  TorchDispatchMode logging:
+  # Here the requires_grad flag from autograd is removed while default arguments were populated.
+  Dispatch Log: aten.rand.default(*([10],), **{'device': device(type='cpu'), 'pin_memory': False})
+  Dispatch Log: aten.mul.Tensor(*(tensor([0.2151, 0.6018, 0.8415, 0.9060, 0.2974, 0.7708, 0.6668, 0.0352, 0.7948,
+          0.6023], requires_grad=True), 2), **{})
+  Dispatch Log: aten.sum.default(*(tensor([0.4303, 1.2036, 1.6831, 1.8120, 0.5949, 1.5416, 1.3335, 0.0705, 1.5897,
+          1.2046], grad_fn=<MulBackward0>),), **{})
+  # Here we don't see the call to backward itself, but its constituents. Starting here with the factory function that creates the initial gradient.
+  Dispatch Log: aten.ones_like.default(*(tensor(11.4637, grad_fn=<SumBackward0>),), **{'pin_memory': False, 'memory_format': torch.preserve_format})
+  # This is the backward of the sum
+  Dispatch Log: aten.expand.default(*(tensor(1.), [10]), **{})
+  Dispatch Log: aten.mul.Tensor(*(tensor([1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]), 2), **{})
+  Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
+  Dispatch Log: aten.detach.default(*(tensor([2., 2., 2., 2., 2., 2., 2., 2., 2., 2.]),), **{})
 
 
 Writing custom C++ extensions
@@ -862,10 +976,3 @@ See this
 for a detailed explanation and examples.
 
 Documentations are available at :doc:`../cpp_extension`.
-
-
-Writing custom C extensions
----------------------------
-
-Example available at
-`this GitHub repository <https://github.com/pytorch/extension-ffi>`_.

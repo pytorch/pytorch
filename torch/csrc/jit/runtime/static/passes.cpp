@@ -14,8 +14,7 @@ C10_DEFINE_bool(
     true,
     "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.");
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool graphHasOp(std::shared_ptr<Graph>& graph, const char* op_name) {
   DepthFirstGraphNodeIterator graph_it(graph);
@@ -666,9 +665,9 @@ void ReplaceWithMaybeCopy(
 #endif
 }
 
-void ReplaceWithCopyImpl(
+static void ReplaceWithCopyImpl(
     std::shared_ptr<Graph>& graph,
-    const FastMap<c10::Symbol, c10::Symbol>& supported,
+    const c10::FastMap<c10::Symbol, c10::Symbol>& supported,
     const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>&
         supported_schema,
     const std::function<bool(Node*)>& f_extra_checks,
@@ -755,7 +754,7 @@ void ReplacePermuteWithCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-  const FastMap<c10::Symbol, c10::Symbol> supported = {
+  const c10::FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
 #endif
@@ -777,7 +776,7 @@ void ReplaceWithCopy(
     std::shared_ptr<Graph>& graph,
     bool outputs_are_immutable) {
   AliasDb db(graph);
-  const FastMap<c10::Symbol, c10::Symbol> supported = {
+  const c10::FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
       OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
@@ -868,7 +867,7 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 } // namespace
 
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
-  const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+  const c10::FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       OP_PAIR(
           "torcharrow::inference_wrapper_run_flat",
           "static_runtime::fused_inference_wrapper_run_flat"),
@@ -1045,7 +1044,8 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   auto outputs = block->outputs();
   // Create owned refs for inputs. Otherwise, the input cleanup process
   // will destroy our outputs before we return.
-  FastSet<Value*> inputs = {block->inputs().begin(), block->inputs().end()};
+  c10::FastSet<Value*> inputs = {
+      block->inputs().begin(), block->inputs().end()};
 
   for (const auto i : c10::irange(outputs.size())) {
     auto* output = outputs[i];
@@ -1453,5 +1453,4 @@ void PrepackWeights(std::shared_ptr<Graph>& graph) {
   // Constant propagation should be called after this pass + others.
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -7,8 +7,10 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
 #include <tensorpipe/tensorpipe_cuda.h>
+C10_DIAGNOSTIC_POP()
 
 namespace torch {
 namespace distributed {
@@ -83,7 +85,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
     c10::cuda::CUDACachingAllocator::recordStream(storage.data_ptr(), stream);
 
     tensorpipe::CudaBuffer buffer;
-    buffer.ptr = storage.data<char>();
+    buffer.ptr = static_cast<char*>(storage.mutable_data());
     buffer.stream = stream.stream();
 
     tensorpipe::Message::Tensor tensor;

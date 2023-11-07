@@ -438,8 +438,8 @@ $$L1Distance(\mathbf{x},\mathbf{y}) = \sum_{i}\mid x_i - y_i\mid$$
 Note, both inputs must either be 1-dimensional or 2-dimensional and both must have the same shape. The output $Z$ will be 1-dimensional regardless and its length will equal the number of rows in the inputs.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/distance_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/distance_op.cc
 
 <details>
 
@@ -547,7 +547,7 @@ then
 $$Z =  \biggl[\Big((x_0^0 * y_0^0) + (x_1^0 * y_1^0) + (x_2^0 * y_2^0)\Big), \\ \Big((x_0^1 * y_0^1) + (x_1^1 * y_1^1) + (x_2^1 * y_2^1)\Big), \\ \Big((x_0^2 * y_0^2) + (x_1^2 * y_1^2) + (x_2^2 * y_2^2)\Big), \\ ..., \\ \Big((x_0^n * y_0^n) + (x_1^n * y_1^n) + (x_2^n * y_2^n)\Big)\biggr]$$
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/distance_op.cc
 
 <details>
 
@@ -650,8 +650,8 @@ This op takes two input float tensors of the same size, $X$ and $Y$, and produce
 $$\mathbf{Z}=CosineSimilarity(\mathbf{X},\mathbf{Y}) = \frac{\mathbf{X}\cdot\mathbf{Y}}{\|\mathbf{X}\|\|\mathbf{Y}\|} = \frac{\sum_n^{i=1}X_iY_i}{\sqrt{\sum_n^{i=1}X_i^2}\sqrt{\sum_n^{i=1}Y_i^2}}$$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/distance_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/distance_op.cc
 
 <details>
 

@@ -32,40 +32,31 @@ struct NestedTensorImpl;
 // The following functions are used to construct nested tensors from buffers and
 // metadata.
 
-inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
-    at::Tensor nested_size_tensor) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      buffer.is_contiguous(), "Given buffer must be contiguous.");
+inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
+  TORCH_CHECK(
+      buffer.dim() == 1,
+      "Expected given buffer to be 1dim, but got ",
+      buffer.dim(),
+      " instead.");
+  TORCH_CHECK(
+      buffer.is_contiguous(), "Expected given buffer to be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_size_tensor));
+      std::move(buffer), std::move(nested_sizes));
 }
 
+// TODO: Figure out if we need a non-moving wrap_buffer()
 inline at::Tensor wrap_buffer(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets) {
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer),
-      std::move(nested_size_tensor),
-      std::move(nested_stride_tensor),
-      std::move(offsets));
-}
-
-inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    const std::vector<int64_t>& offsets) {
-  std::vector<int64_t> offsets_copy(offsets);
-  return wrap_buffer(
-      buffer,
-      nested_size_tensor,
-      nested_stride_tensor,
-      std::move(offsets_copy));
+      std::move(nested_sizes),
+      std::move(nested_strides),
+      std::move(storage_offsets));
 }
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
@@ -84,16 +75,16 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
  * - Must be explicit and define a derivative
  *
  * @param base Base tensor to construct view from.
- * @param nested_size_tensor View tensors' sizes.
- * @param nested_stride_tensor View tensors' strides.
- * @param offsets View tensors' offsets.
+ * @param nested_sizes View tensors' sizes.
+ * @param nested_strides View tensors' strides.
+ * @param storage_offsets View tensors' offsets.
  * @return A newly constructed view tensor
  */
 inline at::Tensor create_nested_view_tensor(
     const at::Tensor& base,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets) {
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets) {
   TORCH_INTERNAL_ASSERT(
       base.is_nested(),
       "This function can only be used to create nested tensor views");
@@ -104,9 +95,9 @@ inline at::Tensor create_nested_view_tensor(
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       base,
-      nested_size_tensor,
-      nested_stride_tensor,
-      std::move(offsets));
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -122,7 +113,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_sizes(
   if (ntensors == 0) {
     return sizes;
   }
-  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  const Tensor& sizemat = self_ptr->get_nested_sizes();
   int64_t orig_dim = sizemat.size(1);
   // nesting scalars has empty sizes
   if (orig_dim == 0) {
@@ -155,7 +146,7 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
   if (ntensors == 0) {
     return strides;
   }
-  const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
+  const Tensor& stridemat = self_ptr->get_nested_strides();
   int64_t orig_dim = stridemat.size(1);
   // nesting scalars has empty strides
   if (orig_dim == 0) {
@@ -178,13 +169,13 @@ inline std::vector<IntArrayRef> NestedTensor_get_strides(
 inline void check_numel_equals_buffer_size(const at::Tensor& self) {
   auto self_impl = get_nested_tensor_impl(self);
   TORCH_CHECK(
-      self.numel() == self_impl->get_buffer_size(),
+      self.numel() == static_cast<int64_t>(self_impl->get_buffer_size()),
       "Number of elements in nested tensor must match number of elements in buffer.");
 }
 
 inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
   TORCH_CHECK(
-      self_ptr->numel() == self_ptr->get_buffer_size(),
+      self_ptr->numel() == static_cast<int64_t>(self_ptr->get_buffer_size()),
       "Number of elements in nested tensor must match number of elements in buffer.");
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -375,7 +366,7 @@ inline Tensor wrap_tensor_node(
                   // for a certain tensor
                   if (tensor_node.children(i).numel() > 0) {
                     memcpy(
-                        nt_buffer.data_ptr<scalar_t>() + start_offsets[i],
+                        nt_buffer.mutable_data_ptr<scalar_t>() + start_offsets[i],
                         tensor_node.children(i).data_ptr<scalar_t>(),
                         tensor_node.children(i).numel() * sizeof(scalar_t));
                   }
@@ -386,7 +377,7 @@ inline Tensor wrap_tensor_node(
     for (size_t i = 0; i < tensor_node.degree(); ++i) {
       auto tensor_sizes = tensor_node.children(i).sizes();
       for (int64_t tensor_size : tensor_sizes) {
-        nt_sizes.data_ptr<int64_t>()[sizes_offset++] = tensor_size;
+        nt_sizes.mutable_data_ptr<int64_t>()[sizes_offset++] = tensor_size;
       }
     }
     options = nt_buffer.options().merge_in(options_);

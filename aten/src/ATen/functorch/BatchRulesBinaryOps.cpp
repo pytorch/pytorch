@@ -71,12 +71,12 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     check_randomness(randomness, (tensor_bdim || other_bdim));
     if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
       auto shape = tensor_value.sizes();
-      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      VmapSymDimVector shapeVec(1, maybe_layer->batchSize());
       shapeVec.reserve(shape.size() + 1);
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
       // not taken care of with binary batch rule, which assumes at least one input is batched
-      tensor_value = tensor_value.expand(shapeVec);
+      tensor_value = tensor_value.expand_symint(shapeVec);
       tensor_bdim = 0;
     } else if (randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
 
@@ -146,7 +146,7 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
     const Tensor& condition, optional<int64_t> condition_bdim,
     const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
   auto condition_logical_rank = rankWithoutBatchDim(condition, condition_bdim);
@@ -164,7 +164,7 @@ std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
+static std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
     const Tensor& grad_out, optional<int64_t> grad_out_bdim, const Tensor& input, optional<int64_t> input_bdim,
     c10::string_view approximate) {
 
@@ -181,7 +181,7 @@ std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
   return std::make_tuple(at::gelu_backward(grad_out_, input_, approximate), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& mask, optional<int64_t> mask_bdim) {
   TORCH_CHECK(!mask_bdim.has_value(),
@@ -200,7 +200,7 @@ std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
     const Tensor& grad, optional<int64_t> grad_bdim,
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& mask, optional<int64_t> mask_bdim) {
@@ -225,7 +225,7 @@ std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
     const Tensor& grad, optional<int64_t> grad_bdim,
     const Tensor& x1, optional<int64_t> x1_bdim,
     const Tensor& x2, optional<int64_t> x2_bdim,
@@ -270,7 +270,7 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
-void fill__Tensor_batch_rule(
+static void fill__Tensor_batch_rule(
     Tensor& self,
     optional<int64_t> self_bdim,
     const Tensor& other,
@@ -289,7 +289,7 @@ void fill__Tensor_batch_rule(
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
-std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
+static std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   Tensor& grad, optional<int64_t> grad_bdim,
   Tensor& self, optional<int64_t> self_bdim,
   Tensor& buffer, optional<int64_t> buffer_bdim) {
@@ -307,7 +307,7 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
-Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
+static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
@@ -362,12 +362,15 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_and_, Tensor);
+  POINTWISE_BOXED(bitwise_and_.Scalar);
   POINTWISE_BOXED(bitwise_and.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_SCALAR_2(bitwise_or, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_or_, Tensor);
+  POINTWISE_BOXED(bitwise_or_.Scalar);
   POINTWISE_BOXED(bitwise_or.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_xor, Tensor);
+  BINARY_SCALAR_2(bitwise_xor, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_xor_, Tensor);
+  POINTWISE_BOXED(bitwise_xor_.Scalar);
   POINTWISE_BOXED(bitwise_xor.Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   POINTWISE_BOXED(bitwise_left_shift_.Tensor_Scalar);
@@ -384,6 +387,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE2(clamp_max, Tensor);
   UNARY_POINTWISE(clamp_max);
   POINTWISE_BOXED(clamp_max_);
+  BINARY_POINTWISE(complex);
 
   VARIADIC_BDIMS_BOXED(_euclidean_dist);
   // Implementation note: _binary_pointwise_helper performs a dtype promotion if args are scalars,
@@ -391,12 +395,14 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(_cdist_forward);
   VMAP_SUPPORT(_cdist_backward, cdist_backward_batch_rule);
 
-  // Commented out so we have a test op
-  // BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  BINARY_SCALAR_2(copysign, Tensor, Scalar);
+  POINTWISE_BOXED(copysign_.Tensor);
+  POINTWISE_BOXED(copysign_.Scalar);
   BINARY_SCALAR_2(div, Tensor, Scalar);
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
   BINARY_POINTWISE(floor_divide);
+  UNARY_POINTWISE2(floor_divide, Scalar);
 
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
@@ -428,7 +434,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
-  BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
 
   VMAP_SUPPORT2(where, self, where_self_batch_rule);

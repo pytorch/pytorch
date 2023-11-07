@@ -16,8 +16,8 @@ namespace at { namespace functorch {
 // PyTorch's convolution is different from JAX's conv_general_dilated:
 // we do not support batch_group_count (which is needed for convolution backwards).
 // Instead, there's a convolution_backward op that needs a batching rule.
-std::tuple<Tensor,optional<int64_t>>
-convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, int64_t groups) {
+static std::tuple<Tensor,optional<int64_t>>
+convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed, c10::SymIntArrayRef output_padding, c10::SymInt groups) {
   DimVector lhs_spec(stride.size() + 2);
   std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
   DimVector rhs_spec = lhs_spec;
@@ -43,13 +43,13 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   if (lhs_bdim && !rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[0], lhs);
     auto out = at::convolution_symint(new_x, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-    out = reshape_dim_outof(out_spec[0], lhs.sizes()[*lhs_bdim], out);
+    out = reshape_dim_outof_symint(out_spec[0], lhs.sizes()[*lhs_bdim], out);
     result = std::make_tuple(out, out_spec[0]);
   } else if (!lhs_bdim && rhs_bdim) {
     if (groups == 1) {
       auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
       auto out = at::convolution_symint(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-      out = reshape_dim_outof(out_spec[1], rhs.size(*rhs_bdim), out);
+      out = reshape_dim_outof_symint(out_spec[1], rhs.size(*rhs_bdim), out);
       result = std::make_tuple(out, out_spec[1]);
     } else {
       if (transposed) {
@@ -64,9 +64,9 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
         // NIHW, I(BO)HW -> N(GBO)HW
         auto out = at::convolution_symint(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
         // N(GBO)HW -> NG(BO)HW
-        out = reshape_dim_outof(1, groups, out);
+        out = reshape_dim_outof_symint(1, groups, out);
         // NG(BO)HW -> NGBOHW
-        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
+        out = reshape_dim_outof_symint(2, rhs.size(*rhs_bdim), out);
         // NGBOHW -> NB(GO)HW
         out = reshape_dim_into(1, 2, out);
         result = std::make_tuple(out, 1);
@@ -78,7 +78,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
         // (PyTorch convs have a fixed dimension order)
 
         // B(GO)IHW -> BGOIHW
-        auto new_w = reshape_dim_outof(0 + (*rhs_bdim == 0), groups, rhs);
+        auto new_w = reshape_dim_outof_symint(0 + (*rhs_bdim == 0), groups, rhs);
         // BGOIHW -> G(BO)IHW
         new_w = reshape_dim_into(*rhs_bdim + (*rhs_bdim > 0), 1, new_w);
         // G(BO)IHW -> (GBO)IHW
@@ -86,9 +86,9 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
         // N(GI)HW, (GBO)IHW -> N(GBO)HW
         auto out = at::convolution_symint(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
         // N(GBO)HW -> NG(BO)HW
-        out = reshape_dim_outof(1, groups, out);
+        out = reshape_dim_outof_symint(1, groups, out);
         // NG(BO)HW -> NGBOHW
-        out = reshape_dim_outof(2, rhs.size(*rhs_bdim), out);
+        out = reshape_dim_outof_symint(2, rhs.size(*rhs_bdim), out);
         // NGBOHW -> NB(GO)HW
         out = reshape_dim_into(1, 2, out);
         result = std::make_tuple(out, 1);
@@ -100,7 +100,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
     auto dim_with_groups = transposed ? 1 : 0;
     auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[dim_with_groups], rhs);
     auto out = at::convolution_symint(new_x, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
-    out = reshape_dim_outof(out_spec[1], lhs.sizes()[*lhs_bdim], out);
+    out = reshape_dim_outof_symint(out_spec[1], lhs.sizes()[*lhs_bdim], out);
     result = std::make_tuple(out, out_spec[1]);
   } else {
     result = std::make_tuple(at::convolution_symint(lhs, rhs, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups), nullopt);
@@ -123,7 +123,7 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   }
 }
 
-Tensor _convolution_decomp(
+static Tensor _convolution_decomp(
     const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
@@ -226,7 +226,7 @@ static Tensor compute_grad_bias(
 }
 
 // reshapes the batch_size into dim
-Tensor make_dummy(
+static Tensor make_dummy(
     const Tensor& tensor, optional<int64_t> tensor_bdim,
     int64_t dim, int64_t batch_size) {
   auto tensor_ = tensor_bdim ? tensor.select(*tensor_bdim, 0) : tensor;
@@ -239,13 +239,13 @@ Tensor make_dummy(
   return tensor_.new_empty({}).expand(expand_shape);
 }
 
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_input_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
-    IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, int64_t groups) {
+    c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
+    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
   const std::array<bool, 3> mask = {true, false, false};
   if (grad_output_bdim && weight_bdim) {
     // regular: BNO, BOI -> N(BO), (BO)I -> N(BI)
@@ -296,7 +296,7 @@ convolution_backward_input_batch_rule(
     } else {
       // N(GO), B(GI)O -> N(GO), (GBI)O -> N(GBI)
       auto weight_ = moveBatchDimToFront(weight, weight_bdim); // B(GI)O
-      weight_ = reshape_dim_outof(1, groups, weight_);         // BGIO
+      weight_ = reshape_dim_outof_symint(1, groups, weight_);         // BGIO
       weight_ = weight_.transpose(0, 1);                       // GBIO
       weight_ = weight_.flatten(0, 2);                         // (GBI)O
       const auto dummy_input = make_dummy(input, input_bdim, 1, batch_size);
@@ -306,8 +306,8 @@ convolution_backward_input_batch_rule(
       grad_input = std::get<0>(result); // N(GBI)
     }
     // N(GBI) -> NG(BI) -> NGBI -> NBGI -> NB(GI)
-    grad_input = reshape_dim_outof(1, groups, grad_input);
-    grad_input = reshape_dim_outof(2, batch_size, grad_input);
+    grad_input = reshape_dim_outof_symint(1, groups, grad_input);
+    grad_input = reshape_dim_outof_symint(2, batch_size, grad_input);
     grad_input = grad_input.transpose(1, 2);
     grad_input = reshape_dim_into(2, 2, grad_input);
     return std::make_tuple(grad_input, 1);
@@ -320,13 +320,13 @@ convolution_backward_input_batch_rule(
     return std::make_tuple(std::get<0>(result), nullopt);
   }
 }
-std::tuple<Tensor,optional<int64_t>>
+static std::tuple<Tensor,optional<int64_t>>
 convolution_backward_weight_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& input, optional<int64_t> input_bdim,
     const Tensor& weight, optional<int64_t> weight_bdim,
-    IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, int64_t groups) {
+    c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
+    c10::SymIntArrayRef output_padding, c10::SymInt groups) {
   const std::array<bool, 3> mask = {false, true, false};
   if (grad_output_bdim && input_bdim) {
     // BNO, BNI -> N(BO), N(BI) -> (BO)I (regular) (BI)O (transposed)
@@ -338,7 +338,7 @@ convolution_backward_weight_batch_rule(
         grad_output_, input_, dummy_weight, nullopt, stride, padding,
         dilation, transposed, output_padding, groups * batch_size, mask);
     auto grad_weight = std::get<1>(result);
-    grad_weight = reshape_dim_outof(0, batch_size, grad_weight);
+    grad_weight = reshape_dim_outof_symint(0, batch_size, grad_weight);
     return std::make_tuple(grad_weight, 0);
   } else if (grad_output_bdim && !input_bdim) {
     const auto batch_size = grad_output.size(*grad_output_bdim);
@@ -352,11 +352,11 @@ convolution_backward_weight_batch_rule(
           grad_output_, input, dummy_weight, nullopt, stride, padding,
           dilation, transposed, output_padding, groups, mask);
       auto grad_weight = std::get<1>(result);
-      grad_weight = reshape_dim_outof(out_ch_dim, batch_size, grad_weight);
+      grad_weight = reshape_dim_outof_symint(out_ch_dim, batch_size, grad_weight);
       return std::make_tuple(grad_weight, out_ch_dim);
     } else {
       auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim); // BN(GO)
-      grad_output_ = reshape_dim_outof(2, groups, grad_output_);              // BNGO
+      grad_output_ = reshape_dim_outof_symint(2, groups, grad_output_);              // BNGO
       grad_output_ = grad_output_.movedim(0, 2);                              // NGBO
       grad_output_ = grad_output_.flatten(1, 3);                              // N(GBO)
       if (!transposed) {
@@ -366,7 +366,7 @@ convolution_backward_weight_batch_rule(
             grad_output_, input, dummy_weight, nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
         auto grad_weight = std::get<1>(result);
-        grad_weight = grad_weight.unflatten(0, { groups, batch_size, -1 }); // GBOI
+        grad_weight = grad_weight.unflatten_symint(0, { groups, batch_size, -1 }); // GBOI
         grad_weight = grad_weight.transpose(0, 1);                          // BGOI
         grad_weight = grad_weight.flatten(1, 2);                            // B(GO)I
         return std::make_tuple(grad_weight, 0);
@@ -377,7 +377,7 @@ convolution_backward_weight_batch_rule(
             grad_output_, input, dummy_weight, nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
         auto grad_weight = std::get<1>(result);
-        grad_weight = reshape_dim_outof(1, batch_size, grad_weight);
+        grad_weight = reshape_dim_outof_symint(1, batch_size, grad_weight);
         return std::make_tuple(grad_weight, 1);
       }
     }
@@ -393,11 +393,11 @@ convolution_backward_weight_batch_rule(
           grad_output, input_, dummy_weight, nullopt, stride, padding,
           dilation, transposed, output_padding, groups, mask);
       auto grad_weight = std::get<1>(result);
-      grad_weight = reshape_dim_outof(in_ch_dim, batch_size, grad_weight);
+      grad_weight = reshape_dim_outof_symint(in_ch_dim, batch_size, grad_weight);
       return std::make_tuple(grad_weight, in_ch_dim);
     } else {
       auto input_ = moveBatchDimToFront(input, input_bdim); // BN(GI)
-      input_ = reshape_dim_outof(2, groups, input_);        // BNGI
+      input_ = reshape_dim_outof_symint(2, groups, input_);        // BNGI
       input_ = input_.movedim(0, 2);                        // NGBI
       input_ = input_.flatten(1, 3);                        // N(GBI)
       if (!transposed) {
@@ -407,7 +407,7 @@ convolution_backward_weight_batch_rule(
             grad_output, input_, dummy_weight, nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
         auto grad_weight = std::get<1>(result);
-        grad_weight = reshape_dim_outof(1, batch_size, grad_weight);
+        grad_weight = reshape_dim_outof_symint(1, batch_size, grad_weight);
         return std::make_tuple(grad_weight, 1);
       } else {
         // transposed: N(GO), BN(GI) -> N(GO), N(GBI) -> (GBI)O
@@ -416,7 +416,7 @@ convolution_backward_weight_batch_rule(
             grad_output, input_, dummy_weight, nullopt, stride, padding,
             dilation, transposed, output_padding, groups, mask);
         auto grad_weight = std::get<1>(result);
-        grad_weight = grad_weight.unflatten(0, { groups, batch_size, -1 }); // GBIO
+        grad_weight = grad_weight.unflatten_symint(0, { groups, batch_size, -1 }); // GBIO
         grad_weight = grad_weight.transpose(0, 1);                          // BGIO
         grad_weight = grad_weight.flatten(1, 2);                            // B(GI)O
         return std::make_tuple(grad_weight, 0);
@@ -433,11 +433,11 @@ convolution_backward_weight_batch_rule(
   }
 }
 
-std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
+static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
     const c10::OptionalArrayRef<SymInt> bias_sizes_opt,
-    IntArrayRef stride, c10::SymIntArrayRef padding, IntArrayRef dilation, bool transposed,
-    c10::SymIntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
+    c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
+    c10::SymIntArrayRef output_padding, c10::SymInt groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();

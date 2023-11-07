@@ -2,7 +2,8 @@ import torch
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map, tree_flatten, tree_map_only
+from torch.utils._pytree import tree_map_only
+from torch.utils import _pytree as pytree
 from torch.multiprocessing.reductions import StorageWeakRef
 
 import _operator
@@ -81,9 +82,9 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             # For multi-output views, we want to map each output view to the base,
             # but this mapping involves two separate nodes in FX IR.
             # e.g. "a, b = x_1.split(...)" becomes:
-            #    %split_tensor : [#users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
-            #    %getitem : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
-            #    %getitem_1 : [#users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
+            #    %split_tensor : [num_users=2] = call_function[target=torch.ops.aten.split.Tensor](args = (%x_1, 2), kwargs = {})
+            #    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 0), kwargs = {})
+            #    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_tensor, 1), kwargs = {})
             # And we'd like to set:
             #    getitem1.meta['view_of'] = x_1
             elif node.target is _operator.getitem:
@@ -153,7 +154,7 @@ def _maybe_get_inplace_op(op):
         for f in inplace_overloads
         if _schemas_match(op._schema, f._schema)
     ]
-    # Just becuase foo() and foo_() are both existing operators,
+    # Just because foo() and foo_() are both existing operators,
     # They aren't guaranteed to have compatible schemas.
     # For example, pow.Scalar(Scalar self, Tensor exponent) has no valid inplace variant,
     # Even though several overloads of pow_ exist.
@@ -280,7 +281,7 @@ def reinplace(gm, *sample_args):
            Because that would require resizing "a".
 
            Similarly, we can't convert torch.ge(a, b) into a.ge_(b),
-           beause that would require changing a's dtype (from e.g. float32 to bool).
+           because that would require changing a's dtype (from e.g. float32 to bool).
            Note that in this specific example, we could technically do better..
 
            If we see the pattern:
@@ -468,10 +469,10 @@ def reinplace(gm, *sample_args):
     # so we know not to re-inplace them.
     # NOTE: later, we'll need to add an optimization for fully recovering performance
     # on programs that mutate inputs.
-    input_storages = set(
+    input_storages = {
         StorageWeakRef(
             node.meta['fake_result']._typed_storage()
-        ) for node in gm.graph.nodes if node.op == 'placeholder')
+        ) for node in gm.graph.nodes if node.op == 'placeholder'}
 
 
     # We also need to know for a given node, what are all of its aliasing nodes.
@@ -482,7 +483,7 @@ def reinplace(gm, *sample_args):
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
-            tree_map(_add_to_map, n.meta['fake_result'])
+            pytree.tree_map_(_add_to_map, n.meta['fake_result'])
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
@@ -511,8 +512,8 @@ def reinplace(gm, *sample_args):
             # (We could potentially swizzle this into larger_tensor.add_(scalar_tensor),
             # this is probably an optimization to revisit later).
             self_arg = node.args[0]
-            self_flattened, _ = tree_flatten(self_arg.meta['fake_result'])
-            node_flattened, _ = tree_flatten(node.meta['fake_result'])
+            self_flattened = pytree.tree_leaves(self_arg.meta['fake_result'])
+            node_flattened = pytree.tree_leaves(node.meta['fake_result'])
             self_has_wrong_metadata = False
             if len(self_flattened) == len(node_flattened):
                 for self_meta, node_meta in zip(self_flattened, node_flattened):
@@ -624,17 +625,17 @@ def reinplace(gm, *sample_args):
                     node_to_update.kwargs = tree_map_only(Node, replace_arg, node_to_update.kwargs)
 
                     # Second, update our storage_to_nodes data structure.
-                    old_flattened_res, _ = tree_flatten(old.meta['fake_result'])
-                    node_flattened_res, _ = tree_flatten(node_to_update.meta['fake_result'])
+                    old_flattened_res = pytree.tree_leaves(old.meta['fake_result'])
+                    node_flattened_res = pytree.tree_leaves(node_to_update.meta['fake_result'])
 
-                    old_res_storage = set(
+                    old_res_storage = {
                         StorageWeakRef(
                             x._typed_storage()
-                        ) for x in old_flattened_res if isinstance(x, FakeTensor))
-                    node_res_storage = set(
+                        ) for x in old_flattened_res if isinstance(x, FakeTensor)}
+                    node_res_storage = {
                         StorageWeakRef(
                             x._typed_storage()
-                        ) for x in node_flattened_res if isinstance(x, FakeTensor))
+                        ) for x in node_flattened_res if isinstance(x, FakeTensor)}
 
                     # This will happen if we're updating a view op, e.g.
                     # e.g. replacing
@@ -647,11 +648,11 @@ def reinplace(gm, *sample_args):
                     # or multiple tensors that all share the same storage.
                     # We can't just check equality because we might encounter FX nodes that return zero tensor outputs.
                     if len(old_res_storage) == 1 and len(node_res_storage) == 1 and old_res_storage == node_res_storage:
-                        new_flattened_res, _ = tree_flatten(new.meta['fake_result'])
-                        new_res_storage = set(
+                        new_flattened_res = pytree.tree_leaves(new.meta['fake_result'])
+                        new_res_storage = {
                             StorageWeakRef(
                                 x._typed_storage()
-                            ) for x in new_flattened_res if isinstance(x, FakeTensor))
+                            ) for x in new_flattened_res if isinstance(x, FakeTensor)}
                         assert len(new_res_storage) == 1
                         (old_ref,) = old_res_storage
                         (new_ref,) = new_res_storage

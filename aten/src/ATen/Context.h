@@ -8,8 +8,12 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
+#include <ATen/detail/MTIAHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
+#include <ATen/detail/PrivateUse1HooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
@@ -32,7 +36,7 @@ class TORCH_API Context {
   Context();
 
   const Generator& defaultGenerator(Device device) {
-    DeviceType device_type = device.type();
+    c10::DeviceType device_type = device.type();
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
@@ -41,22 +45,31 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kPrivateUse1) {
+      return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
+          device.index());
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  Device getDeviceFromPtr(void* data, DeviceType device_type) {
+  Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
     if (device_type == at::kCPU) {
-      return DeviceType::CPU;
+      return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kPrivateUse1) {
+      return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
     } else {
-      AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
-  static bool isPinnedPtr(void* data) {
+  static bool isPinnedPtr(const void* data) {
     return detail::getCUDAHooks().isPinnedPtr(data);
   }
   static bool hasOpenMP();
@@ -68,6 +81,9 @@ class TORCH_API Context {
   }
   static bool hasCUDA() {
     return detail::getCUDAHooks().hasCUDA();
+  }
+  static bool hasMTIA() {
+    return detail::getMTIAHooks().hasMTIA();
   }
   static bool hasCUDART() {
     return detail::getCUDAHooks().hasCUDART();
@@ -91,16 +107,19 @@ class TORCH_API Context {
     return detail::getMPSHooks().hasMPS();
   }
   static bool hasIPU() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::IPU);
   }
   static bool hasXLA() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::XLA);
+  }
+  static bool hasXPU() {
+    return detail::getXPUHooks().hasXPU();
   }
   static bool hasLazy() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::Lazy);
   }
   static bool hasORT() {
-    return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
+    return c10::impl::hasDeviceGuardImpl(c10::DeviceType::ORT);
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
@@ -186,6 +205,8 @@ class TORCH_API Context {
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
   void setDeterministicAlgorithms(bool, bool);
+  bool deterministicFillUninitializedMemory() const;
+  void setDeterministicFillUninitializedMemory(bool);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -265,13 +286,13 @@ class TORCH_API Context {
   void unsetDefaultMobileCPUAllocator();
 
  private:
-  void initCUDAIfNeeded(DeviceType p) {
-    if (p == DeviceType::CUDA) {
+  void initCUDAIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::CUDA) {
       lazyInitCUDA();
     }
   }
-  void initHIPIfNeeded(DeviceType p) {
-    if (p == DeviceType::HIP) {
+  void initHIPIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::HIP) {
       lazyInitHIP();
     }
   }
@@ -282,6 +303,7 @@ class TORCH_API Context {
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
+  bool _deterministic_fill_uninitialized_memory = true;
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
@@ -299,7 +321,10 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
-  at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
+  at::LinalgBackend linalg_preferred_backend =
+      c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
+      ? at::LinalgBackend::Cusolver
+      : at::LinalgBackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
@@ -351,6 +376,10 @@ static inline bool hasCUDA() {
   return globalContext().hasCUDA();
 }
 
+static inline bool hasMTIA() {
+  return globalContext().hasMTIA();
+}
+
 static inline bool hasHIP() {
   return globalContext().hasHIP();
 }
@@ -369,6 +398,10 @@ static inline bool hasMPS() {
 
 static inline bool hasORT() {
   return globalContext().hasORT();
+}
+
+static inline bool hasXPU() {
+  return globalContext().hasXPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.
@@ -412,7 +445,7 @@ static inline bool hasMKLDNN() {
 }
 
 static inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(DeviceType::CPU);
+  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
@@ -420,9 +453,9 @@ static inline void manual_seed(uint64_t seed) {
   }
   // NB: Sometimes we build with CUDA, but we don't have any GPUs
   // available. In that case, we must not seed CUDA; it will fail!
-  const auto num_gpus = detail::getCUDAHooks().getNumGPUs();
-  if (hasCUDA() && num_gpus > 0) {
-    for (const auto i : c10::irange(num_gpus)) {
+  const auto cuda_num_gpus = detail::getCUDAHooks().getNumGPUs();
+  if (hasCUDA() && cuda_num_gpus > 0) {
+    for (const auto i : c10::irange(cuda_num_gpus)) {
       auto cuda_gen = globalContext().defaultGenerator(
           Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
       {
@@ -433,8 +466,21 @@ static inline void manual_seed(uint64_t seed) {
     }
   }
 
+  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  if (hasXPU() && xpu_num_gpus > 0) {
+    for (const auto i : c10::irange(xpu_num_gpus)) {
+      auto xpu_gen = globalContext().defaultGenerator(
+          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
+        xpu_gen.set_current_seed(seed);
+      }
+    }
+  }
+
   if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(DeviceType::MPS);
+    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(mps_gen.mutex());
     mps_gen.set_current_seed(seed);

@@ -82,7 +82,7 @@ T gcd(T a, T b) {
 
 // Helper for determining if an Expr is a multi-lane primitive (e.g. Broadcast
 // or Ramp).
-bool isMultilanePrimitive(ExprPtr e) {
+static bool isMultilanePrimitive(ExprPtr e) {
   return to<Broadcast>(e) || to<Ramp>(e);
 }
 
@@ -232,7 +232,7 @@ ExprPtr combineMultilane(ExprPtr lhs, ExprPtr rhs) {
 }
 
 // Handles optimization cases for Broadcast/Ramp * Broadcast/Ramp
-ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
+static ExprPtr mulMultilane(ExprPtr lhs, ExprPtr rhs) {
   if (BroadcastPtr bc = to<Broadcast>(lhs)) {
     if (BroadcastPtr bcother = to<Broadcast>(rhs)) {
       if (bc->lanes() != bcother->lanes()) {
@@ -1004,7 +1004,7 @@ ExprPtr PolynomialTransformer::mutate(MulPtr v) {
   return alloc<Term>(hasher_, immLike(v, 1), lhs_new, rhs_new);
 }
 
-ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
+static ExprPtr factorizeDivision(ExprPtr lhs_new, ExprPtr rhs_new) {
   if (!lhs_new || !rhs_new) {
     return nullptr;
   }
@@ -1610,7 +1610,7 @@ StmtPtr PolynomialBase::mutate(CondPtr v) {
   return v;
 }
 
-StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
+static StmtPtr handleForCondReordering(ForPtr loop, CondPtr cond) {
   if (cond->false_stmt()) {
     return nullptr;
   }
@@ -1809,7 +1809,7 @@ ExprPtr TermExpander::mutate(TermPtr v) {
 // Returns an immediate containing the greatest common divisor of all terms
 // (inc. the scalar term) in the polynomial. If the GCD is uninteresting
 // (e.g. 1) then returns nullptr.
-ExprPtr polyGCD(PolynomialPtr poly) {
+static ExprPtr polyGCD(PolynomialPtr poly) {
   ExprPtr scalar = poly->scalar();
   const std::vector<TermPtr>& variables = poly->variables();
 
@@ -1867,7 +1867,7 @@ class ModRound {
   ExprPtr mod_divisor;
 };
 
-c10::optional<class ModRound> isModRound(TermPtr e) {
+static c10::optional<class ModRound> isModRound(TermPtr e) {
   DivPtr div{nullptr};
   ModPtr mod{nullptr};
   ExprPtr denom{nullptr};
@@ -1903,7 +1903,7 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
         }
       }
 
-      // All non-mod vairables are considered as part of the multiplier.
+      // All non-mod variables are considered as part of the multiplier.
       multiplier = alloc<Mul>(multiplier, m);
     }
   }
@@ -1976,7 +1976,7 @@ c10::optional<class ModRound> isModRound(TermPtr e) {
 // (1) Round + Mod pattern: (x/y) * y + x % y => RoundOff(x,y) + Mod(x, y) => x
 // (2) Mod round + Mod pattern: (x/y % z)*y + x%y => ModRound(x, y, z) + Mod(x,
 // y) => x % (y*z)
-ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
+static ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
   std::vector<TermPtr> rounds;
   std::vector<TermPtr> mods;
   std::vector<TermPtr> mod_rounds;
@@ -2077,7 +2077,7 @@ ExprPtr simplifyRoundModPattern(PolynomialPtr poly) {
 
         // TODO: for now don't attempt partial factorization of this
         // optimization. E.g. it's possible to do: 2 * (x/y) * y + (x%y) => x +
-        // (x/y) * y but unsure thats actually much better, particulary with
+        // (x/y) * y but unsure thats actually much better, particularly with
         // CSE.
         if (!immediateEquals(
                 evaluateOp(alloc<Sub>(r->scalar(), m->scalar())), 0)) {
@@ -2144,7 +2144,7 @@ TermPtr PolynomialBase::factorizePolynomial(PolynomialPtr poly) {
     return nullptr;
   }
 
-  // Create new struture.
+  // Create new structure.
   std::vector<TermPtr> newPolyTerms;
   newPolyTerms.reserve(variables.size());
   for (const auto& t : variables) {
@@ -2386,7 +2386,7 @@ StmtPtr TermExpander::mutate(FreePtr v) {
   return v;
 }
 
-// Combines adjactent Cond nodes with identical conditions.
+// Combines adjacent Cond nodes with identical conditions.
 BlockPtr TermExpander::fuseConditions(BlockPtr v) {
   std::vector<StmtPtr> stmts;
   bool did_anything = false;
@@ -2641,7 +2641,7 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2654,11 +2654,14 @@ StmtPtr SimplifierUnderContext::mutate(ForPtr v) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) j is not negative
-ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
+static ExprPtr distributeDiv(
+    ExprPtr lhs,
+    ExprPtr rhs,
+    VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
@@ -2759,7 +2762,7 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when x is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) x is not negative
@@ -2772,11 +2775,14 @@ ExprPtr distributeDiv(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
 //   TODO: remove d) from the requirements because the simplification formula
 //   still holds when j is a negative integer. In integer division, the result
 //   of the division is converted to an integer using `floor` function which
-//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns the largest integer that is not greater than X. For example, -1/6
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, j has to be not negative. d) j is not negative
-ExprPtr distributeMod(ExprPtr lhs, ExprPtr rhs, VarBoundInfo var_bound_info) {
+static ExprPtr distributeMod(
+    ExprPtr lhs,
+    ExprPtr rhs,
+    VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }

@@ -209,7 +209,7 @@ can be found below.
         node.replace_all_uses_with(new_node)
 
 For simple transformations that only consist of substitutions, you can also
-make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/main/torch/fx/subgraph_rewriter.py>`__
 
 Subgraph Rewriting With replace_pattern()
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -230,7 +230,7 @@ Graph Manipulation Examples
 -  `Conv/Batch Norm
    fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
--  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
+-  `Quantization <https://pytorch.org/docs/main/quantization.html#prototype-fx-graph-mode-quantization>`__
 -  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
 
 Proxy/Retracing
@@ -633,9 +633,9 @@ examine our traced module:
     # This print-out returns:
     """
     graph():
-        %x : [#users=1] = placeholder[target=x]
-        %y : [#users=1] = placeholder[target=y]
-        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        %x : [num_users=1] = placeholder[target=x]
+        %y : [num_users=1] = placeholder[target=y]
+        %add : [num_users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
         return add
     """
 
@@ -1125,3 +1125,77 @@ API Reference
 .. py:module:: torch.fx.experimental.migrate_gradual_types
 .. py:module:: torch.fx.passes.dialect
 .. py:module:: torch.fx.passes.dialect.common
+.. py:module:: torch.fx.annotate
+.. py:module:: torch.fx.config
+.. py:module:: torch.fx.experimental.accelerator_partitioner
+.. py:module:: torch.fx.experimental.const_fold
+.. py:module:: torch.fx.experimental.debug
+.. py:module:: torch.fx.experimental.graph_gradual_typechecker
+.. py:module:: torch.fx.experimental.merge_matmul
+.. py:module:: torch.fx.experimental.meta_tracer
+.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint
+.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_generator
+.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_transformation
+.. py:module:: torch.fx.experimental.migrate_gradual_types.operation
+.. py:module:: torch.fx.experimental.migrate_gradual_types.transform_to_z3
+.. py:module:: torch.fx.experimental.migrate_gradual_types.util
+.. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
+.. py:module:: torch.fx.experimental.normalize
+.. py:module:: torch.fx.experimental.optimization
+.. py:module:: torch.fx.experimental.partitioner_utils
+.. py:module:: torch.fx.experimental.proxy_tensor
+.. py:module:: torch.fx.experimental.recording
+.. py:module:: torch.fx.experimental.refinement_types
+.. py:module:: torch.fx.experimental.rewriter
+.. py:module:: torch.fx.experimental.schema_type_annotation
+.. py:module:: torch.fx.experimental.symbolic_shapes
+.. py:module:: torch.fx.experimental.sym_node
+.. py:module:: torch.fx.experimental.unification.core
+.. py:module:: torch.fx.experimental.unification.dispatch
+.. py:module:: torch.fx.experimental.unification.match
+.. py:module:: torch.fx.experimental.unification.more
+.. py:module:: torch.fx.experimental.unification.multipledispatch.conflict
+.. py:module:: torch.fx.experimental.unification.multipledispatch.core
+.. py:module:: torch.fx.experimental.unification.multipledispatch.dispatcher
+.. py:module:: torch.fx.experimental.unification.multipledispatch.utils
+.. py:module:: torch.fx.experimental.unification.multipledispatch.variadic
+.. py:module:: torch.fx.experimental.unification.unification_tools
+.. py:module:: torch.fx.experimental.unification.utils
+.. py:module:: torch.fx.experimental.unification.variable
+.. py:module:: torch.fx.experimental.unify_refinements
+.. py:module:: torch.fx.experimental.validator
+.. py:module:: torch.fx.graph
+.. py:module:: torch.fx.graph_module
+.. py:module:: torch.fx.immutable_collections
+.. py:module:: torch.fx.interpreter
+.. py:module:: torch.fx.node
+.. py:module:: torch.fx.operator_schemas
+.. py:module:: torch.fx.passes.annotate_getitem_nodes
+.. py:module:: torch.fx.passes.backends.cudagraphs
+.. py:module:: torch.fx.passes.dialect.common.cse_pass
+.. py:module:: torch.fx.passes.fake_tensor_prop
+.. py:module:: torch.fx.passes.graph_drawer
+.. py:module:: torch.fx.passes.graph_manipulation
+.. py:module:: torch.fx.passes.infra.partitioner
+.. py:module:: torch.fx.passes.infra.pass_base
+.. py:module:: torch.fx.passes.infra.pass_manager
+.. py:module:: torch.fx.passes.net_min_base
+.. py:module:: torch.fx.passes.operator_support
+.. py:module:: torch.fx.passes.param_fetch
+.. py:module:: torch.fx.passes.pass_manager
+.. py:module:: torch.fx.passes.reinplace
+.. py:module:: torch.fx.passes.shape_prop
+.. py:module:: torch.fx.passes.split_module
+.. py:module:: torch.fx.passes.split_utils
+.. py:module:: torch.fx.passes.splitter_base
+.. py:module:: torch.fx.passes.tests.test_pass_manager
+.. py:module:: torch.fx.passes.tools_common
+.. py:module:: torch.fx.passes.utils.common
+.. py:module:: torch.fx.passes.utils.fuser_utils
+.. py:module:: torch.fx.passes.utils.matcher_utils
+.. py:module:: torch.fx.passes.utils.matcher_with_name_node_map_utils
+.. py:module:: torch.fx.passes.utils.source_matcher_utils
+.. py:module:: torch.fx.proxy
+.. py:module:: torch.fx.subgraph_rewriter
+.. py:module:: torch.fx.tensor_type
+.. py:module:: torch.fx.traceback

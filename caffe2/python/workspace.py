@@ -438,6 +438,10 @@ def FetchInt8BlobRealVal(name):
         np.float32) * int8_blob.scale
 
 
+def RemoveBlob(name) -> None:
+    ws = C.Workspace.current
+    _Workspace_remove_blob(ws, name)
+
 def _Workspace_fetch_int8_blob(ws, name):
     """Fetches an Int8 blob from the workspace. It shared backend implementation
     with FetchBlob but it is recommended when fetching Int8 Blobs
@@ -704,7 +708,7 @@ def _Workspace_feed_blob(ws, name, arr, device_option=None):
         arr = utils.Caffe2TensorToNumpyArray(arr)
     if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
         # Plain NumPy strings are weird, let's use objects instead
-        arr = arr.astype(np.object)
+        arr = arr.astype(object)
 
     if device_option is None:
         device_option = scope.CurrentDeviceScope()

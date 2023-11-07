@@ -29,7 +29,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 class MyShardedModel(torch.nn.Module):
     def __init__(self, spec=None, group=None):
-        super(MyShardedModel, self).__init__()
+        super().__init__()
         # Use same seed.
         torch.manual_seed(0)
         self.param = torch.nn.Parameter(torch.rand(5, 10))
@@ -47,7 +47,7 @@ class MyShardedModel(torch.nn.Module):
 
 class MyShardedLinear(torch.nn.Module):
     def __init__(self, rank=None):
-        super(MyShardedLinear, self).__init__()
+        super().__init__()
         # Use same seed.
         torch.manual_seed(0)
         self.linear1 = torch.nn.Linear(17, 12)
@@ -104,7 +104,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         local_model = MyShardedModel().cuda()
         sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
 
-        # copy the parameteres from local model
+        # copy the parameters from local model
         sharded_model.sharded_param.local_shards()[0].tensor = \
             local_model.sharded_param.detach().clone().requires_grad_()
 

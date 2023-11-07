@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
-#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -29,6 +28,19 @@ Tensor& max_quantized_unary_out(const Tensor& self, Tensor& out) {
 
 Tensor min_quantized_cpu(const Tensor& self) {
   return std::get<0>(self.reshape({-1}).min(/*dim=*/0));
+}
+
+Tensor& min_quantized_unary_out(const Tensor& self, Tensor& out) {
+  // TODO this implementation is inefficient for now.
+  TORCH_CHECK(self.device() == out.device());
+
+  TORCH_CHECK(canCast(
+      typeMetaToScalarType(self.dtype()),
+      typeMetaToScalarType(out.dtype())));
+  Tensor temp = min_quantized_cpu(self);
+  at::native::resize_output(out, temp.sizes());
+  out.copy_(temp);
+  return out;
 }
 
 // TODO: move to TensorMath.cpp

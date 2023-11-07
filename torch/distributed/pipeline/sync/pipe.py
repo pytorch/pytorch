@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union, Sequence, Tuple, cast
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 from torch import Tensor, nn
@@ -112,8 +112,8 @@ def _retrieve_device(module: nn.Module) -> torch.device:
             device = parameter.device
         elif device != parameter.device:
             raise ValueError(
-                'nn.Module: {}, should have all parameters on a single device,'
-                ' please use .to() to place the module on a single device'.format(module))
+                f'nn.Module: {module}, should have all parameters on a single device,'
+                ' please use .to() to place the module on a single device')
 
     return device if device is not None else torch.device("cpu")
 
@@ -162,7 +162,7 @@ class WithDevice(nn.Module):
         >>> model = Pipe(model, chunks=8)
     """
     def __init__(self, module: nn.Module, device: torch.device):
-        super(WithDevice, self).__init__()
+        super().__init__()
         self._module = module
         self._device = torch.device(device)
 
@@ -218,7 +218,7 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     return partitions, devices
 
 
-MOVING_DENIED = TypeError("denied to move parameters and buffers, " "because Pipe should manage device placement")
+MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
 
 
 class Pipe(Module):
@@ -297,7 +297,7 @@ class Pipe(Module):
         will be expanded to support inter-node pipelining in the future.
         The forward function returns an :class:`~torch.distributed.rpc.RRef`
         to allow for inter-node pipelining in the future, where the output
-        might be on a remote host. For intra-node pipelinining you can use
+        might be on a remote host. For intra-node pipelining you can use
         :meth:`~torch.distributed.rpc.RRef.local_value` to retrieve the
         output locally.
 
@@ -379,7 +379,7 @@ class Pipe(Module):
 
         raise IndexError
 
-    def __iter__(self) -> Iterable[nn.Module]:
+    def __iter__(self) -> Iterator[nn.Module]:
         """Iterates over children of the underlying sequential module."""
         for partition in self.partitions:
             yield from partition
@@ -418,7 +418,7 @@ class Pipe(Module):
 
         It's worth to cache CUDA streams although PyTorch already manages a
         pool of pre-allocated CUDA streams, because it may reduce GPU memory
-        fragementation when the number of micro-batches is small.
+        fragmentation when the number of micro-batches is small.
 
         """
         if not self._copy_streams:

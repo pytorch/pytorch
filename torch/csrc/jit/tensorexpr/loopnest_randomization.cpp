@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <iostream>
 #include <random>
 #include <stdexcept>
 #include <typeinfo>
@@ -10,12 +11,13 @@
 #include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/loopnest_randomization.h>
 
 namespace torch::jit::tensorexpr {
 
 namespace randomization_helper {
 
-int64_t max_transformations(int n_max_transforms) {
+static int64_t max_transformations(int n_max_transforms) {
   // Reuse the env variable PYTORCH_JIT_OPT_LIMIT to control the max number of
   // transformations.  Example - set the env variable
   // PYTORCH_JIT_OPT_LIMIT="loopnest_randomization=10" to set max
@@ -31,7 +33,7 @@ int64_t max_transformations(int n_max_transforms) {
   return max_transforms;
 }
 
-std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
+static std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
     std::vector<ForPtr> loops) {
   // Find the first set of loops that can be reordered
   std::vector<std::vector<ForPtr>> all_nested_loops;
@@ -68,7 +70,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
 
   std::vector<T> selected_objects;
   std::vector<int> selected_indices;
-  if (indices.size() < n) {
+  if (static_cast<int>(indices.size()) < n) {
     return std::make_tuple(selected_objects, selected_indices);
   }
   for (int i = 0; i < n; i++) {
@@ -79,7 +81,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
   return std::make_tuple(selected_objects, selected_indices);
 }
 
-int find_factor(ForPtr loop) {
+static int find_factor(ForPtr loop) {
   // Find valid factors
   ExprPtr loop_stop = loop->stop();
   auto loop_imm = intValue(loop_stop);
@@ -91,7 +93,7 @@ int find_factor(ForPtr loop) {
   return -1;
 }
 
-void printHistory(int index, std::string message) {
+static void printHistory(int index, std::string message) {
   message = "Random Transform Sequence - Transformations[" +
       std::to_string(index) + "] = " + message;
   GRAPH_DEBUG(message);
@@ -106,7 +108,7 @@ std::string join(std::vector<T> indices, char sep = ',') {
   return s;
 }
 
-std::string join(std::vector<std::string> indices, char sep = ',') {
+static std::string join(std::vector<std::string> indices, char sep = ',') {
   std::string s = "";
   for (const auto& index : indices) {
     s += index + sep;
@@ -122,7 +124,7 @@ std::string indexOf(const std::vector<T>& objects, const T& object) {
 } // namespace randomization_helper
 
 void loopnestRandomization(int64_t seed, LoopNest& l) {
-  // This is to help with determinstic testing of randomized infrastructure.
+  // This is to help with deterministic testing of randomized infrastructure.
   // When seed value is 1, we perform preset loop transformations. This allows
   // testing of interface.
   if (seed == 1) {
@@ -132,8 +134,8 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
   std::default_random_engine random_engine(seed);
   std::srand(seed);
-  // Set the maximum allowed number of transformations beyong which it is hard
-  // to track and debug. Arbitratily choosing 20 as maximum number.
+  // Set the maximum allowed number of transformations beyond which it is hard
+  // to track and debug. Arbitrarily choosing 20 as maximum number.
   int max_allowed_transformations = 20;
   int n_transforms = randomization_helper::max_transformations(
       std::rand() % max_allowed_transformations);
@@ -393,8 +395,8 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Find pairs of axes that can be reordered
           std::vector<std::pair<ForPtr, ForPtr>> valid_pairs;
-          for (int i = 0; i < loops.size(); i++) {
-            for (int j = i + 1; j < loops.size(); j++) {
+          for (const auto i : c10::irange(loops.size())) {
+            for (const auto j : c10::irange(i + 1, loops.size())) {
               if (LoopNest::findOuterFor(loops[i], loops[j])) {
                 valid_pairs.emplace_back(loops[i], loops[j]);
               }
@@ -583,8 +585,6 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         }
 
         case COMPRESS_ALL_BUFFERS: {
-          auto buffers = BufFinder::find(l.root_stmt());
-
           message = "compressAllBuffers(l.root_stmt());\n";
           randomization_helper::printHistory(n_transform, message);
           l.compressAllBuffers(l.root_stmt());

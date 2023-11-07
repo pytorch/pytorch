@@ -6,7 +6,6 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/strong_type.h>
-#include <c10/util/variant.h>
 
 namespace torch {
 namespace profiler {
@@ -49,7 +48,7 @@ using TensorImplAddress = strong::type<
     strong::boolean>;
 
 using StorageImplData = strong::type<
-    void*,
+    const void*,
     struct StorageImplData_,
     strong::regular,
     strong::hashable,

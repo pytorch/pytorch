@@ -1,9 +1,7 @@
 import itertools
 import textwrap
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
-
-from typing_extensions import Literal  # Python 3.8+
+from typing import List, Literal, Optional, Tuple, Union
 
 import torchgen.api.cpp as cpp
 import torchgen.api.meta as meta
@@ -224,11 +222,11 @@ def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
 class RegisterDispatchKey:
     backend_index: BackendIndex
 
-    target: Union[
-        Literal[Target.ANONYMOUS_DEFINITION],
-        Literal[Target.NAMESPACED_DEFINITION],
-        Literal[Target.NAMESPACED_DECLARATION],
-        Literal[Target.REGISTRATION],
+    target: Literal[
+        Target.ANONYMOUS_DEFINITION,
+        Target.NAMESPACED_DEFINITION,
+        Target.NAMESPACED_DECLARATION,
+        Target.REGISTRATION,
     ]
 
     # Selector object to determine which operators to generate
@@ -323,10 +321,21 @@ class RegisterDispatchKey:
                 for i, ret_name in enumerate(return_names)
             )
             returns = f'{sig.returns_type().cpp_type()}({", ".join(return_names)})'
-        else:
+        elif len(return_names) == 1:
             ret_name = return_names[0]
             updates = f"{copy_op}({func_res}, {ret_name});"
             returns = ret_name
+        else:
+            assert len(f.func.arguments.out) == 1
+            returns = ""
+            out_arg = f.func.arguments.out[0]
+            if out_arg.type.is_list_like():
+                updates = f"""\
+    for (int64_t i = 0; i < {func_res}.size(); ++i) {{
+        {copy_op}({func_res}[i], {out_arg.name}[i]);
+    }}"""
+            else:
+                updates = f"{copy_op}({func_res}, {out_arg.name});"
 
         functional_sig = self.wrapper_kernel_sig(g.functional)
         wrapper_name = sig.name()
@@ -568,7 +577,6 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             set_output_super = ""
 
         def gen_set_output_function(name: str, maybe_create_proxy: bool) -> str:
-            maybe_star = "*" if k is SchemaKind.functional else ""
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
@@ -576,7 +584,7 @@ void set_output_{name}(
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
     if (!names.empty()) {{
-      namedinference::propagate_names({maybe_star}outputs_[output_idx], names);
+      namedinference::propagate_names(outputs_[output_idx], names);
     }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
@@ -612,7 +620,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             create_proxy = """
 auto maybe_proxy = maybe_create_proxy(out, sizes, strides, options);
 if (C10_UNLIKELY(maybe_proxy.has_value())) {
-    proxy_outputs_[output_idx] = c10::ExclusivelyOwned<Tensor>(std::move(maybe_proxy).value());
+    proxy_outputs_[output_idx] = std::move(maybe_proxy).value();
 }
 """
         else:
@@ -674,17 +682,17 @@ resize_out(out, sizes, strides, options);
         generate_super: bool,
     ) -> str:
         if k is SchemaKind.functional:
-            output_type = "c10::ExclusivelyOwned<Tensor>"
-            output_value = "*outputs_[output_idx]"
+            output_type = "Tensor"
+            output_value = "outputs_[output_idx]"
             proxy_field = ""
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
+            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
-            output_value = "proxy_outputs_[output_idx].has_value() ? **proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<c10::ExclusivelyOwned<Tensor>>, {len(f.func.returns)}> proxy_outputs_;"
+            output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
+            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
@@ -787,7 +795,6 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             return result
 
         elif self.target is Target.ANONYMOUS_DEFINITION:
-
             k = f.func.kind()
 
             # Construct the body of the wrapper function with signature sig
@@ -878,8 +885,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 if k is SchemaKind.out:
                     expr = f"op.maybe_get_output({i})"
                 else:
-                    maybe_star = "*" if k is SchemaKind.functional else ""
-                    expr = f"{maybe_star}op.outputs_[{i}]"
+                    expr = f"op.outputs_[{i}]"
 
                 context.append(
                     Expr(
@@ -934,17 +940,17 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
             if k is SchemaKind.out or k is SchemaKind.inplace:
                 for i in range(len(f.func.returns)):
                     sig_body.append(
-                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(**op.proxy_outputs_[{i}]);"
+                        f"if (op.proxy_outputs_[{i}].has_value()) op.outputs_[{i}].get().copy_(*op.proxy_outputs_[{i}]);"
                     )
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
             if k is SchemaKind.functional:
                 if len(f.func.returns) == 1:
-                    ret_expr = "std::move(op.outputs_[0]).take()"  # small optimization
+                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
                 else:
                     moved = ", ".join(
-                        f"std::move(op.outputs_[{i}]).take()"
+                        f"std::move(op.outputs_[{i}])"
                         for i in range(len(f.func.returns))
                     )
                     ret_expr = f"std::make_tuple({moved})"

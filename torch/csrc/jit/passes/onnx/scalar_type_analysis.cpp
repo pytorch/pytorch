@@ -29,6 +29,8 @@ static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
         {c10::kQUInt8, 13},
         {c10::kQInt32, 14},
         {c10::kBFloat16, 15},
+        {c10::kFloat8_e4m3fn, 16},
+        {c10::kFloat8_e5m2, 17},
 };
 
 static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
@@ -53,6 +55,8 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Mul,
     onnx::Pow,
     onnx::Sub,
+    onnx::MatMul,
+    onnx::Conv,
 };
 
 // For these operators, all inputs share the same scalar type.
@@ -203,7 +207,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           // seeing a scalar input, we convert its expected type to tensor.
           if (auto scalar_type = get_scalar_type(input)) {
             auto tensor_type = input->type()->castRaw<TensorType>();
-            // get_scalar_type returns non-null value already guranatees
+            // get_scalar_type returns non-null value already guarantees
             // that the input has a valid tensor_type.
             TORCH_INTERNAL_ASSERT(nullptr != tensor_type);
             auto rank = tensor_type->dim();

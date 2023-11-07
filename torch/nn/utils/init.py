@@ -4,8 +4,9 @@ import torch
 
 def skip_init(module_cls, *args, **kwargs):
     r"""
-    Given a module class object and args / kwargs, instantiates the module without initializing
-    parameters / buffers.  This can be useful if initialization is slow or if custom initialization will
+    Given a module class object and args / kwargs, instantiate the module without initializing parameters / buffers.
+
+    This can be useful if initialization is slow or if custom initialization will
     be performed, making the default initialization unnecessary. There are some caveats to this, due to
     the way this function is implemented:
 
@@ -43,7 +44,7 @@ def skip_init(module_cls, *args, **kwargs):
 
     """
     if not issubclass(module_cls, torch.nn.Module):
-        raise RuntimeError('Expected a Module; got {}'.format(module_cls))
+        raise RuntimeError(f'Expected a Module; got {module_cls}')
     if 'device' not in inspect.signature(module_cls).parameters:
         raise RuntimeError('Module must support a \'device\' arg to skip initialization')
 

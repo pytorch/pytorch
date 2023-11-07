@@ -1,6 +1,4 @@
-"""
-Spectral Normalization from https://arxiv.org/abs/1802.05957
-"""
+"""Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 import torch
 from torch.nn.functional import normalize
 from typing import Any, Optional, TypeVar
@@ -29,7 +27,7 @@ class SpectralNorm:
         self.dim = dim
         if n_power_iterations <= 0:
             raise ValueError('Expected n_power_iterations to be positive, but '
-                             'got n_power_iterations={}'.format(n_power_iterations))
+                             f'got n_power_iterations={n_power_iterations}')
         self.n_power_iterations = n_power_iterations
         self.eps = eps
 
@@ -64,7 +62,7 @@ class SpectralNorm:
         #     Therefore, since the same power iteration is performed on all
         #     devices, simply updating the tensors in-place will make sure that
         #     the module replica on `device[0]` will update the _u vector on the
-        #     parallized module (by shared storage).
+        #     parallelized module (by shared storage).
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
         #    them before using them to normalize the weight. This is to support
@@ -115,10 +113,9 @@ class SpectralNorm:
 
     @staticmethod
     def apply(module: Module, name: str, n_power_iterations: int, dim: int, eps: float) -> 'SpectralNorm':
-        for k, hook in module._forward_pre_hooks.items():
+        for hook in module._forward_pre_hooks.values():
             if isinstance(hook, SpectralNorm) and hook.name == name:
-                raise RuntimeError("Cannot register two spectral_norm hooks on "
-                                   "the same parameter {}".format(name))
+                raise RuntimeError(f"Cannot register two spectral_norm hooks on the same parameter {name}")
 
         fn = SpectralNorm(name, n_power_iterations, dim, eps)
         weight = module._parameters[name]
@@ -212,7 +209,7 @@ class SpectralNormStateDictHook:
             local_metadata['spectral_norm'] = {}
         key = self.fn.name + '.version'
         if key in local_metadata['spectral_norm']:
-            raise RuntimeError("Unexpected key in metadata['spectral_norm']: {}".format(key))
+            raise RuntimeError(f"Unexpected key in metadata['spectral_norm']: {key}")
         local_metadata['spectral_norm'][key] = self.fn._version
 
 
@@ -223,7 +220,7 @@ def spectral_norm(module: T_module,
                   n_power_iterations: int = 1,
                   eps: float = 1e-12,
                   dim: Optional[int] = None) -> T_module:
-    r"""Applies spectral normalization to a parameter in the given module.
+    r"""Apply spectral normalization to a parameter in the given module.
 
     .. math::
         \mathbf{W}_{SN} = \dfrac{\mathbf{W}}{\sigma(\mathbf{W})},
@@ -284,7 +281,7 @@ def spectral_norm(module: T_module,
 
 
 def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
-    r"""Removes the spectral normalization reparameterization from a module.
+    r"""Remove the spectral normalization reparameterization from a module.
 
     Args:
         module (Module): containing module
@@ -300,8 +297,7 @@ def remove_spectral_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             break
     else:
-        raise ValueError("spectral_norm of '{}' not found in {}".format(
-            name, module))
+        raise ValueError(f"spectral_norm of '{name}' not found in {module}")
 
     for k, hook in module._state_dict_hooks.items():
         if isinstance(hook, SpectralNormStateDictHook) and hook.fn.name == name:

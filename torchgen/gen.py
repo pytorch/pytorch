@@ -10,6 +10,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Sequence,
     Set,
@@ -19,7 +20,6 @@ from typing import (
 )
 
 import yaml
-from typing_extensions import Literal  # Python 3.8+
 
 import torchgen.api.dispatcher as dispatcher
 import torchgen.api.meta as meta
@@ -94,9 +94,8 @@ from torchgen.utils import (
     mapMaybe,
     NamespaceHelper,
     Target,
-    YamlDumper,
-    YamlLoader,
 )
+from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 T = TypeVar("T")
 
@@ -213,7 +212,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 def parse_tags_yaml(path: str) -> Set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
-        with open(path, "r") as f:
+        with open(path) as f:
             es = yaml.load(f, Loader=LineLoader)
             _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
 
@@ -226,12 +225,19 @@ def parse_native_yaml(
     ignore_keys: Optional[Set[DispatchKey]] = None,
     *,
     skip_native_fns_gen: bool = False,
+    loaded_yaml: Optional[object] = None,
 ) -> ParsedYaml:
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
-        with open(path, "r") as f:
-            es = yaml.load(f, Loader=LineLoader)
+
+        # if a loaded yaml is provided, use that instead of reading from path
+        if loaded_yaml is None:
+            with open(path) as f:
+                es = yaml.load(f, Loader=LineLoader)
+        else:
+            es = loaded_yaml
+
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(
             es,
             valid_tags,
@@ -264,7 +270,11 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
         # but it would be overkill to add a true "view" variant of resize.
         # Instead, resize_() gets special treatment in functionalization,
         # and we have a resize() op that is non-aliasing + functional.
-        if "inplace_view" in f.tags and str(f.func.name) != "resize_":
+        if (
+            "inplace_view" in f.tags
+            and str(f.func.name) != "resize_"
+            and str(f.func.name) != "resize_as_"
+        ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, (
@@ -368,7 +378,6 @@ def translate_args(
     sig: Union[CppSignature, DispatcherSignature],
     cpp_sig: CppSignature,
 ) -> str:
-
     # Adds SpecialArgName.possibly_redundant_memory_format NamedCType for memory_format bindings
     def add_spl_memory_format_binding(input_bindings: List[Binding]) -> List[Binding]:
         output_bindings: List[Binding] = []
@@ -538,7 +547,7 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
         return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
@@ -1188,8 +1197,8 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     # These sets are used to conveniently test if an argument is a
     # kwarg-only or out argument
-    kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in f.func.arguments.out)
+    kwarg_only_set = {a.name for a in f.func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in f.func.arguments.out}
 
     sig_group = CppSignatureGroup.from_native_function(
         f, method=False, fallback_binding=False
@@ -1412,25 +1421,15 @@ def get_grouped_native_functions(
     )
 
 
-# Return native function declarations grouped by their namespaces.
-def get_native_function_declarations(
+def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
     native_function_decl_gen: Callable[
         [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
     ] = dest.compute_native_function_declaration,
-) -> List[str]:
-    """
-    Generate kernel declarations, in `NativeFunction(s).h`.
-    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
-    :param backend_indices: kernel collections grouped by dispatch key.
-    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
-    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
-    """
-    declarations: List[str] = []
+) -> Dict[str, List[str]]:
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
-    newline = "\n"
     for f in grouped_native_functions:
         native_function_namespaces = set()
         dispatch_keys = set()
@@ -1448,12 +1447,20 @@ def get_native_function_declarations(
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
+    return ns_grouped_kernels
 
+
+def get_native_function_declarations_from_ns_grouped_kernels(
+    *,
+    ns_grouped_kernels: Dict[str, List[str]],
+) -> List[str]:
+    declarations: List[str] = []
+    newline = "\n"
     for namespace, kernels in ns_grouped_kernels.items():
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
             entity_name="",
-            max_level=3,
+            max_level=4,
         )
         # Convert to a set first to remove duplicate kernel names. Backends are
         # allowed to repeat kernel names; only generate the declaration once!
@@ -1468,6 +1475,33 @@ def get_native_function_declarations(
             )
         )
     return declarations
+
+
+# Return native function declarations grouped by their namespaces.
+def get_native_function_declarations(
+    *,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    backend_indices: Dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
+    ] = dest.compute_native_function_declaration,
+) -> List[str]:
+    """
+    Generate kernel declarations, in `NativeFunction(s).h`.
+    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
+    :param backend_indices: kernel collections grouped by dispatch key.
+    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
+    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
+    """
+
+    ns_grouped_kernels = get_ns_grouped_kernels(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+        native_function_decl_gen=native_function_decl_gen,
+    )
+    return get_native_function_declarations_from_ns_grouped_kernels(
+        ns_grouped_kernels=ns_grouped_kernels
+    )
 
 
 def get_kernel_namespace(
@@ -1651,7 +1685,6 @@ def get_native_function_schema_registrations(
     aten_schema_registrations = []
     custom_namespace = None
     for namespace, funcs in ns_native_functions.items():
-
         schema_registrations_body = list(
             mapMaybe(RegisterSchema(schema_selector), funcs)
         )
@@ -1813,13 +1846,13 @@ def gen_per_operator_headers(
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
-    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(list)
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
 
     grouped_functions_by_root_name: Dict[
         str, List[Union[NativeFunction, NativeFunctionsGroup]]
-    ] = defaultdict(lambda: [])
+    ] = defaultdict(list)
     for group in grouped_native_functions:
         name = group.root_name
         grouped_functions_by_root_name[name].append(group)
@@ -2099,21 +2132,19 @@ def gen_headers(
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative
-        names -= set(
-            [
-                "and",
-                "and_eq",
-                "bitand",
-                "bitor",
-                "compl",
-                "not",
-                "not_eq",
-                "or",
-                "or_eq",
-                "xor",
-                "xor_eq",
-            ]
-        )
+        names -= {
+            "and",
+            "and_eq",
+            "bitand",
+            "bitor",
+            "compl",
+            "not",
+            "not_eq",
+            "or",
+            "or_eq",
+            "xor",
+            "xor_eq",
+        }
 
         return {
             "aten_symbols": " \\\n".join(

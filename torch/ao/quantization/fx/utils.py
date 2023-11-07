@@ -6,7 +6,6 @@ from torch.ao.quantization import (
     QuantType,
 )
 from torch.ao.quantization.backend_config import (
-    BackendConfig,
     DTypeWithConstraints,
 )
 from torch.ao.quantization.fake_quantize import (
@@ -86,25 +85,23 @@ class ObservedGraphModuleAttrs:
     standalone_module_input_quantized_idxs: Optional[List[int]] = None
     standalone_module_output_quantized_idxs: Optional[List[int]] = None
 
-def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+def node_arg_is_weight(node: Node, arg: Any) -> bool:
     """Returns if node arg is weight"""
-    if isinstance(node, Node) and node.op == "call_function" and \
-            node.target in backend_config._pattern_complex_format_to_config:
-        weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
-        if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
-            return True
-        return node.kwargs.get("weight") is arg
-    return False
+    weight_index = None
+    if "target_dtype_info" in node.meta:
+        weight_index = node.meta["target_dtype_info"].get("weight_index", None)
+    if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
+        return True
+    return node.kwargs.get("weight") is arg
 
-def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+def node_arg_is_bias(node: Node, arg: Any) -> bool:
     """Returns if node arg is bias"""
-    if isinstance(node, Node) and node.op == "call_function" and \
-            node.target in backend_config._pattern_complex_format_to_config:
-        bias_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("bias")
-        if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
-            return True
-        return node.kwargs.get("bias") is arg
-    return False
+    bias_index = None
+    if "target_dtype_info" in node.meta:
+        bias_index = node.meta["target_dtype_info"].get("bias_index", None)
+    if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
+        return True
+    return node.kwargs.get("bias") is arg
 
 def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
@@ -146,10 +143,13 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
     prepack_ops = {
         torch.nn.functional.conv1d: torch.ops.quantized.conv1d_prepack,
         torch.nn.functional.conv2d: torch.ops.quantized.conv2d_prepack,
-        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack
+        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack,
+        torch.nn.functional.conv_transpose1d: torch.ops.quantized.conv_transpose1d_prepack,
+        torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
+        torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
     prepack_op = prepack_ops.get(conv_op, None)
-    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
+    assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
 # Returns a function that can get a new attribute name for module with given
@@ -209,7 +209,7 @@ def graph_module_from_producer_nodes(
       A graph module constructed from the producer nodes
     '''
     assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
-    # since we traced back from node to getattrr
+    # since we traced back from node to getattr
     producer_nodes.reverse()
     graph = Graph()
     env: Dict[Any, Any] = {}
@@ -231,7 +231,7 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
         {p.device for p in module.buffers()}
     assert len(devices) <= 1, (
         "prepare only works with cpu or single-device CUDA modules, "
-        "but got devices {}".format(devices)
+        f"but got devices {devices}"
     )
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
@@ -410,7 +410,7 @@ def maybe_get_next_module(
         target_functional_type: Functional type that we want to check
     """
 
-    for user, _ in node.users.items():
+    for user in node.users.keys():
         if user.op == 'call_module' and target_module_type is not None and \
            isinstance(modules[str(user.target)], target_module_type):
             return user
@@ -464,6 +464,25 @@ def _is_custom_module_lstm(
     else:
         return isinstance(mod, torch.ao.nn.quantizable.LSTM)
 
+def _is_custom_module_mha(
+        node: Node,
+        named_modules: Dict[str, torch.nn.Module],
+        qconfig: QConfigAny = None,
+        # QuantizeHandler, but we cannot include the type here due to circular imports
+        qhandler: Optional[Any] = None,
+) -> bool:
+    """
+    Return whether this refers to the custom module MultiheadAttention flow.
+    """
+    mod = _get_module(node, named_modules)
+    if qconfig is not None and qhandler is not None:
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
+        return isinstance(mod, torch.nn.MultiheadAttention) and \
+            activation_is_statically_quantized(qconfig) and \
+            qhandler.is_custom_module()
+    else:
+        return isinstance(mod, torch.ao.nn.quantizable.MultiheadAttention)
+
 def _get_module(node: Node, named_modules: Dict[str, torch.nn.Module]) -> Optional[torch.nn.Module]:
     """
     If `node` refers to a call_module node, return the module, else None.
@@ -501,7 +520,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
     """
     Insert DeQuantStubs after each internal output node of custom module LSTM.
 
-    Custom module LSTM outputs are nested tuples of the sturcture (output, (hidden0, hidden1)),
+    Custom module LSTM outputs are nested tuples of the structure (output, (hidden0, hidden1)),
     Since we cannot dequantize a tuple as a whole, we must first break down the tuple into its
     components through `getitem`. This function transforms the graph as follows:
 
@@ -792,24 +811,26 @@ def _qconfig_satisfies_dtype_config_constraints(
         # check quantization ranges
         if backend_quant_min is not None and backend_quant_max is not None:
             if app_quant_min is None or app_quant_max is None:
-                warnings.warn("QConfig %s must specify 'quant_min' and 'quant_max', ignoring %s" %
-                              (debug_string, qconfig))
+                warnings.warn(f"QConfig {debug_string} must specify 'quant_min' and 'quant_max', ignoring {qconfig}")
                 return False
             elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
-                warnings.warn(("QConfig %s quantization range must fall within the backend's:\n"
-                              "QConfig range = (%s, %s), BackendConfig range = (%s, %s), ignoring %s") %
-                              (debug_string, app_quant_min, app_quant_max,
-                              backend_quant_min, backend_quant_max, qconfig))
+                warnings.warn(
+                    f"QConfig {debug_string} quantization range must fall within the backend's:\n"
+                    f"QConfig range = ({app_quant_min}, {app_quant_max}), "
+                    f"BackendConfig range = ({backend_quant_min}, {backend_quant_max}), "
+                    f"ignoring {qconfig}"
+                )
                 return False
         # check scale min
         if backend_scale_min is not None:
             if app_scale_min is None:
-                warnings.warn("QConfig %s must specify 'eps', ignoring %s" % (debug_string, qconfig))
+                warnings.warn(f"QConfig {debug_string} must specify 'eps', ignoring {qconfig}")
                 return False
-            elif app_scale_min < backend_scale_min:
-                warnings.warn(("QConfig %s eps (%s) must be greater than or equal to "
-                              "the backend's min scale value (%s), ignoring %s") %
-                              (debug_string, app_scale_min, backend_scale_min, qconfig))
+            if app_scale_min < backend_scale_min:
+                warnings.warn(
+                    f"QConfig {debug_string} eps ({app_scale_min}) must be greater than or equal to "
+                    f"the backend's min scale value ({backend_scale_min}), ignoring {qconfig}"
+                )
                 return False
         # check fixed scale and zero point
         if backend_scale_exact_match is not None and backend_zero_point_exact_match is not None:
@@ -826,14 +847,17 @@ def _qconfig_satisfies_dtype_config_constraints(
             )
             if not isinstance(activation_post_process, FixedQParamsObserver) and \
                     not isinstance(activation_post_process, FixedQParamsFakeQuantize):
-                warnings.warn(("QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
-                              "for fixed qparams ops, ignoring %s.\n%s") % (qconfig, suggestion_str))
+                warnings.warn(
+                    f"QConfig must specify a FixedQParamsObserver or a FixedQParamsFakeQuantize "
+                    f"for fixed qparams ops, ignoring {qconfig}.\n{suggestion_str}"
+                )
                 return False
             if observer.scale != backend_scale_exact_match or observer.zero_point != backend_zero_point_exact_match:
-                warnings.warn(("QConfig fixed scale (%s) and zero point (%s) do not match the backend's "
-                              "(%s and %s), ignoring %s.\n%s") %
-                              (observer.scale, observer.zero_point, backend_scale_exact_match,
-                              backend_zero_point_exact_match, qconfig, suggestion_str))
+                warnings.warn(
+                    f"QConfig fixed scale ({observer.scale}) and zero point ({observer.zero_point}) "
+                    f"do not match the backend's ({backend_scale_exact_match} and {backend_zero_point_exact_match}), "
+                    f"ignoring {qconfig}.\n{suggestion_str}"
+                )
                 return False
         return True
 

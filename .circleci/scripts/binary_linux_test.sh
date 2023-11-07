@@ -38,10 +38,6 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
-if [[ "\$python_nodot" = *311* ]]; then
-  # Numpy is yet not avaiable on default conda channel
-  EXTRA_CONDA_FLAGS="-c=malfet"
-fi
 
 if [[ "\$python_nodot" = *310* ]]; then
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
@@ -58,7 +54,7 @@ fi
 
 
 
-# Move debug wheels out of the the package dir so they don't get installed
+# Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
 mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
 
@@ -70,6 +66,12 @@ mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to m
 #   conda build scripts themselves. These should really be consolidated
 # Pick only one package of multiple available (which happens as result of workflow re-runs)
 pkg="/final_pkgs/\$(ls -1 /final_pkgs|sort|tail -1)"
+if [[ "\$PYTORCH_BUILD_VERSION" == *dev* ]]; then
+    CHANNEL="nightly"
+else
+    CHANNEL="test"
+fi
+
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   (
     # For some reason conda likes to re-activate the conda environment when attempting this install
@@ -81,26 +83,27 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       "numpy\${NUMPY_PIN}" \
       mkl>=2018 \
       ninja \
+      sympy \
       typing-extensions \
-      ${PROTOBUF_PACKAGE} \
-      six
+      ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
-
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE="cudatoolkit"
-      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" || "$DESIRED_CUDA" == "cu118" ]]; then
-        CUDA_PACKAGE="cuda"
-      fi
-
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "\${CUDA_PACKAGE}=\${cu_ver}"
+      CUDA_PACKAGE="pytorch-cuda"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "pytorch-\${CHANNEL}" "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
-  retry pip install -q future numpy protobuf typing-extensions six
+  if [[ "$(uname -m)" == aarch64 ]]; then
+    # Using "extra-index-url" until all needed aarch64 dependencies are
+    # added to "https://download.pytorch.org/whl/"
+    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+  else
+    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+  fi
+  retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

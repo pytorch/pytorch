@@ -1,3 +1,5 @@
+import os
+import io
 from typing import (
     List,
     Callable,
@@ -22,8 +24,8 @@ import torch
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
 )
-
 from torch.distributed._shard.sharded_tensor.shard import Shard
+from torch.distributed._tensor import DTensor
 
 from .metadata import (
     STATE_DICT_TYPE,
@@ -316,6 +318,8 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 def find_tensor_shard(
     tensor: torch.Tensor, index: MetadataIndex
 ) -> torch.Tensor:
+    if isinstance(tensor, DTensor):
+        return tensor.to_local()
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:
@@ -334,6 +338,7 @@ def find_state_dict_object(
     if index.fqn not in state_dict:
         raise ValueError(f"Could not find FQN: '{index.fqn}'")
     obj = state_dict[index.fqn]
+
     if isinstance(obj, torch.Tensor):
         return find_tensor_shard(obj, index)
     elif index.offset is not None:
@@ -349,3 +354,49 @@ def _element_wise_add(a: Sequence[int], b: Sequence[int]) -> List[int]:
 
 def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> List[int]:
     return [i_a - i_b for i_a, i_b in zip(a, b)]
+
+
+class _ReaderView(io.IOBase):
+    def __init__(self, base_stream: io.IOBase, offset: int, len: int):
+        super().__init__()
+        self.offset = offset
+        self.len = len
+        self.base_stream = base_stream
+        self.seek(0)
+
+    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
+        if __whence == os.SEEK_SET:
+            __offset = self.offset + __offset
+        elif __whence == os.SEEK_END:
+            __whence = os.SEEK_SET
+            __offset = (self.offset + self.len) - __offset
+        return self.base_stream.seek(__offset, __whence)
+
+    def tell(self) -> int:
+        return self.base_stream.tell() - self.offset
+
+    def readable(self) -> bool:
+        return self.base_stream.readable()
+
+    def seekable(self) -> bool:
+        return self.base_stream.seekable()
+
+    def readinto(self, b):
+        return self.base_stream.readinto(b)  # type: ignore[attr-defined]
+
+    def read(self, size=-1):
+        return self.base_stream.read(size)
+
+
+def _create_file_view(file: io.IOBase, offset: int, length: int) -> io.IOBase:
+    # FIXME (kumpera) torch.load fails if we wrap with io.BufferedReader
+    return _ReaderView(file, offset, length)
+
+
+def _normalize_device_info(device_type: str, device_id: int) -> str:
+    """
+    Device info normalization.
+    """
+    if device_type == "cpu":
+        return "cpu"
+    return f"{device_type}:{device_id}"

@@ -15,6 +15,7 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
@@ -40,18 +41,43 @@
 #include <functional>
 #include <memory>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace c10::cuda::_internal {
+void setHasPrimaryContext(bool (*func)(DeviceIndex));
+}
+
+namespace at::cuda::detail {
 
 const at::cuda::NVRTC& nvrtc();
-int64_t current_device();
+DeviceIndex current_device();
 
 static void (*magma_init_fn)() = nullptr;
 
 void set_magma_init_fn(void (*fn)()) {
   magma_init_fn = fn;
 }
+
+namespace {
+bool _hasPrimaryContext(DeviceIndex device_index) {
+  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
+              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+  unsigned int ctx_flags;
+  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
+  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
+  int ctx_is_active = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
+  return ctx_is_active == 1;
+}
+
+// Register hasPrimaryContext back to c10::cuda
+struct _Initializer {
+  _Initializer() {
+      c10::cuda::_internal::setHasPrimaryContext(_hasPrimaryContext);
+  }
+  ~_Initializer() {
+      c10::cuda::_internal::setHasPrimaryContext(nullptr);
+  }
+} initializer;
+} // anonymous namespace
 
 // Sets the CUDA_MODULE_LOADING environment variable
 // if it's not set by the user.
@@ -95,7 +121,7 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
-bool CUDAHooks::isPinnedPtr(void* data) const {
+bool CUDAHooks::isPinnedPtr(const void* data) const {
   // First check if driver is broken/missing, in which case PyTorch CPU
   // functionalities should still work, we should report `false` here.
   if (!at::cuda::is_available()) {
@@ -109,17 +135,19 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+  // We do not believe that CUDA needs mutable access to the data
+  // here.
+  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear HIP error
     return false;
   }
 #endif
@@ -148,6 +176,8 @@ bool CUDAHooks::hasCuDNN() const {
 
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
   return true;
 #else
   return false;
@@ -196,49 +226,21 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
   return at::cuda::detail::nvrtc();
 }
 
-int64_t current_device() {
+DeviceIndex current_device() {
   int device;
-  cudaError_t err = cudaGetDevice(&device);
+  cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }
   return -1;
 }
 
-int64_t CUDAHooks::current_device() const {
+DeviceIndex CUDAHooks::current_device() const {
   return at::cuda::detail::current_device();
 }
 
-bool hasPrimaryContext(int64_t device_index) {
-  TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags;
-  // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
-  // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
-  int ctx_is_active = 0;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxGetState(device_index, &ctx_flags, &ctx_is_active));
-  return ctx_is_active == 1;
-}
-
-bool CUDAHooks::hasPrimaryContext(int64_t device_index) const {
-  return at::cuda::detail::hasPrimaryContext(device_index);
-}
-
-c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
-  // check current device first
-  int64_t current_device_index = current_device();
-  if (current_device_index >= 0) {
-    if (hasPrimaryContext(current_device_index)) {
-      return current_device_index;
-    }
-  }
-  for (const auto device_index : c10::irange(at::cuda::device_count())) {
-    if (device_index == current_device_index) continue;
-    if (hasPrimaryContext(device_index)) {
-      return device_index;
-    }
-  }
-  return c10::nullopt;
+bool CUDAHooks::hasPrimaryContext(DeviceIndex device_index) const {
+  return _hasPrimaryContext(device_index);
 }
 
 Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
@@ -412,19 +414,19 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #endif
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(int64_t device_index) const {
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_max_size_impl(device_index);
 }
 
-void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const {
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(DeviceIndex device_index, int64_t max_size) const {
   at::native::detail::cufft_set_plan_cache_max_size_impl(device_index, max_size);
 }
 
-int64_t CUDAHooks::cuFFTGetPlanCacheSize(int64_t device_index) const {
+int64_t CUDAHooks::cuFFTGetPlanCacheSize(DeviceIndex device_index) const {
   return at::native::detail::cufft_get_plan_cache_size_impl(device_index);
 }
 
-void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
+void CUDAHooks::cuFFTClearPlanCache(DeviceIndex device_index) const {
   at::native::detail::cufft_clear_plan_cache_impl(device_index);
 }
 
@@ -432,7 +434,7 @@ int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
 }
 
-void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
 }
@@ -443,6 +445,4 @@ using at::RegistererCUDAHooksRegistry;
 
 REGISTER_CUDA_HOOKS(CUDAHooks);
 
-} // namespace detail
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda::detail

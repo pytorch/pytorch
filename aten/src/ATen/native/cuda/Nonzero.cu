@@ -65,14 +65,14 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   size_t temp_storage_bytes=0;
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int));
-  cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, scalar_t*> itr(self_.data_ptr<scalar_t>(), NonZeroOp<scalar_t>());
+  cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*> itr(self_.const_data_ptr<scalar_t>(), NonZeroOp<scalar_t>());
   cub::DeviceReduce::Sum(nullptr, temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   auto temp_storage = allocator.allocate(temp_storage_bytes);
   cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   int num_nonzeros_h;
   at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
   //expected output size is num_nonzeros x ndim
-  //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
+  //we are producing output with size {num_nonzeros, ndim} and strides {1, num_nonzeros} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)
   //resize passed output with incorrect sizes anyway we want.
   //However, out with correct sizes and incorrect strides will have to be copied to from the intermediate we've produced.
@@ -85,10 +85,10 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
     cub::CountingInputIterator<int64_t> counting_itr(0);
     temp_storage_bytes = 0;
     cub::DeviceSelect::Flagged(nullptr, temp_storage_bytes, counting_itr, itr,
-      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+      out_temp.mutable_data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
     temp_storage = allocator.allocate(temp_storage_bytes);
     cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
-      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+      out_temp.mutable_data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
     if (num_nonzeros_h > 0 && self.dim() > 1){
         TensorDims<int> dims;
         for (int i=0; i<self.dim(); i++){
@@ -96,7 +96,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
         }
         const int nthreads = 256;
         const int nblocks = (num_nonzeros_h + nthreads -1)/nthreads;
-        write_indices<<<nblocks, nthreads, 0, stream>>>(out_temp.data_ptr<int64_t>(),
+        write_indices<<<nblocks, nthreads, 0, stream>>>(out_temp.mutable_data_ptr<int64_t>(),
         dims, self.dim(), num_nonzeros_h);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     }

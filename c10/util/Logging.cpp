@@ -22,9 +22,8 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-// NOLINTNEXTLINE(modernize-redundant-void-arg)
-std::function<string(void)>* GetFetchStackTrace() {
-  static std::function<string(void)> func = []() {
+std::function<string()>* GetFetchStackTrace() {
+  static std::function<string()> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
   };
   return &func;
@@ -45,7 +44,7 @@ void ThrowEnforceNotMet(
   if (FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg();
   }
-  throw e;
+  throw std::move(e);
 }
 
 void ThrowEnforceNotMet(
@@ -86,6 +85,9 @@ Error::Error(SourceLocation source_location, std::string msg)
               (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
+using APIUsageMetadataLoggerType = std::function<void(
+    const std::string&,
+    const std::map<std::string, std::string>& metadata_map)>;
 using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
@@ -105,6 +107,13 @@ APIUsageLoggerType* GetAPIUsageLogger() {
   return &func;
 };
 
+APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
+  static APIUsageMetadataLoggerType func =
+      [](const std::string&,
+         const std::map<std::string, std::string>& metadata_map) {};
+  return &func;
+};
+
 DDPUsageLoggerType* GetDDPUsageLogger() {
   static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
@@ -116,15 +125,42 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = std::move(logger);
 }
 
+void SetAPIUsageMetadataLogger(
+    std::function<void(
+        const std::string&,
+        const std::map<std::string, std::string>& metadata_map)> logger) {
+  TORCH_CHECK(logger);
+  *GetAPIUsageMetadataLogger() = std::move(logger);
+}
+
 void SetPyTorchDDPUsageLogger(
     std::function<void(const DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
   *GetDDPUsageLogger() = std::move(logger);
 }
 
+static int64_t GLOBAL_RANK = -1;
+
+int64_t GetGlobalRank() {
+  return GLOBAL_RANK;
+}
+
+void SetGlobalRank(int64_t rank) {
+  GLOBAL_RANK = rank;
+}
+
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
+}
+
+void LogAPIUsageMetadata(
+    const std::string& context,
+    const std::map<std::string, std::string>& metadata_map) try {
+  if (auto logger = GetAPIUsageMetadataLogger())
+    (*logger)(context, metadata_map);
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -326,6 +362,9 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
+  if (GLOBAL_RANK != -1) {
+    stream_ << "[rank" << GLOBAL_RANK << "]:";
+  }
   stream_ << "["
           << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday

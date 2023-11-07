@@ -57,6 +57,7 @@ __all__ = [
     "setup_onnx_logging",
     "exporter_context",
     "export",
+    "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
     "export_to_pretty_string",
@@ -204,6 +205,7 @@ def export(
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    autograd_inlining: Optional[bool] = True,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -357,9 +359,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 14): The version of the
+        opset_version (int, default 17): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 16.
+            to target. Must be >= 7 and <= 17.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -452,6 +454,11 @@ def export(
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
+            If True, `deduplicate_initializers` pass will not be executed. This means
+            initializers with duplicated values will not be deduplicated and
+            will be treated as distinct inputs to the graph. This allows different
+            input initializers to be supplied at the runtime following export.
+
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
             equivalent to setting this argument to True.
@@ -495,6 +502,9 @@ def export(
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
                 only if the type of the ``nn.Module`` is found in the set.
 
+        autograd_inlining (bool, default True): Flag used to control whether to inline autograd functions.
+            Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -519,6 +529,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        autograd_inlining=autograd_inlining,
     )
 
 
@@ -580,7 +591,8 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
-    _C._jit_pass_onnx_autograd_function_process(graph)
+    if GLOBALS.autograd_inlining:
+        _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -686,9 +698,19 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
+
     return graph
 
 
@@ -959,7 +981,7 @@ def _create_jit_graph(
 
         if isinstance(model, torch.jit.ScriptModule):
             try:
-                graph = model.forward.graph
+                graph = model.forward.graph  # type: ignore[attr-defined]
             except AttributeError as e:
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
@@ -1062,7 +1084,7 @@ def _pre_trace_quant_model(model, args):
     This is due to https://github.com/pytorch/pytorch/issues/75761.
     """
     if any(
-        hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()
+        hasattr(m, "_packed_params") for m in getattr(model, "modules", list)()
     ) or any(getattr(arg, "is_quantized", False) for arg in args):
         return torch.jit.trace(model, args)
     return model
@@ -1169,23 +1191,32 @@ def _model_to_graph(
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    if training is None or training == _C_onnx.TrainingMode.EVAL:
-        params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
-
     if (
         do_constant_folding
         and GLOBALS.export_onnx_opset_version
         >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
+        if training is None or training == _C_onnx.TrainingMode.EVAL:
+            params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1205,6 +1236,7 @@ def _model_to_graph(
 
 
 @_beartype.beartype
+@torch._disable_dynamo
 def export_to_pretty_string(
     model,
     args,
@@ -1333,7 +1365,7 @@ def unconvertible_ops(
     unsupported_ops = []
     for node in graph.nodes():
         domain_op = node.kind()
-        if domain_op.startswith("onnx::") or domain_op.startswith("prim::"):
+        if domain_op.startswith(("onnx::", "prim::")):
             # We consider onnx and prim ops as supported ops, even though some "prim"
             # ops are not implemented as symbolic functions, because they may be
             # eliminated in the conversion passes. Users may still see errors caused
@@ -1436,11 +1468,27 @@ def _reset_trace_module_map():
 
 @_beartype.beartype
 def _get_module_attributes(module):
-
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
-    return {k: getattr(module, k) for k in annotations}
+    # Check whether module attributes can be accessed. Some classes
+    # define attributes but don't provide access to them in their
+    # constructor.
+    #
+    # For example, torch.nn.Embedding has the `freeze` variable and its
+    # type specified in the class but the attribute is not created in the
+    # constructor. In other words, there is no `self.freeze = <True | False>`
+    # in the constructor.
+    #
+    # Reference: https://github.com/pytorch/pytorch/blob/92de1d322223fb5584e384971b32c46b93bc2f4b/torch/nn/modules/sparse.py#L120
+    attrs = {}
+    for k in annotations:
+        try:
+            attrs[k] = getattr(module, k)
+        except AttributeError:
+            torch.onnx.log(f"Skipping module attribute '{k}'")
+            continue
+    return attrs
 
 
 @_beartype.beartype
@@ -1464,11 +1512,21 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
 
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
+
+    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn(
+            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
+            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1482,6 +1540,20 @@ def _export(
 
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
+
+    # torch.onnx.export does not support opset versions >=18
+    if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
+        # We do not want to fail because we should still allow users to create
+        # custom symbolic functions for opset>17
+        warnings.warn(
+            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"by 'torch.onnx.export()'. "
+            f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
+            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
+            f"Note that dynamo_export() is in preview. Please report errors with "
+            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
+            category=errors.OnnxExporterWarning,
+        )
 
     if export_modules_as_functions and opset_version < 15:
         raise ValueError(
@@ -1506,6 +1578,8 @@ def _export(
 
     try:
         GLOBALS.in_onnx_export = True
+        _autograd_inlining_previous = GLOBALS.autograd_inlining
+        GLOBALS.autograd_inlining = autograd_inlining
 
         module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
@@ -1565,9 +1639,11 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-            )
+
+            if keep_initializers_as_inputs is not True:
+                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
@@ -1630,6 +1706,7 @@ def _export(
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
+        GLOBALS.autograd_inlining = _autograd_inlining_previous
         _reset_trace_module_map()
 
     return torch_out
@@ -1688,7 +1765,15 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
     call from C++.
     """
     try:
-        return symbolic_fn(g, *args)
+        graph_context = jit_utils.GraphContext(
+            graph=g,
+            block=g.block(),
+            opset=GLOBALS.export_onnx_opset_version,
+            original_node=None,  # type: ignore[arg-type]
+            params_dict=_params_dict,
+            env={},
+        )
+        return symbolic_fn(graph_context, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1764,7 +1849,6 @@ def _need_symbolic_context(symbolic_fn: Callable) -> bool:
 def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
     """Decorator that provides the symbolic context to the symbolic function if needed."""
     if _need_symbolic_context(symbolic_fn):
-
         # TODO(justinchuby): Update the module name of GraphContext when it is public
         warnings.warn(
             "The first argument to symbolic functions is deprecated in 1.13 and will be "
@@ -1788,7 +1872,6 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
 
 @_beartype.beartype
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
     if not schema.startswith("aten::") or symbolic_helper.is_caffe2_aten_fallback():
@@ -1843,7 +1926,7 @@ def _run_symbolic_function(
         }
         outputs = node.outputsSize()
         attrs["outputs"] = outputs
-        return graph_context.at(
+        return graph_context.aten_op(
             op_name,
             *inputs,
             overload_name=_get_aten_op_overload_name(node),
@@ -1901,7 +1984,7 @@ def _run_symbolic_function(
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
             }
-            return graph_context.at(
+            return graph_context.aten_op(
                 op_name,
                 *inputs,
                 overload_name=_get_aten_op_overload_name(node),
@@ -2031,3 +2114,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
+
+
+def model_signature(model: Union[torch.nn.Module, Callable]) -> inspect.Signature:
+    return inspect.signature(
+        model.forward if isinstance(model, torch.nn.Module) else model
+    )

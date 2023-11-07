@@ -114,11 +114,13 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"shape", "prim"},
            {"is_cuda", "prim"},
            {"is_cpu", "prim"},
+           {"is_xla", "prim"},
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
            {"is_mps", "prim"},
+           {"is_mtia", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
            {"is_ipu", "prim"},
@@ -132,6 +134,8 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"mT", "aten"},
            {"mH", "aten"},
            {"is_ort", "prim"},
+           {"itemsize", "prim"},
+           {"nbytes", "prim"},
            {"ndim", "prim"},
            {"name", "prim"},
            {"real", "aten"},
@@ -235,6 +239,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   if (value_->type()->isSubtypeOf(*TensorType::get()) &&
       field == "__getitem__") {
     return SpecialFormValue::create(aten::index);
+  }
+
+  if (auto generator_type = value_->type()->cast<GeneratorType>()) {
+    // Handle access to Generator's `manual_seed`, `initial_seed` and `seed`
+    // attributes.
+    if (field == "manual_seed" || field == "initial_seed" || field == "seed") {
+      if (auto builtin = BuiltinFunction::tryCreate(
+              Symbol::aten(field), NamedValue(loc, "self", value_))) {
+        return builtin;
+      }
+    }
   }
 
   ErrorReport report(loc);
@@ -504,7 +519,7 @@ RangeValue::RangeValue(
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
           << "all inputs of range must be ints, found " << typ->repr_str()
-          << " in argument " << c10::guts::to_string(i);
+          << " in argument " << std::to_string(i);
     }
   }
 

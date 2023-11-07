@@ -46,7 +46,7 @@ class LocalResponseNorm(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1.) -> None:
-        super(LocalResponseNorm, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -67,7 +67,7 @@ class CrossMapLRN2d(Module):
     k: float
 
     def __init__(self, size: int, alpha: float = 1e-4, beta: float = 0.75, k: float = 1) -> None:
-        super(CrossMapLRN2d, self).__init__()
+        super().__init__()
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -123,6 +123,8 @@ class LayerNorm(Module):
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`elementwise_affine` is ``True``). Default: ``True``.
 
     Attributes:
         weight: the learnable weights of the module of shape
@@ -163,9 +165,9 @@ class LayerNorm(Module):
     elementwise_affine: bool
 
     def __init__(self, normalized_shape: _shape_t, eps: float = 1e-5, elementwise_affine: bool = True,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(LayerNorm, self).__init__()
+        super().__init__()
         if isinstance(normalized_shape, numbers.Integral):
             # mypy error: incompatible types in assignment
             normalized_shape = (normalized_shape,)  # type: ignore[assignment]
@@ -174,7 +176,10 @@ class LayerNorm(Module):
         self.elementwise_affine = elementwise_affine
         if self.elementwise_affine:
             self.weight = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
-            self.bias = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+            else:
+                self.register_parameter('bias', None)
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -184,7 +189,8 @@ class LayerNorm(Module):
     def reset_parameters(self) -> None:
         if self.elementwise_affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def forward(self, input: Tensor) -> Tensor:
         return F.layer_norm(
@@ -247,7 +253,7 @@ class GroupNorm(Module):
     def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5, affine: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(GroupNorm, self).__init__()
+        super().__init__()
         if num_channels % num_groups != 0:
             raise ValueError('num_channels must be divisible by num_groups')
 

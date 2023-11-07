@@ -12,7 +12,7 @@
 
 // It implements various functions with a simple interface
 // For example it enables the user to call vsin(float* out, const float* in,
-// size) This functions takes a pointer to a contious output array of floats and
+// size) This functions takes a pointer to a continuous output array of floats and
 // a constant input array. It will then apply sin to each value in the input
 // array and write the result into the output array. out and in may point to the
 // same memory, i.e. this fully supports in-place operations. These functions
@@ -67,6 +67,7 @@ IMPLEMENT_VML(abs)
 IMPLEMENT_VML(acos)
 IMPLEMENT_VML(asin)
 IMPLEMENT_VML(atan)
+IMPLEMENT_VML(atanh)
 IMPLEMENT_VML(ceil)
 IMPLEMENT_VML(cos)
 // IMPLEMENT_VML(cosh)
@@ -78,6 +79,7 @@ IMPLEMENT_VML(expm1)
 IMPLEMENT_VML(floor)
 IMPLEMENT_VML(i0)
 IMPLEMENT_VML(i0e)
+IMPLEMENT_VML(digamma)
 IMPLEMENT_VML(reciprocal)
 IMPLEMENT_VML(log)
 IMPLEMENT_VML(log10)

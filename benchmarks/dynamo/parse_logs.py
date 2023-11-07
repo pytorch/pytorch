@@ -1,7 +1,6 @@
 import csv
 import os
 import re
-import subprocess
 import sys
 
 # This script takes the logs produced by the benchmark scripts (e.g.,
@@ -16,18 +15,13 @@ import sys
 
 assert len(sys.argv) == 2
 
-full_log = open(sys.argv[1], "r").read()
+full_log = open(sys.argv[1]).read()
 
 # If the log contains a gist URL, extract it so we can include it in the CSV
 gist_url = ""
 m = re.search(r"https://gist.github.com/[a-f0-9]+", full_log)
 if m is not None:
     gist_url = m.group(0)
-
-# Record the current commit hash for ease of reproducibility
-hash = subprocess.check_output(
-    "git rev-parse HEAD".split(" "), encoding="utf-8"
-).rstrip()
 
 # Split the log into an entry per benchmark
 entries = re.split(
@@ -45,24 +39,27 @@ def chunker(seq, size):
 c = 0
 i = 0
 
-out = csv.writer(sys.stdout, dialect="excel")
-out.writerow(
+out = csv.DictWriter(
+    sys.stdout,
     [
-        "",
-        hash,
-        "",
-        "",
-        "",
-        "",
-        gist_url,
+        "bench",
+        "name",
+        "result",
+        "component",
+        "context",
+        "explain",
         "frame_time",
         "backend_time",
         "graph_count",
         "op_count",
         "graph_breaks",
         "unique_graph_breaks",
-    ]
+    ],
+    dialect="excel",
 )
+out.writeheader()
+out.writerow({"explain": gist_url})
+
 
 # Sometimes backtraces will be in third party code, which results
 # in very long file names.  Delete the absolute path in this case.
@@ -179,21 +176,20 @@ for name, name2, log in chunker(entries, 3):
         context = ""
 
     out.writerow(
-        [
-            bench,
-            name,
-            "",
-            r,
-            component,
-            context,
-            explain,
-            frame_time,
-            backend_time,
-            graph_count,
-            op_count,
-            graph_breaks,
-            unique_graph_breaks,
-        ]
+        {
+            "bench": bench,
+            "name": name,
+            "result": r,
+            "component": component,
+            "context": context,
+            "explain": explain,
+            "frame_time": frame_time,
+            "backend_time": backend_time,
+            "graph_count": graph_count,
+            "op_count": op_count,
+            "graph_breaks": graph_breaks,
+            "unique_graph_breaks": unique_graph_breaks,
+        }
     )
     i += 1
 

@@ -376,10 +376,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (w.data_ptr<scalar_t>(),
-            norms.data_ptr<accscalar_t>(),
-            v.data_ptr<scalar_t>(),
-            g.data_ptr<scalar_t>(),
+           (w.mutable_data_ptr<scalar_t>(),
+            norms.mutable_data_ptr<accscalar_t>(),
+            v.const_data_ptr<scalar_t>(),
+            g.const_data_ptr<scalar_t>(),
             rowSize);
          C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
@@ -407,10 +407,10 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (w.data_ptr<scalar_t>(),
-            norms.data_ptr<accscalar_t>(),
-            v.data_ptr<scalar_t>(),
-            g.data_ptr<scalar_t>(),
+           (w.mutable_data_ptr<scalar_t>(),
+            norms.mutable_data_ptr<accscalar_t>(),
+            v.const_data_ptr<scalar_t>(),
+            g.const_data_ptr<scalar_t>(),
             fast_dim_size,
             slower_dims_size);
          C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -465,12 +465,12 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
               BLOCK,
               BLOCK*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data_ptr<scalar_t>(),
-            grad_g.data_ptr<scalar_t>(),
-            grad_w.data_ptr<scalar_t>(),
-            saved_v.data_ptr<scalar_t>(),
-            saved_g.data_ptr<scalar_t>(),
-            saved_norms.data_ptr<accscalar_t>(),
+           (grad_v.mutable_data_ptr<scalar_t>(),
+            grad_g.mutable_data_ptr<scalar_t>(),
+            grad_w.const_data_ptr<scalar_t>(),
+            saved_v.const_data_ptr<scalar_t>(),
+            saved_g.const_data_ptr<scalar_t>(),
+            saved_norms.const_data_ptr<accscalar_t>(),
             rowSize);
          C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
@@ -498,12 +498,12 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
               stream>>>
-           (grad_v.data_ptr<scalar_t>(),
-            grad_g.data_ptr<scalar_t>(),
-            grad_w.data_ptr<scalar_t>(),
-            saved_v.data_ptr<scalar_t>(),
-            saved_g.data_ptr<scalar_t>(),
-            saved_norms.data_ptr<accscalar_t>(),
+           (grad_v.mutable_data_ptr<scalar_t>(),
+            grad_g.mutable_data_ptr<scalar_t>(),
+            grad_w.const_data_ptr<scalar_t>(),
+            saved_v.const_data_ptr<scalar_t>(),
+            saved_g.const_data_ptr<scalar_t>(),
+            saved_norms.const_data_ptr<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
          C10_CUDA_KERNEL_LAUNCH_CHECK();

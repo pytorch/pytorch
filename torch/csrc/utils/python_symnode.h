@@ -11,6 +11,7 @@ namespace torch {
 
 TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
+TORCH_PYTHON_API py::handle get_symbool_class();
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -19,6 +20,9 @@ inline bool is_symint(py::handle obj) {
 }
 inline bool is_symfloat(py::handle obj) {
   return py::isinstance(obj, get_symfloat_class());
+}
+inline bool is_symbool(py::handle obj) {
+  return py::isinstance(obj, get_symbool_class());
 }
 
 namespace impl {
@@ -51,13 +55,25 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
   }
 
-  c10::SymNode is_non_overlapping_and_dense(
-      c10::ArrayRef<c10::SymNode> sizes,
-      c10::ArrayRef<c10::SymNode> strides) override {
-    py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr("is_non_overlapping_and_dense")(sizes, strides);
-    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));
+#define TORCH_SYMNODE_SIZES_STRIDES(n)                                        \
+  c10::SymNode n(                                                             \
+      c10::ArrayRef<c10::SymNode> sizes, c10::ArrayRef<c10::SymNode> strides) \
+      override {                                                              \
+    py::gil_scoped_acquire acquire;                                           \
+    auto r = getPyObj().attr(#n)(sizes, strides);                             \
+    return c10::make_intrusive<PythonSymNodeImpl>(std::move(r));              \
   }
+
+  // clang-format off
+    TORCH_SYMNODE_SIZES_STRIDES(is_contiguous)
+    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_2d)
+    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_contiguous_3d)
+    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_strides_2d)
+    TORCH_SYMNODE_SIZES_STRIDES(is_channels_last_strides_3d)
+    TORCH_SYMNODE_SIZES_STRIDES(is_non_overlapping_and_dense)
+  // clang-format on
+
+#undef TORCH_SYMNODE_SIZES_STRIDES
 
   bool bool_() override {
     py::gil_scoped_acquire acquire;
@@ -79,6 +95,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("is_bool")().is(py::handle(Py_True));
   }
 
+  bool has_hint() override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("has_hint")().is(py::handle(Py_True));
+  }
+
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
@@ -94,14 +115,47 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("guard_bool")(file, line).cast<bool>();
   }
 
+  bool expect_true(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("expect_true")(file, line).cast<bool>();
+  }
+
+  bool expect_size(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("expect_size")(file, line).cast<bool>();
+  }
+
   int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("int_")().cast<int64_t>();
   }
 
+  c10::optional<int64_t> maybe_as_int() override {
+    py::gil_scoped_acquire acquire;
+    const auto& r = getPyObj().attr("maybe_as_int")();
+    if (r.is_none()) {
+      return c10::nullopt;
+    } else {
+      return r.cast<int64_t>();
+    }
+  }
+
   std::string str() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("str")().cast<std::string>();
+  }
+
+  c10::SymNode dispatch_sym_ite_(
+      const char* fname,
+      const c10::SymNode& other,
+      const c10::SymNode& third) {
+    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
+    auto pthird = dynamic_cast<PythonSymNodeImpl*>(third.get());
+    TORCH_CHECK(pother);
+    TORCH_CHECK(pthird);
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr(fname)(pother->getPyObj(), pthird->getPyObj());
+    return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
   c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
@@ -183,6 +237,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   c10::SymNode sym_or(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
+  }
+
+  c10::SymNode sym_ite(const c10::SymNode& other, const c10::SymNode& third)
+      override {
+    return dispatch_sym_ite_(__func__, other, third);
   }
 
   c10::SymNode sym_not() override {

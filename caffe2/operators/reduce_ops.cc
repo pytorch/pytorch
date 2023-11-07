@@ -186,7 +186,7 @@ OPERATOR_SCHEMA(ReduceSum)
 Computes the **sum** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_ops.cc
 
 <details>
 
@@ -265,7 +265,7 @@ OPERATOR_SCHEMA(ReduceMean)
 Computes the **mean** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_ops.cc
 
 <details>
 
@@ -403,7 +403,7 @@ OPERATOR_SCHEMA(ReduceL1)
 Computes the **L1 norm** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_ops.cc
 
 <details>
 
@@ -483,7 +483,7 @@ OPERATOR_SCHEMA(ReduceL2)
 Computes the **L2 norm** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_ops.cc
 
 <details>
 

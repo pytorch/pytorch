@@ -5,9 +5,8 @@ import unittest
 import torch
 
 import torch._dynamo
-import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
-from torch._dynamo.backends.ipex import has_ipex
+from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
@@ -32,7 +31,7 @@ class Seq(torch.nn.Module):
 
 class Conv_Bn_Relu(torch.nn.Module):
     def __init__(self, in_channels, out_channels, **kwargs):
-        super(Conv_Bn_Relu, self).__init__()
+        super().__init__()
         self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, **kwargs)
         self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
         self.relu = torch.nn.ReLU()
@@ -97,38 +96,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    @unittest.skipIf(not has_ipex(), "requires ipex")
-    def test_ipex_fp32(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        for dynamic_shapes in [True, False]:
-            torch._dynamo.reset()
-            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
-            with torch.no_grad():
-                for _ in range(3):
-                    r2 = opt_model(input)
-            self.assertTrue(same(r1, r2))
-            self.assertEqual(r2.dtype, torch.float32)
-
-    @unittest.skipIf(not has_ipex(), "requires ipex")
-    def test_ipex_bf16(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        for dynamic_shapes in [True, False]:
-            torch._dynamo.reset()
-            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
-            with torch.no_grad(), torch.cpu.amp.autocast():
-                for _ in range(3):
-                    r2 = opt_model(input)
-            self.assertTrue(same(r1, r2.float(), tol=0.1))
-            self.assertEqual(r2.dtype, torch.bfloat16)
-
     def _check_backend_works(self, backend):
         model = Seq().eval()
         input = torch.randn(2, 10)
@@ -154,18 +121,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
-
-    @requires_cuda()
-    def test_aot_ts_nvfuser(self):
-        self._check_backend_works("aot_ts_nvfuser")
-
-    @requires_cuda()
-    def test_nvprims_nvfuser(self):
-        self._check_backend_works("nvprims_nvfuser")
-
-    @requires_cuda()
-    def test_nvprims_aten(self):
-        self._check_backend_works("nvprims_aten")
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_onnxrt(self):
@@ -198,6 +153,66 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
         optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
+
+
+class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
+    def test_mps_not_supported(self):
+        model = Seq().to("mps")
+        example_input = torch.randn(1, 10).to("mps")
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.compile(model, backend="inductor")(example_input),
+        )
+
+
+class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
+    def test_explain_with_backend(self):
+        def fn3(x):
+            x = torch.sin(x)
+            torch._dynamo.graph_break()
+            x = torch.sin(x)
+            return x
+
+        def fn2(x):
+            x = torch.cos(x)
+            x = fn3(x)
+            x = torch.cos(x)
+            return x
+
+        def fn1(x):
+            x = torch.tan(x)
+            x = fn2(x)
+            x = torch.tan(x)
+            return x
+
+        def fn(x):
+            x = torch.sigmoid(x)
+            x = fn1(x)
+            x = torch.sigmoid(x)
+            return x
+
+        # Wrap TorchInductor with explain backend
+        eb = ExplainWithBackend("inductor")
+        optimized_fn = torch.compile(fn, backend=eb)
+        input_tensor = torch.randn(5)
+        result = optimized_fn(input_tensor)
+
+        # Check that fn still produces the same output when wrapped by ExplainWithBackend
+        self.assertTrue(torch.allclose(result, fn(input_tensor)))
+
+        # Verify ExplainOutput object contents, output might change but make sure these fields are present
+        explain_output = eb.output()
+        explain_str = str(explain_output)
+        self.assertIn("Graph Count", explain_str)
+        self.assertIn("Graph Break Count", explain_str)
+        self.assertIn("Op Count", explain_str)
+        self.assertIn("Break Reasons", explain_str)
+
+        # Verify that for the given functions above, we report the correct number of graphs, graph breaks, and ops
+        self.assertEqual(8, explain_output.graph_count)
+        self.assertEqual(7, explain_output.graph_break_count)
+        self.assertEqual(8, explain_output.op_count)
 
 
 if __name__ == "__main__":

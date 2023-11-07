@@ -231,18 +231,24 @@ void ProcessGroupMPI::mpiExit() {
 void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
   c10::call_once(onceFlagInitMPI, []() {
-    MPI_CHECK(MPI_Init_thread(
-        nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
-    if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
-      TORCH_CHECK(
-          false,
-          "Used MPI implementation doesn't have the "
-          "minimum level of threading support: "
-          "MPI_THREAD_SERIALIZED. This is required by "
-          "c10d package");
-    }
-    if (std::atexit(ProcessGroupMPI::mpiExit)) {
-      TORCH_CHECK(false, "Fail to register the MPI exit handler");
+    int mpi_was_initialized = 0;
+    MPI_CHECK(MPI_Initialized(&mpi_was_initialized));
+    if (mpi_was_initialized == 0) {
+      MPI_CHECK(MPI_Init_thread(
+          nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
+      if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {
+        TORCH_CHECK(
+            false,
+            "Used MPI implementation doesn't have the "
+            "minimum level of threading support: "
+            "MPI_THREAD_SERIALIZED. This is required by "
+            "c10d package");
+      }
+      if (std::atexit(ProcessGroupMPI::mpiExit)) {
+        TORCH_CHECK(false, "Fail to register the MPI exit handler");
+      }
+    } else {
+      TORCH_WARN_ONCE("MPI was previously initialized.");
     }
   });
 }
@@ -774,10 +780,10 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
   TORCH_CHECK(
-      inputTensors.size() == size_,
+      inputTensors.size() == static_cast<size_t>(size_),
       "Number of input tensors are not equal to group size");
   TORCH_CHECK(
-      outputTensors.size() == size_,
+      outputTensors.size() == static_cast<size_t>(size_),
       "Number of output tensors are not equal to group size");
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {

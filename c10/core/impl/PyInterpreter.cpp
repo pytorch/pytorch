@@ -10,7 +10,8 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     return "<unloaded interpreter>";
   }
 
-  void decref(PyObject* pyobj, bool is_tensor) const override {} // do nothing
+  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
+  } // do nothing
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
@@ -27,11 +28,22 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
+  void reportErrorCallback(PyObject* callback, DispatchKey key) const override {
+    PANIC(reportErrorCallback);
+  }
+
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey,
       torch::jit::Stack* stack) const override {
     PANIC(python_op_registration_trampoline);
+  }
+
+  void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const override {
+    PANIC(throw_abstract_impl_not_imported_error);
   }
 
   void python_dispatcher(
@@ -97,9 +109,16 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   };
 };
 
+// Construct this in Global scope instead of within `disarm`
+// where it will be only initialized first time `disarm` is called.
+// This increases the likelihood `noop_vtable` lives longer than
+// any object that refers to it.
+
+// If `noop_vtable` goes out of scope first, other objects will have dangling
+// reference to it.
+static NoopPyInterpreterVTable noop_vtable;
+
 void PyInterpreter::disarm() noexcept {
-  // Intentionally leaked
-  static NoopPyInterpreterVTable noop_vtable;
   vtable_ = &noop_vtable;
 }
 

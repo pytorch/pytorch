@@ -32,7 +32,7 @@ DETECTOR_IS_POST_OBS_KEY = "is_post_observer"
 DETECTOR_OBS_ARGS_KEY = "observer_args"
 
 # Mapping related code
-class DetectorQConfigInfo():
+class DetectorQConfigInfo:
     r"""
     This class contains the QConfig information for a single module.
     The list of variables / values this contains can grow depending on the
@@ -117,7 +117,7 @@ class DetectorBase(ABC):
     Concrete detectors should follow the same general API, which includes:
     - A method to calculate and return observer insertion points
         - Should return both the fqns and the Observer class to insert
-    - A method to return a report based on the the detector
+    - A method to return a report based on the detector
         - Should return a str-based report and dict info in Tuple[str,Dict] format
     """
 
@@ -144,7 +144,7 @@ class DetectorBase(ABC):
 
     @abstractmethod
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
-        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        r""" Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
@@ -219,10 +219,10 @@ class PerChannelDetector(DetectorBase):
 
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
-        "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "x86": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "fbgemm": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "qnnpack": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "onednn": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "x86": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
     }
 
     def __init__(self, backend: str = torch.backends.quantized.engine):
@@ -230,18 +230,18 @@ class PerChannelDetector(DetectorBase):
 
         # store the backend information
         self.backend_chosen = backend
-        self.supported_modules = set([])
+        self.supported_modules = set()
         if self.backend_chosen in self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES:
             self.supported_modules = self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[self.backend_chosen]
         else:
-            raise ValueError("Not configured to work with {}. Try a different default backend".format(self.backend_chosen))
+            raise ValueError(f"Not configured to work with {self.backend_chosen}. Try a different default backend")
 
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
         return "per_channel_detector"
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
-        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        r""" Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
@@ -292,7 +292,7 @@ class PerChannelDetector(DetectorBase):
         # get the fully qualified name and check if in list of modules to include and list of modules to ignore
         for fqn, module in model.named_modules():
 
-            is_in_include_list = sum(list(map(lambda x: isinstance(module, x), self.supported_modules))) > 0
+            is_in_include_list = sum([isinstance(module, x) for x in self.supported_modules]) > 0
 
             # check if the module per_channel is supported
             # based on backend
@@ -352,16 +352,14 @@ class PerChannelDetector(DetectorBase):
         per_channel_info = self._detect_per_channel_helper(model)
 
         # String to let the user know of further optimizations
-        further_optims_str = "Further Optimizations for backend {}: \n".format(self.backend_chosen)
+        further_optims_str = f"Further Optimizations for backend {self.backend_chosen}: \n"
 
         optimizations_possible = False
         for fqn in per_channel_info:
             fqn_dict = per_channel_info[fqn]
             if fqn_dict[self.PER_CHAN_SUPPORTED_KEY] and not fqn_dict[self.PER_CHAN_USED_KEY]:
                 optimizations_possible = True
-                further_optims_str += "Module {module_fqn} can be configured to use per_channel quantization.\n".format(
-                    module_fqn=fqn
-                )
+                further_optims_str += f"Module {fqn} can be configured to use per_channel quantization.\n"
 
         if optimizations_possible:
             further_optims_str += (
@@ -413,17 +411,17 @@ class DynamicStaticDetector(DetectorBase):
     IS_CURRENTLY_SUPPORTED_KEY = "is_dynamic_supported"
 
     # modules that are supported both dynamic and static for this report function
-    DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
+    DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = {nn.Linear}
 
     # modules that will be supported soon for both
-    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = set([nn.Conv1d, nn.Conv2d, nn.Conv3d])
+    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = {nn.Conv1d, nn.Conv2d, nn.Conv3d}
 
     def __init__(self, tolerance=0.5):
         super().__init__()
 
         # set tolerance level and initialize a set to keep track of useful fqn locations
         self.tolerance = tolerance
-        self.useful_observer_fqns: Set[str] = set([])
+        self.useful_observer_fqns: Set[str] = set()
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""
@@ -483,7 +481,7 @@ class DynamicStaticDetector(DetectorBase):
 
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
-        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        r""" Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
@@ -517,10 +515,10 @@ class DynamicStaticDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+        is_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED]) > 0
 
         # check if it will be supported
-        future_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED))) > 0
+        future_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED]) > 0
 
         # supported
         supported = is_supported_type or future_supported_type
@@ -553,7 +551,7 @@ class DynamicStaticDetector(DetectorBase):
         # store modules dynamic vs static information
         module_dynamic_static_info = {}
 
-        # This for loop goes through the modules, and extracts all relavent information into module_dynamic_static_info
+        # This for loop goes through the modules, and extracts all relevant information into module_dynamic_static_info
         #   This information primary includes whether the data distributions around a supported module is stationary or not
         #   Based on this, it is recorded whether dynamic or static quantization is recommended
 
@@ -578,7 +576,7 @@ class DynamicStaticDetector(DetectorBase):
                 post_obs_dist_classif = self.STATIONARY_STR if post_stat > self.tolerance else self.NON_STATIONARY_STR
 
                 # check if current support or future support
-                is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+                is_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED]) > 0
 
                 # store the set of important information for this module
                 module_info = {
@@ -638,7 +636,7 @@ class DynamicStaticDetector(DetectorBase):
         future_support_str = ". This layer is not yet supported for dynamic quantization"
         # This for loop goes through the information collected in module_dynamic_static_info and:
         #   Populates the string based report with the information from module_dynamic_static_info
-        #   Compiles the complete report by appending relavent formatted strings
+        #   Compiles the complete report by appending relevant formatted strings
 
         for module_fqn in module_dynamic_static_info.keys():
 
@@ -722,12 +720,12 @@ class InputWeightEqualizationDetector(DetectorBase):
         if s_c >= threshold or <= 1 / threshold, recommends input-weight equalization
 
     Args:
-        ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is sugggested
+        ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is suggested
             Should be between 0 and 1 (both non-inclusive)
         ch_axis (int, optional): The channel axis being observed to determine input weight equalization
             Default: 1
 
-    * :attr:`ratio_threshold`: The threshold for s_c to determine if input-weight equalization is sugggested
+    * :attr:`ratio_threshold`: The threshold for s_c to determine if input-weight equalization is suggested
         Should be between 0 and 1
 
     * :attr:`ch_axis`: The channel axis being observed to determine input weight equalization
@@ -737,9 +735,14 @@ class InputWeightEqualizationDetector(DetectorBase):
     * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    SUPPORTED_MODULES: Set[Callable] = set(
-        [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]
-    )
+    SUPPORTED_MODULES: Set[Callable] = {nn.Linear,
+                                        nn.Conv1d,
+                                        nn.Conv2d,
+                                        nn.Conv3d,
+                                        nnqat.Linear,
+                                        nnqat.Conv1d,
+                                        nnqat.Conv2d,
+                                        nnqat.Conv3d}
 
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
@@ -772,7 +775,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         if ratio_threshold <= 0 or ratio_threshold >= 1:
             raise ValueError("Make sure threshold is > 0 and < 1")
 
-        # intialize attributes based on args
+        # initialize attributes based on args
         self.ratio_threshold: float = ratio_threshold
         self.ch_axis: int = ch_axis
 
@@ -786,7 +789,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
+        is_supported_type = sum([type(module) is x for x in self.SUPPORTED_MODULES]) > 0
 
         # this is check for observer insertion
         if insert:
@@ -797,7 +800,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             return is_supported_type and has_obs
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
-        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        r""" Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
@@ -885,7 +888,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         Args
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
-        Returns a dict mapping relavent module fqns (str) to a dict with keys:
+        Returns a dict mapping relevant module fqns (str) to a dict with keys:
             "input_activation_per_channel_max" : maps to the per_channel max values
             "input_activation_per_channel_min" : maps to the per_channel min values
             "input_activation_global_max" : maps to the global max recorded
@@ -912,7 +915,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def _extract_weight_info(self, model: GraphModule) -> Dict[str, Dict]:
         r"""
-        Takes in a calibrated GraphModule and then finds the relavent observers.
+        Takes in a calibrated GraphModule and then finds the relevant observers.
         It then extracts the weight information for each layer an observer is attached to.
 
         Args
@@ -932,8 +935,9 @@ class InputWeightEqualizationDetector(DetectorBase):
             if self._is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
-                min_val: torch.Tensor = torch.tensor([float('inf')])
-                max_val: torch.Tensor = torch.tensor([float('-inf')])
+                device = module.weight.device
+                min_val: torch.Tensor = torch.tensor([float('inf')], device=device)
+                max_val: torch.Tensor = torch.tensor([float('-inf')], device=device)
                 x_copy = module.weight
                 x_dim = x_copy.size()
 
@@ -1002,7 +1006,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             input_info (dict): A dict mapping each observer to input range information
             weight_info (dict): A dict mapping each observer to weight range information
 
-        Returns a dict mapping relavent observer fqns (str) to a 1-D tensor.
+        Returns a dict mapping relevant observer fqns (str) to a 1-D tensor.
             Each value is a different s_c value for a different channel
         """
         # create return dictionary for each observer
@@ -1013,7 +1017,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
             # raise error if not in weight info
             if module_fqn not in weight_info:
-                raise KeyError("Unable to find weight range stats for module {}".format(module_fqn))
+                raise KeyError(f"Unable to find weight range stats for module {module_fqn}")
 
             # calculate the ratios of the weight info and input info
             weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)
@@ -1048,7 +1052,7 @@ class InputWeightEqualizationDetector(DetectorBase):
             weight_info (dict): A dict mapping each module to weight range information
             comp_stats (dict): A dict mapping each module to its corresponding comp stat
 
-        Returns a dictionary mapping each module with relavent ModelReportObservers around them to:
+        Returns a dictionary mapping each module with relevant ModelReportObservers around them to:
             whether input weight equalization is recommended
             their s_c metric compared to the threshold
             the threshold used to make the recommendation
@@ -1062,7 +1066,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         # for each module we add separate set of suggestions
         for module_fqn in input_info:
 
-            # get relavent info for this module
+            # get relevant info for this module
             mod_input_info: Dict = input_info[module_fqn]
             mod_weight_info: Dict = weight_info[module_fqn]
             mod_comp_stat: Dict = comp_stats[module_fqn]
@@ -1275,7 +1279,7 @@ class OutlierDetector(DetectorBase):
         return num_children == 0 and not _is_activation_post_process(module)
 
     def get_qconfig_info(self, model) -> Dict[str, DetectorQConfigInfo]:
-        r""" Returns the DetectorQConfigInfo for each module_fqn relavent
+        r""" Returns the DetectorQConfigInfo for each module_fqn relevant
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
@@ -1385,7 +1389,7 @@ class OutlierDetector(DetectorBase):
         Args:
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
 
-        Returns a dict mapping relavent module fqns to:
+        Returns a dict mapping relevant module fqns to:
             whether there were outliers found in activation before
             the number of batches used for each channel
             whether fraction of applicable batches used is above fraction_batches_used_threshold
@@ -1449,7 +1453,7 @@ class OutlierDetector(DetectorBase):
         r"""
         Determines whether input weight equalization is appropriate for a given module.
 
-        Takes advantage of the ModelReport Observer which records the relavent percentile information
+        Takes advantage of the ModelReport Observer which records the relevant percentile information
 
         Args:
             model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers

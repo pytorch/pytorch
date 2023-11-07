@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
 # torch
@@ -74,6 +73,8 @@ from torch.testing._internal.jit_utils import attrs_with_prefix
 from torch.testing._internal.jit_utils import get_forward
 from torch.testing._internal.jit_utils import get_forward_graph
 
+from torch.testing._internal.common_utils import set_default_dtype
+
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
@@ -89,7 +90,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_skip_dequant_constant_prop(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3).float()
 
             def forward(self, x):
@@ -133,7 +134,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # Test trivial case
         class TestModule(torch.nn.Module):
             def __init__(self, dim):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](1, 20, 5, 1)
                 self.bn = bn_module[dim](num_features=20)
                 self.bn.eps = 0.0023
@@ -176,7 +177,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # Test trivial case
         class TestModule(torch.nn.Module):
             def __init__(self, dim):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](1, 20, 5, 1, bias=False)
                 self.bn = bn_module[dim](num_features=20)
                 # to make sure new bias is not zero
@@ -220,7 +221,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
             def __init__(self, dim):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](1, 20, 5, 1)
                 self.bn = bn_module[dim](num_features=20)
 
@@ -231,7 +232,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, dim):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule(dim)
 
             def forward(self, x):
@@ -262,7 +263,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, dim, bias=False):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.conv1 = conv_module[dim](5, 5, 3, bias=bias)
                 self.bn1 = bn_module[dim](num_features=5)
                 self.bn1.running_mean.fill_(-0.2)
@@ -296,22 +297,16 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         """Test that we don't fuse the cases when module type does not match"""
 
         class CustomConv(torch.nn.Module):
-            def __init__(self):
-                super(CustomConv, self).__init__()
-
             def forward(self, x):
                 return x
 
         class CustomBn(torch.nn.Module):
-            def __init__(self):
-                super(CustomBn, self).__init__()
-
             def forward(self, x):
                 return x
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = CustomConv()
                 self.bn = CustomBn()
 
@@ -322,18 +317,18 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = fuse_conv_bn_jit(m)
         FileCheck().check_count("prim::CallMethod", 2, exactly=True).run(m.graph)
 
+    @set_default_dtype(torch.double)
     def test_foldbn_complex_cases(self):
         # This test case attempt to try combinations of conv2d/conv3d with bias/nobias
         # as well as BatchNorm with affine/no-affine along with varying the
         # number of layers.
         # this only works when default dtype is double
-        torch.set_default_dtype(torch.double)
         bn_module = {2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
         conv_module = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 
         class SubModule(torch.nn.Module):
             def __init__(self, dim, num_blocks, enable_bias, enable_affine):
-                super(SubModule, self).__init__()
+                super().__init__()
                 layers = []
                 for i in range(num_blocks):
                     layers.append(conv_module[dim](20, 20, 5, 1, bias=enable_bias))
@@ -353,7 +348,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class TestModule(torch.nn.Module):
             def __init__(self, dim, num_blocks, enable_bias, enable_affine):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.sub = SubModule(dim, num_blocks, enable_bias, enable_affine)
 
             def forward(self, x):
@@ -381,12 +376,10 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
             self.assertEqual(eager(x), scripted_or_traced(x))
 
-        torch.set_default_dtype(torch.float)
-
     def test_fuse_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
-                super(FunctionalLinear, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -430,7 +423,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         # check matmuls are not fused
         class Matmul(torch.nn.Module):
             def __init__(self, weight):
-                super(Matmul, self).__init__()
+                super().__init__()
                 self.weight = weight
 
             def forward(self, x):
@@ -449,7 +442,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
 
             def forward(self, x):
@@ -471,7 +464,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def addOne(self, inp):
@@ -482,7 +475,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.sub = Sub()
 
@@ -538,7 +531,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_child_qconfig(self):
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -546,7 +539,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.sub = Sub()
 
@@ -573,7 +566,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_skip_values(self):
         class ConvFunctionalReLU(torch.nn.Module):
             def __init__(self):
-                super(ConvFunctionalReLU, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
 
             def forward(self, x):
@@ -581,7 +574,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class ConvReLUModule(torch.nn.Module):
             def __init__(self):
-                super(ConvReLUModule, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.relu = torch.nn.ReLU()
 
@@ -590,7 +583,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class AddReLUModule(torch.nn.Module):
             def __init__(self):
-                super(AddReLUModule, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
@@ -601,7 +594,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class AddFunctionalReLU(torch.nn.Module):
             def __init__(self):
-                super(AddFunctionalReLU, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
@@ -651,7 +644,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_weight_dtype(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
 
             def forward(self, x):
@@ -660,16 +653,16 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         m = torch.jit.script(M())
         qconfig_dict = {"": default_qconfig}
         m = prepare_jit(m, qconfig_dict)
-        activation_dtypes = set(
+        activation_dtypes = {
             obs.getattr("dtype")
             for x, obs in m._modules._c.items()
             if x.startswith("_observer_")
-        )
-        weight_dtypes = set(
+        }
+        weight_dtypes = {
             obs.getattr("dtype")
             for x, obs in m.conv._modules._c.items()
             if x.startswith("_observer_")
-        )
+        }
         assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
         assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
         assert (
@@ -679,9 +672,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
     def test_insert_observers_for_reused_weight(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x, y, weight):
                 x = F.conv2d(x, weight)
                 y = F.conv2d(y, weight)
@@ -695,7 +685,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 5, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 5, 3).float()
 
@@ -722,7 +712,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
@@ -754,7 +744,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
@@ -792,7 +782,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
@@ -839,7 +829,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 1).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
 
@@ -874,7 +864,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_for_if(self):
         class QuantProp(torch.nn.Module):
             def __init__(self, use_skip):
-                super(QuantProp, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = use_skip
 
@@ -888,7 +878,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
-                super(Res, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = use_skip
 
@@ -900,7 +890,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.quant_prop = QuantProp(True)
                 self.res = Res(False)
 
@@ -948,7 +938,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_observers_for_nested_if(self):
         class Res(torch.nn.Module):
             def __init__(self, use_skip):
-                super(Res, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.cond = use_skip
                 self.use_skip = use_skip
@@ -964,7 +954,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.res1 = Res(True)
                 self.res2 = Res(False)
 
@@ -990,7 +980,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, cond):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
                 self.cond = cond
 
@@ -1003,7 +993,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M2(torch.nn.Module):
             def __init__(self, cond):
-                super(M2, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
                 self.cond = cond
@@ -1041,7 +1031,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3).float()
 
             def forward(self, x):
@@ -1075,7 +1065,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_insert_quant_dequant_shared_class_type(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
@@ -1141,7 +1131,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_dedup_module_uses(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
@@ -1166,7 +1156,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_replicate_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
 
             def forward(self, x):
@@ -1188,7 +1178,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_replicate_dequantize_in_block(self):
         class M(torch.nn.Module):
             def __init__(self, cond):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
 
                 self.cond = cond
@@ -1224,9 +1214,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             return torch.nn.functional.linear(input, weight, bias)
 
         class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
             def forward(self, x, weight, bias):
                 x = torch.dequantize(x)
                 weight = torch.dequantize(weight)
@@ -1259,7 +1246,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class Res(torch.nn.Module):
             def __init__(self):
-                super(Res, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
@@ -1274,7 +1261,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.res1 = Res()
                 self.res2 = Res()
 
@@ -1293,7 +1280,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_finalize_for_linear(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
 
             def forward(self, x):
@@ -1325,7 +1312,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_finalize_debug(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
                 self.avgpool = torch.nn.AvgPool2d(3)
 
@@ -1353,7 +1340,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_module_list(self):
         class SimpleLinearLayer(torch.nn.Module):
             def __init__(self):
-                super(SimpleLinearLayer, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
 
             def forward(self, x):
@@ -1361,7 +1348,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class ComplexModel(torch.nn.Module):
             def __init__(self):
-                super(ComplexModel, self).__init__()
+                super().__init__()
                 self.layers = torch.nn.ModuleList(
                     [SimpleLinearLayer() for i in range(2)]
                 )
@@ -1387,7 +1374,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_conv_trace(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1d = torch.nn.Conv1d(3, 3, 3).float()
                 self.conv2d = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv3d = torch.nn.Conv3d(3, 3, 3).float()
@@ -1419,7 +1406,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_convtranspose_trace(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.convtranspose1d = torch.nn.ConvTranspose1d(3, 3, 3).float()
                 self.convtranspose2d = torch.nn.ConvTranspose2d(3, 3, 3).float()
                 self.convtranspose3d = torch.nn.ConvTranspose3d(3, 3, 3).float()
@@ -1456,7 +1443,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_replicate_dequant_same_value(self):
         class Mul(torch.nn.Module):
             def __init__(self):
-                super(Mul, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3).float()
 
             def forward(self, x):
@@ -1472,7 +1459,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
     def test_interface_with_fork(self):
         class SubModule(torch.nn.Module):
             def __init__(self):
-                super(SubModule, self).__init__()
+                super().__init__()
                 self.embedding1 = torch.nn.EmbeddingBag(
                     num_embeddings=10,
                     embedding_dim=12,
@@ -1486,7 +1473,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class OrigMod(torch.nn.Module):
             def __init__(self):
-                super(OrigMod, self).__init__()
+                super().__init__()
                 self.embedding1 = torch.nn.EmbeddingBag(
                     num_embeddings=10,
                     embedding_dim=12,
@@ -1507,7 +1494,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             proxy_mod: ModInterface
 
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.proxy_mod = OrigMod()
                 self.sub = SubModule()
 
@@ -1518,7 +1505,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class MainModule(torch.nn.Module):
             def __init__(self):
-                super(MainModule, self).__init__()
+                super().__init__()
                 self.test = TestModule()
 
             def forward(self, x, y):
@@ -1586,7 +1573,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class MainModule(nn.Module):
             def __init__(self):
-                super(MainModule, self).__init__()
+                super().__init__()
                 self.fork_ops = ForkModule()
 
             def init_values(self, x):
@@ -1598,9 +1585,6 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 return val
 
         class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-
             def forward(self, x):
                 w = torch.ones(5, 5)
                 b = torch.zeros(5)
@@ -1608,7 +1592,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         class ForkModule(nn.Module):
             def __init__(self):
-                super(ForkModule, self).__init__()
+                super().__init__()
                 self.test = TestModule()
 
             def forward(self, x):
@@ -1634,7 +1618,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_linear(self):
         class ModuleLinear(torch.nn.Module):
             def __init__(self, has_relu=False, f_relu=False):
-                super(ModuleLinear, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(30, 4).float()
                 if has_relu:
                     if f_relu:
@@ -1649,7 +1633,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class FuncLinear(torch.nn.Module):
             def __init__(self, has_relu=False, f_relu=False):
-                super(FuncLinear, self).__init__()
+                super().__init__()
                 self.w = torch.randn(4, 30)
                 self.b = torch.randn(4)
                 if has_relu:
@@ -1696,7 +1680,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class Conv(torch.nn.Module):
             def __init__(self, dim):
-                super(Conv, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -1707,7 +1691,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             model = self.checkGraphModeOp(
                 Conv(dim),
                 self.img_data_dict[dim],
-                "quantized::conv{}d".format(dim),
+                f"quantized::conv{dim}d",
                 tracing,
             )
             # make sure there is only one quantize_per_tensor for input
@@ -1716,7 +1700,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 model.graph
             )
 
-            FileCheck().check_not("quantized::conv{}d_prepack".format(dim)).run(
+            FileCheck().check_not(f"quantized::conv{dim}d_prepack").run(
                 model.graph
             )
 
@@ -1727,7 +1711,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class ConvNdRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
-                super(ConvNdRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -1736,7 +1720,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class ConvNdFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(ConvNdFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -1744,7 +1728,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class ConvNdInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(ConvNdInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = conv_module[dim](3, 3, 3).float()
 
             def forward(self, x):
@@ -1758,17 +1742,17 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 ConvNdFunctionalRelu(dim),
                 ConvNdInplaceFunctionalRelu(dim),
             ]:
-                conv_name = "conv{}d".format(dim)
+                conv_name = f"conv{dim}d"
                 m = self.checkGraphModeOp(
                     orig_m,
                     self.img_data_dict[dim],
-                    "quantized::conv{}d_relu(".format(dim),
+                    f"quantized::conv{dim}d_relu(",
                     tracing=tracing,
                 )
 
-                FileCheck().check_not("aten::conv{}d(".format(dim)).check_not(
+                FileCheck().check_not(f"aten::conv{dim}d(").check_not(
                     "aten::relu"
-                ).check_not("quantized::conv{}d(".format(dim)).check_not(
+                ).check_not(f"quantized::conv{dim}d(").check_not(
                     "quantized::relu("
                 ).run(
                     m.graph
@@ -1782,7 +1766,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
-                super(QuantizedAdd, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1812,7 +1796,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(AddRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -1827,7 +1811,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(InplaceAddRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -1842,7 +1826,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1856,7 +1840,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1870,7 +1854,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1884,7 +1868,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1931,7 +1915,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_add(self):
         class QuantizedAdd(torch.nn.Module):
             def __init__(self):
-                super(QuantizedAdd, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1942,7 +1926,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedInplaceAdd(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInplaceAdd, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -1953,16 +1937,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 return x
 
         class NonQuantizedAdd(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedAdd, self).__init__()
-
             def forward(self, x, y):
                 return x + y
 
         class NonQuantizedInplaceAdd(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInplaceAdd, self).__init__()
-
             def forward(self, x, y):
                 x += y
                 return x
@@ -1994,7 +1972,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_add_scalar(self):
         class QuantizedAddScalar(torch.nn.Module):
             def __init__(self):
-                super(QuantizedAddScalar, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2003,7 +1981,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedInplaceAddScalar(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInplaceAddScalar, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2012,16 +1990,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 return x
 
         class NonQuantizedAddScalar(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedAddScalar, self).__init__()
-
             def forward(self, x):
                 return x + 3
 
         class NonQuantizedInplaceAddScalar(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInplaceAddScalar, self).__init__()
-
             def forward(self, x):
                 x += 3
                 return x
@@ -2050,7 +2022,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_add_relu(self):
         class AddRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(AddRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -2063,7 +2035,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(InplaceAddRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -2076,7 +2048,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2088,7 +2060,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2100,7 +2072,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2112,7 +2084,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2152,7 +2124,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_add_scalar_relu(self):
         class AddScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(AddScalarRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -2162,7 +2134,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(InplaceAddScalarRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -2173,7 +2145,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddScalarFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2182,7 +2154,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddScalarFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2192,7 +2164,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class AddScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(AddScalarInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2201,7 +2173,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceAddScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceAddScalarInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2244,7 +2216,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedCat(torch.nn.Module):
             def __init__(self):
-                super(QuantizedCat, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2254,9 +2226,6 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 return torch.cat([x, y], 1)
 
         class NonQuantizedCat(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedCat, self).__init__()
-
             def forward(self, x, y):
                 return torch.cat([x, y], 1)
 
@@ -2283,7 +2252,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self, dim):
-                super(M, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -2303,7 +2272,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class BNRelu(torch.nn.Module):
             def __init__(self, dim, inplace):
-                super(BNRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
                 self.relu = torch.nn.ReLU(inplace=inplace)
 
@@ -2326,7 +2295,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class BNFuncRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(BNFuncRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -2348,7 +2317,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class BNFuncInplaceRelu(torch.nn.Module):
             def __init__(self, dim):
-                super(BNFuncInplaceRelu, self).__init__()
+                super().__init__()
                 self.bn = bn_module[dim](3).to(torch.float)
 
             def forward(self, x):
@@ -2368,7 +2337,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_mul(self):
         class QuantizedMul(torch.nn.Module):
             def __init__(self):
-                super(QuantizedMul, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2379,7 +2348,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedInplaceMul(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInplaceMul, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2390,16 +2359,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 return x
 
         class NonQuantizedMul(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedMul, self).__init__()
-
             def forward(self, x, y):
                 return x * y
 
         class NonQuantizedInplaceMul(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInplaceMul, self).__init__()
-
             def forward(self, x, y):
                 x *= y
                 return x
@@ -2431,7 +2394,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_mul_scalar(self):
         class QuantizedMulScalar(torch.nn.Module):
             def __init__(self):
-                super(QuantizedMulScalar, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2440,7 +2403,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class QuantizedInplaceMulScalar(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInplaceMulScalar, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2449,16 +2412,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 return x
 
         class NonQuantizedMulScalar(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedMulScalar, self).__init__()
-
             def forward(self, x):
                 return x * 3
 
         class NonQuantizedInplaceMulScalar(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInplaceMulScalar, self).__init__()
-
             def forward(self, x):
                 x *= 3
                 return x
@@ -2487,7 +2444,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_mul_relu(self):
         class MulRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(MulRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -2500,7 +2457,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(InplaceMulRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
@@ -2513,7 +2470,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class MulFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(MulFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2525,7 +2482,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceMulFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2537,7 +2494,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class MulInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(MulInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2549,7 +2506,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceMulInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -2589,7 +2546,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_quantized_mul_scalar_relu(self):
         class MulScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(MulScalarRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -2599,7 +2556,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulScalarRelu(torch.nn.Module):
             def __init__(self, inplace):
-                super(InplaceMulScalarRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu = torch.nn.ReLU(inplace)
 
@@ -2610,7 +2567,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class MulScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(MulScalarFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2619,7 +2576,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulScalarFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceMulScalarFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2629,7 +2586,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class MulScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(MulScalarInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2638,7 +2595,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class InplaceMulScalarInplaceFunctionalRelu(torch.nn.Module):
             def __init__(self):
-                super(InplaceMulScalarInplaceFunctionalRelu, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
 
             def forward(self, x):
@@ -2676,7 +2633,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_hardswish(self):
         class FunctionalHardswish(torch.nn.Module):
             def __init__(self, inplace):
-                super(FunctionalHardswish, self).__init__()
+                super().__init__()
                 self.inplace = inplace
 
             def forward(self, input):
@@ -2701,7 +2658,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_elu(self):
         class FunctionalELU(torch.nn.Module):
             def __init__(self, inplace=False):
-                super(FunctionalELU, self).__init__()
+                super().__init__()
                 self.inplace = inplace
 
             def forward(self, input):
@@ -2760,7 +2717,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
@@ -2776,7 +2733,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_clamp(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(2, 2, 2).float()
                 self.relu6 = torch.nn.ReLU6()
                 self.relu6_ = torch.nn.ReLU6(True)
@@ -2817,7 +2774,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
                 self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
@@ -2933,12 +2890,12 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
-                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d(1)
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
                 self.leaky_relu = torch.nn.LeakyReLU()
@@ -3058,7 +3015,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
     def test_cat_linear(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
-                super(LinearModel, self).__init__()
+                super().__init__()
                 self.weight = torch.randn(5, 5)
 
             def forward(self, x, y):
@@ -3082,7 +3039,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -3109,7 +3066,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic_child_qconfig(self):
         class Sub(torch.nn.Module):
             def __init__(self):
-                super(Sub, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -3117,7 +3074,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.sub = Sub()
 
@@ -3147,7 +3104,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc1 = torch.nn.Linear(5, 5).float()
                 self.fc2 = torch.nn.Linear(5, 5).float()
 
@@ -3198,7 +3155,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_dynamic_multi_op(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
             def forward(self, x):
@@ -3217,7 +3174,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_dynamic_quant_multi_uses(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
 
             def forward(self, x):
@@ -3245,7 +3202,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         class DynamicModel(torch.nn.Module):
             def __init__(self):
-                super(DynamicModel, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(5, 5))
                 self.mod1 = myMod(self.weight)
 
@@ -3278,7 +3235,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_dynamic_with_if(self):
         class Res(torch.nn.Module):
             def __init__(self):
-                super(Res, self).__init__()
+                super().__init__()
                 self.weight = torch.nn.Parameter(torch.ones(5, 5))
 
             def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
@@ -3289,7 +3246,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
 
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.res1 = Res()
                 self.res2 = Res()
 
@@ -3334,7 +3291,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_dynamic_weight_observer(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
                 self.fc2 = torch.nn.Linear(5, 5).float()
 
@@ -3366,7 +3323,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_convert_dynamic_fp16(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -3381,7 +3338,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_quantize_dynamic_fp16(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.fc = torch.nn.Linear(5, 5)
 
             def forward(self, x):
@@ -3404,7 +3361,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     def test_linear(self):
         class FunctionalLinear(torch.nn.Module):
             def __init__(self, weight, bias):
-                super(FunctionalLinear, self).__init__()
+                super().__init__()
                 self.weight = weight
                 self.bias = bias
 
@@ -3437,7 +3394,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     def test_embedding_bag(self):
         class M(torch.nn.Module):
             def __init__(self, weights):
-                super(M, self).__init__()
+                super().__init__()
                 self.embedding1 = torch.nn.EmbeddingBag(
                     num_embeddings=10,
                     embedding_dim=12,
@@ -3536,7 +3493,7 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     def test_embedding_bag_padding_idx_error(self):
         class M(torch.nn.Module):
             def __init__(self, weights):
-                super(M, self).__init__()
+                super().__init__()
                 self.embedding = torch.nn.EmbeddingBag(
                     num_embeddings=10,
                     embedding_dim=12,

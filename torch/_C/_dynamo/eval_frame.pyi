@@ -1,6 +1,11 @@
 import types
-from typing import Union
+from typing import NewType
+
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
+
+# We implement our own FrameType-like type for Python >= 3.11. So it's not actually an alias of FrameType, but still
+# exposes the same interface.
+_PyInterpreterFrame = NewType("_PyInterpreterFrame", types.FrameType)
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...

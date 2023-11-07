@@ -132,6 +132,7 @@ def define_tools_targets(
             "autograd/templates/python_linalg_functions.cpp",
             "autograd/templates/python_nested_functions.cpp",
             "autograd/templates/python_nn_functions.cpp",
+            "autograd/templates/python_return_types.h",
             "autograd/templates/python_return_types.cpp",
             "autograd/templates/python_sparse_functions.cpp",
             "autograd/templates/python_special_functions.cpp",
@@ -286,5 +287,20 @@ def define_tools_targets(
         deps = [
             torchgen_deps,
             ":autograd",
+        ],
+    )
+
+    python_test(
+        name = "test_torchgen_executorch",
+        srcs = [
+            "test/test_executorch_gen.py",
+            "test/test_executorch_signatures.py",
+            "test/test_executorch_types.py",
+            "test/test_executorch_unboxing.py",
+        ],
+        contacts = contacts,
+        visibility = ["PUBLIC"],
+        deps = [
+            torchgen_deps,
         ],
     )

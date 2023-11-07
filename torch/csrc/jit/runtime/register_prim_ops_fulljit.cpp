@@ -1,6 +1,8 @@
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -24,8 +26,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -260,7 +261,7 @@ RegisterOperators reg({
         },
         aliasAnalysisFromSchema()),
     // NB: backward op might write to every input tensors in the graph and it's
-    // much more expensive to analayze the leaves and sometimes it might retain
+    // much more expensive to analyze the leaves and sometimes it might retain
     // the whole gradients in every tensor of the Autograd graph with
     // create_graph=True so we use aliasAnalysisConservative for these two OPs
     Operator(
@@ -370,8 +371,7 @@ RegisterOperators logging_operators(
              tracer::recordSourceLocation(node);
              graph->insertNode(node);
            }
-           auto output =
-               torch::profiler::impl::getTime(/*allow_monotonic=*/true);
+           auto output = c10::getTime(/*allow_monotonic=*/true);
            push(stack, output);
            if (jit::tracer::isTracing()) {
              jit::tracer::addOutput(node, output);
@@ -870,5 +870,4 @@ static auto reg4 =
         .op("_test::get_first", &get_first);
 
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

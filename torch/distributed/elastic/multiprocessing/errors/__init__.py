@@ -67,7 +67,7 @@ from .handlers import get_error_handler  # noqa: F401
 
 __all__ = ["ProcessFailure", "ChildFailedError", "record", "ErrorHandler", "get_error_handler"]
 
-log = get_logger()
+log = get_logger(__name__)
 
 
 JSON = Dict
@@ -109,16 +109,16 @@ class ProcessFailure:
         self.error_file_data = _EMPTY_ERROR_DATA
         if os.path.isfile(self.error_file):
             try:
-                with open(self.error_file, "r") as fp:
+                with open(self.error_file) as fp:
                     self.error_file_data = json.load(fp)
                     log.debug(
-                        f"User process failed with error data: {json.dumps(self.error_file_data, indent=2)}"
+                        "User process failed with error data: %s", json.dumps(self.error_file_data, indent=2)
                     )
                     self.message, self.timestamp = self._get_error_data(
                         self.error_file_data
                     )
             except Exception:
-                log.exception(f"Failed to parse reply file: {self.error_file}")
+                log.exception("Failed to parse reply file: %s", self.error_file)
                 raise
         else:
             self._set_no_reply_file()
@@ -150,7 +150,12 @@ class ProcessFailure:
 
     def signal_name(self) -> str:
         if self.exitcode < 0:
-            return signal.Signals(-self.exitcode).name
+            # We don't want to kill the parent process trying to find the signal name.
+            # if the signal doesn't map to a known name, use not available.
+            try:
+                return signal.Signals(-self.exitcode).name
+            except Exception:
+                return _NOT_AVAILABLE
         else:
             return _NOT_AVAILABLE
 
@@ -351,9 +356,10 @@ def record(
                 else:
                     log.info(
                         (
-                            f"local_rank {rank} FAILED with no error file."
-                            f" Decorate your entrypoint fn with @record for traceback info."
-                            f" See: https://pytorch.org/docs/stable/elastic/errors.html"
+                            "local_rank %s FAILED with no error file."
+                            " Decorate your entrypoint fn with @record for traceback info."
+                            " See: https://pytorch.org/docs/stable/elastic/errors.html",
+                            rank
                         )
                     )
                 raise

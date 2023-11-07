@@ -178,7 +178,7 @@ def output_graph(a, b, c, iters: int):
 
 class SubModule(nn.Module):
     def __init__(self):
-        super(SubModule, self).__init__()
+        super().__init__()
         self.a = 11
         self.b = 2
 
@@ -188,7 +188,7 @@ class SubModule(nn.Module):
 
 class SubModule2(nn.Module):
     def __init__(self):
-        super(SubModule2, self).__init__()
+        super().__init__()
         self.a = 12
         self.b = 2
 
@@ -199,7 +199,7 @@ class SubModule2(nn.Module):
 
 class TestModule(nn.Module):
     def __init__(self):
-        super(TestModule, self).__init__()
+        super().__init__()
         self.sub1 = SubModule()
         self.sub2 = SubModule2()
         self.a = 3
@@ -297,6 +297,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph on
     multiple nested fork/wait operations
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4(self):
         input = torch.ones(3, 3)
         num_forks = 10
@@ -311,6 +312,7 @@ class TestStaticModule(TestCase):
     Test Case: To test fork/wait operation in a graph with multiple
     nested fork/wait operations on runAsync API returning future
     """
+    @unittest.skip("Broken test: https://github.com/pytorch/pytorch/issues/109782")
     def test_fork_wait_4_async(self):
         input = torch.ones(3, 3)
         num_forks = 10

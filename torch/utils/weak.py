@@ -1,12 +1,17 @@
+from __future__ import annotations
+
 import weakref
 from weakref import ref
 from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
 from collections.abc import MutableMapping, Mapping
-from typing import Dict
+from torch import Tensor
 import collections.abc as _collections_abc
 
 
-__all__ = ['WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
+WeakRef = ref
+
+
+__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
 
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
@@ -44,7 +49,7 @@ class WeakIdRef(weakref.ref):
         # cache the id of the key as we know this is definitely the hash
         # method
         self._id = id(key)
-        super().__init__(key, callback)
+        super().__init__(key, callback)  # type: ignore[call-arg]
 
     def __call__(self):
         r = super().__call__()
@@ -77,7 +82,7 @@ class WeakIdRef(weakref.ref):
 
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    data: Dict[WeakIdRef, object]
+    data: dict[WeakIdRef, object]
 
     def __init__(self, dict=None):
         self.data = {}
@@ -138,7 +143,7 @@ class WeakIdKeyDictionary(MutableMapping):
         return len(self.data) - len(self._pending_removals)
 
     def __repr__(self):
-        return "<%s at %#x>" % (self.__class__.__name__, id(self))
+        return f"<{self.__class__.__name__} at {id(self):#x}>"
 
     def __setitem__(self, key, value):
         self.data[WeakIdRef(key, self._remove)] = value  # CHANGED
@@ -261,3 +266,25 @@ class WeakIdKeyDictionary(MutableMapping):
 
 # Convenience alias
 WeakTensorKeyDictionary = WeakIdKeyDictionary
+
+
+class TensorWeakRef:
+    """
+    Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required
+    when unwrapping a Tensor weakref.
+    """
+
+    ref: WeakRef[Tensor]
+
+    def __init__(self, tensor: Tensor):
+        assert isinstance(tensor, Tensor)
+        self.ref = weakref.ref(tensor)
+
+    def __call__(self):
+        out = self.ref()
+        if out is None:
+            return out
+        assert isinstance(out, Tensor)
+        # TODO, add _fix_weakref type binding
+        out._fix_weakref()  # type: ignore[attr-defined]
+        return out

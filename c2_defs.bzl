@@ -163,8 +163,6 @@ def get_c2_fbobjc_xplat_compiler_flags():
 
 def get_c2_fbandroid_xplat_compiler_flags():
     flags = [
-        # T95767731 -- remove this once all builds are on at least llvm-13
-        "-Wno-unknown-warning-option",
         "-Wno-unused-but-set-variable",
         "-DHAVE_MMAP",
     ]
@@ -324,43 +322,28 @@ def get_c2_default_cxx_args():
     )
 
 def get_c2_aten_cpu_fbobjc_macosx_deps():
-    if is_focus_enabled():
-        # focus2 is broken when using platform deps (T80070498) so in the case
-        # where it's focus2 we just add fbgemm as a standard dep. Otherwise we
-        # use platform deps to select correctly for arm64.
-        return [
-            "fbsource//xplat/deeplearning/fbgemm:fbgemm",
-            "fbsource//xplat/caffe2:cpukernel_avx2",
-        ]
-    else:
-        return select({
-            "DEFAULT": [],
-            "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
-        }) if is_arvr_mode() else []
+    return select({
+        "DEFAULT": [],
+        "ovr_config//os:macos-x86_64": ["fbsource//xplat/deeplearning/fbgemm:fbgemm"],
+    }) if is_arvr_mode() else []
 
 def get_c2_aten_cpu_fbobjc_macosx_platform_deps():
-    if is_focus_enabled():
-        # focus2 is broken when using platform deps (T80070498) so in the case
-        # where it's focus2 we just add fbgemm as a standard dep. Otherwise we
-        # use platform deps to select correctly for arm64.
-        return []
-    else:
-        return compose_platform_setting_list([
-            {
-                "cpu": "x86_64",
-                "flags": [
-                    "fbsource//xplat/deeplearning/fbgemm:fbgemmAppleMac",
-                ] + ([
-                    "fbsource//xplat/caffe2:cpukernel_avx2AppleMac",
-                ] if not is_arvr_mode() else []),
-                "os": "macosx",
-            },
-            {
-                "cpu": "arm64",
-                "flags": ["fbsource//xplat/third-party/XNNPACK:XNNPACKAppleMac"],
-                "os": "macosx",
-            },
-        ])
+    return compose_platform_setting_list([
+        {
+            "cpu": "x86_64",
+            "flags": [
+                "fbsource//xplat/deeplearning/fbgemm:fbgemmAppleMac",
+            ] + ([
+                "fbsource//xplat/caffe2:cpukernel_avx2AppleMac",
+            ] if not is_arvr_mode() else []),
+            "os": "macosx",
+        },
+        {
+            "cpu": "arm64",
+            "flags": ["fbsource//xplat/third-party/XNNPACK:XNNPACKAppleMac"],
+            "os": "macosx",
+        },
+    ])
 
 def using_protobuf_v3():
     # Consider migrating this to `read_config("protobuf", "use_v3")`
@@ -370,10 +353,13 @@ def using_protobuf_v3():
 def get_c2_protobuf_dep():
     return "fbsource//third-party/protobuf:libprotobuf" if using_protobuf_v3() else "fbsource//xplat/third-party/protobuf:fb-protobuf-lite"
 
-def c2_cxx_library(**kwargs):
+def c2_cxx_library(fbobjc_compiler_flags = [], **kwargs):
     args = get_c2_default_cxx_args()
     args.update(kwargs)
     args.setdefault("platforms", (ANDROID, APPLE, CXX, WINDOWS))
+
+    # Make sure we don't overwrite custom `fbobjc_compiler_flags`
+    args["fbobjc_compiler_flags"] = args.pop("fbobjc_compiler_flags", []) + fbobjc_compiler_flags
 
     fb_xplat_cxx_library(
         labels = [
@@ -390,19 +376,17 @@ def c2_protobuf_rule(protos):
     raw_headers = {}
     for p in protos:
         proto = paths.basename(p)
-        if native.host_info().os.is_windows:
-            protocexe = "$(exe fbsource//third-party/protobuf:protoc-host)" if is_arvr_mode() else "$(location fbsource//xplat/third-party/protobuf:protoc.Windows)"
-            protocmd = "powershell.exe -file $(location fbsource//xplat/caffe2/scripts:proto)\\proto.ps1 -Protoc {} -Unprocessed $SRCDIR/{} -Processed $SRCDIR/{} -out $OUT -srcdir $SRCDIR".format(protocexe, p, proto)
-        else:
-            protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && chmod +w $SRCDIR/{} && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/{} && ".format(p, proto, proto, proto) +
-                        "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && chmod +w $SRCDIR/caffe2.proto && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/caffe2.proto && " +
-                        "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
-                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
-                        "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
+        protocexe = "$(exe fbsource//third-party/protobuf:protoc-host)" if is_arvr_mode() else "$(location fbsource//xplat/third-party/protobuf:protoc.Windows)"
+        protocmd_exe  = "powershell.exe -file $(location fbsource//xplat/caffe2/scripts:proto)\\proto.ps1 -Protoc {} -Unprocessed $SRCDIR/{} -Processed $SRCDIR/{} -out $OUT -srcdir $SRCDIR".format(protocexe, p, proto)
+        protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && chmod +w $SRCDIR/{} && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/{} && ".format(p, proto, proto, proto) +
+                    "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && chmod +w $SRCDIR/caffe2.proto && echo \"option optimize_for = LITE_RUNTIME;\" >> $SRCDIR/caffe2.proto && " +
+                    "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
+                   ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
+                    "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
         buck_genrule(
             name = proto,
             srcs = sorted(collections.uniq([p, "caffe2/proto/caffe2.proto"])),
-            cmd_exe = protocmd,
+            cmd_exe = protocmd_exe,
             bash = protocmd,
             out = ".",
         )
@@ -437,19 +421,18 @@ def c2_full_protobuf_rule(protos):
     raw_headers = {}
     for p in protos:
         proto = paths.basename(p)
-        if native.host_info().os.is_windows:
-            protocexe = "$(exe fbsource//third-party/protobuf:protoc-host)" if is_arvr_mode() else "$(location fbsource//xplat/third-party/protobuf:protoc.Windows)"
-            protocmd = "powershell.exe -file $(location fbsource//xplat/caffe2/scripts:proto)\\proto.ps1 -Protoc {} -Unprocessed $SRCDIR/{} -Processed $SRCDIR/{} -out $OUT -srcdir $SRCDIR".format(protocexe, p, proto)
-        else:
-            protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && ".format(p, proto) +
-                        "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && " +
-                        "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
-                        ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
-                        "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
+        protocexe = "$(exe fbsource//third-party/protobuf:protoc-host)" if is_arvr_mode() else "$(location fbsource//xplat/third-party/protobuf:protoc.Windows)"
+        protocmd_exe = "powershell.exe -file $(location fbsource//xplat/caffe2/scripts:proto)\\proto.ps1 -Protoc {} -Unprocessed $SRCDIR/{} -Processed $SRCDIR/{} -out $OUT -srcdir $SRCDIR".format(protocexe, p, proto)
+        protocmd = ("cp $SRCDIR/{} $SRCDIR/{} && ".format(p, proto) +
+                    "cp $SRCDIR/caffe2/proto/caffe2.proto $SRCDIR/caffe2.proto && " +
+                    "sed -i -e 's/caffe2\\/proto\\/caffe2.proto/caffe2.proto/g' $SRCDIR/{} && ".format(proto) +
+                   ("$(exe fbsource//third-party/protobuf:protoc-host) " if using_protobuf_v3() else "$(exe fbsource//xplat/third-party/protobuf:protoc) --osx $(location fbsource//xplat/third-party/protobuf:protoc.Darwin) --linux $(location fbsource//xplat/third-party/protobuf:protoc.Linux) ") +
+                    "-I $SRCDIR --cpp_out=$OUT $SRCDIR/{}".format(proto))
         buck_genrule(
             name = prefix + proto,
             srcs = sorted(collections.uniq([p, "caffe2/proto/caffe2.proto"])),
             cmd = protocmd,
+            cmd_exe = protocmd_exe,
             out = ".",
         )
         (name, _) = paths.split_extension(proto)

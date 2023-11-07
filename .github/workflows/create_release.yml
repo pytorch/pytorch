@@ -2,11 +2,9 @@ name: Create Release
 
 on:
   push:
-    tags: ['v*']
     branches:
-      - master
       - main
-      - nightly
+      - release/*
   release:
     types: [published]
   pull_request:
@@ -32,6 +30,8 @@ jobs:
         run: |
           tag_or_branch="${PT_GITHUB_REF#refs/tags/}"
           tag_or_branch="${tag_or_branch#refs/heads/}"
+          # replace directory separators with _ in branch name
+          tag_or_branch="${tag_or_branch//\//_}"
           echo "PT_RELEASE_NAME=pytorch-$tag_or_branch" >> "$GITHUB_ENV"
           echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
       - name: Create source distribution
@@ -53,5 +53,5 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
   cancel-in-progress: true

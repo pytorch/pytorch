@@ -6,12 +6,14 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO, IS_WINDOWS,
     xfail_inherited_tests
 )
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode, dispatch_functionalize
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
-from torch.utils._pytree import tree_map, tree_map_only, tree_flatten
+from torch.utils._pytree import tree_map_only
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.reinplace import reinplace
 from torch._dispatch.python import enable_crossref_functionalize, enable_python_dispatcher
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils import _pytree as pytree
 
 import unittest
 
@@ -23,7 +25,7 @@ def are_aliased(x, y):
 # We can unify testing and use functionalize() here instead
 # if/when functorch moves into core.
 # This is basically a crappy version of `functionalize()`.
-def _functionalize(f, *, reapply_views: bool, crossref: bool):
+def _functionalize(f, *, reapply_views: bool, crossref: bool, skip_input_mutations: bool = False):
     def to_fun(t: torch.Tensor):
         func_t = torch._to_functional_tensor(t)
         func_t.requires_grad = t.requires_grad
@@ -40,18 +42,19 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool):
                 out = f(*inputs_functional)
             finally:
                 torch._disable_functionalization()
-            flat_inputs, _ = tree_flatten(inputs)
-            flat_inputs_functional, _ = tree_flatten(inputs_functional)
+            flat_inputs = pytree.tree_leaves(inputs)
+            flat_inputs_functional = pytree.tree_leaves(inputs_functional)
+
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
                 inpt_new = torch._from_functional_tensor(input_functional)
-                if inpt_new is not inpt:
+                if inpt_new is not inpt and not skip_input_mutations:
                     # Existing deficiency in functionalize():
                     # we don't correctly mutate input metadata (yet?)
                     if inpt_new.shape == inpt.shape:
                         inpt.copy_(inpt_new)
-            tree_map(torch._sync, out)
-            out_unwrapped = tree_map(torch._from_functional_tensor, out)
+            tree_map_only(torch.Tensor, torch._sync, out)
+            out_unwrapped = tree_map_only(torch.Tensor, torch._from_functional_tensor, out)
             return out_unwrapped
 
     return wrapped
@@ -89,9 +92,9 @@ class TestFunctionalization(TestCase):
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            flat_inpts, _ = tree_flatten(inpts)
-            flat_clones1, _ = tree_flatten(clones1)
-            flat_clones3, _ = tree_flatten(clones3)
+            flat_inpts = pytree.tree_leaves(inpts)
+            flat_clones1 = pytree.tree_leaves(clones1)
+            flat_clones3 = pytree.tree_leaves(clones3)
             for inpt, input_clone, input_clone3 in zip(flat_inpts, flat_clones1, flat_clones3):
                 self.assertEqual(inpt, input_clone)  # input mutations should still occur
                 self.assertEqual(inpt, input_clone3)
@@ -197,7 +200,7 @@ def forward(self, arg0_1):
     view_copy_3 = torch.ops.aten.view_copy.default(view_copy_2, [16, 64, 128, 128]);  view_copy_2 = None
     view_copy_4 = torch.ops.aten.view_copy.default(clone, [16, 64, 128, 128]);  clone = None
     sum_1 = torch.ops.aten.sum.default(view_copy_3)
-    ones_like = torch.ops.aten.ones_like.default(sum_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand_copy = torch.ops.aten.expand_copy.default(ones_like, [16, 64, 128, 128]);  ones_like = None
     view_copy_5 = torch.ops.aten.view_copy.default(expand_copy, [1, 1024, 128, 128]);  expand_copy = None
     new_empty_strided = torch.ops.aten.new_empty_strided.default(view_copy_5, [1, 1024, 128, 128], [16777216, 16384, 128, 1])
@@ -582,6 +585,21 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = None
     return diagonal_scatter
     """)
+
+    def test_channels_last_contiguous(self):
+        def f(x):
+            return x.contiguous(memory_format=torch.channels_last)
+            tmp = torch.ones(2)
+            y = x.diagonal()
+            y.add_(tmp)
+            return x
+        x = torch.randn(4, 8, 8, 3).permute(0, 3, 1, 2)
+        self.assert_functionalization(f, x)
+        logs = self.get_logs(f, x).strip()
+        # There should be no clone in the graph
+        self.assertExpectedInline(logs, """\
+def forward(self, arg0_1):
+    return arg0_1""")
 
     def test_split(self):
         def f(x):
@@ -1189,6 +1207,14 @@ def forward(self, arg0_1):
     return as_strided_3
     """)
 
+    def test_resize_same_size_diff_rank(self):
+        def f(x):
+            y = x.clone()
+            y.resize_(25, 5)
+            return y
+
+        self.assert_functionalization(f, torch.ones(5, 5, 5))
+
     def test_resize_larger_valid(self):
         def f(x):
             y = x + 1
@@ -1289,8 +1315,8 @@ def forward(self, arg0_1):
         # Make sure that functionalization ran the "+" kernel
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
-$2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
+$2: f32[4] = torch._ops.aten.add.Tensor($0, $1)
+$3: f32[4] = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -1424,10 +1450,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """)  # noqa: B950
 
 
+    def test_mutation_overlapping_mem(self):
+        def fn(x):
+            # x: (1, 5)
+            t1 = torch.add(x, x)
+            t2 = t1.unfold(1, 3, 2)
+            t3 = t2.abs_()
+            return t3
+
+        with self.assertRaisesRegex(RuntimeError, r'encountered a tensor being mutated that has internal overlap'):
+            x = torch.ones(1, 5)
+            out = _functionalize(fn, reapply_views=True, crossref=False)(x)
+
+
     def test_batch_norm(self):
         def f(x, running_mean, running_var):
             with enable_python_dispatcher():
-                return torch.batch_norm(x, None, None, running_mean, running_var, False, 0.1, 1e-5, False)
+                return torch.batch_norm(x, None, None, running_mean, running_var, True, 0.1, 1e-5, False)
 
         self.assert_functionalization(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
         logs = self.get_logs(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
@@ -1437,7 +1476,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
@@ -1457,7 +1496,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
@@ -1468,6 +1507,168 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return getitem
     """)  # noqa: B950
 
+    # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
+    def test_python_functionalization(self):
+        def f(x):
+            x_view = x.view(-1)
+            x.mul_(2)
+            return x_view + 1
+
+        def f_functionalized(x):
+            x_wrapped = FunctionalTensor.to_functional(x)
+
+            # Note [Disabling Functionalize TLS Above Python Functionalization]
+            # This UX is pretty annoying (although python functionalization's main customer is AOTAutograd,
+            # and is not really advertised as a user API).
+            # We need to explicitly disable functionalization when using python FunctionalTensor and FunctionalTensorMode.
+            # Why? FunctionalTensor is a wrapper tensor that holds an inner FunctionalTensorWrapper.
+            # Since the inner tensor has `DispatchKey.Functionalize` in its keyset, then by default,
+            # our FunctionalTensor will inherit the same keyset.
+            # We don't have an easy way of directly mutating a tensor's keyset from python,
+            # so globally disabling functionalization here is easier.
+            maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+            with maybe_disable, FunctionalTensorMode():
+                out_wrapped = f(x_wrapped)
+            out_unwrapped = out_wrapped.elem
+            torch._sync(out_unwrapped)
+            return torch._from_functional_tensor(out_unwrapped)
+
+        # Make a non-leaf
+        x = torch.randn(2, requires_grad=True) + 1
+        fx_g = make_fx(f_functionalized)(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    view = torch.ops.aten.view.default(x_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
+    view_1 = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
+    return add""")
+
+    def test_python_functionalization_zero_tensor(self):
+        def f(x):
+            y = torch.ops.aten._efficientzerotensor([4])
+            out = x + y
+            out.mul_(2)
+            return out
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_is_conj(self):
+        def f(x):
+            out = x.conj()
+            return out, out.is_conj()
+
+        x = torch.randn(4, dtype=torch.complex64)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False)(x)
+        self.assertEqual(out_ref[0], out_test[0])
+        self.assertEqual(out_ref[1], out_test[1])
+        self.assertEqual(out_ref[0], out_test_cpp[0])
+        self.assertEqual(out_ref[1], out_test_cpp[1])
+
+    def test_python_functionalization_is_neg(self):
+        def f(x):
+            out = x.neg()
+            return out, out.is_neg()
+
+        x = torch.randn(4, dtype=torch.complex64)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False)(x)
+        self.assertEqual(out_ref[0], out_test[0])
+        self.assertEqual(out_ref[1], out_test[1])
+        self.assertEqual(out_ref[0], out_test_cpp[0])
+        self.assertEqual(out_ref[1], out_test_cpp[1])
+
+
+    def test_python_functionalization_conj(self):
+        def f(x):
+            y = x.clone().conj()
+            y.mul_(2)
+            return torch.view_as_real(y.resolve_conj())
+
+        x = torch.randn(4, dtype=torch.complex64)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_test, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    _conj = torch.ops.aten._conj.default(clone);  clone = None
+    clone_1 = torch.ops.aten.clone.default(_conj)
+    mul = torch.ops.aten.mul.Tensor(clone_1, 2);  clone_1 = None
+    clone_2 = torch.ops.aten.clone.default(_conj);  _conj = None
+    copy = torch.ops.aten.copy.default(clone_2, mul);  clone_2 = mul = None
+    _conj_1 = torch.ops.aten._conj.default(copy);  copy = None
+    _conj_2 = torch.ops.aten._conj.default(_conj_1);  _conj_1 = None
+    clone_3 = torch.ops.aten.clone.default(_conj_2);  _conj_2 = None
+    view_as_real = torch.ops.aten.view_as_real.default(clone_3);  clone_3 = None
+    return view_as_real""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_neg(self):
+        def f(x):
+            y = x._neg_view()
+            z = y.resolve_neg()
+            return z + 1
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    _neg_view = torch.ops.aten._neg_view.default(arg0_1);  arg0_1 = None
+    clone = torch.ops.aten.clone.default(_neg_view);  _neg_view = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return add""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
+
+    def test_python_functionalization_lift_fresh_storage(self):
+        unlifted = torch.tensor([0.0])
+
+        maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with maybe_disable, FunctionalTensorMode():
+            lifted = torch.ops.aten.lift_fresh.default(unlifted)
+
+        self.assertNotEqual(unlifted.untyped_storage(), lifted.untyped_storage())
+
+    def test_python_functionalization_lift_fresh(self):
+        def f(x):
+            tmp = torch.tensor([0.0])
+            return tmp + x
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        out_test_cpp = _functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True)(x)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(out_ref, out_test_cpp)
+        fx_g = make_fx(dispatch_functionalize(f))(x)
+        fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, arg0_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    add = torch.ops.aten.add.Tensor(lift_fresh_copy, arg0_1);  lift_fresh_copy = arg0_1 = None
+    return add""")
+        self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
 @xfail_inherited_tests([
     "test_as_strided",
@@ -1480,6 +1681,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     "test_view_clone_view_inplace",
     "test_view_inplace",
 ])
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "dynamo-ing code with proxy + fake doesnt work well")
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
 

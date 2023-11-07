@@ -21,13 +21,6 @@ if(NOT EXISTS ${HIP_PATH})
   return()
 endif()
 
-# HCC_PATH
-if(NOT DEFINED ENV{HCC_PATH})
-  set(HCC_PATH ${ROCM_PATH}/hcc)
-else()
-  set(HCC_PATH $ENV{HCC_PATH})
-endif()
-
 # HSA_PATH
 if(NOT DEFINED ENV{HSA_PATH})
   set(HSA_PATH ${ROCM_PATH}/hsa)
@@ -40,6 +33,13 @@ if(NOT DEFINED ENV{ROCBLAS_PATH})
   set(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
 else()
   set(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
+endif()
+
+# HIPBLAS_PATH
+if(NOT DEFINED ENV{HIPBLAS_PATH})
+  set(HIPBLAS_PATH ${ROCM_PATH}/hipblas)
+else()
+  set(HIPBLAS_PATH $ENV{HIPBLAS_PATH})
 endif()
 
 # ROCFFT_PATH
@@ -117,6 +117,13 @@ if(NOT DEFINED ENV{ROCTHRUST_PATH})
   set(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
 else()
   set(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
+endif()
+
+# HIPSOLVER_PATH
+if(NOT DEFINED ENV{HIPSOLVER_PATH})
+  set(HIPSOLVER_PATH ${ROCM_PATH}/hipsolver)
+else()
+  set(HIPSOLVER_PATH $ENV{HIPSOLVER_PATH})
 endif()
 
 # ROCTRACER_PATH
@@ -226,8 +233,8 @@ if(HIP_FOUND)
 
   message("\n***** Library versions from cmake find_package *****\n")
 
-  set(CMAKE_HCC_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
-  set(CMAKE_HCC_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
+  set(CMAKE_HIP_CLANG_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
+  set(CMAKE_HIP_CLANG_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
   # As of ROCm 5.1.x, all *.cmake files are under /opt/rocm/lib/cmake/<package>
@@ -239,6 +246,7 @@ if(HIP_FOUND)
     set(rocrand_DIR ${ROCM_PATH}/lib/cmake/rocrand)
     set(hiprand_DIR ${ROCM_PATH}/lib/cmake/hiprand)
     set(rocblas_DIR ${ROCM_PATH}/lib/cmake/rocblas)
+    set(hipblas_DIR ${ROCM_PATH}/lib/cmake/hipblas)
     set(miopen_DIR ${ROCM_PATH}/lib/cmake/miopen)
     set(rocfft_DIR ${ROCM_PATH}/lib/cmake/rocfft)
     set(hipfft_DIR ${ROCM_PATH}/lib/cmake/hipfft)
@@ -247,6 +255,7 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
+    set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
   else()
     set(hip_DIR ${HIP_PATH}/lib/cmake/hip)
     set(hsa-runtime64_DIR ${ROCM_PATH}/lib/cmake/hsa-runtime64)
@@ -255,6 +264,7 @@ if(HIP_FOUND)
     set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
     set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
     set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
+    set(hipblas_DIR ${HIPBLAS_PATH}/lib/cmake/hipblas)
     set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
     set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
     set(hipfft_DIR ${HIPFFT_PATH}/lib/cmake/hipfft)
@@ -263,6 +273,7 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCPRIM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
+    set(hipsolver_DIR ${HIPSOLVER_PATH}/lib/cmake/hipsolver)
   endif()
 
   find_package_and_print_version(hip REQUIRED)
@@ -271,6 +282,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
   find_package_and_print_version(rocblas REQUIRED)
+  find_package_and_print_version(hipblas REQUIRED)
   find_package_and_print_version(miopen REQUIRED)
   if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
     find_package_and_print_version(hipfft REQUIRED)
@@ -282,19 +294,10 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
+  find_package_and_print_version(hipsolver REQUIRED)
 
-  if(HIP_COMPILER STREQUAL clang)
-    set(hip_library_name amdhip64)
-  else()
-    set(hip_library_name hip_hcc)
-  endif()
-  message("HIP library name: ${hip_library_name}")
 
-  # TODO: hip_hcc has an interface include flag "-hc" which is only
-  # recognizable by hcc, but not gcc and clang. Right now in our
-  # setup, hcc is only used for linking, but it should be used to
-  # compile the *_hip.cc files as well.
-  find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
+  find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   if(TARGET ${miopen_LIBRARIES})
@@ -310,8 +313,7 @@ if(HIP_FOUND)
     find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   endif()
   # hiprtc is part of HIP
-  find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
+  find_library(ROCM_HIPRTC_LIB amdhip64 HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
-  set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 endif()

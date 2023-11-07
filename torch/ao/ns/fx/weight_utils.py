@@ -78,7 +78,7 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
                 res.append(param_value)
         return res
     else:
-        assert isinstance(mod, nnqd.LSTM), f"type {type(res)} not handled yet"
+        assert isinstance(mod, nnqd.LSTM), f"type {type(mod)} not handled yet"
         res = []
         for weight_value in mod._all_weight_values:
             res.append(weight_value.param.__getstate__()[0][4][0].__getstate__()[0][0])

@@ -47,14 +47,14 @@ class PixelShuffle(Module):
     upscale_factor: int
 
     def __init__(self, upscale_factor: int) -> None:
-        super(PixelShuffle, self).__init__()
+        super().__init__()
         self.upscale_factor = upscale_factor
 
     def forward(self, input: Tensor) -> Tensor:
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def extra_repr(self) -> str:
-        return 'upscale_factor={}'.format(self.upscale_factor)
+        return f'upscale_factor={self.upscale_factor}'
 
 
 class PixelUnshuffle(Module):
@@ -97,11 +97,11 @@ class PixelUnshuffle(Module):
     downscale_factor: int
 
     def __init__(self, downscale_factor: int) -> None:
-        super(PixelUnshuffle, self).__init__()
+        super().__init__()
         self.downscale_factor = downscale_factor
 
     def forward(self, input: Tensor) -> Tensor:
         return F.pixel_unshuffle(input, self.downscale_factor)
 
     def extra_repr(self) -> str:
-        return 'downscale_factor={}'.format(self.downscale_factor)
+        return f'downscale_factor={self.downscale_factor}'

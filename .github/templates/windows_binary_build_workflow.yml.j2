@@ -56,9 +56,12 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
+    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+    {%- endif %}
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
@@ -84,9 +87,13 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] == "cuda" %}
+{%- if branches == "nightly" %}
     runs-on: windows.8xlarge.nvidia.gpu
 {%- else %}
-    runs-on: windows.4xlarge
+    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+{%- endif %}
+{%- else %}
+    runs-on: windows.4xlarge.nonephemeral
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}

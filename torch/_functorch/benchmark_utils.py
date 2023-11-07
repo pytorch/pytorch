@@ -1,3 +1,4 @@
+import contextlib
 import time
 import os
 import json
@@ -8,14 +9,6 @@ from torch.profiler import profile, ProfilerActivity
 
 def synchronize():
     pass
-
-
-class NullContext:
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
 
 
 def dump_chrome_trace(f, input, trace_filename, optimize_ctx, activities, num_runs=1,
@@ -121,7 +114,7 @@ gpu_pids = []
 def compute_utilization(filename: str, total_length: float):
     """
     Process the chrome traces outputs by the pytorch profiler to compute GPU Utilization
-    and percent of times spent on matmal and convolution
+    and percent of times spent on matmul and convolution
 
     Args:
         filename(str): Name of chrome traces file produced by pytorch profiler
@@ -129,7 +122,7 @@ def compute_utilization(filename: str, total_length: float):
         total_length(float): total length of the process without profiler in second
 
     Return:
-        tuple: (GPU Utilization, percent of time spent on matmal and convolution)
+        tuple: (GPU Utilization, percent of time spent on matmul and convolution)
     """
     events = get_chrome_trace_events(filename)
 
@@ -154,7 +147,7 @@ def compute_utilization(filename: str, total_length: float):
 
 def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_name="tmp_chrome_trace", num_runs=1):
     """
-    Benchmark the GPU Utilization and percent of time spent on matmal and convolution operations of
+    Benchmark the GPU Utilization and percent of time spent on matmul and convolution operations of
     running f(input, **kwargs_for_f) with [optimize_ctx] [num_runs] times.
     It will produce a chrome trace file in trace_folder/trace_file_name.json
 
@@ -181,7 +174,7 @@ def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_
         num_runs: number of times to run f, excluding the warm-up runs, default to 1.
 
     Return:
-        tuple: (GPU Utilization, percent of time spent on matmal and convolution)
+        tuple: (GPU Utilization, percent of time spent on matmul and convolution)
 
     """
     isExist = os.path.exists(trace_folder)
@@ -190,7 +183,7 @@ def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_
         print("create folder " + trace_folder)
 
     if optimize_ctx is None:
-        optimize_ctx = NullContext()
+        optimize_ctx = contextlib.nullcontext()
 
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
     total_length = dump_chrome_trace(f, input, chrome_trace_file_name, optimize_ctx,

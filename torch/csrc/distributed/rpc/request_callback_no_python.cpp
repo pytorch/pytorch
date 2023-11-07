@@ -78,7 +78,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           // of 10us.
           auto serverProcessGlobalProfilerStateStackEntryPtr =
               profiler::processglobal::StateStackEntry::current();
-          // If server global profiler is enabled, we futher pay the
+          // If server global profiler is enabled, we further pay the
           // cost of thread local profiler state initialization.
           if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Initialize thread-local profiler state from process-global
@@ -408,7 +408,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
 
   if (profilingConfig.state == ProfilerState::KINETO ||
-      profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK) {
+      profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      profilingConfig.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
     profilingConfig = ProfilerConfig(
         ProfilerState::CPU,
         profilingConfig.report_input_shapes,

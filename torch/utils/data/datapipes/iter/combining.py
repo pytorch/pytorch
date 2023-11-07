@@ -2,7 +2,8 @@ import warnings
 
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
+import copy as copymodule
+from typing import Any, Callable, Iterator, List, Literal, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -23,8 +24,9 @@ T_co = TypeVar('T_co', covariant=True)
 @functional_datapipe('concat')
 class ConcaterIterDataPipe(IterDataPipe):
     r"""
-    Concatenates multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
-    yield all the elements from the first input DataPipe, before yielding from the subsequent ones.
+    Concatenates multiple Iterable DataPipes (functional name: ``concat``).
+
+    The resulting DataPipe will yield all the elements from the first input DataPipe, before yielding from the subsequent ones.
 
     Args:
         datapipes: Iterable DataPipes being concatenated
@@ -38,6 +40,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         >>> list(dp1.concat(dp2))
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
+
     datapipes: Tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
@@ -49,14 +52,13 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __iter__(self) -> Iterator:
         for dp in self.datapipes:
-            for data in dp:
-                yield data
+            yield from dp
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return sum(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 @functional_datapipe('fork')
@@ -70,6 +72,14 @@ class ForkerIterDataPipe(IterDataPipe):
         buffer_size: this restricts how far ahead the leading child DataPipe
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+        copy: copy strategy to use for items yielded by each branch. Supported
+            options are ``None`` for no copying, ``"shallow"`` for shallow object
+            copies, and ``"deep"`` for deep object copies. Defaults to ``None``.
+
+    Note:
+        All branches of the forked pipeline return the identical object unless
+        the copy parameter is supplied. If the object is mutable or contains
+        mutable objects, changing them in one branch will affect all others.
 
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
@@ -81,20 +91,25 @@ class ForkerIterDataPipe(IterDataPipe):
         >>> list(dp2)
         [0, 1, 2, 3, 4]
     """
-    def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+
+    def __new__(
+        cls,
+        datapipe: IterDataPipe,
+        num_instances: int,
+        buffer_size: int = 1000,
+        copy: Optional[Literal["shallow", "deep"]] = None
+    ):
         if num_instances < 1:
-            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
+            raise ValueError(f"Expected `num_instances` larger than 0, but {num_instances} is found")
         if num_instances == 1:
             return datapipe
-        container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size)
+        container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size, copy)
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
 class _ContainerTemplate(ABC):
-    r"""
-    Abstract class for container ``DataPipes``. The followings are three required
-    methods.
-    """
+    r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
+
     @abstractmethod
     def get_next_element_by_instance(self, instance_id: int):
         ...
@@ -109,18 +124,28 @@ class _ContainerTemplate(ABC):
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):
-        r"""
-        Raise TypeError if it's not supposed to be implemented to support `list(datapipe)`
-        """
+        r"""Raise TypeError if it's not supposed to be implemented to support `list(datapipe)`."""
+
+
+def _no_op(x):
+    return x
 
 
 class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
-    Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
-    the state of its child DataPipes, maintains the buffer, and yields the next value
+    Container to hold instance-specific information on behalf of ForkerIterDataPipe.
+
+    It tracks the state of its child DataPipes, maintains the buffer, and yields the next value
     as requested by the child DataPipes.
     """
-    def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        num_instances: int,
+        buffer_size: int = 1000,
+        copy: Optional[Literal["shallow", "deep"]] = None
+    ):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -132,6 +157,15 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "please be aware of OOM at random places",
                 UserWarning
             )
+        if copy is None:
+            self.copy_fn = _no_op
+        elif copy == "shallow":
+            self.copy_fn = copymodule.copy
+        elif copy == "deep":
+            self.copy_fn = copymodule.deepcopy
+        else:
+            raise ValueError(f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`.")
+
         self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
@@ -157,7 +191,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 if self.buffer and self.child_pointers[instance_id] <= self.leading_ptr:
                     idx = self.child_pointers[instance_id] - self.slowest_ptr - 1
                     return_val = self.buffer[idx]
-                else:  # Retreive one element from main datapipe
+                else:  # Retrieve one element from main datapipe
                     self.leading_ptr = self.child_pointers[instance_id]
                     try:
                         return_val = next(self._datapipe_iterator)  # type: ignore[arg-type]
@@ -175,7 +209,8 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 if self.buffer_size >= 0 and self.leading_ptr > self.buffer_size + self.slowest_ptr:
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
-                yield return_val
+
+                yield self.copy_fn(return_val)
         finally:
             self._child_stop[instance_id] = True
             # Cleanup _datapipe_iterator for the case that fork exits earlier
@@ -203,6 +238,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self.copy_fn,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
@@ -215,6 +251,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self.copy_fn,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         ) = state
@@ -237,8 +274,9 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
 
 class _ChildDataPipe(IterDataPipe):
     r"""
-    Iterable Datapipe that is a child of a main DataPipe. The instance of this class
-    will pass its instance_id to get the next value from its main DataPipe.
+    Iterable Datapipe that is a child of a main DataPipe.
+
+    The instance of this class will pass its instance_id to get the next value from its main DataPipe.
 
     Note:
         ChildDataPipe, like all other IterDataPipe, follows the single iterator per IterDataPipe constraint.
@@ -263,6 +301,7 @@ class _ChildDataPipe(IterDataPipe):
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
         instance_id: integer identifier of this instance
     """
+
     _is_child_datapipe: bool = True
 
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
@@ -283,6 +322,7 @@ class _ChildDataPipe(IterDataPipe):
     def _set_main_datapipe_valid_iterator_id(self) -> int:
         r"""
         Update the valid iterator ID for both this DataPipe object and `main_datapipe`.
+
         `main_datapipe.reset()` is called when the ID is incremented to a new generation.
         """
         # 1. First time any child iterator is created
@@ -304,17 +344,16 @@ class _ChildDataPipe(IterDataPipe):
 
     # This method is called by `hook_iterator` in `_typing.py`.
     def _check_valid_iterator_id(self, iterator_id) -> bool:
-        r"""
-        Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`.
-        """
+        r"""Check the valid iterator ID against that of DataPipe object and that of `main_datapipe`."""
         return iterator_id == self._valid_iterator_id and iterator_id == self.main_datapipe._valid_iterator_id
 
 
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
     r"""
-    Splits the input DataPipe into multiple child DataPipes, using the given
-    classification function (functional name: ``demux``). A list of the child DataPipes is returned from this operation.
+    Splits the input DataPipe into multiple child DataPipes, using the given classification function (functional name: ``demux``).
+
+    A list of the child DataPipes is returned from this operation.
 
     Args:
         datapipe: Iterable DataPipe being filtered
@@ -345,10 +384,11 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         >>> list(dp2)
         [1, 3]
     """
+
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
         if num_instances < 1:
-            raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
+            raise ValueError(f"Expected `num_instances` larger than 0, but {num_instances} is found")
 
         _check_unpickable_fn(classifier_fn)
 
@@ -361,8 +401,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
 
 class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
-    Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe. It tracks
-    the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
+    Container to hold instance-specific information on behalf of DemultiplexerIterDataPipe.
+
+    It tracks the state of its child DataPipes, maintains the buffer, classifies and yields the next correct value
     as requested by the child DataPipes.
     """
 
@@ -385,7 +426,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe_exhausted = False
         self._child_stop: List[bool] = [True for _ in range(num_instances)]
 
-    def _find_next(self, instance_id: int) -> T_co:
+    def _find_next(self, instance_id: int) -> T_co:  # type: ignore[type-var]
         while True:
             if self.main_datapipe_exhausted or self._child_stop[instance_id]:
                 raise StopIteration
@@ -496,8 +537,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
 @functional_datapipe('mux')
 class MultiplexerIterDataPipe(IterDataPipe):
     r"""
-    Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``). As in,
-    one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
+    Yields one element at a time from each of the input Iterable DataPipes (functional name: ``mux``).
+
+    As in, one element from the 1st input DataPipe, then one element from the 2nd DataPipe in the next iteration,
     and so on. It ends when the shortest input DataPipe is exhausted.
 
     Args:
@@ -510,6 +552,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
         >>> list(dp1.mux(dp2, dp3))
         [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
+
     def __init__(self, *datapipes):
         self.datapipes = datapipes
         self.buffer: List = []  # Store values to be yielded only when every iterator provides one
@@ -524,15 +567,14 @@ class MultiplexerIterDataPipe(IterDataPipe):
                 except StopIteration:
                     self.buffer.clear()
                     return
-            for value in self.buffer:
-                yield value
+            yield from self.buffer
             self.buffer.clear()
 
     def __len__(self):
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return min(len(dp) for dp in self.datapipes) * len(self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
     def reset(self) -> None:
         self.buffer = []
@@ -563,6 +605,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
+
     The output is stopped as soon as the shortest input DataPipe is exhausted.
 
     Args:
@@ -575,6 +618,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         >>> list(dp1.zip(dp2, dp3))
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
+
     datapipes: Tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
@@ -592,4 +636,4 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         if all(isinstance(dp, Sized) for dp in self.datapipes):
             return min(len(dp) for dp in self.datapipes)
         else:
-            raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+            raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

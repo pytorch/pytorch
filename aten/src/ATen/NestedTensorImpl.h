@@ -10,60 +10,54 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
+int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
       Storage storage,
       c10::DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
-      at::Tensor nested_size_tensor,
-      at::Tensor nested_stride_tensor,
-      std::vector<int64_t>&& offsets);
+      at::Tensor nested_sizes,
+      at::Tensor nested_strides,
+      at::Tensor storage_offsets);
 
   explicit NestedTensorImpl(
       at::Tensor buffer,
-      at::Tensor nested_size_tensor,
-      at::Tensor nested_stride_tensor,
-      std::vector<int64_t>&& offsets);
-  // assume contiguous, `nested_stride_tensor` and `offsets`
-  // can be infered from `nested_size_tensor`
-  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
+      at::Tensor nested_sizes,
+      at::Tensor nested_strides,
+      at::Tensor storage_offsets);
+  // assume contiguous, `nested_strides` and `offsets`
+  // can be infered from `nested_sizes`
+  explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_sizes);
 
   // This constructor is used creating view tensors from nested tensors
   explicit NestedTensorImpl(
       c10::TensorImpl::ImplType impl_type,
       const at::Tensor& base_tensor,
-      at::Tensor nested_size_tensor,
-      at::Tensor nested_stride_tensor,
-      std::vector<int64_t>&& offsets);
+      at::Tensor nested_sizes,
+      at::Tensor nested_strides,
+      at::Tensor storage_offsets);
 
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
-  const Tensor& get_nested_size_tensor() const {
-    return nested_size_tensor_;
+  const Tensor& get_nested_sizes() const {
+    return nested_sizes_;
   }
   // TODO: don't expose private implementation details like this
-  const Tensor& get_nested_stride_tensor() const {
-    return nested_stride_tensor_;
+  const Tensor& get_nested_strides() const {
+    return nested_strides_;
   }
-  const std::vector<int64_t>& get_storage_offsets() const {
+  const Tensor& get_storage_offsets() const {
     return storage_offsets_;
   }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
-  c10::optional<int64_t> opt_size(int64_t d) const {
-    d = at::maybe_wrap_dim(d, dim(), false);
-    if (opt_sizes_[d] == -1) {
-      return c10::nullopt;
-    }
-    return opt_sizes_[d];
-  }
+  c10::optional<int64_t> opt_size(int64_t d) const;
 
   int64_t size(int64_t d) const {
     c10::optional<int64_t> optional_size = this->opt_size(d);
@@ -101,11 +95,12 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     const auto buffer_size = get_buffer_size();
     auto buffer_tensor_impl = c10::make_intrusive<TensorImpl>(
         c10::TensorImpl::VIEW, Storage(storage_), buffer_key_set_, data_type_);
-    buffer_tensor_impl->set_sizes_contiguous(c10::makeArrayRef(buffer_size));
+    buffer_tensor_impl->set_sizes_contiguous(
+        c10::makeArrayRef(static_cast<int64_t>(buffer_size)));
     return Tensor(buffer_tensor_impl);
   }
 
-  int64_t get_buffer_size() const {
+  size_t get_buffer_size() const {
     return storage_.nbytes() / data_type_.itemsize();
   }
 
@@ -152,12 +147,13 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // to TensorImpl.
   void refresh_dim();
 
-  const at::Tensor nested_size_tensor_, nested_stride_tensor_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const at::Tensor nested_sizes_, nested_strides_;
   // The starting positions of the underlying tensors in contiguous buffer
   // i.e. the buffer memory offsets to get the underlying tensors
   // The reason to keep this metadata is that, without strong enough constraint
-  // it cannot be derived from `nested_size_tensor_`
-  // and `nested_stride_tensor_`:
+  // it cannot be derived from `nested_sizes_`
+  // and `nested_strides_`:
   // 1. when buffer has blanks, e.g. [tensor1, blank, tensor2]
   //    this can happen e.g. after slicing a nested tensor
   // 2. when multiple tensors share a same memory
@@ -165,11 +161,13 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // Some strong enough constraints are:
   // 1. every underlying tensor is contiguous in memory
   //    && nesting in ascending order
-  std::vector<int64_t> storage_offsets_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
+  const at::Tensor storage_offsets_;
   // NOTE: -1 here means the size is missing
+  // Optional to allow it to be computed lazily from nested.
   // TODO: maybe we can remove this metadata since
-  //       we can compute it from `nested_size_tensor_`
-  std::vector<int64_t> opt_sizes_;
+  //       we can compute it from `nested_sizes_`
+  mutable c10::optional<std::vector<int64_t>> opt_sizes_;
 
   template <typename VariableVersion>
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
@@ -224,23 +222,23 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   if (ntensors == 0) {
     return true;
   }
-  const Tensor &sizemat = nt->get_nested_size_tensor(),
-               &stridemat = nt->get_nested_stride_tensor();
-  const auto& offsets = nt->get_storage_offsets();
+  const Tensor &sizemat = nt->get_nested_sizes(),
+               &stridemat = nt->get_nested_strides();
+  int64_t* offsets_ptr = nt->get_storage_offsets().data_ptr<int64_t>();
   int64_t orig_dim = sizemat.size(1);
   // nesting scalars
   if (orig_dim == 0) {
     // each scalar must be contiguous
-    // if there is blanck memory between underlying scalars
+    // if there is blank memory between underlying scalars
     for (int64_t i = 0; i < ntensors; i++) {
-      if (offsets[i] != i) {
+      if (offsets_ptr[i] != i) {
         return false;
       }
     }
   }
   // nesting tensors
   else {
-    // if any underlying tensor is noncontiguous
+    // if any underlying tensor is non-contiguous
     const int64_t *sizemat_ptr = sizemat.data_ptr<int64_t>(),
                   *stridemat_ptr = stridemat.data_ptr<int64_t>();
     for (int64_t i = 0; i < ntensors; i++) {
@@ -257,14 +255,15 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
       sizemat_ptr += orig_dim;
       stridemat_ptr += orig_dim;
     }
-    // if there is blanck memory between underlying tensors
-    if (offsets[0] != 0) {
+    // if there is blank memory between underlying tensors
+    if (offsets_ptr[0] != 0) {
       return false;
     }
     sizemat_ptr = sizemat.data_ptr<int64_t>();
     stridemat_ptr = stridemat.data_ptr<int64_t>();
     for (int64_t i = 1; i < ntensors; i++) {
-      if (offsets[i] != offsets[i - 1] + *sizemat_ptr * *stridemat_ptr) {
+      if (offsets_ptr[i] !=
+          offsets_ptr[i - 1] + *sizemat_ptr * *stridemat_ptr) {
         return false;
       }
       sizemat_ptr += orig_dim;
@@ -275,9 +274,8 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   return true;
 }
 
-inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
-  return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
+inline const at::Tensor& get_nested_sizes(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_nested_sizes();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

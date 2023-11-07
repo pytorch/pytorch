@@ -9,7 +9,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_mps_max_pool2d.h>
 #include <ATen/ops/adaptive_avg_pool1d_native.h>
 #include <ATen/ops/adaptive_avg_pool2d.h>
 #include <ATen/ops/adaptive_max_pool1d_native.h>
@@ -24,6 +23,7 @@
 #include <ATen/ops/mkldnn_max_pool2d.h>
 #include <ATen/ops/mkldnn_max_pool3d.h>
 #include <ATen/ops/quantized_max_pool2d.h>
+#include <ATen/ops/quantized_max_pool3d.h>
 #endif
 
 #include <tuple>
@@ -54,6 +54,19 @@ Tensor adaptive_avg_pool1d(const Tensor & self, IntArrayRef output_size) {
 std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntArrayRef output_size) {
   checkDimRange("adaptive_max_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
   check1d("adaptive_max_pool1d", "output_size", output_size);
+
+  int ndim = self.ndimension();
+  for (const auto i : c10::irange(1, ndim)) {
+    TORCH_CHECK(
+        self.sym_size(i) > 0,
+        "adaptive_max_pool1d(): ",
+        "Expected input to have non-zero size for non-batch dimensions, "
+        "but input has sizes ",
+        self.sym_sizes(),
+        " with dimension ",
+        i,
+        " being empty");
+  }
 
   Tensor output, indices;
   std::tie(output, indices) = at::adaptive_max_pool2d(
@@ -141,12 +154,6 @@ Tensor max_pool2d(
     return at::mkldnn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
-#ifdef USE_MPS
-  if (self.is_mps()) {
-    return at::_mps_max_pool2d(
-        self, kernel_size, stride, padding, dilation, ceil_mode);
-  }
-#endif
 #if defined(C10_MOBILE)
   if(xnnpack::use_max_pool2d(self, kernel_size, padding, stride,
                              dilation, ceil_mode)) {
@@ -166,6 +173,10 @@ Tensor max_pool3d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  if (self.is_quantized()) {
+    return at::quantized_max_pool3d(self, kernel_size, stride, padding,
+                                    dilation, ceil_mode);
+  }
   if (self.is_mkldnn()) {
     return at::mkldnn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);

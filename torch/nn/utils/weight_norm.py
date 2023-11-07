@@ -1,9 +1,8 @@
-r"""
-Weight Normalization from https://arxiv.org/abs/1602.07868
-"""
+r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch import _weight_norm, norm_except_dim
 from typing import Any, TypeVar
+import warnings
 from ..modules import Module
 
 __all__ = ['WeightNorm', 'weight_norm', 'remove_weight_norm']
@@ -26,10 +25,11 @@ class WeightNorm:
 
     @staticmethod
     def apply(module, name: str, dim: int) -> 'WeightNorm':
-        for k, hook in module._forward_pre_hooks.items():
+        warnings.warn("torch.nn.utils.weight_norm is deprecated in favor of torch.nn.utils.parametrizations.weight_norm.")
+
+        for hook in module._forward_pre_hooks.values():
             if isinstance(hook, WeightNorm) and hook.name == name:
-                raise RuntimeError("Cannot register two weight_norm hooks on "
-                                   "the same parameter {}".format(name))
+                raise RuntimeError(f"Cannot register two weight_norm hooks on the same parameter {name}")
 
         if dim is None:
             dim = -1
@@ -68,7 +68,7 @@ class WeightNorm:
 T_module = TypeVar('T_module', bound=Module)
 
 def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_module:
-    r"""Applies weight normalization to a parameter in the given module.
+    r"""Apply weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -86,6 +86,27 @@ def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_modul
     ``dim=None``.
 
     See https://arxiv.org/abs/1602.07868
+
+    .. warning::
+
+        This function is deprecated.  Use :func:`torch.nn.utils.parametrizations.weight_norm`
+        which uses the modern parametrization API.  The new ``weight_norm`` is compatible
+        with ``state_dict`` generated from old ``weight_norm``.
+
+        Migration guide:
+
+        * The magnitude (``weight_g``) and direction (``weight_v``) are now expressed
+          as ``parametrizations.weight.original0`` and ``parametrizations.weight.original1``
+          respectively.  If this is bothering you, please comment on
+          https://github.com/pytorch/pytorch/issues/102999
+
+        * To remove the weight normalization reparametrization, use
+          :func:`torch.nn.utils.parametrize.remove_parametrizations`.
+
+        * The weight is no longer recomputed once at module forward; instead, it will
+          be recomputed on every access.  To restore the old behavior, use
+          :func:`torch.nn.utils.parametrize.cached` before invoking the module
+          in question.
 
     Args:
         module (Module): containing module
@@ -111,7 +132,7 @@ def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_modul
 
 
 def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
-    r"""Removes the weight normalization reparameterization from a module.
+    r"""Remove the weight normalization reparameterization from a module.
 
     Args:
         module (Module): containing module
@@ -127,5 +148,4 @@ def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
             del module._forward_pre_hooks[k]
             return module
 
-    raise ValueError("weight_norm of '{}' not found in {}"
-                     .format(name, module))
+    raise ValueError(f"weight_norm of '{name}' not found in {module}")

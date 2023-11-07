@@ -1,8 +1,16 @@
 import functools
-from typing import Callable, Optional, Union
+import warnings
+from typing import Callable, Tuple, Optional, Union
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor.device_mesh import _mesh_resources
+from torch.distributed._tensor.placement_types import Placement
+try:
+    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+except Exception:
+    def is_torchdynamo_compiling():  # type: ignore[misc]
+        return False
 
 _PrepareInputType = Callable[
     [Union[torch.Tensor, DTensor], Optional[DeviceMesh], Optional[int]], DTensor
@@ -11,6 +19,19 @@ _PrepareInputType = Callable[
 _PrepareOutputType = Callable[
     [DTensor, Optional[DeviceMesh], Optional[int]], Union[torch.Tensor, DTensor]
 ]
+
+LayoutsType = Union[Placement, Tuple[Placement, ...]]
+
+def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
+    """
+    Inject common validation logics for `_prepare_input` funcs via this
+    decorator, including verifying that input needs to be either
+    a :class:`Tensor` or :class:`DTensor` and only 1D :class:`DeviceMesh`
+    is passed in.
+    """
+    # TODO: Will follow up with dynamo POC to make warnings.warn working with dynamo.
+    if not is_torchdynamo_compiling():
+        warnings.warn(f"{func_name} is deprecated and will be removed soon. {extra_msg}")
 
 
 def _prepare_input_validate(
@@ -58,7 +79,7 @@ def _prepare_input_validate(
                 raise RuntimeError("device_mesh is not passed nor can be inferred")
         if device_mesh.ndim != 1:
             raise RuntimeError(
-                f"device_mesh has dims {device_mesh.ndim} but expcted to be 1"
+                f"device_mesh has dims {device_mesh.ndim} but expected to be 1"
                 " for input."
             )
         return _prepare_input_func(*args, **kwargs)
@@ -107,7 +128,7 @@ def _prepare_output_validate(
             device_mesh = args[1]
 
         assert device_mesh.ndim == 1, (
-            f"device_mesh has dims {device_mesh.ndim} but expcted to be 1 for"
+            f"device_mesh has dims {device_mesh.ndim} but expected to be 1 for"
             " output."
         )
         return _prepare_output_func(*args, **kwargs)
@@ -146,7 +167,41 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
     pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, tp_mesh_dim).reshape(
         -1, device_mesh.mesh.size(tp_mesh_dim)
     )
-    dim_mesh_1d = pg_ranks_by_dim[torch.any(pg_ranks_by_dim == cur_rank, 1), :]
+    for mesh_1d in pg_ranks_by_dim:
+        sub_mesh = DeviceMesh(device_mesh.device_type, mesh_1d, _init_process_groups=False)
+        if cur_rank in mesh_1d:
+            res_sub_mesh = sub_mesh
 
-    sub_pg = device_mesh.get_dim_groups()[tp_mesh_dim]
-    return DeviceMesh(device_mesh.device_type, dim_mesh_1d.squeeze(), [sub_pg])
+    res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[tp_mesh_dim]]
+    return res_sub_mesh
+
+
+def _validate_tp_mesh_dim(
+    device_mesh: DeviceMesh,
+) -> None:
+    """
+    Check whether TP mesh dimension is valid or not.
+
+    Args:
+        device_mesh (:class:`DeviceMesh`):
+            The `device_mesh` where we perform
+            Tensor Parallelism on.
+
+    Return:
+        `True` if the mesh dimension
+        is valid, `False` otherwise.
+    """
+    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh:
+        if parent_mesh.ndim != 2:
+            raise RuntimeError(
+                f"Found TP device_mesh has a parent mesh with dims {parent_mesh.ndim}",
+                "Currently we only support 2D TP composition with DP.",
+            )
+
+        tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(device_mesh)
+        if tp_mesh_dim != 1:
+            raise RuntimeError(
+                f"Found TP device_mesh on the {tp_mesh_dim} dimension of its parent mesh.",
+                "Currently we only support intranode TP and TP needs to be the innermost dimension on its parent mesh.",
+            )

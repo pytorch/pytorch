@@ -49,6 +49,7 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 # All of these operators don't have any tensor like returns
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
+    "_assert_async.msg",  # no return
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -72,7 +73,9 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
     "sparse_dim",  # returns an int
-    "_nested_tensor_offsets",  # returns a vector of ints
+    "sym_constrain_range",  # no return
+    "sym_constrain_range_for_size",  # no return
+    "_nested_tensor_storage_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
 ]
@@ -85,6 +88,7 @@ INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # (which would require changing its overload name to prevent overload ambiguity).
     "polygamma_"
 ]
+
 
 # Groups "similar" NativeFunctions together
 # example add.Tensor, add_.Tensor, add.out
@@ -194,7 +198,7 @@ def generate_out_args_from_schema(
     # - If every return is a plain tensor, then the new returns == the old returns, but with the out= alias annotations added.
     # - Otherwise, none of the out arguments show up in the returns (and we're only left with non-tensor-like returns, if any).
     new_returns: List[Return] = []
-    for (i, r) in enumerate(func.returns):
+    for i, r in enumerate(func.returns):
         if r.type.is_tensor_like():
             new_out = Argument(
                 name="out" if len(func.returns) == 1 else f"out{i}",
@@ -319,14 +323,16 @@ def generate_function(
             )
         }
     }
-    tags = set(["generated"]) | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
             # These generated fn's aren't meant to be user friendly- don't generate methods.
-            variants=set([Variant.function]),
+            variants={Variant.function},
             structured=False,
             structured_delegate=None,
             structured_inherits=None,
@@ -367,11 +373,11 @@ def add_generated_native_functions(
     rs: List[NativeFunction],
     indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
 ) -> None:
-    # The main code for gnerating new NativeFunctions
-    # First we group of NaitveFunctions by schema kind,
+    # The main code for generating new NativeFunctions
+    # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
-    for k, d in pre_grouped_native_functions.items():
+    for d in pre_grouped_native_functions.values():
         has_functional = SchemaKind.functional in d
         has_inplace = SchemaKind.inplace in d
         has_mutable = SchemaKind.mutable in d
@@ -384,7 +390,6 @@ def add_generated_native_functions(
         #     variant, mostly so we can easily pair up functions into NativeFunctionsGroup,
         #     while maintaining the constraint that the out= variant is "required".
         if has_mutable or has_inplace or has_out or has_functional:
-
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
@@ -493,13 +498,13 @@ def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
 
 
-# Given a function, and the name of a variable correponding to the output of that function,
+# Given a function, and the name of a variable corresponding to the output of that function,
 # gather up all of the individual returns that are not aliased
 def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
     aliased_rets = func.aliased_return_names()
     non_aliased_names = []
     is_out_var_a_tuple = len(func.returns) > 1
-    for (i, r) in enumerate(aliased_rets):
+    for i, r in enumerate(aliased_rets):
         if r is None:
             non_aliased_names.append(
                 f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var

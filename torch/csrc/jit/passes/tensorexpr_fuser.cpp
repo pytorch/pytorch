@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
@@ -43,7 +42,7 @@ namespace jit {
 
 static bool texpr_reductions_enabled = false;
 
-bool isSupportedForBlock(Node* node) {
+static bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
     case aten::mul:
@@ -187,7 +186,7 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-void removeProfileNodesAndSpecializeTypes(Block* b) {
+static void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
@@ -275,7 +274,7 @@ bool hasTensorTypeSpecialization(Value* v) {
   return true;
 }
 
-void removeTensorTypeSpecialization(Value* v) {
+static void removeTensorTypeSpecialization(Value* v) {
   if (hasTensorTypeSpecialization(v)) {
     v->setType(TensorType::get());
   }
@@ -550,7 +549,7 @@ class TensorExprFuser {
   }
 
   void run() {
-    aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    aliasDb_ = std::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
@@ -683,7 +682,7 @@ class TensorExprFuser {
 
     // Try to merge adjacent fusion groups together. Because we have only merged
     // by looking at graph inputs, without this we would not attempt to merge
-    // adjacent fusion groups that don't have a depdency on each other
+    // adjacent fusion groups that don't have a dependency on each other
 
     std::vector<Node*> initial_fusion_groups;
     for (Node* n : block->nodes()) {
@@ -699,7 +698,7 @@ class TensorExprFuser {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
-      // If merging suceeded, save the merged group as the "previous" fusion
+      // If merging succeeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
 
       Node* fusion_group = initial_fusion_groups[i];
@@ -858,11 +857,6 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
-#ifndef C10_MOBILE
-      if (fuser::cuda::isEnabled()) {
-        return false;
-      }
-#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
@@ -1151,7 +1145,7 @@ class TensorExprFuser {
     REQ(tensorexpr::isSupported(node));
     REQ(typesAreSupported(node));
 
-    // A hook to optimizations limitter to allow bisecting the pass
+    // A hook to optimizations limiter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
     if (fuse_to_dynamic_shapes_) {
@@ -1364,7 +1358,7 @@ void FuseTensorExprs(
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
-Operation createTensorExprOp(const Node* node) {
+static Operation createTensorExprOp(const Node* node) {
   bool dynamic_shape_fusion_node =
       node->hasAttribute(attr::striding_inputs_desc);
   if (!dynamic_shape_fusion_node) {

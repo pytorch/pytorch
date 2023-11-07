@@ -4,7 +4,9 @@
 
 #include <c10/util/irange.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <tensorpipe/tensorpipe.h>
+C10_DIAGNOSTIC_POP()
 
 namespace torch {
 namespace distributed {
@@ -44,7 +46,8 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
     bool storageHasDeleter = storage.data_ptr().get_context() != nullptr;
     if (!storageHasDeleter) {
       std::vector<char> storageData(
-          storage.data<char>(), storage.data<char>() + storage.nbytes());
+          static_cast<const char*>(storage.data()),
+          static_cast<const char*>(storage.data()) + storage.nbytes());
 
       tensorpipe::CpuBuffer buffer;
       buffer.ptr = storageData.data();
@@ -58,7 +61,7 @@ class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
       return c10::make_optional(std::move(storageData));
     } else {
       tensorpipe::CpuBuffer buffer;
-      buffer.ptr = storage.data<char>();
+      buffer.ptr = static_cast<char*>(storage.mutable_data());
 
       tensorpipe::Message::Tensor tensor;
       tensor.buffer = buffer;

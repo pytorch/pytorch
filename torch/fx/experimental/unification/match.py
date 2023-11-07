@@ -55,7 +55,7 @@ class VarDispatcher(Dispatcher):
     """
     def __call__(self, *args, **kwargs):
         func, s = self.resolve(args)
-        d = dict((k.token, v) for k, v in s.items())
+        d = {k.token: v for k, v in s.items()}
         return func(**d)
 
 
@@ -86,7 +86,7 @@ def supercedes(a, b):
     s = unify(a, b)
     if s is False:
         return False
-    s = dict((k, v) for k, v in s.items() if not isvar(k) or not isvar(v))
+    s = {k: v for k, v in s.items() if not isvar(k) or not isvar(v)}
     if reify(a, s) == a:
         return True
     if reify(b, s) == b:
@@ -109,7 +109,7 @@ def edge(a, b, tie_breaker=hash):
 # Taken from multipledispatch
 def ordering(signatures):
     """ A sane ordering of signatures to check, first to last
-    Topoological sort of edges as given by ``edge`` and ``supercedes``
+    Topological sort of edges as given by ``edge`` and ``supercedes``
     """
     signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
@@ -117,5 +117,5 @@ def ordering(signatures):
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = dict((k, [b for a, b in v]) for k, v in edges.items())  # type: ignore[attr-defined, assignment]
+    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[attr-defined, assignment]
     return _toposort(edges)

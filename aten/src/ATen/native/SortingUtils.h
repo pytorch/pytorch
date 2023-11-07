@@ -10,8 +10,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ensure we get good values and indices for kthvalue, mode
 // this will always be with the reducing dim as 1-d
@@ -86,5 +85,4 @@ inline void _allocate_or_resize_output_with_indices(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

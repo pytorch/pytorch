@@ -10,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::string typeString(py::handle h);
 
@@ -242,7 +241,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 };
 
 bool isNamedTupleClass(const py::object& obj);
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
@@ -371,5 +373,4 @@ struct VISIBILITY_HIDDEN PythonSliceClass : public SugaredValue {
       size_t n_binders) override;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -233,6 +233,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExpr(converted);
+  }
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -243,6 +247,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExprImpl(converted);
+  }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -465,6 +473,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   if (assign.lhs().kind() != TK_VAR) {
     throw ErrorReport(assign.range())
         << "Expected to a variable for class constant";
+  }
+  if (!assign.type().present()) {
+    throw ErrorReport(assign.range())
+        << "Expected a type to present for class constant";
   }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();

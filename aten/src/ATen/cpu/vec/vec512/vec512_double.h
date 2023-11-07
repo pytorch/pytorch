@@ -163,6 +163,9 @@ public:
   Vectorized<double> atan() const {
     return Vectorized<double>(Sleef_atand8_u10(values));
   }
+  Vectorized<double> atanh() const {
+    return Vectorized<double>(Sleef_atanhd8_u10(values));
+  }
   Vectorized<double> atan2(const Vectorized<double> &b) const {
     return Vectorized<double>(Sleef_atan2d8_u10(values, b));
   }
@@ -198,6 +201,9 @@ public:
   }
   Vectorized<double> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
     __at_align__ double tmp[size()];
@@ -293,7 +299,7 @@ public:
   }
 
   Vectorized<double> operator!=(const Vectorized<double>& other) const {
-    auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_OQ);
+    auto cmp_mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }

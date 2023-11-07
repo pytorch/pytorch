@@ -1,5 +1,7 @@
 """Utilities for manipulating the onnx and onnx-script dependencies and ONNX proto."""
 
+from __future__ import annotations
+
 import glob
 import io
 import os
@@ -42,10 +44,10 @@ def export_as_test_case(
     """
     try:
         import onnx
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Export test case to ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     test_case_dir = os.path.join(dir, "test_" + name)
     os.makedirs(test_case_dir, exist_ok=True)
@@ -60,7 +62,7 @@ def export_as_test_case(
         shutil.rmtree(data_set_dir)
     os.makedirs(data_set_dir)
 
-    proto = onnx.load_from_string(model_bytes)
+    proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
 
     for i, (input_proto, input) in enumerate(zip(proto.graph.input, inputs_data)):
         export_data(input, input_proto, os.path.join(data_set_dir, f"input_{i}.pb"))
@@ -97,10 +99,10 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     try:
         import onnx
         from onnx import numpy_helper
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Load test case from ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     with open(os.path.join(dir, "model.onnx"), "rb") as f:
         model_bytes = f.read()
@@ -110,12 +112,12 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     inputs = {}
     input_files = glob.glob(os.path.join(test_data_dir, "input_*.pb"))
     for input_file in input_files:
-        tensor = onnx.load_tensor(input_file)
+        tensor = onnx.load_tensor(input_file)  # type: ignore[attr-defined]
         inputs[tensor.name] = numpy_helper.to_array(tensor)
     outputs = {}
     output_files = glob.glob(os.path.join(test_data_dir, "output_*.pb"))
     for output_file in output_files:
-        tensor = onnx.load_tensor(output_file)
+        tensor = onnx.load_tensor(output_file)  # type: ignore[attr-defined]
         outputs[tensor.name] = numpy_helper.to_array(tensor)
 
     return model_bytes, inputs, outputs
@@ -133,8 +135,10 @@ def export_data(data, value_info_proto, f: str) -> None:
     """
     try:
         from onnx import numpy_helper
-    except ImportError:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.")
+    except ImportError as exc:
+        raise ImportError(
+            "Export data to ONNX format failed: Please install ONNX."
+        ) from exc
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):
@@ -225,7 +229,7 @@ def _add_onnxscript_fn(
     # size > 2GB, and if it for some reason did not, the model would fail on
     # serialization anyway in terms of the protobuf limitation. So we don't
     # need to worry about > 2GB model getting here.
-    model_proto = onnx.load_from_string(model_bytes)
+    model_proto = onnx.load_model_from_string(model_bytes)  # type: ignore[attr-defined]
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
@@ -276,9 +280,12 @@ def _find_onnxscript_op(
             if onnx_fn is not None:
                 # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
                 # after onnx-script is dependency
-                onnx_function_list.append(onnx_fn.to_function_proto())  # type: ignore[attr-defined]
-                included_node_func.add(node_kind)
+                if hasattr(onnx_fn, "to_function_proto"):
+                    onnx_function_proto = onnx_fn.to_function_proto()  # type: ignore[attr-defined]
+                    onnx_function_list.append(onnx_function_proto)
+                    included_node_func.add(node_kind)
                 continue
+
             raise errors.UnsupportedOperatorError(
                 node_kind,
                 specified_version,

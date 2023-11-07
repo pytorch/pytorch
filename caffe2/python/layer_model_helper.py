@@ -47,7 +47,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             This attribute access will be consistent with MTML model.
         '''
 
-        super(LayerModelHelper, self).__init__(name=name)
+        super().__init__(name=name)
         self._layer_names = set()
         self._layers = []
         self._param_to_shape = {}
@@ -124,7 +124,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         assert isinstance(
             blob, (str, core.BlobReference)
         ), "expect type str or BlobReference, but got {}".format(type(blob))
-        dtype = dtype or (np.float, (1, ))
+        dtype = dtype or (np.float64, (1, ))
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
         self.ad_hoc_plot_blobs.append(blob)
 
@@ -148,9 +148,9 @@ class LayerModelHelper(model_helper.ModelHelper):
                 op_name = 'GivenTensorIntFill'
             elif array.dtype == np.int64:
                 op_name = 'GivenTensorInt64Fill'
-            elif array.dtype == np.str:
+            elif array.dtype == str:
                 op_name = 'GivenTensorStringFill'
-            elif array.dtype == np.bool:
+            elif array.dtype == bool:
                 op_name = 'GivenTensorBoolFill'
             else:
                 op_name = 'GivenTensorFill'

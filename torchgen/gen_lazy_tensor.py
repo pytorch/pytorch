@@ -28,7 +28,8 @@ from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
 from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, FileManager, NamespaceHelper, YamlLoader
+from torchgen.utils import concatMap, FileManager, NamespaceHelper
+from torchgen.yaml_utils import YamlLoader
 from .gen_backend_stubs import (
     error_on_missing_kernels,
     gen_dispatcher_registrations,
@@ -106,7 +107,6 @@ def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
 ) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -115,7 +115,7 @@ def parse_native_functions_keys(
         )
     }
 
-    with open(backend_yaml_path, "r") as f:
+    with open(backend_yaml_path) as f:
         yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
@@ -134,10 +134,10 @@ def validate_shape_inference_header(
     shape_inference_hdr: str, expected_shape_infr_decls: List[str]
 ) -> None:
     try:
-        with open(shape_inference_hdr, "r") as f:
+        with open(shape_inference_hdr) as f:
             shape_infr_decls = f.read()
             shape_infr_decl_lines = set(shape_infr_decls.split("\n"))
-    except IOError as e:
+    except OSError as e:
         raise AssertionError(
             f"Unable to read from the specified shape_inference_hdr file: {shape_inference_hdr}"
         ) from e
@@ -155,7 +155,7 @@ def validate_shape_inference_header(
         raise Exception(
             f"""Missing shape inference function.\n
 Please add declare this function in {shape_inference_hdr}:\n
-and implement it in the the corresponding shape_inference.cpp file.\n
+and implement it in the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
 
@@ -404,8 +404,7 @@ def run_gen_lazy_tensor(
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
                 if f.func.name in ops_list:
-                    for r in func(f):
-                        yield r
+                    yield from func(f)
 
     selector = SelectiveBuilder.get_nop_selector()
 
@@ -427,7 +426,7 @@ def run_gen_lazy_tensor(
 
     Generated lazy native functions all perform shape inference, by first using a meta:: kernel
     if available for that op, and otherwise using a 'compute_shape_{op}' function instead.  The generator
-    knows the call signature for compute_shape_{op} becuase it matches the nativefunction (and meta::) signature,
+    knows the call signature for compute_shape_{op} because it matches the nativefunction (and meta::) signature,
     so it just has to check whether the op is structured and generate a call for one or the other.  It's up to the dev
     to supply the missing compute_shape_{op} function, but the codegen at least warns you about this and provides
     the expected signature which can be copy-pasted into shape_inference.h.

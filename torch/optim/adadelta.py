@@ -2,8 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _view_as_real)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -23,13 +22,13 @@ class Adadelta(Optimizer):
         differentiable: bool = False,
     ):
         if not 0.0 <= lr:
-            raise ValueError("Invalid learning rate: {}".format(lr))
+            raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= rho <= 1.0:
-            raise ValueError("Invalid rho value: {}".format(rho))
+            raise ValueError(f"Invalid rho value: {rho}")
         if not 0.0 <= eps:
-            raise ValueError("Invalid epsilon value: {}".format(eps))
+            raise ValueError(f"Invalid epsilon value: {eps}")
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
         defaults = dict(
             lr=lr,
@@ -40,7 +39,7 @@ class Adadelta(Optimizer):
             foreach=foreach,
             differentiable=differentiable,
         )
-        super(Adadelta, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -50,9 +49,11 @@ class Adadelta(Optimizer):
             group.setdefault("differentiable", False)
 
     def _init_group(self, group, params_with_grad, grads, square_avgs, acc_deltas):
+        has_complex = False
         for p in group["params"]:
             if p.grad is None:
                 continue
+            has_complex |= torch.is_complex(p)
             params_with_grad.append(p)
             if p.grad.is_sparse:
                 raise RuntimeError("Adadelta does not support sparse gradients")
@@ -74,6 +75,7 @@ class Adadelta(Optimizer):
             acc_deltas.append(state["acc_delta"])
 
             state["step"] += 1
+        return has_complex
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
@@ -103,7 +105,7 @@ class Adadelta(Optimizer):
                 group["differentiable"],
             )
 
-            self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
+            has_complex = self._init_group(group, params_with_grad, grads, square_avgs, acc_deltas)
 
             adadelta(
                 params_with_grad,
@@ -117,6 +119,7 @@ class Adadelta(Optimizer):
                 foreach=foreach,
                 maximize=maximize,
                 differentiable=differentiable,
+                has_complex=has_complex,
             )
 
         return loss
@@ -149,7 +152,7 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
        \end{aligned}
 
     For further details regarding the algorithm we refer to `ADADELTA: An Adaptive Learning Rate Method`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -160,14 +163,14 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adadelta(
@@ -179,6 +182,7 @@ def adadelta(
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
     differentiable: bool = False,
+    has_complex: bool = False,
     *,
     lr: float,
     rho: float,
@@ -193,8 +197,7 @@ def adadelta(
 
     # We still respect when the user inputs False for foreach.
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach([params, grads, square_avgs, acc_deltas],
-                                                  differentiable, has_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -215,6 +218,7 @@ def adadelta(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        has_complex=has_complex,
     )
 
 
@@ -230,6 +234,7 @@ def _single_tensor_adadelta(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     for (param, grad, square_avg, acc_delta) in zip(
@@ -270,6 +275,7 @@ def _multi_tensor_adadelta(
     eps: float,
     maximize: bool,
     differentiable: bool,
+    has_complex: bool,
 ):
 
     assert not differentiable, "_foreach ops don't support autograd"
@@ -277,13 +283,20 @@ def _multi_tensor_adadelta(
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
+    for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
+        if has_complex:
+            _view_as_real(device_params, device_grads, device_square_avgs, device_acc_deltas)
+
         if weight_decay != 0:
-            device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(device_grads, device_params, alpha=weight_decay)
 
         torch._foreach_mul_(device_square_avgs, rho)
         torch._foreach_addcmul_(device_square_avgs, device_grads, device_grads, value=1 - rho)

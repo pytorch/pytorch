@@ -70,7 +70,7 @@ static bool checkTypes(const ScalarType highType, const int typeConstraints) {
   return false;
 }
 
-bool isScalar(ExprHandle e) {
+static bool isScalar(ExprHandle e) {
   auto n = e.node();
   return n->isConstant() || to<Var>(n);
 }
@@ -188,7 +188,7 @@ static bool isOne(ExprHandle e) {
   return *n == 1;
 }
 
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
   auto at = a.rbegin();
@@ -224,7 +224,7 @@ std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
   return {ret, hasBroadcast};
 }
 
-std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapesImpl(
     std::vector<std::vector<ExprHandle>> shapes) {
   size_t n = shapes.size();
   if (n == 1) {
@@ -249,7 +249,7 @@ std::vector<ExprHandle> broadcastShapes(
 }
 
 std::vector<ExprHandle> valueShape(const ArgValue& v) {
-  if (auto b = c10::get_if<tensorexpr::BufHandle>(&v)) {
+  if (auto b = std::get_if<tensorexpr::BufHandle>(&v)) {
     return b->dims();
   }
   return {};
@@ -258,14 +258,14 @@ std::vector<ExprHandle> valueShape(const ArgValue& v) {
 ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes) {
-  if (auto b = c10::get_if<BufHandle>(&v)) {
+  if (auto b = std::get_if<BufHandle>(&v)) {
     return broadcast(*b, axes);
   }
   return constant(v);
 }
 
 ExprHandle scalarOrConstant(const ArgValue& v) {
-  if (auto vh = c10::get_if<VarHandle>(&v)) {
+  if (auto vh = std::get_if<VarHandle>(&v)) {
     return *vh;
   }
   return constant(v);
@@ -276,15 +276,15 @@ ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes) {
 }
 
 ExprHandle constant(const ArgValue& v) {
-  if (auto s = c10::get_if<tensorexpr::VarHandle>(&v)) {
+  if (auto s = std::get_if<tensorexpr::VarHandle>(&v)) {
     return *s;
-  } else if (auto d = c10::get_if<double>(&v)) {
+  } else if (auto d = std::get_if<double>(&v)) {
     return DoubleImm::make(*d);
-  } else if (auto i = c10::get_if<int64_t>(&v)) {
+  } else if (auto i = std::get_if<int64_t>(&v)) {
     return LongImm::make(*i);
-  } else if (auto b = c10::get_if<bool>(&v)) {
+  } else if (auto b = std::get_if<bool>(&v)) {
     return BoolImm::make(*b);
-  } else if (c10::get_if<ArgNone>(&v)) {
+  } else if (std::get_if<ArgNone>(&v)) {
     // This is just a placeholder so we don't throw.  None-handling
     // is operator-specific and should be handled properly in
     // the operator-specific lowering code.
@@ -327,10 +327,10 @@ Tensor computeChunk(
       "prim_constantchunk",
       outputShape,
       [inputs](const std::vector<VarHandle>& axes) {
-        const auto& b = c10::get<BufHandle>(inputs[0]);
-        int64_t chunkIdx = c10::get<int64_t>(inputs[1]);
-        int64_t dim = c10::get<int64_t>(inputs[2]);
-        int64_t chunks = c10::get<int64_t>(inputs[3]);
+        const auto& b = std::get<BufHandle>(inputs[0]);
+        int64_t chunkIdx = std::get<int64_t>(inputs[1]);
+        int64_t dim = std::get<int64_t>(inputs[2]);
+        int64_t chunks = std::get<int64_t>(inputs[3]);
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
 
         auto norm_dim = normalizeAndCheckIndex(dim, indices.size());
@@ -338,7 +338,7 @@ Tensor computeChunk(
         size_t step = buf_info->dims[norm_dim] / chunks;
 
         std::vector<ExprHandle> new_indices;
-        for (int64_t i = 0; i < indices.size(); ++i) {
+        for (int64_t i = 0; i < static_cast<int64_t>(indices.size()); ++i) {
           if (i == norm_dim) {
             new_indices.push_back(
                 indices[i] + ExprHandle(immLike(indices[i], chunkIdx * step)));
@@ -357,7 +357,7 @@ Tensor computeTranspose(
     const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto A = c10::get<BufHandle>(inputs[0]);
+  auto A = std::get<BufHandle>(inputs[0]);
   // Trivial case of 0-dim and 1-dim tensors: transpose is just a copy
   if (A.ndim() <= 1) {
     return Compute(
@@ -369,8 +369,8 @@ Tensor computeTranspose(
         });
   }
   // Usual case where transpose actually swaps dimensions
-  auto start_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[1]), A.ndim());
-  auto to_dim = at::maybe_wrap_dim(c10::get<int64_t>(inputs[2]), A.ndim());
+  auto start_dim = at::maybe_wrap_dim(std::get<int64_t>(inputs[1]), A.ndim());
+  auto to_dim = at::maybe_wrap_dim(std::get<int64_t>(inputs[2]), A.ndim());
   return Compute(
       "aten_transpose", outputShape, [&](std::vector<VarHandle> axes) {
         std::swap(axes[start_dim], axes[to_dim]);
@@ -384,7 +384,7 @@ Tensor computeExpand(
     const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto A = c10::get<BufHandle>(inputs[0]);
+  auto A = std::get<BufHandle>(inputs[0]);
   return Compute(
       "aten_expand", outputShape, [&](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -398,7 +398,7 @@ Tensor computeReshape(
     const std::vector<ExprHandle>& outputStrides,
     const c10::optional<ScalarType>& outputType,
     at::Device device) {
-  auto A = c10::get<BufHandle>(inputs[0]);
+  auto A = std::get<BufHandle>(inputs[0]);
   if (A.ndim() == 0) {
     return Compute(
         "aten_view", outputShape, [&](const std::vector<VarHandle>& axes) {
@@ -444,7 +444,7 @@ Tensor computeReshape(
         for (size_t idx = 0; idx < A.ndim(); idx++) {
           size_t dim_idx = A.ndim() - idx - 1;
           // We don't need to generate mod-div for the first dimension -
-          // ideally IRSimlifier would get rid of that for us, but for now
+          // ideally IRSimplifier would get rid of that for us, but for now
           // let's just avoid generating it in the first place.
           if (dim_idx > 0) {
             orig_buf_indexes[dim_idx] = flat_idx / stride % A.dim(dim_idx);
@@ -508,12 +508,12 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
   return {highType, nonEmptyInputs};
 }
 
-Tensor computeCatWoConditionals(
+static Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto input_list = c10::get<BufList>(inputs[0]);
+  auto input_list = std::get<BufList>(inputs[0]);
   auto arg_dim = inputs[1];
   auto cat_info = processCatList(input_list);
   ScalarType high_type = cat_info.first;
@@ -547,7 +547,7 @@ Tensor computeCatWoConditionals(
         output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
-  int64_t concat_dim = c10::get<int64_t>(arg_dim);
+  int64_t concat_dim = std::get<int64_t>(arg_dim);
   auto norm_concat_dim = normalizeAndCheckIndex(concat_dim, outputShape.size());
 
   auto loop_order_fn = [&](const BufPtr& buf_) {
@@ -574,7 +574,7 @@ Tensor computeCatWoConditionals(
     std::vector<VarPtr> for_vars(dims.size());
     std::vector<ExprPtr> load_indices(dims.size());
     std::vector<ExprPtr> store_indices(dims.size());
-    for (int64_t i = 0; i < dims.size(); ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(dims.size()); ++i) {
       for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i),
           dims[i].dtype());
@@ -628,7 +628,7 @@ Tensor computeCat(
     return computeCatWoConditionals(inputs, outputShape, outputStrides);
   }
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto inputList = c10::get<BufList>(inputs[0]);
+  auto inputList = std::get<BufList>(inputs[0]);
   auto argDim = inputs[1];
   auto catInfo = processCatList(inputList);
   ScalarType highType = catInfo.first;
@@ -642,7 +642,7 @@ Tensor computeCat(
           return ExprHandle(0);
         }
 
-        int64_t dim_ = c10::get<int64_t>(argDim);
+        int64_t dim_ = std::get<int64_t>(argDim);
         auto dim = normalizeAndCheckIndex(dim_, axes.size());
         // Promote input types.
         // Note that we need to consider all inputs, including empty - they
@@ -693,8 +693,8 @@ Tensor computeEmbedding(
   }
 
   BufHandle ResultBuf("emb", outputShape, dtype);
-  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
-  const BufHandle& indices = c10::get<BufHandle>(inputs[1]);
+  const BufHandle& w = std::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = std::get<BufHandle>(inputs[1]);
 
   StmtPtr s =
       ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});

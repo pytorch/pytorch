@@ -57,6 +57,9 @@ namespace {
     int64_t out_H = grid.size(2);
     int64_t out_W = grid.size(3);
     auto output = at::empty({N, C, out_D, out_H, out_W}, input.options());
+    if (output.numel() == 0) {
+        return output;
+    }
     int64_t inp_sN = input.stride(0);
     int64_t inp_sC = input.stride(1);
     int64_t inp_sD = input.stride(2);
@@ -174,9 +177,9 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-                int64_t ix_nearest = static_cast<int64_t>(std::round(ix));
-                int64_t iy_nearest = static_cast<int64_t>(std::round(iy));
-                int64_t iz_nearest = static_cast<int64_t>(std::round(iz));
+                int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
+                int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
+                int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
 
                 // assign nearest neighor pixel value to output pixel
                 scalar_t *out_ptr_NCDHW = out_ptr + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
@@ -219,6 +222,10 @@ namespace {
       }
     })();
     auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    if (grid.numel() == 0 || input.numel() == 0) {
+      grad_grid.zero_();
+      return std::make_tuple(grad_input, grad_grid);
+    }
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
     if (interpolation_mode == GridSamplerInterpolation::Nearest) {
@@ -266,7 +273,7 @@ namespace {
     scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
     scalar_t *gInp_ptr = nullptr;
     if (input_requires_grad) {
-      gInp_ptr = grad_input.data_ptr<scalar_t>();
+      gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
     }
     scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
     // loop over each output pixel
@@ -411,9 +418,9 @@ namespace {
                 gGrid_ptr_NDHW[1] = giy_mult * giy;
                 gGrid_ptr_NDHW[2] = giz_mult * giz;
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-                int64_t ix_nearest = static_cast<int64_t>(std::round(ix));
-                int64_t iy_nearest = static_cast<int64_t>(std::round(iy));
-                int64_t iz_nearest = static_cast<int64_t>(std::round(iz));
+                int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
+                int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
+                int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
 
                 // assign nearest neighor pixel value to output pixel
                 scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
@@ -436,7 +443,7 @@ namespace {
 
 }  // namespace
 
-Tensor _grid_sampler_2d_cpu_quantized(
+static Tensor _grid_sampler_2d_cpu_quantized(
     const Tensor& input,
     const Tensor& grid,
     int64_t interpolation_mode_,
@@ -538,7 +545,7 @@ Tensor _grid_sampler_2d_cpu_quantized(
             res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
                 ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
                 : zero_point * se;
-            *out_ptr_NCHW = std::round(res);
+            *out_ptr_NCHW = std::nearbyint(res);
           }
         }
       }
@@ -567,6 +574,9 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   int64_t out_H = grid.size(1);
   int64_t out_W = grid.size(2);
   auto output = at::empty({N, C, out_H, out_W}, input.options());
+  if (output.numel() == 0) {
+      return output;
+  }
   int64_t inp_sN = input.stride(0);
   int64_t inp_sC = input.stride(1);
   int64_t inp_sH = input.stride(2);
@@ -715,6 +725,10 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
 
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  if (grid.numel() == 0 || input.numel() == 0) {
+    grad_grid.zero_();
+    return std::make_tuple(grad_input, grad_grid);
+  }
   // If interpolation mode is Nearest, then grad_grid is not filled in the
   // loop below.
   if (interpolation_mode == GridSamplerInterpolation::Nearest) {
@@ -747,7 +761,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   scalar_t *inp_ptr = input.data_ptr<scalar_t>();
   scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
   scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
-  scalar_t *gInp_ptr = grad_input.data_ptr<scalar_t>();
+  scalar_t *gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
   scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {

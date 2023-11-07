@@ -13,7 +13,6 @@ import re
 import torch
 
 from typing import Callable, Dict, Optional, Tuple, Type, Union
-from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -70,7 +69,7 @@ def default_convert(data):
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, tuple):
         return [default_convert(d) for d in data]  # Backwards compatibility.
-    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
+    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, (str, bytes)):
         try:
             return elem_type([default_convert(d) for d in data])
         except TypeError:
@@ -154,6 +153,11 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
 def collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     elem = batch[0]
     out = None
+    if elem.is_nested:
+        raise RuntimeError(
+            "Batches of nested tensors are not currently supported by the default collate_fn; "
+            "please provide a custom collate_fn to handle them appropriately."
+        )
     if torch.utils.data.get_worker_info() is not None:
         # If we're in a background process, concatenate directly into a
         # shared memory tensor to avoid an extra copy
@@ -198,7 +202,8 @@ with contextlib.suppress(ImportError):
     default_collate_fn_map[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
 default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
-default_collate_fn_map[string_classes] = collate_str_fn
+default_collate_fn_map[str] = collate_str_fn
+default_collate_fn_map[bytes] = collate_str_fn
 
 
 def default_collate(batch):

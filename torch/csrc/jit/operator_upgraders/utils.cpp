@@ -8,8 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 c10::optional<UpgraderEntry> findUpgrader(
     const std::vector<UpgraderEntry>& upgraders_for_schema,
@@ -22,7 +21,7 @@ c10::optional<UpgraderEntry> findUpgrader(
       upgraders_for_schema.begin(),
       upgraders_for_schema.end(),
       [current_version](const UpgraderEntry& entry) {
-        return entry.bumped_at_version > current_version;
+        return entry.bumped_at_version > static_cast<int>(current_version);
       });
 
   if (pos != upgraders_for_schema.end()) {
@@ -36,7 +35,7 @@ bool isOpCurrentBasedOnUpgraderEntries(
     size_t current_version) {
   auto latest_update =
       upgraders_for_schema[upgraders_for_schema.size() - 1].bumped_at_version;
-  if (latest_update > current_version) {
+  if (latest_update > static_cast<int>(current_version)) {
     return false;
   }
   return true;
@@ -95,5 +94,4 @@ std::vector<UpgraderRange> getUpgradersRangeForOp(const std::string& name) {
   return output;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

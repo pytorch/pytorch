@@ -278,6 +278,14 @@ def sample_inputs_numpy_sort(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(3, 5), args=(1,))
 
 
+def sample_inputs_numpy_take(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    tensor = make_arg(3, 5)
+    dim = 1
+    _, ind, ind_inv = NumpySort.apply(tensor, 1)
+    yield SampleInput(tensor, args=(ind, ind_inv, dim))
+
+
 class NumpyTake(torch.autograd.Function):
     @staticmethod
     def forward(x, ind, ind_inv, dim):
@@ -455,6 +463,40 @@ class ZeroGradientsGenVmap(torch.autograd.Function):
             torch.zeros(gy.shape, dtype=gy.dtype, device=gy.device),
         )
 
+
+def sample_inputs_forward_default_args(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(3, 5))
+
+
+class ForwardHasDefaultArgs(torch.autograd.Function):
+    @staticmethod
+    def forward(x, idx=(2,)):
+        return x[idx]
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        x, idx = inputs
+        ctx.x_shape = x.shape
+        ctx.idx = idx
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        result = grad_output.new_zeros(ctx.x_shape)
+        result[ctx.idx] = grad_output
+        return result, None
+
+    @staticmethod
+    def vmap(info, in_dims, x, idx):
+        x_bdim, _ = in_dims
+        x = x.movedim(x_bdim, 1)
+        return ForwardHasDefaultArgs.apply(x, idx), 0
+
+    @staticmethod
+    def jvp(ctx, x_tangent, _):
+        return ForwardHasDefaultArgs.apply(x_tangent, ctx.idx)
+
+
 autograd_function_db = [
     OpInfo(
         'NumpyCubeAutogradFunction',
@@ -502,6 +544,15 @@ autograd_function_db = [
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
         gradcheck_wrapper=lambda y, ind: y,
+    ),
+    OpInfo(
+        'NumpyTakeAutogradFunction',
+        op=NumpyTake.apply,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        sample_inputs_func=sample_inputs_numpy_take,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
     ),
     OpInfo(
         'SelectAutogradFunction',
@@ -564,6 +615,15 @@ autograd_function_db = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_numpy_mul,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+    ),
+    OpInfo(
+        'ForwardHasDefaultArgsAutogradFunction',
+        op=ForwardHasDefaultArgs.apply,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_forward_default_args,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),

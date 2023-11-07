@@ -64,7 +64,7 @@ class NodeBase:
 
 class NodePy(NodeBase):
     def __init__(self, node_cpp, valid_methods):
-        super(NodePy, self).__init__(node_cpp)
+        super().__init__(node_cpp)
         valid_methods = valid_methods[:]
         self.inputs = []
 
@@ -89,7 +89,7 @@ class NodePy(NodeBase):
 
 class NodePyIO(NodePy):
     def __init__(self, node_cpp, input_or_output=None):
-        super(NodePyIO, self).__init__(node_cpp, methods_IO)
+        super().__init__(node_cpp, methods_IO)
         try:
             tensor_size = node_cpp.type().sizes()
         except RuntimeError:
@@ -109,7 +109,7 @@ class NodePyIO(NodePy):
 
 class NodePyOP(NodePy):
     def __init__(self, node_cpp):
-        super(NodePyOP, self).__init__(node_cpp, methods_OP)
+        super().__init__(node_cpp, methods_OP)
         # Replace single quote which causes strange behavior in TensorBoard
         # TODO: See if we can remove this in the future
         self.attributes = str(
@@ -271,11 +271,9 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]
-                attr_to_scope[attr_key] = "{}/{}.{}".format(
-                    parent_scope, attr_scope, attr_name
-                )
+                attr_to_scope[attr_key] = f"{parent_scope}/{attr_scope}.{attr_name}"
             else:
-                attr_to_scope[attr_key] = "__module.{}".format(attr_name)
+                attr_to_scope[attr_key] = f"__module.{attr_name}"
             # We don't need classtype nodes; scope will provide this information
             if node.output().type().kind() != CLASSTYPE_KIND:
                 node_py = NodePyOP(node)
@@ -286,7 +284,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
 
     for i, node in enumerate(graph.outputs()):  # Create sink nodes for output ops
         node_pyio = NodePyIO(node, "output")
-        node_pyio.debugName = "output.{}".format(i + 1)
+        node_pyio.debugName = f"output.{i + 1}"
         node_pyio.inputs = [node.debugName()]
         nodes_py.append(node_pyio)
 
@@ -302,7 +300,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
     for name, module in trace.named_modules(prefix="__module"):
         mod_name = parse_traced_name(module)
         attr_name = name.split(".")[-1]
-        alias_to_name[name] = "{}[{}]".format(mod_name, attr_name)
+        alias_to_name[name] = f"{mod_name}[{attr_name}]"
 
     for node in nodes_py.nodes_op:
         module_aliases = node.scopeName.split("/")

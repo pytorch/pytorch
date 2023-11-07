@@ -63,7 +63,7 @@ def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     """
     return eval(ts_type.annotation_str, _type_eval_globals)
 
-def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
+def _torchscript_schema_to_signature_impl(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
     from inspect import Parameter
     parameters : List[Parameter] = []
     for arg in ts_schema.arguments:
@@ -80,7 +80,7 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
         if name == "from":
             assert kind == Parameter.POSITIONAL_OR_KEYWORD
             # ParameterKind type is internal implementation detail to inspec package
-            # which makes it hard to do type annoation
+            # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
             for idx, p in enumerate(parameters):
@@ -96,6 +96,19 @@ def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> ins
         return_type = tuple(return_types)
 
     return inspect.Signature(parameters, return_annotation=return_type)
+
+_SCHEMA_TO_SIGNATURE_CACHE : Dict[Tuple[str, str], inspect.Signature] = {}
+
+def _torchscript_schema_to_signature(ts_schema : torch._C.FunctionSchema) -> inspect.Signature:
+    # Cached as it's called in the hot path of FakeTensor dispatch
+    cache_key = ts_schema.name, ts_schema.overload_name
+    cache_val = _SCHEMA_TO_SIGNATURE_CACHE.get(cache_key)
+    if cache_val is not None:
+        return cache_val
+
+    res = _torchscript_schema_to_signature_impl(ts_schema)
+    _SCHEMA_TO_SIGNATURE_CACHE[cache_key] = res
+    return res
 
 @compatibility(is_backward_compatible=False)
 def check_for_mutable_operation(target : Callable, args : Tuple['Argument', ...], kwargs : Dict[str, 'Argument']):
@@ -222,7 +235,7 @@ def type_matches(signature_type : Any, argument_type : Any):
             return issubclass(argument_type.__args__[0], sig_el_type)
 
         def is_homogeneous_tuple(t):
-            if not getattr(t, '__origin__', None) in {tuple, Tuple}:
+            if getattr(t, "__origin__", None) not in {tuple, Tuple}:
                 return False
             contained = t.__args__
             if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason

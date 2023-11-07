@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/native/Unfold3d.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
@@ -452,8 +453,9 @@ void Unfold3dCopyCPU(
     int64_t pad_h,
     int64_t pad_w,
     void* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       dtype,
       "Unfold3dCopyCPU",
       [=, &src]() {
@@ -499,8 +501,9 @@ void Unfold3dAccCPU(
     int64_t pad_h,
     int64_t pad_w,
     void* dst) {
-  AT_DISPATCH_ALL_TYPES_AND(
+  AT_DISPATCH_ALL_TYPES_AND2(
       at::ScalarType::BFloat16,
+      at::ScalarType::Half,
       dtype,
       "Unfold3dAccCPU",
       [=, &src]() {

@@ -194,8 +194,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   std::vector<WorkerInfo> getWorkerInfos() const override;
   void updateGroupMembership(
       const WorkerInfo& workerInfo,
-      const std::vector<c10::Device> devices,
-      const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+      const std::vector<c10::Device>& devices,
+      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps,
       bool isJoin);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
@@ -314,8 +314,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // TODO: To achieve better performance we can have a pipe pool per
   // client that can be configured using RpcBackendOptions.
   struct ClientPipe {
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
+    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe)
+        : pipe_(std::move(pipe)) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     mutable std::mutex mutex_;
     bool inError_{false};
@@ -359,11 +359,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   struct TimeoutMessageMetadata {
     TimeoutMessageMetadata(
         uint64_t messageId_,
-        // NOLINTNEXTLINE(modernize-pass-by-value)
         std::shared_ptr<AtomicJitFuture> responseFuture_,
         std::chrono::milliseconds timeout_)
         : messageId(messageId_),
-          responseFuture(responseFuture_),
+          responseFuture(std::move(responseFuture_)),
           timeout(timeout_) {}
     uint64_t messageId;
     std::shared_ptr<AtomicJitFuture> responseFuture;

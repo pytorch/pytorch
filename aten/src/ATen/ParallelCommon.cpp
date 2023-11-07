@@ -28,7 +28,7 @@ const char* get_env_var(
 size_t get_env_num_threads(const char* var_name, size_t def_value = 0) {
   try {
     if (auto* value = std::getenv(var_name)) {
-      int nthreads = c10::stoi(value);
+      int nthreads = std::stoi(value);
       TORCH_CHECK(nthreads > 0);
       return nthreads;
     }
@@ -101,7 +101,11 @@ int intraop_default_num_threads() {
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
+#if defined(FBCODE_CAFFE2) && defined(__aarch64__)
+    nthreads = 1;
+#else
     nthreads = TaskThreadPoolBase::defaultNumThreads();
+#endif
   }
   return nthreads;
 #endif

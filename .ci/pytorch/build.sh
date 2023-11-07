@@ -11,14 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *-clang7-tsan* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-tsan.sh" "$@"
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
@@ -44,6 +36,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *cuda11.3* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
     # disable it for now and to be fix later.
+    # TODO: disable UCC temporarily to enable CUDA 12.1 in CI
     export USE_UCC=1
     export USE_SYSTEM_UCC=1
   fi
@@ -166,9 +159,25 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   exit 1
 fi
 
+# We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
+# memory to build and will OOM
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ "$TORCH_CUDA_ARCH_LIST" == *"8.6"* || "$TORCH_CUDA_ARCH_LIST" == *"8.0"* ]]; then
+  echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
+  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
+  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+fi
+
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
   export CXX=clang++
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
+  export LDSHARED="clang --shared"
+  export USE_CUDA=0
+  export USE_ASAN=1
+  export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
+  unset USE_LLVM
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
@@ -191,16 +200,19 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
   get_bazel
+  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
   BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
   BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
 
-  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
-  # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
-
+  if [[ "$CUDA_VERSION" == "cpu" ]]; then
+    # Build torch, the Python module, and tests for CPU-only
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :torch/_C.so :all_tests
+  else
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
+  fi
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."

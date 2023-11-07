@@ -11,6 +11,7 @@
 
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
@@ -33,10 +34,11 @@
 #include "caffe2/opt/shape_info.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/torch.pb.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/python/pybind_workspace.h"
 #include "caffe2/utils/cpuid.h"
-#include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/module_python.h"
@@ -190,7 +192,7 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
     // If there is no fetcher registered, return a metainfo string.
     // If all branches failed, we will return a metainfo string.
     std::stringstream ss;
-    ss << caffe2::string(name) << ", a C++ native class of type "
+    ss << std::string(name) << ", a C++ native class of type "
        << blob.TypeName() << ".";
     return py::bytes(ss.str());
   }
@@ -1027,7 +1029,7 @@ void addGlobalMethods(py::module& m) {
   );
 
   // if the binary is built with USE_ROCM, this is a ROCm build
-  // and therefore we need to ignore dyndep failures (because the the module
+  // and therefore we need to ignore dyndep failures (because the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
 #if defined(USE_ROCM)

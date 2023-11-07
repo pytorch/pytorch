@@ -297,7 +297,7 @@ parseWireSections(const void* data, size_t data_size) {
     if (ptr == endp) {
       break;
     }
-    size_t sz = c10::stoll(std::string(sizePtr, ptr - sizePtr));
+    size_t sz = std::stoll(std::string(sizePtr, ptr - sizePtr));
     headerEnts.emplace_back(name, sz);
     ++ptr; // past the '\n'
   }
@@ -502,8 +502,8 @@ std::vector<at::IValue> readWrappedPayload(
   payload.resize(indexToRead);
 
   TORCH_INTERNAL_ASSERT(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      payload.size() > additionalPayloadSize,
+      additionalPayloadSize > 0 &&
+          static_cast<int64_t>(payload.size()) > additionalPayloadSize,
       "Wrong payload sizes: payload.size() is ",
       payload.size(),
       " but additional payload size is ",

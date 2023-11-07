@@ -476,7 +476,7 @@ Note that you can use ``torch.profiler`` (recommended, only available after 1.8.
         tensor = torch.randn(20, 10)
         dist.all_reduce(tensor)
 
-Please refer to the `profiler documentation <https://pytorch.org/docs/master/profiler.html>`__ for a full overview of profiler features.
+Please refer to the `profiler documentation <https://pytorch.org/docs/main/profiler.html>`__ for a full overview of profiler features.
 
 
 Multi-GPU collective functions
@@ -842,13 +842,20 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
-Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
-the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+Distributed components raise custom Exception types derived from `RuntimeError`:
 
+- `torch.distributed.DistError`: This is the base type of all distributed exceptions.
+- `torch.distributed.DistBackendError`: This exception is thrown when a backend-specific error occurs. For example, if
+  the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+- `torch.distributed.DistNetworkError`: This exception is thrown when networking
+  libraries encounter errors (ex: Connection reset by peer)
+- `torch.distributed.DistStoreError`: This exception is thrown when the Store encounters
+  an error (ex: TCPStore timeout)
+
+.. autoclass:: torch.distributed.DistError
 .. autoclass:: torch.distributed.DistBackendError
-
-.. warning::
-    The DistBackendError exception type is an experimental feature is subject to change.
+.. autoclass:: torch.distributed.DistNetworkError
+.. autoclass:: torch.distributed.DistStoreError
 
 .. Distributed modules that are missing specific entries.
 .. Adding them here for tracking purposes until they are more permanently fixed.
@@ -867,3 +874,118 @@ the `NCCL` backend is used and the user attempts to use a GPU that is not availa
 .. py:module:: torch.distributed.pipeline.sync
 .. py:module:: torch.distributed.pipeline.sync.skip
 .. py:module:: torch.distributed.tensor
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.default_hooks
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.mixed_precision_hooks
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks.quantization_hooks
+.. py:module:: torch.distributed.algorithms.join
+.. py:module:: torch.distributed.algorithms.model_averaging.averagers
+.. py:module:: torch.distributed.algorithms.model_averaging.hierarchical_model_averager
+.. py:module:: torch.distributed.algorithms.model_averaging.utils
+.. py:module:: torch.distributed.argparse_util
+.. py:module:: torch.distributed.c10d_logger
+.. py:module:: torch.distributed.checkpoint.api
+.. py:module:: torch.distributed.checkpoint.default_planner
+.. py:module:: torch.distributed.checkpoint.filesystem
+.. py:module:: torch.distributed.checkpoint.metadata
+.. py:module:: torch.distributed.checkpoint.optimizer
+.. py:module:: torch.distributed.checkpoint.planner
+.. py:module:: torch.distributed.checkpoint.planner_helpers
+.. py:module:: torch.distributed.checkpoint.resharding
+.. py:module:: torch.distributed.checkpoint.state_dict_loader
+.. py:module:: torch.distributed.checkpoint.state_dict_saver
+.. py:module:: torch.distributed.checkpoint.storage
+.. py:module:: torch.distributed.checkpoint.utils
+.. py:module:: torch.distributed.collective_utils
+.. py:module:: torch.distributed.constants
+.. py:module:: torch.distributed.distributed_c10d
+.. py:module:: torch.distributed.elastic.agent.server.api
+.. py:module:: torch.distributed.elastic.agent.server.local_elastic_agent
+.. py:module:: torch.distributed.elastic.events.api
+.. py:module:: torch.distributed.elastic.events.handlers
+.. py:module:: torch.distributed.elastic.metrics.api
+.. py:module:: torch.distributed.elastic.multiprocessing.api
+.. py:module:: torch.distributed.elastic.multiprocessing.errors.error_handler
+.. py:module:: torch.distributed.elastic.multiprocessing.errors.handlers
+.. py:module:: torch.distributed.elastic.multiprocessing.redirects
+.. py:module:: torch.distributed.elastic.multiprocessing.tail_log
+.. py:module:: torch.distributed.elastic.rendezvous.api
+.. py:module:: torch.distributed.elastic.rendezvous.c10d_rendezvous_backend
+.. py:module:: torch.distributed.elastic.rendezvous.dynamic_rendezvous
+.. py:module:: torch.distributed.elastic.rendezvous.etcd_rendezvous
+.. py:module:: torch.distributed.elastic.rendezvous.etcd_rendezvous_backend
+.. py:module:: torch.distributed.elastic.rendezvous.etcd_server
+.. py:module:: torch.distributed.elastic.rendezvous.etcd_store
+.. py:module:: torch.distributed.elastic.rendezvous.static_tcp_rendezvous
+.. py:module:: torch.distributed.elastic.rendezvous.utils
+.. py:module:: torch.distributed.elastic.timer.api
+.. py:module:: torch.distributed.elastic.timer.file_based_local_timer
+.. py:module:: torch.distributed.elastic.timer.local_timer
+.. py:module:: torch.distributed.elastic.utils.api
+.. py:module:: torch.distributed.elastic.utils.data.cycling_iterator
+.. py:module:: torch.distributed.elastic.utils.data.elastic_distributed_sampler
+.. py:module:: torch.distributed.elastic.utils.distributed
+.. py:module:: torch.distributed.elastic.utils.log_level
+.. py:module:: torch.distributed.elastic.utils.logging
+.. py:module:: torch.distributed.elastic.utils.store
+.. py:module:: torch.distributed.fsdp.api
+.. py:module:: torch.distributed.fsdp.fully_sharded_data_parallel
+.. py:module:: torch.distributed.fsdp.sharded_grad_scaler
+.. py:module:: torch.distributed.fsdp.wrap
+.. py:module:: torch.distributed.launcher.api
+.. py:module:: torch.distributed.logging_handlers
+.. py:module:: torch.distributed.nn.api.remote_module
+.. py:module:: torch.distributed.nn.functional
+.. py:module:: torch.distributed.nn.jit.instantiator
+.. py:module:: torch.distributed.nn.jit.templates.remote_module_template
+.. py:module:: torch.distributed.optim.apply_optimizer_in_backward
+.. py:module:: torch.distributed.optim.functional_adadelta
+.. py:module:: torch.distributed.optim.functional_adagrad
+.. py:module:: torch.distributed.optim.functional_adam
+.. py:module:: torch.distributed.optim.functional_adamax
+.. py:module:: torch.distributed.optim.functional_adamw
+.. py:module:: torch.distributed.optim.functional_rmsprop
+.. py:module:: torch.distributed.optim.functional_rprop
+.. py:module:: torch.distributed.optim.functional_sgd
+.. py:module:: torch.distributed.optim.named_optimizer
+.. py:module:: torch.distributed.optim.optimizer
+.. py:module:: torch.distributed.optim.post_localSGD_optimizer
+.. py:module:: torch.distributed.optim.utils
+.. py:module:: torch.distributed.optim.zero_redundancy_optimizer
+.. py:module:: torch.distributed.pipeline.sync.batchnorm
+.. py:module:: torch.distributed.pipeline.sync.checkpoint
+.. py:module:: torch.distributed.pipeline.sync.copy
+.. py:module:: torch.distributed.pipeline.sync.dependency
+.. py:module:: torch.distributed.pipeline.sync.microbatch
+.. py:module:: torch.distributed.pipeline.sync.phony
+.. py:module:: torch.distributed.pipeline.sync.pipe
+.. py:module:: torch.distributed.pipeline.sync.pipeline
+.. py:module:: torch.distributed.pipeline.sync.skip.layout
+.. py:module:: torch.distributed.pipeline.sync.skip.namespace
+.. py:module:: torch.distributed.pipeline.sync.skip.portal
+.. py:module:: torch.distributed.pipeline.sync.skip.skippable
+.. py:module:: torch.distributed.pipeline.sync.skip.tracker
+.. py:module:: torch.distributed.pipeline.sync.stream
+.. py:module:: torch.distributed.pipeline.sync.utils
+.. py:module:: torch.distributed.pipeline.sync.worker
+.. py:module:: torch.distributed.remote_device
+.. py:module:: torch.distributed.rendezvous
+.. py:module:: torch.distributed.rpc.api
+.. py:module:: torch.distributed.rpc.backend_registry
+.. py:module:: torch.distributed.rpc.constants
+.. py:module:: torch.distributed.rpc.functions
+.. py:module:: torch.distributed.rpc.internal
+.. py:module:: torch.distributed.rpc.options
+.. py:module:: torch.distributed.rpc.rref_proxy
+.. py:module:: torch.distributed.rpc.server_process_global_profiler
+.. py:module:: torch.distributed.tensor.parallel.api
+.. py:module:: torch.distributed.tensor.parallel.ddp
+.. py:module:: torch.distributed.tensor.parallel.fsdp
+.. py:module:: torch.distributed.tensor.parallel.input_reshard
+.. py:module:: torch.distributed.tensor.parallel.style
+.. py:module:: torch.distributed.utils
+.. py:module:: torch.distributed.checkpoint.state_dict

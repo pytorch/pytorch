@@ -170,6 +170,31 @@ processed by autograd internally: default mode (grad mode), no-grad mode,
 and inference mode, all of which can be togglable via context managers and
 decorators.
 
+.. list-table::
+   :widths: 50 50 50 50 50
+   :header-rows: 1
+
+   * - Mode
+     - Excludes operations from being recorded in backward graph
+     - Skips additional autograd tracking overhead
+     - Tensors created while the mode is enabled can be used in grad-mode later
+     - Examples
+   * - default
+     -
+     -
+     - ✓
+     - Forward pass
+   * - no-grad
+     - ✓
+     -
+     - ✓
+     - Optimizer updates
+   * - inference
+     - ✓
+     - ✓
+     -
+     - Data processing, model evaluation
+
 Default Mode (Grad Mode)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -455,8 +480,8 @@ imaginary of the components of :math:`z` can be expressed in terms of
 
     .. math::
         \begin{aligned}
-            Re(z) &= \frac {z + z^*}{2} \\
-            Im(z) &= \frac {z - z^*}{2j}
+            \mathrm{Re}(z) &= \frac {z + z^*}{2} \\
+            \mathrm{Im}(z) &= \frac {z - z^*}{2j}
         \end{aligned}
 
 Wirtinger calculus suggests to study :math:`f(z, z^*)` instead, which is
@@ -474,15 +499,15 @@ derivatives w.r.t., the real and imaginary components of :math:`z`.
                                          &= \frac{\partial }{\partial z} + \frac{\partial }{\partial z^*}   \\
             \\
             \frac{\partial }{\partial y} &= \frac{\partial z}{\partial y} * \frac{\partial }{\partial z} + \frac{\partial z^*}{\partial y} * \frac{\partial }{\partial z^*} \\
-                                         &= 1j * (\frac{\partial }{\partial z} - \frac{\partial }{\partial z^*})
+                                         &= 1j * \left(\frac{\partial }{\partial z} - \frac{\partial }{\partial z^*}\right)
         \end{aligned}
 
 From the above equations, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial }{\partial z} &= 1/2 * (\frac{\partial }{\partial x} - 1j * \frac{\partial }{\partial y})   \\
-            \frac{\partial }{\partial z^*} &= 1/2 * (\frac{\partial }{\partial x} + 1j * \frac{\partial }{\partial y})
+            \frac{\partial }{\partial z} &= 1/2 * \left(\frac{\partial }{\partial x} - 1j * \frac{\partial }{\partial y}\right)   \\
+            \frac{\partial }{\partial z^*} &= 1/2 * \left(\frac{\partial }{\partial x} + 1j * \frac{\partial }{\partial y}\right)
         \end{aligned}
 
 which is the classic definition of Wirtinger calculus that you would find on `Wikipedia <https://en.wikipedia.org/wiki/Wirtinger_derivatives>`_.
@@ -516,7 +541,7 @@ How do these equations translate into complex space :math:`ℂ`?
     .. math::
         \begin{aligned}
             z_{n+1} &= x_n - (\alpha/2) * \frac{\partial L}{\partial x} + 1j * (y_n - (\alpha/2) * \frac{\partial L}{\partial y}) \\
-                    &= z_n - \alpha * 1/2 * (\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}) \\
+                    &= z_n - \alpha * 1/2 * \left(\frac{\partial L}{\partial x} + j \frac{\partial L}{\partial y}\right) \\
                     &= z_n - \alpha * \frac{\partial L}{\partial z^*}
         \end{aligned}
 
@@ -538,9 +563,9 @@ is the loss of the entire computation (producing a real loss) and
 :math:`s` is the output of our function. The goal here is to compute
 :math:`\frac{\partial L}{\partial z^*}`, where :math:`z` is the input of
 the function.  It turns out that in the case of real loss, we can
-get away with *only* calculating :math:`\frac{\partial L}{\partial z^*}`,
+get away with *only* calculating :math:`\frac{\partial L}{\partial s^*}`,
 even though the chain rule implies that we also need to
-have access to :math:`\frac{\partial L}{\partial z^*}`.  If you want
+have access to :math:`\frac{\partial L}{\partial s}`.  If you want
 to skip this derivation, look at the last equation in this section
 and then skip to the next section.
 
@@ -558,8 +583,8 @@ Now using Wirtinger derivative definition, we can write:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial s} = 1/2 * (\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j) \\
-            \frac{\partial L}{\partial s^*} = 1/2 * (\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j)
+            \frac{\partial L}{\partial s} = 1/2 * \left(\frac{\partial L}{\partial u} - \frac{\partial L}{\partial v} j\right) \\
+            \frac{\partial L}{\partial s^*} = 1/2 * \left(\frac{\partial L}{\partial u} + \frac{\partial L}{\partial v} j\right)
         \end{aligned}
 
 It should be noted here that since :math:`u` and :math:`v` are real
@@ -567,7 +592,7 @@ functions, and :math:`L` is real by our assumption that :math:`f` is a
 part of a real valued function, we have:
 
     .. math::
-        (\frac{\partial L}{\partial s})^* = \frac{\partial L}{\partial s^*}
+        \left( \frac{\partial L}{\partial s} \right)^* = \frac{\partial L}{\partial s^*}
         :label: [2]
 
 i.e., :math:`\frac{\partial L}{\partial s}` equals to :math:`grad\_output^*`.
@@ -577,7 +602,7 @@ Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:
     .. math::
         \begin{aligned}
             \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
-            \frac{\partial L}{\partial v} = -1j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*})
+            \frac{\partial L}{\partial v} = -1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
         \end{aligned}
         :label: [3]
 
@@ -585,8 +610,8 @@ Substituting :eq:`[3]` in :eq:`[1]`, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= (\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}) * \frac{\partial u}{\partial z^*} - 1j * (\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}) * \frac{\partial v}{\partial z^*}  \\
-                                            &= \frac{\partial L}{\partial s} * (\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j) + \frac{\partial L}{\partial s^*} * (\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j)  \\
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} - 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
                                             &= \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
         \end{aligned}
@@ -595,8 +620,8 @@ Using :eq:`[2]`, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= (\frac{\partial L}{\partial s^*})^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * (\frac{\partial s}{\partial z})^*  \\
-                                            &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * {(\frac{\partial s}{\partial z})}^* }       \\
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s^*}\right)^* * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \left(\frac{\partial s}{\partial z}\right)^*  \\
+                                            &= \boxed{ (grad\_output)^* * \frac{\partial s}{\partial z^*} + grad\_output * \left(\frac{\partial s}{\partial z}\right)^* }       \\
         \end{aligned}
         :label: [4]
 
@@ -624,12 +649,12 @@ Using the first way to compute the Wirtinger derivatives, we have.
 
 .. math::
     \begin{aligned}
-        \frac{\partial s}{\partial z} &= 1/2 * (\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j) \\
+        \frac{\partial s}{\partial z} &= 1/2 * \left(\frac{\partial s}{\partial x} - \frac{\partial s}{\partial y} j\right) \\
                                       &= 1/2 * (c - (c * 1j) * 1j)  \\
                                       &= c                          \\
         \\
         \\
-        \frac{\partial s}{\partial z^*} &= 1/2 * (\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j) \\
+        \frac{\partial s}{\partial z^*} &= 1/2 * \left(\frac{\partial s}{\partial x} + \frac{\partial s}{\partial y} j\right) \\
                                         &= 1/2 * (c + (c * 1j) * 1j)  \\
                                         &= 0                          \\
     \end{aligned}
@@ -667,7 +692,7 @@ chain rule:
     - For :math:`f: ℝ → ℂ`, we get:
 
         .. math::
-            \frac{\partial L}{\partial z^*} = 2 * Re(grad\_out^* * \frac{\partial s}{\partial z^{*}})
+            \frac{\partial L}{\partial z^*} = 2 * \mathrm{Re}(grad\_output^* * \frac{\partial s}{\partial z^{*}})
 
 .. _saved-tensors-hooks-doc:
 
@@ -824,19 +849,29 @@ Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
-The hooks that will be covered are: hooks registered to Tensor via
-:meth:`torch.tensor.register_hook`,
-post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
+The hooks that will be covered are: backward hooks registered to Tensor via
+:meth:`torch.Tensor.register_hook`, post-accumulate-grad hooks registered to
+Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`, post-hooks
+registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
 pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
 
 Whether a particular hook will be fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Hooks registered to a Tensor via :meth:`torch.tensor.register_hook`
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_hook`
 are executed when gradients are being computed for that Tensor. (Note that this does not require
 the Tensor's grad_fn to be executed. For example, if the Tensor is passed
 as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
 the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
+
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are executed after the gradients have been accumulated for that Tensor, meaning the
+Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.Tensor.register_hook`
+are run as gradients are being computed, hooks registered via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are only triggered once the Tensor's grad field is updated by autograd at the end of
+the backward pass. Thus, post-accumulate-grad hooks can only be registered for leaf
+Tensors. Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+on a non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
@@ -865,11 +900,13 @@ The order in which the different hooks are fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The order in which things happen are:
-1. hooks registered to Tensor are executed
-2. pre-hook registered to Node are executed (if Node is executed).
-3. The ``.grad`` field is updated for Tensors that retain_grad
-4. Node is executed (subject to rules above)
-5. post-hook registered to Node are executed (if Node is executed)
+
+#. hooks registered to Tensor are executed
+#. pre-hooks registered to Node are executed (if Node is executed).
+#. the ``.grad`` field is updated for Tensors that retain_grad
+#. Node is executed (subject to rules above)
+#. for leaf Tensors that have ``.grad`` accumulated, post-accumulate-grad hooks are executed
+#. post-hooks registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.
@@ -913,7 +950,7 @@ For example:
     t.register_hook(fn)
     t.backward()
 
-Furthemore, it can be helpful to know that under the hood,
+Furthermore, it can be helpful to know that under the hood,
 when hooks are registered to a Tensor, they actually become permanently bound to the grad_fn
 of that Tensor, so if that Tensor is then modified in-place,
 even though the Tensor now has a new grad_fn, hooks registered before it was

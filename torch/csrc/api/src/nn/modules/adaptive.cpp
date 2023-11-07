@@ -25,6 +25,9 @@ AdaptiveLogSoftmaxWithLossImpl::AdaptiveLogSoftmaxWithLossImpl(
 
 void AdaptiveLogSoftmaxWithLossImpl::reset() {
   TORCH_CHECK(
+      options.cutoffs().size() > 0,
+      "cutoffs should be a sequence of length larger than 0");
+  TORCH_CHECK(
       std::is_sorted(options.cutoffs().begin(), options.cutoffs().end()) &&
           *std::min_element(
               options.cutoffs().begin(), options.cutoffs().end()) > 0 &&

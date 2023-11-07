@@ -292,7 +292,7 @@ TEST_F(atest, atest) {
     int isgone = 0;
     {
       auto base = at::empty({1, 2, 3}, TensorOptions(kCUDA));
-      auto f2 = from_blob(base.data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
+      auto f2 = from_blob(base.mutable_data_ptr(), {1, 2, 3}, [&](void*) { isgone++; });
     }
     ASSERT_EQ(isgone, 1);
 

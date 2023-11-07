@@ -7,12 +7,14 @@ self-hosted-runner:
     - linux.4xlarge
     - linux.12xlarge
     - linux.24xlarge
+    - linux.arm64.2xlarge
     - linux.4xlarge.nvidia.gpu
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
-    - windows.4xlarge
+    - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
+    - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
     - bm-runner
     - linux.rocm.gpu
@@ -21,3 +23,5 @@ self-hosted-runner:
     - macos-12-xl
     - macos-12
     - macos12.3-m1
+    - macos-latest-xlarge
+    - macos-13-xlarge

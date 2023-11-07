@@ -29,7 +29,7 @@ class BroadcastOp final : public Operator<Context> {
     }
   }
 
-  virtual ~BroadcastOp() {}
+  ~BroadcastOp() override {}
 
   bool RunOnDevice() override {
     std::call_once(once_, [&] { initialize(); });

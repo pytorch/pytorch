@@ -3,8 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/metal/Context.h>
 
-namespace at {
-namespace metal {
+namespace at::metal {
 
 std::atomic<const MetalInterface*> g_metal_impl_registry;
 
@@ -19,13 +18,12 @@ at::Tensor& metal_copy_(at::Tensor& self, const at::Tensor& src) {
   }
   AT_ERROR("Metal backend was not linked to the build");
 }
-} // namespace metal
+} // namespace at::metal
 
-namespace native {
+namespace at::native {
 bool is_metal_available() {
   auto p = at::metal::g_metal_impl_registry.load();
   return p ? p->is_metal_available() : false;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

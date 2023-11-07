@@ -184,14 +184,14 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         throw ErrorReport(token.range)
             << "Expected a number after '-' but got:" << token.text();
       }
-      // Fallthrough
+      [[fallthrough]];
     case TK_NUMBER:
       str += L.cur().text();
       if (str.find('j') != std::string::npos) {
         r.k = AttributeKind::c;
         double imag = 0.0f;
         try {
-          imag = c10::stod(str.substr(0, str.size() - 1));
+          imag = std::stod(str.substr(0, str.size() - 1));
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -205,7 +205,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
         try {
-          r.f = c10::stod(str);
+          r.f = std::stod(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -216,7 +216,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       } else {
         r.k = AttributeKind::i;
         try {
-          r.i = c10::stoll(str);
+          r.i = std::stoll(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to integer";
@@ -520,7 +520,7 @@ void IRParser::parseOperator(Block* b) {
   const FunctionSchema* schema = n->maybeSchema();
 
   // Register outputs.
-  int idx = 0;
+  unsigned idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {

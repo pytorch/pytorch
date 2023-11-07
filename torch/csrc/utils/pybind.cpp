@@ -27,25 +27,26 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymInt>::cast(
-    c10::SymInt si,
+    const c10::SymInt& si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
-    auto* py_node =
-        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+    auto* py_node = dynamic_cast<torch::impl::PythonSymNodeImpl*>(
+        si.toSymNodeImplUnowned());
     if (py_node) {
       // Return the Python directly (unwrap)
       return torch::get_symint_class()(py_node->getPyObj()).release();
     } else {
       // Wrap the C++ into Python
-      auto inner = py::cast(si.toSymNodeImpl());
+      auto inner = py::cast(si.toSymNode());
       if (!inner) {
         throw python_error();
       }
       return torch::get_symint_class()(inner).release();
     }
   } else {
-    return py::cast(si.as_int_unchecked()).release();
+    auto m = si.maybe_as_int();
+    return py::cast(*m).release();
   }
 }
 
@@ -65,7 +66,7 @@ bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
 }
 
 py::handle type_caster<c10::SymFloat>::cast(
-    c10::SymFloat si,
+    const c10::SymFloat& si,
     return_value_policy /* policy */,
     handle /* parent */) {
   if (si.is_symbolic()) {
@@ -76,6 +77,36 @@ py::handle type_caster<c10::SymFloat>::cast(
     return torch::get_symfloat_class()(py_node->getPyObj()).release();
   } else {
     return py::cast(si.as_float_unchecked()).release();
+  }
+}
+
+bool type_caster<c10::SymBool>::load(py::handle src, bool) {
+  if (torch::is_symbool(src)) {
+    value = c10::SymBool(static_cast<c10::SymNode>(
+        c10::make_intrusive<torch::impl::PythonSymNodeImpl>(src.attr("node"))));
+    return true;
+  }
+
+  auto raw_obj = src.ptr();
+  if (THPUtils_checkBool(raw_obj)) {
+    value = c10::SymBool{THPUtils_unpackBool(raw_obj)};
+    return true;
+  }
+  return false;
+}
+
+py::handle type_caster<c10::SymBool>::cast(
+    const c10::SymBool& si,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  if (auto m = si.maybe_as_bool()) {
+    return py::cast(*m).release();
+  } else {
+    // TODO: generalize this to work with C++ backed class
+    auto* py_node =
+        dynamic_cast<torch::impl::PythonSymNodeImpl*>(si.toSymNodeImpl().get());
+    TORCH_INTERNAL_ASSERT(py_node);
+    return torch::get_symbool_class()(py_node->getPyObj()).release();
   }
 }
 
@@ -105,6 +136,9 @@ py::handle type_caster<c10::Scalar>::cast(
       return py::cast(scalar.toDouble()).release();
     }
   } else if (scalar.isBoolean()) {
+    if (scalar.isSymbolic()) {
+      return py::cast(scalar.toSymBool()).release();
+    }
     return py::cast(scalar.toBool()).release();
   } else if (scalar.isComplex()) {
     return py::cast(scalar.toComplexDouble()).release();

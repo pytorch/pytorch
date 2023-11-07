@@ -3,6 +3,15 @@
 - tag: inplace_view
   desc: |
           This tag indicates if an operator *only* modifies the tensor metadata
+- tag: pt2_compliant_tag
+  desc: |
+          This tag indicates if the operator is guaranteed to
+          work with the PT2 compilation APIs (torch.compile,
+          torch.export, etc). If you add this tag to an
+          operator, please use
+          `torch.testing._internal.optest.opcheck` to test that
+          the operator has been registered correctly and
+          works with torch.compile
 - tag: view_copy
   desc: |
           This tag indicates operators that are *_copy* variants
@@ -24,12 +33,17 @@
           native_functions.yaml, and instead was generated automatically by the codegen.
 - tag: nondeterministic_seeded
   desc: |
-          This tag indicates if an operator is nondeterminstically seeded (ie is random)
-          such that the operator intentionally produces different results when run twice on the same inputs.
+          This tag indicates if an operator is nondeterministically seeded
+          (i.e., is random) such that the operator intentionally produces
+          different results when run twice on the same inputs, but this randomness
+          is controlled by a Generator which, if reseeded would give you the
+          same result.
 - tag: nondeterministic_bitwise
   desc: |
-          This tag indicates if an operator doesn't guarentee bitwise equivalence
+          This tag indicates if an operator doesn't guarantee bitwise equivalence
           across different runs of an operator with identical inputs.
+
+# NOTE [Core ATen Ops]
 - tag: core
   desc: |
           Core aten ops is a subset of aten ops that remains after aten-to-aten decomposition and

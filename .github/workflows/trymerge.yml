@@ -8,6 +8,7 @@ jobs:
   do_merge:
     name: try_merge_pr_${{ github.event.client_payload.pr_num }}
     runs-on: linux.20_04.4x
+    environment: mergebot
     env:
         GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -36,16 +37,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           FORCE: ${{ github.event.client_payload.force}}
-          ON_GREEN: ${{ github.event.client_payload.on_green}}
-          LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           REBASE: ${{ github.event.client_payload.rebase }}
+          IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
         run: |
           set -ex
           if [ -n "${REBASE}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
-            git checkout master
+            git checkout main
             git fetch -p
             # give github some time between the push and start workflows so that Github's messages
             # on the PR appear in chronological order (timing issues can shuffle them around)
@@ -57,10 +58,12 @@ jobs:
             else
               python3 .github/scripts/trymerge.py --force "${PR_NUM}"
             fi
-          elif [ -n "${ON_GREEN}" ]; then
-            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
-          elif [ -n "${LAND_CHECKS}" ]; then
-            python3 .github/scripts/trymerge.py --land-checks "${PR_NUM}"
+          elif [ -n "${IGNORE_CURRENT}" ]; then
+            if [ -n "${COMMENT_ID}" ]; then
+              python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            else
+              python3 .github/scripts/trymerge.py --ignore-current "${PR_NUM}"
+            fi
           elif [ -n "${COMMENT_ID}" ]; then
             python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else

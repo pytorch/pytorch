@@ -1,3 +1,4 @@
+import enum
 import dis
 import copy
 import sys
@@ -7,8 +8,11 @@ import operator
 import traceback
 import collections
 
+from dataclasses import is_dataclass, fields
+
+
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
+from typing import Tuple, Dict, OrderedDict, Optional, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -80,6 +84,9 @@ class ScopeContextManager:
         return
 
 
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
+
+
 @compatibility(is_backward_compatible=True)
 class TracerBase:
     graph: Graph
@@ -120,13 +127,40 @@ class TracerBase:
             check_for_mutable_operation(target, args, kwargs)
 
         node = self.graph.create_node(kind, target, args, kwargs, name, type_expr)
-        # TODO node_name_to_scope will be depricated in favor of
+        # TODO node_name_to_scope will be depreciated in favor of
         # node.meta['nn_module_stack']
         self.node_name_to_scope[node.name] = (
             self.scope.module_path,
             self.scope.module_type,
         )
-        if self.module_stack:
+        # Optionally set stack trace on the created Node for debugging purposes
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                node.stack_trace = stack_trace
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            for field in _COPY_META_FIELDS:
+                if field in current_meta:
+                    node.meta[field] = copy.copy(current_meta[field])
+
+            # Here we decrement to account for the sequence_nr having
+            # just been incremented while tracing this lowered aten op.
+            new_seq_nr = torch.autograd._get_sequence_nr() - 1
+            # The sequence_nr increments every time a new autograd Node
+            # is created. During the FWD pass we store the sequence_nr
+            # corresponding to the last autograd Node created on this fx
+            # node's meta.  A single aten op can create multiple autograd
+            # nodes as is the case with in-place foreach ops. During the
+            # BWD pass we retrieve the sequence_nr stored on the current
+            # executing autograd Node. See NOTE [ Sequence Number ].
+            if current_meta.get("in_grad_fn", False):
+                new_seq_nr = current_meta["grad_fn_seq_nr"]
+            node.meta["seq_nr"] = new_seq_nr
+
+        elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
@@ -160,34 +194,12 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
-        # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.has_preserved_node_meta():
-            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
-
-            # Explicitly set the stack_trace, nn_module_stack, source_fn, val on the node.meta
-            # If other meta fields are needed, they can be added here
-            stack_trace = current_meta.get("stack_trace")
-            if stack_trace:
-                proxy.node.stack_trace = stack_trace
-
-            nn_module_stack = current_meta.get("nn_module_stack")
-            if nn_module_stack:
-                proxy.node.meta["nn_module_stack"] = nn_module_stack
-
-            source_fn = current_meta.get("source_fn")
-            if source_fn:
-                proxy.node.meta["source_fn"] = source_fn
-
-            val = current_meta.get("val")
-            if val is not None:
-                proxy.node.meta["val"] = val
-
-        elif self.record_stack_traces:
+        if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy
@@ -210,7 +222,8 @@ class TracerBase:
                     'torch/utils/_python_dispatch.py',
                     'torch/_prims_common/wrappers.py',
                     'torch/_refs/__init__.py',
-                    'torch/_refs/nn/functional/__init__.py'
+                    'torch/_refs/nn/functional/__init__.py',
+                    'torch/utils/_stats.py',
                     ]
         while frame:
             frame = frame.f_back
@@ -263,10 +276,18 @@ class TracerBase:
         elif isinstance(a, range):
             return range(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
+        elif isinstance(a, torch._ops.OpOverload):
+            return a
+
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
-        elif isinstance(a, base_types) or a is None or a is ...:
+
+        if is_dataclass(a):
+            kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
+            return self.create_node("call_function", a.__class__, (), kwargs)
+
+        elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
 
@@ -371,7 +392,7 @@ class Proxy:
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
-    def __iter__(self) -> Iterable['Proxy']:
+    def __iter__(self) -> Iterator['Proxy']:
         frame = inspect.currentframe()
         assert frame is not None
         calling_frame = frame.f_back
@@ -449,9 +470,9 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
-            if isinstance(orig_method, torch._ops.PyOperator):
-                # TODO: Define how to symbolically trace PyOperators
-                raise RuntimeError("Unable to symbolically trace PyOperators")
+            if isinstance(orig_method, torch._ops.HigherOrderOperator):
+                # TODO: Define how to symbolically trace HigherOrderOperators
+                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 

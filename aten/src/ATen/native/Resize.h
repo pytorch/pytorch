@@ -10,7 +10,7 @@
 #include <utility>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // TODO: make all operations that resize given outputs use this function
 //   for consistency and maintainability.
@@ -25,6 +25,9 @@ namespace at { namespace native {
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
 TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+// WARNING: Do NOT call this directly. If you are resizing an output and want
+// to support dynamic shapes call at::resize__symint and resize_output_check_symint.
+// For more details, see: https://github.com/pytorch/pytorch/pull/111530/files#r1365845272
 TORCH_API bool resize_output_symint(const Tensor& output, SymIntArrayRef shape);
 
 // Utility for resize_output
@@ -34,6 +37,7 @@ TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
 TORCH_API bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
+TORCH_API void resize_bytes_meta(StorageImpl* storage, c10::SymInt size_bytes);
 
 static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
@@ -78,7 +82,7 @@ static inline void checkInBoundsForStorage(
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T storage_offset,
-    const caffe2::TypeMeta data_type,
+    const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
@@ -165,4 +169,4 @@ inline void setStrided(
   self_->set_sizes_and_strides(size, stride, c10::make_optional(storage_offset));
 }
 
-}}
+} // namespace at::native

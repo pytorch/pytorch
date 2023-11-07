@@ -1,19 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import functools
 import itertools
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import CPUOffload, MixedPrecision
+from torch.distributed.fsdp._flat_param import FlatParamHandle
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
+    FullyShardedDataParallel as FSDP,
     ShardingStrategy,
 )
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.utils import _p_assert
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     AlwaysWrapNestedWrappedModule,
@@ -322,7 +327,7 @@ class TestHooks(FSDPTest):
     def _test_pre_backward_hook_registration(self, model):
         optim = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
         optim.zero_grad()
-        # Inputs always cuda, as computation happes on CUDA device only
+        # Inputs always cuda, as computation happens on CUDA device only
         input = model.module.get_input(torch.device("cuda"))
         output = model(*input)
         # this is pre-bwd hook
@@ -367,7 +372,7 @@ class TestHooks(FSDPTest):
             "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
             _register_pre_backward_hooks_with_count,
         ), mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_post_backward_hooks"
+            "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
         ) as register_post_bwd_mock:
             self.assertEqual(register_pre_backward_hooks_call_count, 0)
             self.assertFalse(register_post_bwd_mock.called)
@@ -413,6 +418,87 @@ class TestNoGrad(FSDPTest):
         with torch.no_grad():
             no_grad_output = fsdp_model(*input)
         self.assertEqual(ref_output, no_grad_output)
+
+
+class TestAutograd(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_unshard_params_as_tensors(
+        self,
+    ):
+        """
+        Tests that FSDP always unshards the logical parameters as ``Tensor``
+        views during forward and backward computation even when forward and/or
+        backward prefetching.
+        """
+        self.run_subtests(
+            {
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP
+                    # Skip testing `NO_SHARD` since it doubly uses
+                    # `_use_unsharded_views()` for sharded views. Testing
+                    # `FULL_SHARD` and `SHARD_GRAD_OP` provides good confidence
+                    # that the `as_params` logic is correct.
+                ],
+                "use_orig_params": [False, True],
+                "forward_prefetch": [False, True],
+                "backward_prefetch": [
+                    BackwardPrefetch.BACKWARD_PRE,
+                    BackwardPrefetch.BACKWARD_POST,
+                    None,
+                ],
+            },
+            self._test_unshard_params_as_tensors,
+        )
+
+    def _test_unshard_params_as_tensors(
+        self,
+        sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
+        forward_prefetch: bool,
+        backward_prefetch: Optional[BackwardPrefetch],
+    ):
+        orig_use_unsharded_views = FlatParamHandle._use_unsharded_views
+
+        def _use_unsharded_views_assert_as_tensors(
+            self: FlatParamHandle, as_params: bool
+        ) -> None:
+            _p_assert(
+                not as_params, "Expects to use Tensor views but using parameter views"
+            )
+            return orig_use_unsharded_views(self, as_params)
+
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+            "use_orig_params": use_orig_params,
+            "forward_prefetch": forward_prefetch,
+            "backward_prefetch": backward_prefetch,
+            "auto_wrap_policy": ModuleWrapPolicy({nn.Linear}),
+        }
+        device = torch.device("cuda")
+        # Define a model with enough FSDP instances to exercise prefetching
+        NUM_LINEARS = 5
+        model = nn.Sequential(
+            *[nn.Linear(3, 3, device=device) for _ in range(NUM_LINEARS)]
+        )
+        fsdp_model = FSDP(model, **fsdp_kwargs)
+        self.assertEqual(len(list(FSDP.fsdp_modules(fsdp_model))), NUM_LINEARS + 1)
+        for _ in range(3):
+            inp = torch.randn((2, 3), device=device)
+            with self._patch_use_unsharded_views(
+                _use_unsharded_views_assert_as_tensors
+            ):
+                loss = fsdp_model(inp).sum()
+                loss.backward()
+
+    @contextlib.contextmanager
+    def _patch_use_unsharded_views(self, new_use_unsharded_views: Callable):
+        orig_use_unsharded_views = FlatParamHandle._use_unsharded_views
+        FlatParamHandle._use_unsharded_views = new_use_unsharded_views
+        try:
+            yield
+        finally:
+            FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
 
 instantiate_parametrized_tests(TestHooks)

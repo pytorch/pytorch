@@ -50,11 +50,8 @@ struct Event final {
   Event& operator=(const Event&) = delete;
 
   // Move constructor and move assignment operator
-  Event(Event&& other) noexcept : impl_{std::move(other.impl_)} {}
-  Event& operator=(Event&& other) noexcept {
-    impl_.swap(std::move(other.impl_));
-    return *this;
-  }
+  Event(Event&&) noexcept = default;
+  Event& operator=(Event&&) noexcept = default;
 
   // Destructor
   ~Event() = default;
@@ -88,7 +85,7 @@ struct Event final {
   /**
    * Increments the event's version and enqueues a job with this version
    * in the stream's work queue. When the stream process that job
-   * it nofifies all streams waiting on / blocked by that version of the
+   * it notifies all streams waiting on / blocked by that version of the
    * event to continue and marks that version as recorded.
    * */
   void record(const Stream& stream) {

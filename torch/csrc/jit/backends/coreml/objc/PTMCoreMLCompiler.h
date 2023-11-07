@@ -10,12 +10,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (NSString*)cacheDirectory;
 
-+ (BOOL)compileModel:(const std::string&)modelSpecs
-             modelID:(const std::string&)modelID;
++ (BOOL)compileModel:(const std::string&)modelSpecs modelID:(const std::string&)modelID;
 
-+ (nullable MLModel*)loadModel:(const std::string&)modelID
-                       backend:(const std::string&)backend
-             allowLowPrecision:(BOOL)allowLowPrecision;
++ (nullable MLModel*)loadModel:(const std::string)modelID
+                       backend:(const std::string)backend
+             allowLowPrecision:(BOOL)allowLowPrecision
+                         error:(NSError**)error;
 
 @end
 

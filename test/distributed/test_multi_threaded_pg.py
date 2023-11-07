@@ -1,10 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
 import sys
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
 from unittest import skip, SkipTest
+import operator
+from functools import reduce
+import threading
+import torch.autograd
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -13,12 +18,14 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     spawn_threads_and_init_comms,
     MultiThreadedTestCase,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     IS_SANDCASTLE,
 )
+
 
 DEFAULT_WORLD_SIZE = 4
 
@@ -92,8 +99,13 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         return 4
 
     def setUp(self):
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "1"
         super().setUp()
         self._spawn_threads()
+
+    def tearDown(self):
+        super().tearDown()
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
 
     def test_allgather(self):
         input_tensor = torch.ones(3, 3) * dist.get_rank()
@@ -141,9 +153,49 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(output, torch.ones(3, 3) * res_num)
 
-        # Test unimplemented error
-        with self.assertRaisesRegex(NotImplementedError, "only supports SUM on threaded pg for now"):
-            dist.all_reduce(output, op=ReduceOp.MAX)
+    def test_all_to_all(self):
+        rank = self.rank
+        world_size = self.world_size
+        input_tensor_list = [
+            torch.ones(3, 3) * x
+            for x in range(rank * world_size, (rank + 1) * world_size)
+        ]
+        output_tensor_list = [torch.empty_like(tensor) for tensor in input_tensor_list]
+        dist.all_to_all(output_tensor_list, input_tensor_list)
+        expected_tensor_list = [
+            torch.ones(3, 3) * x
+            for x in range(rank, world_size * world_size, world_size)
+        ]
+        self.assertEqual(expected_tensor_list, output_tensor_list)
+
+    def test_all_reduce_ops(self):
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.PRODUCT)
+        expected = reduce(operator.mul, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.MIN)
+        self.assertEqual(1, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.MAX)
+        self.assertEqual(self.world_size, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BAND)
+        expected = reduce(operator.and_, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BOR)
+        expected = reduce(operator.or_, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
+
+        tensor = torch.tensor([dist.get_rank() + 1])
+        dist.all_reduce(tensor, op=ReduceOp.BXOR)
+        expected = reduce(operator.xor, range(1, self.world_size + 1))
+        self.assertEqual(expected, tensor.item())
 
     def test_assert_equal_on_rank(self):
         # RNG is shared across threads. So instead of asserting on all threads
@@ -171,6 +223,64 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         else:
             self.assertEqual(output, torch.ones(3, 3) * 5)
 
+    def test_using_pg_from_another_thread(self):
+        def stuff_in_other_thread(pg):
+            x = torch.rand(4, requires_grad=True)
+            dist.all_reduce(x, group=pg)
+
+        t = threading.Thread(target=stuff_in_other_thread, args=(dist.group.WORLD,))
+        t.start()
+        t.join()
+
+    def test_gather(self):
+        if dist.get_rank() == 0:
+            gather_list = [torch.empty(3, 3) for _ in range(self.world_size)]
+        else:
+            gather_list = None
+        input_tensor = torch.ones(3, 3) * dist.get_rank()
+
+        dist.gather(input_tensor, gather_list)
+        if dist.get_rank() == 0:
+            for i in range(self.world_size):
+                self.assertEqual(gather_list[i], torch.ones(3, 3) * i)
+
+    def test_all_reduce_coalesced(self):
+        t0 = torch.ones(3, 3) * dist.get_rank()
+        t1 = torch.ones(3, 3) * dist.get_rank() * 2
+        dist.all_reduce_coalesced([t0, t1])
+        res_num = ((0 + self.world_size - 1) * self.world_size) / 2
+        self.assertEqual(t0, torch.ones(3, 3) * res_num)
+        self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
+
+    @skip_if_lt_x_gpu(1)
+    def test_bwd_sees_fwd_pg(self):
+        fwd_tid = threading.current_thread().ident
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, rank):
+                result = rank * 2
+
+                ctx.save_for_backward(result, rank)
+                assert int(rank.item()) == dist.get_rank()
+                return result
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                result, rank = ctx.saved_tensors
+                bwd_tid = threading.current_thread().ident
+
+                self.assertEqual(fwd_tid, bwd_tid, f"bwd not running in the same thread a fwd for rank {rank.item()}")
+                self.assertTrue(dist.is_initialized())
+                self.assertEqual(int(rank.item()), dist.get_rank())
+                dist.all_reduce(result)
+                self.assertEqual(int(result.item()), 12)  # (0 + 1 + 2 + 3) * 2
+
+                return grad_output * result
+
+        x = torch.tensor([dist.get_rank()], dtype=torch.float, device="cuda", requires_grad=True)
+        x = MyFunc.apply(x)
+        x.sum().backward()
 
 if __name__ == "__main__":
     run_tests()

@@ -3,8 +3,8 @@ import os
 from typing import Any, List
 
 import torch
+from torch.fx.experimental.symbolic_shapes import has_free_symbols
 
-from . import config
 from .utils import print_once
 
 
@@ -128,6 +128,8 @@ class Profiler:
 
         unique_graphs = Profiler.unique_graphs
         Profiler.unique_graphs = 0
+        # we counted one extra op that is part of the profiler setup code
+        total_ops -= 1
 
         return ProfileResult(
             captured=ProfileMetrics(
@@ -161,15 +163,19 @@ def fx_insert_profiling(gm: torch.fx.GraphModule, example_inputs: List[Any]):
     def _wrapped(*args):
         nonlocal output_shapes
         with torch.profiler.record_function("TORCHDYNAMO"):
-            assert (
-                shapes_of(args) == input_shapes or config.dynamic_shapes
+            # TODO: The assert here is a bit imprecise: if there are free
+            # symbols in the input shapes, we can still do the assert by
+            # doing matching and substitution.  However, I'm guessing that
+            # this assert doesn't matter too much so it's not worth the work
+            assert shapes_of(args) == input_shapes or any(
+                has_free_symbols(s) for s in input_shapes
             ), debug_print(shapes_of(args))
             result = gm.forward(*args)
             if output_shapes is None:
                 output_shapes = shapes_of(result)
             else:
-                assert (
-                    shapes_of(result) == output_shapes or config.dynamic_shapes
+                assert shapes_of(result) == output_shapes or any(
+                    has_free_symbols(s) for s in input_shapes
                 ), debug_print(shapes_of(result))
             return result
 

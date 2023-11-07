@@ -1,15 +1,17 @@
 import ctypes
-import torch
 
+import torch
+from torch._streambase import _EventBase, _StreamBase
 from ._utils import _dummy_type
 
 
-if not hasattr(torch._C, '_CudaStreamBase'):
+if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
-    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
-    torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
+    torch._C.__dict__["_CudaStreamBase"] = _dummy_type("_CudaStreamBase")
+    torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
 
-class Stream(torch._C._CudaStreamBase):
+
+class Stream(torch._C._CudaStreamBase, _StreamBase):
     r"""Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
@@ -20,21 +22,19 @@ class Stream(torch._C._CudaStreamBase):
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream. Can be either
-            -1 (high priority) or 0 (low priority). By default, streams have
-            priority 0.
+        priority(int, optional): priority of the stream, should be 0 or
+            negative, where negative numbers indicate higher priority. By default,
+            streams have priority 0.
 
-    .. note:: Although CUDA versions >= 11 support more than two levels of
-        priorities, in PyTorch, we only support two levels of priorities.
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
-            return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+            return super().__new__(cls, priority=priority, **kwargs)
         else:
             with torch.cuda.device(device):
-                return super(Stream, cls).__new__(cls, priority=priority, **kwargs)
+                return super().__new__(cls, priority=priority, **kwargs)
 
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
@@ -87,7 +87,7 @@ class Stream(torch._C._CudaStreamBase):
 
         Returns:
             A boolean indicating if all kernels in this stream are completed."""
-        return super(Stream, self).query()
+        return super().query()
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.
@@ -95,7 +95,7 @@ class Stream(torch._C._CudaStreamBase):
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
            `CUDA Stream documentation`_ for more info.
         """
-        super(Stream, self).synchronize()
+        super().synchronize()
 
     @property
     def _as_parameter_(self):
@@ -103,15 +103,14 @@ class Stream(torch._C._CudaStreamBase):
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return super(Stream, self).__eq__(o)
+            return super().__eq__(o)
         return False
 
     def __hash__(self):
         return hash((self.cuda_stream, self.device))
 
     def __repr__(self):
-        return ('<torch.cuda.Stream device={0} cuda_stream={1:#x}>'
-                .format(self.device, self.cuda_stream))
+        return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
 
 
 class ExternalStream(Stream):
@@ -134,10 +133,10 @@ class ExternalStream(Stream):
 
     def __new__(cls, stream_ptr, device=None, **kwargs):
         with torch.cuda.device(device):
-            return super(ExternalStream, cls).__new__(cls, stream_ptr=stream_ptr, **kwargs)
+            return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
-class Event(torch._C._CudaEventBase):
+class Event(torch._C._CudaEventBase, _EventBase):
     r"""Wrapper around a CUDA event.
 
     CUDA events are synchronization markers that can be used to monitor the
@@ -161,14 +160,17 @@ class Event(torch._C._CudaEventBase):
     """
 
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
-        return super(Event, cls).__new__(
+        return super().__new__(
             cls,
-            enable_timing=enable_timing, blocking=blocking, interprocess=interprocess)
+            enable_timing=enable_timing,
+            blocking=blocking,
+            interprocess=interprocess,
+        )
 
     @classmethod
     def from_ipc_handle(cls, device, handle):
         r"""Reconstruct an event from an IPC handle on the given device."""
-        return super(Event, cls).from_ipc_handle(device, handle)
+        return super().from_ipc_handle(device, handle)
 
     def record(self, stream=None):
         r"""Records the event in a given stream.
@@ -177,7 +179,7 @@ class Event(torch._C._CudaEventBase):
         stream's device must match the event's device."""
         if stream is None:
             stream = torch.cuda.current_stream()
-        super(Event, self).record(stream)
+        super().record(stream)
 
     def wait(self, stream=None):
         r"""Makes all future work submitted to the given stream wait for this
@@ -190,7 +192,7 @@ class Event(torch._C._CudaEventBase):
         """
         if stream is None:
             stream = torch.cuda.current_stream()
-        super(Event, self).wait(stream)
+        super().wait(stream)
 
     def query(self):
         r"""Checks if all work currently captured by event has completed.
@@ -199,13 +201,13 @@ class Event(torch._C._CudaEventBase):
             A boolean indicating if all work currently captured by event has
             completed.
         """
-        return super(Event, self).query()
+        return super().query()
 
     def elapsed_time(self, end_event):
         r"""Returns the time elapsed in milliseconds after the event was
         recorded and before the end_event was recorded.
         """
-        return super(Event, self).elapsed_time(end_event)
+        return super().elapsed_time(end_event)
 
     def synchronize(self):
         r"""Waits for the event to complete.
@@ -216,12 +218,12 @@ class Event(torch._C._CudaEventBase):
          .. note:: This is a wrapper around ``cudaEventSynchronize()``: see
             `CUDA Event documentation`_ for more info.
         """
-        super(Event, self).synchronize()
+        super().synchronize()
 
     def ipc_handle(self):
         r"""Returns an IPC handle of this event. If not recorded yet, the event
-        will use the current device. """
-        return super(Event, self).ipc_handle()
+        will use the current device."""
+        return super().ipc_handle()
 
     @property
     def _as_parameter_(self):
@@ -229,6 +231,6 @@ class Event(torch._C._CudaEventBase):
 
     def __repr__(self):
         if self.cuda_event:
-            return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
+            return f"<torch.cuda.Event {self._as_parameter_.value:#x}>"
         else:
-            return '<torch.cuda.Event uninitialized>'
+            return "<torch.cuda.Event uninitialized>"

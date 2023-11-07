@@ -5,8 +5,7 @@
 #include <ATen/core/class_type.h>
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 static constexpr int defaultPrecision = 6;
@@ -18,7 +17,7 @@ void addFormattedArg(
     const IValue& ival,
     std::stringstream& ss,
     int precision = defaultPrecision) {
-  // TODO: Implement precison-based formatting
+  // TODO: Implement precision-based formatting
   std::stringstream tmp;
   switch (key) {
     case 'd':
@@ -217,7 +216,7 @@ void einsum(Stack& stack, size_t num_inputs) {
 void percentFormat(Stack& stack, size_t num_inputs) {
   auto format_str = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1)[0];
-  auto args_size = 1; // assumed size
+  size_t args_size = 1; // assumed size
   if (args.isTuple()) {
     args_size = args.toTupleRef().elements().size();
   }
@@ -239,7 +238,6 @@ void percentFormat(Stack& stack, size_t num_inputs) {
       begin = percent_idx + 2; // skip the `%` and the format specifier
       continue;
     }
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(used_args < args_size, "Too few arguments for format string");
     char key = format_str.at(format_idx);
     IValue arg;
@@ -252,7 +250,6 @@ void percentFormat(Stack& stack, size_t num_inputs) {
     begin = percent_idx + 2;
     ++used_args;
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");
   drop(stack, num_inputs);
   push(stack, ss.str());
@@ -270,6 +267,9 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 }
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
+  if (num_inputs > stack.size()) {
+    TORCH_CHECK(false, "Invalid number of inputs: ", num_inputs);
+  }
   switch (num_inputs) {
     case 0:
       stack.emplace_back(c10::ivalue::Tuple::create());
@@ -426,5 +426,4 @@ void dequantize(Stack& stack) {
   }
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
