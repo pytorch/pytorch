@@ -155,11 +155,30 @@ def common_reduction_strategy(
     return reduction_strategy
 
 
+LINEAR_REDUCTION_OP_MAP = {
+    aten.all.default: c10d.ReduceOp.SUM,
+    aten.all.dim: c10d.ReduceOp.SUM,
+    aten.sum.default: c10d.ReduceOp.SUM,
+    aten.sum.dim_IntList: c10d.ReduceOp.SUM,
+    aten.prod.default: c10d.ReduceOp.PRODUCT,
+    aten.prod.dim_int: c10d.ReduceOp.PRODUCT,
+    aten.prod.int_out: c10d.ReduceOp.PRODUCT,
+    aten.mean.default: c10d.ReduceOp.AVG,
+    aten.mean.dim: c10d.ReduceOp.AVG,
+    aten.mean.out: c10d.ReduceOp.AVG,
+    aten.max.default: c10d.ReduceOp.MAX,
+    aten.max.dim: c10d.ReduceOp.MAX,
+    aten.max.out: c10d.ReduceOp.MAX,
+    aten.min.default: c10d.ReduceOp.MIN,
+    aten.min.dim: c10d.ReduceOp.MIN,
+    aten.min.out: c10d.ReduceOp.MIN,
+}
+
+
 @register_op_strategy(
-    [aten.all.default, aten.sum.default, aten.sum.dim_IntList],
-    schema_info=RuntimeSchemaInfo(1),
+    list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
 )
-def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
@@ -170,32 +189,14 @@ def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
 
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
-    return common_reduction_strategy(
-        mesh, input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=True
-    )
-
-
-@register_op_strategy(
-    [aten.mean.default, aten.mean.dim, aten.mean.out], schema_info=RuntimeSchemaInfo(1)
-)
-def mean_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    args_schema = op_schema.args_schema
-    input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
-    dims = None
-    if len(op_schema.args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], input_strategy.output_ndim)
-
-    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
-
-    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+    reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
     return common_reduction_strategy(
         mesh,
         input_strategy,
         reduce_dims,
         keep_dim=keep_dim,
         reduction_linear=True,
-        reduction_op=c10d.ReduceOp.AVG,
+        reduction_op=reduction_op,
     )
 
 

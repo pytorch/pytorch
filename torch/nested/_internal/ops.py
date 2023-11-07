@@ -11,6 +11,13 @@ __all__: List[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
+# Simplifying assumption: we assume that the batch dim is always the left-most
+# dim, and the ragged dim is always the second dim.
+def _outer_to_inner_dim(ndim, dim):
+    assert dim >= 0 and dim < ndim
+    return 0 if dim < 2 else dim - 1
+
+
 def _wrap_jagged_dim(ndim, dim, op_name):
     from torch._prims_common import canonicalize_dims
 
@@ -19,7 +26,29 @@ def _wrap_jagged_dim(ndim, dim, op_name):
         raise RuntimeError(
             f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
         )
-    return wrapped - 1
+    return _outer_to_inner_dim(ndim, wrapped)
+
+
+def _wrap_jagged_dims(ndim, dims, op_name):
+    # ex: (2, 3, 4) -> (1, 2, 3)
+    # ex: (0, 1, 4) -> (0, 3)
+    from torch._prims_common import canonicalize_dims
+
+    wrapped_dims = [canonicalize_dims(ndim, d) for d in dims]
+    # This logic needs to be done after we canonicalize dims but before we
+    # map to inner dims so we can print a nicer error message.
+    zero_in_dims = 0 in wrapped_dims
+    one_in_dims = 1 in wrapped_dims
+    if zero_in_dims ^ one_in_dims:
+        apply, not_apply = ("batch", "ragged") if zero_in_dims else ("ragged", "batch")
+        raise RuntimeError(
+            f"{op_name}(): applying over the {apply} dimension, but not the {not_apply}"
+            " dimension is not supported for NestedTensor"
+        )
+    return (
+        tuple(_outer_to_inner_dim(ndim, d) for d in dims if d != 0),
+        zero_in_dims,
+    )
 
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
@@ -79,6 +108,30 @@ def raggedness_matches(nt, size):
     return list(nt._size[:end]) == list(size[:end])
 
 
+def squeeze_leading_ones(t):
+    # Note: [ Squeezing leading ones ]
+    #
+    # Squeeze leading ones from t.
+    #
+    # We want:
+    #   (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
+    #   (B, j0, ?, ?) + (1, 1, 1, ?, ?) -> (1, B, j0, ?, ?)  (not yet supported)
+    #
+    # 1) Squeeze extra ones and grab values from NT
+    #   (1, 1, ?, ?) -> (?, ?)   and   (sum(*), ?, ?) -> (B, j0, ?, ?)
+    # 2) Do dense broadcasting:
+    #   (sum(*), ?, ?) + (?, ?) -> (sum(*), ?, ?)
+    # 3) Construct nested tensor
+    #   (sum(*), ?, ?) -> (B, j0, ?, ?)
+    #
+    # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
+    # at step (4) and we would need to update this function to record how
+    # many ones we unsqueezed.
+    while t.shape[0] == 1:
+        t = t.squeeze(0)
+    return t
+
+
 def register_func(tables, aten_ops, schema_str):
     if not isinstance(aten_ops, list):
         aten_ops = [aten_ops]
@@ -97,6 +150,7 @@ def register_func(tables, aten_ops, schema_str):
 
             for table in tables:
                 table[aten_op] = get_inner(aten_op)
+        return func
 
     return wrapper
 
@@ -162,15 +216,17 @@ def jagged_binary_pointwise(func, *args, **kwargs):
     # === Handle broadcasting across the batch / ragged dims ===
 
     # Easy case: take advantage of pre-existing broadcasting logic
-    # when NT dim > non-NT dim
-    # ex: (B, j0, D_0, D_1) + (D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, D_0, D_1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, 1, 1) + (D_0, D_1) -> (B, j0, D_0, D_1)
-    # ex: (B, j0, 1, 1) + (1, D_0, D_1) -> (B, j0, D_0, D_1)
-    if (a_is_nt and a.dim() > b.dim()) or (not a_is_nt and b.dim() > a.dim()):
-        arg1 = a._values if a_is_nt else a
-        arg2 = b._values if not a_is_nt else b
-        return NestedTensor(func(arg1, arg2, *args[2:], **kwargs), **extracted_kwargs)
+    # ex: (B, j0, ?, ?) + (?) -> (B, j0, ?, ?)
+    # ex: (B, j0, ?, ?) + (?, ?) -> (B, j0, ?, ?)
+    # ex: (B, j0, ?, ?) + (1, 1, ?, ?) -> (B, j0, ?, ?)
+    nt, t = (a, b) if a_is_nt else (b, a)
+    # See Note: [ Squeezing leading ones ]
+    if t.dim() > nt.dim():
+        raise NotImplementedError("NYI: broadcasting NT with T with larger dim")
+    t_squeezed = squeeze_leading_ones(t)
+    if nt.dim() >= t_squeezed.dim() + 2:
+        lhs, rhs = (nt._values, t_squeezed) if a_is_nt else (t_squeezed, nt._values)
+        return NestedTensor(func(lhs, rhs, *args[2:], **kwargs), **extracted_kwargs)
 
     # Harder case: do manual broadcasting over unbound components
     # when NT dim == non-NT dim
@@ -282,15 +338,18 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.is_contiguous.default, "self: jt")
 def is_contiguous_general(func, *args, **kwargs):
+    from torch._prims_common import is_contiguous_for_memory_format
+
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-
     inp = new_kwargs.pop("input")
-
-    from torch._prims_common import is_contiguous
-
-    return is_contiguous(inp, **new_kwargs)
+    new_kwargs["memory_format"] = new_kwargs.get(
+        "memory_format", torch.contiguous_format
+    )
+    if new_kwargs["memory_format"] == torch.preserve_format:
+        return True
+    return is_contiguous_for_memory_format(inp, **new_kwargs)
 
 
 register_jagged_func(
@@ -592,6 +651,31 @@ def is_pinned_default(func, *args, **kwargs):
 @register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
 def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
+
+
+@register_jagged_func(
+    torch.ops.aten.sum.dim_IntList, "self: jt, dim: any?, keepdim: any?, dtype: any?"
+)
+def sum_dim_IntList(func, *args, **kwargs):
+    # sum_dim_IntList can produce a NT or a T depending on whether the ragged dims
+    # are reduced away.
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    assert inp._ragged_idx == 1
+    new_kwargs["dim"], ragged_reduced_away = _wrap_jagged_dims(
+        inp.dim(), new_kwargs["dim"], "sum"
+    )
+
+    if not ragged_reduced_away:
+        return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
+    else:
+        # Don't wrap because we reduced away the raggedness
+        out = func(inp._values, **new_kwargs)
+        if new_kwargs["keepdim"]:
+            out = out.unsqueeze(0)
+        return out
 
 
 @register_jagged_func(torch.ops.aten.transpose.int, "self: jt, dim0: any, dim1: any")
