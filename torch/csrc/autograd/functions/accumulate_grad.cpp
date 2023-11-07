@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -70,6 +71,10 @@ void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
     args.collect(variable);
     args.collect(variable.grad());
   }
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    hook->compiled_args(args);
+  }
 }
 variable_list AccumulateGrad::apply_with_saved(
     const variable_list& grads,
@@ -83,19 +88,16 @@ variable_list AccumulateGrad::apply_with_saved(
   at::Tensor& grad_copy = variable.mutable_grad();
   saved.before(variable_copy);
   saved.before(grad_copy);
-  // saved.assign_mutable_grad() will record the symbolic gradient result.
-  // However,  AccumulateGrad may not call the `update_grad` lambda but simply
-  // calls `add_()`. So we also have to record the symbolic gradient result here
-  // to guarantee can retrieve it back later.
-  saved.record_grad(grad_copy);
-  accumulateGrad(
-      variable_copy,
-      grad_copy,
-      grads[0],
-      0 /* num_expected_refs, 0 disables aliased reuse */,
-      [&saved, this, &grad_copy](const at::Tensor& grad_update) {
-        saved.assign_mutable_grad(variable, grad_update);
-      });
+  variable_copy.mutable_grad() = grad_copy;
+  // op is intentionally static
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("inductor::accumulate_grad_", "")
+                       .typed<void(const at::Tensor&, const at::Tensor&)>();
+  op.call(variable_copy, grads[0]);
+  auto& hook = tensor_post_acc_grad_hooks();
+  if (hook != nullptr) {
+    hook->apply_with_saved(variable_copy, saved);
+  }
   saved.after(variable_copy);
   saved.after(grad_copy);
 

@@ -130,28 +130,16 @@ jobs:
           export TCLLIBPATH="/usr/local/lib"
           ${CONDA_RUN} scripts/build_ios.sh
 
-      - name: Build TestApp
-        if: matrix.ios_platform == 'SIMULATOR'
-        timeout-minutes: 15
-        run: |
-          # Run the ruby build script
-          if ! [ -x "$(command -v xcodebuild)" ]; then
-            echo 'Error: xcodebuild is not installed.'
-            exit 1
-          fi
-          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
-
-      - name: Run simulator tests
-        if: matrix.ios_platform == 'SIMULATOR'
+      - name: Prepare the test models
         shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp/benchmark
         run: |
           set -eux
           # shellcheck disable=SC1091
           # Use the pytorch nightly build to generate models
           ${CONDA_RUN} pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
 
-          # Generate models for differnet backends
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          # Generate models for different backends
           mkdir -p ../models
           # NB: Both of the following scripts only export models with lite interpreter
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
@@ -172,9 +160,28 @@ jobs:
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
-          popd
 
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp"
+      - name: Build TestApp
+        if: matrix.ios_platform == 'SIMULATOR'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -eux
+
+          # Run the ruby build script
+          if ! [ -x "$(command -v xcodebuild)" ]; then
+            echo 'Error: xcodebuild is not installed.'
+            exit 1
+          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
+
+      - name: Run simulator tests
+        if: matrix.ios_platform == 'SIMULATOR'
+        shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp
+        run: |
+          set -eux
+
           # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
@@ -185,7 +192,6 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
-          popd
 
       - name: Dump simulator tests on failure
         if: failure() && matrix.ios_platform == 'SIMULATOR'

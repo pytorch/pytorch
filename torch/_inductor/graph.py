@@ -17,16 +17,11 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
-    ShapeEnv,
-    SymTypes,
-)
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
-from . import config, ir, metrics
+from . import config, ir
 from .codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
@@ -34,11 +29,20 @@ from .codegen.common import (
 )
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
+    CppWrapperCodeGenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    Pointwise,
+    Reduction,
+    StorageBox,
+    TensorBox,
+)
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -167,6 +171,7 @@ class GraphLowering(torch.fx.Interpreter):
         user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
+        is_inference=False,
     ):
         super().__init__(gm)
 
@@ -174,6 +179,7 @@ class GraphLowering(torch.fx.Interpreter):
             layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
         )
         self.num_channels_last_conv = 0
+        self.is_inference = is_inference
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -251,14 +257,9 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # Currently on ROCm we are seeing some slow downs in gcnArch that do not
-        # have optimal NHWC implementations. On ROCm MI200 series we will
-        # default to the enforced last channels behavior, but on non-MI200 series
-        # we will disable the forced layout.
+        # NHWC perf issue on ROCm5.7 first noted here https://github.com/pytorch/pytorch/pull/110319
         if torch.version.hip and torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            if not re.search(r"MI2\d\d", gpu_name):
-                return False
+            return False
 
         # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
         if (
@@ -335,30 +336,6 @@ class GraphLowering(torch.fx.Interpreter):
         ):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
-
-        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
-        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
-        # for more details.
-        #
-        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
-        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
-        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
-        #
-        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
-        #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
-        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
-        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
-        # bringing perf gains.
-        for n in gm.graph.nodes:
-            if n.target in (
-                torch.ops.aten._scaled_dot_product_flash_attention.default,
-                torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            ):
-                log.debug(
-                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
-                )
-                return False
 
         return True
 
@@ -463,11 +440,6 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def disable_cpp_wrapper(self, cond):
-        metrics.disable_cpp_wrapper += 1
-        self.cpp_wrapper = False
-        log.debug("Set cpp_wrapper to False due to %s", cond)
-
     def register_buffer(self, buffer: ir.ComputedBuffer):
         name = f"buf{len(self.buffers)}"
         self.buffers.append(buffer)
@@ -488,7 +460,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -528,6 +503,14 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
@@ -590,7 +573,7 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
@@ -598,6 +581,9 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
@@ -628,17 +614,24 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
+    @staticmethod
+    def can_inline_constant(t: torch.Tensor) -> bool:
+        """
+        True if this is a small constant attr that will be inlined.
+        """
+        return len(t.shape) == 1 and t.shape[0] <= 8
+
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
 
-        if unsupported_output_tensor(value):
+        if config.always_keep_tensor_constants or unsupported_output_tensor(value):
             return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if len(value.shape) == 1 and value.shape[0] <= 8:
+            if self.can_inline_constant(value):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
@@ -675,7 +668,7 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.graph_inputs.items():
             assert isinstance(
                 value, (TensorBox, sympy.Expr)
-            ), "Unsupported inductor graph input type: " + type(value)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -698,12 +691,21 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
         for buf in self.buffers:
             buf.decide_layout()
+
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
 
     def run_node(self, n: torch.fx.Node):
         log.debug("lowering %s", LazyString(lambda: n.format_node()))
@@ -711,7 +713,9 @@ class GraphLowering(torch.fx.Interpreter):
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(n):
+        with ir.IRNode.current_origins(origins), self.set_current_node(
+            n
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -829,6 +833,15 @@ class GraphLowering(torch.fx.Interpreter):
                 # reads, but they converge to a user.
                 result.realize_hint()
 
+            # Realize if a Pointwise has too much stuff to be inlined.
+            # As this may cause RecursionError during Inductor's evaluation.
+            if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+                curr = result.data.data
+                if isinstance(curr, Pointwise):
+                    # Use inner fn as a rough proxy. Good enough.
+                    if curr.inner_fn_str_len() > config.realize_bytes_threshold:
+                        result.realize()
+
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct
         # TensorBox -> StorageBox denoting a non-view; we don't bother trying
@@ -858,15 +871,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
-    def check_cpp_codegen_disabled(self):
+    def validate_can_generate_cpp_wrapper(self):
         if config.disable_cpp_codegen:
-            self.disable_cpp_wrapper("cpp codegen disabled")
+            raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-    def check_platform(self):
         if sys.platform != "linux":
-            self.disable_cpp_wrapper("platform not linux")
+            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
-    def check_input_for_cpp_buffer(self):
         for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
@@ -877,39 +888,20 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
-                self.disable_cpp_wrapper("unsupported inputs dtype")
-
-    @contextmanager
-    def set_current_node(self, node: torch.fx.Node):
-        old = self.current_node
-        try:
-            self.current_node = node
-            yield
-        finally:
-            self.current_node = old
-
-    def check_cpp_wrapper(self):
-        self.check_cpp_codegen_disabled()
-        self.check_platform()
-        self.check_input_for_cpp_buffer()
+                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if self.cuda:
-                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
-
-            if self.cpp_wrapper:
-                self.wrapper_code = (
-                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
-                )
-                return
+            self.validate_can_generate_cpp_wrapper()
+            self.wrapper_code = (
+                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
+            )
+            return
 
         device_types = self.device_types.copy()
         # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
+        # check the device of the buffers.
         for buffer in self.buffers:
             device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
@@ -920,6 +912,7 @@ class GraphLowering(torch.fx.Interpreter):
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
         wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
     def codegen(self):
@@ -932,7 +925,7 @@ class GraphLowering(torch.fx.Interpreter):
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        return self.wrapper_code.generate(self.is_inference)
 
     def count_bytes(self):
         from .scheduler import Scheduler
@@ -956,13 +949,12 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        mod = PyCodeCache.load_by_key_path(
+            key, path, linemap=linemap, attrs=self.constants
+        )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
-
-        for name, value in self.constants.items():
-            setattr(mod, name, value)
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature

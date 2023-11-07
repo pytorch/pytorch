@@ -182,7 +182,7 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
-            inspect.getsourcefile(self._orig_mod.forward)
+            self._orig_mod.forward
         ):
             # This may be a torch.nn.* instance in skipfiles.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -267,7 +267,7 @@ def enable_dynamic(enable: Optional[bool] = None, export: bool = False):
     if enable is None:
         yield
     elif enable:
-        # Assume everything is dynamic by deafult
+        # Assume everything is dynamic by default
         with config.patch(assume_static_by_default=False):
             yield
     else:
@@ -362,7 +362,7 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
         if (
-            (filename is None or skipfiles.check(filename))
+            (filename is None or skipfiles.check(fn))
             and (
                 getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
             )
@@ -384,6 +384,15 @@ class _TorchDynamoContext:
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(
                         "Detected that you are using FX to symbolically trace "
+                        "a dynamo-optimized function. This is not supported at the moment."
+                    )
+                else:
+                    return fn(*args, **kwargs)
+
+            if torch.jit.is_tracing():
+                if config.error_on_nested_jit_trace:
+                    raise RuntimeError(
+                        "Detected that you are using FX to torch.jit.trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
                 else:
@@ -519,10 +528,23 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            or skipfiles.check(frame.f_code.co_filename)
+            or skipfiles.check(frame.f_code)
             or config.disable
         ):
-            log.debug("skipping %s %s", frame.f_code.co_name, frame.f_code.co_filename)
+            if log.isEnabledFor(logging.DEBUG):
+                skip_reason = (
+                    "traced frame already"
+                    if frame.f_lasti >= first_real_inst_idx(frame.f_code)
+                    else "in skipfiles"
+                    if skipfiles.check(frame.f_code)
+                    else "dynamo tracing is disabled"
+                )
+                log.debug(
+                    "skipping: %s (reason: %s, file: %s)",
+                    frame.f_code.co_name,
+                    skip_reason,
+                    frame.f_code.co_filename,
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
@@ -712,7 +734,7 @@ def explain(f, *extra_args, **extra_kwargs):
             nopython=False,
             guard_export_fn=guard_export_print,
         )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
@@ -817,10 +839,14 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
 
     def run_node(self, n):
         self.current_node = n
-        r = super().run_node(n)
+        result_proxy = super().run_node(n)
         if "val" in self.current_node.meta:
-            r.node.meta["val"] = self.current_node.meta["val"]
-        return r
+            result_proxy.node.meta["val"] = self.current_node.meta["val"]
+        if self.current_node.op != "output":
+            result_proxy.node._rename(
+                getattr(self.current_node, "name", result_proxy.node.name)
+            )
+        return result_proxy
 
 
 class ExportResult(NamedTuple):
@@ -886,44 +912,46 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
+    supported_types = (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool)
+
+    def is_supported_type(val):
+        return isinstance(val, supported_types)
+
     def produce_matching(sources, candidates):
         source_types = " or ".join(
             [
-                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
-                for desc, args in sources.items()
+                desc
+                + " of types: ("
+                + ", ".join([str(type(val)) for val in vals])
+                + ")"
+                for desc, vals in sources.items()
             ]
         )
-        source_args = [arg for args in sources.values() for arg in args]
+        source_vals = [val for vals in sources.values() for val in vals]
         matched_elements_positions = []
-        dict_of_source_args = dict()
-        for i, arg in enumerate(source_args):
-            dict_of_source_args[id(arg)] = i
+        dict_of_source_vals = {}
+        for i, val in enumerate(source_vals):
+            dict_of_source_vals[id(val)] = i
 
-        for candidate_desc, candidate_args in candidates.items():
-            for i, arg in enumerate(candidate_args):
-                # 1-element tensor arg can be unspec int/float
-                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                    if id(arg) in dict_of_source_args:
-                        matched_elements_positions.append(dict_of_source_args[id(arg)])
-                    elif id(arg.item()) in dict_of_source_args:
-                        matched_elements_positions.append(
-                            dict_of_source_args[id(arg.item())]
-                        )
+        for candidate_desc, candidate_vals in candidates.items():
+            for i, val in enumerate(candidate_vals):
+                if is_supported_type(val):
+                    if id(val) in dict_of_source_vals:
+                        matched_elements_positions.append(dict_of_source_vals[id(val)])
                     else:
                         raise AssertionError(
-                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                            f"{candidate_desc} #{i+1}, of type {type(val)}, is not among {source_types}"
                         )
                 else:
-                    if id(arg) not in dict_of_source_args:
-                        raise AssertionError(
-                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
-                        )
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    raise AssertionError(
+                        f"{candidate_desc} #{i+1} is {val}, but only "
+                        f"the following types are supported: {supported_types}"
+                    )
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        sources={"original args": flat_args},
+        sources={"original inputs": flat_args},
         candidates={"graph-captured input": graph_captured_input},
     )
 
@@ -933,9 +961,9 @@ def rewrite_signature(
     matched_output_elements_positions = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
-            "original args": flat_args,
+            "original inputs": flat_args,
         },
-        candidates={"traced result": flat_results_traced},
+        candidates={"original output": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1206,7 +1234,7 @@ def export(
                 export=True,
                 export_constraints=constraints,
             )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
             except ConstraintViolationError as e:
@@ -1216,7 +1244,7 @@ def export(
         if (
             (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
-            and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+            and not skipfiles.check(call_to_inspect)
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
@@ -1256,7 +1284,7 @@ def export(
         assert out_guards is not None, "Failed to produce guards during tracing"
         assert fake_mode is not None
 
-        # This check need to happend before aten_graph
+        # This check need to happened before aten_graph
         # because placeholder's _source_node attribute is not preserved by make_fx
         if same_signature:
             check_signature_rewritable(graph)
@@ -1284,7 +1312,11 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
+                    raise UserError(  # noqa: TRY200
+                        UserErrorType.DYNAMIC_CONTROL_FLOW,
+                        str(e),
+                        case_name="cond_operands",
+                    )
 
         if same_signature:
             flat_args_dynamic_dims = [

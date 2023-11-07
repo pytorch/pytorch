@@ -64,7 +64,7 @@ if(INTERN_BUILD_ATEN_OPS)
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
     --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
     --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+    --yaml_dir=${CMAKE_BINARY_DIR}/aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
   ${torchgen_python}
@@ -533,7 +533,7 @@ if(NOT MSVC)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
 endif()
 # Disable certain warnings for GCC-9.X
-if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
+if(CMAKE_COMPILER_IS_GNUCXX)
   # See https://github.com/pytorch/pytorch/issues/38856
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS "-Wno-redundant-move -Wno-noexcept-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS "-Wno-init-list-lifetime")
@@ -692,7 +692,8 @@ if(USE_ROCM)
   # caffe2_nvrtc's stubs to driver APIs are useful for HIP.
   # See NOTE [ ATen NVRTC Stub and HIP ]
   add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
-  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_HCC_LIBRARIES} ${ROCM_HIPRTC_LIB})
+  target_link_libraries(caffe2_nvrtc ${PYTORCH_HIP_LIBRARIES} ${ROCM_HIPRTC_LIB})
+  target_include_directories(caffe2_nvrtc PRIVATE ${CMAKE_BINARY_DIR})
   target_compile_definitions(caffe2_nvrtc PRIVATE USE_ROCM __HIP_PLATFORM_HCC__)
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
@@ -820,6 +821,12 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   # Caffe2 has too many signed-unsigned violation, but the framework is dead
   # So no point in fixing those
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
+endif()
+
+# Ignore Wdeprecated-XXX errors from third-party libraries
+if(NOT MSVC)
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
+  set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
@@ -957,6 +964,7 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_options_if_supported(torch_cuda "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
 
   if(USE_CUSPARSELT)
@@ -1252,21 +1260,21 @@ endif()
 if(USE_ROCM)
   target_compile_definitions(torch_hip PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   # NB: Massive hack.  torch/csrc/jit/codegen/fuser/codegen.cpp includes
   # torch/csrc/jit/codegen/fuser/cuda/resource_strings.h which changes the
-  # strings depending on if you're __HIP_PLATFORM_HCC__ or not.
+  # strings depending on if you're __HIP_PLATFORM_AMD__ or not.
   # But that file is in torch_cpu!  So, against all odds, this macro
   # has to be set on torch_cpu too.  I also added it to torch for
   # better luck
   target_compile_definitions(torch_cpu PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   target_compile_definitions(torch PRIVATE
     USE_ROCM
-    __HIP_PLATFORM_HCC__
+    __HIP_PLATFORM_AMD__
     )
   target_include_directories(torch_hip PRIVATE
     /opt/rocm/include
@@ -1445,7 +1453,7 @@ if(MSVC AND NOT BUILD_SHARED_LIBS)
   #   1. Write out a config.h header which stores whether or not
   #      you are linking statically or dynamically.
   #
-  #   2. Force all of users to set the the macro themselves.  If they
+  #   2. Force all of users to set the macro themselves.  If they
   #      use cmake, you can set -DAT_CORE_STATIC_WINDOWS=1 as a PUBLIC
   #      compile option, in which case cmake will automatically
   #      add the macro for you.
@@ -1680,6 +1688,14 @@ if(BUILD_TEST)
           target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
           if(USE_FBGEMM)
             target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
+          endif()
+          if(USE_ASAN)
+            if(TARGET Sanitizer::address)
+              target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::address)
+            endif()
+            if(TARGET Sanitizer::undefined)
+              target_link_libraries(${test_name}_${CPU_CAPABILITY} Sanitizer::undefined)
+            endif()
           endif()
         else()
           add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")

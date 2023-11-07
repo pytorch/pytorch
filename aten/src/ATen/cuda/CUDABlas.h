@@ -115,13 +115,14 @@ void scaled_gemm(
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
-    const void* bias,
+    const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
     const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr);
+    void* amax_ptr,
+    bool use_fast_accum);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

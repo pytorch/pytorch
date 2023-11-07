@@ -1,8 +1,13 @@
 import contextlib
 
 import copy
+import hashlib
+import inspect
+import io
 import pickle
+import tokenize
 import unittest
+import warnings
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Set
 from unittest import mock
@@ -17,7 +22,7 @@ def install_config_module(module):
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set()
+        _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
     def visit(source, dest, prefix):
         """Walk the module structure and move everything to module._config"""
@@ -42,11 +47,61 @@ def install_config_module(module):
 
     config = dict()
     default = dict()
+
+    compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
+
     visit(module, module, "")
     module._config = config
     module._default = default
     module._allowed_keys = set(config.keys())
+    module._compile_ignored_keys = compile_ignored_keys
     module.__class__ = ConfigModuleInstance
+    module._is_dirty = True
+    module._hash_digest = None
+
+
+COMPILE_IGNORED_MARKER = "@compile_ignored"
+
+
+# Gets all the keys (i.e. assignments) with a @compile_ignored comment
+def get_assignments_with_compile_ignored_comments(module):
+    source_code = inspect.getsource(module)
+    assignments = set()
+
+    # Tokenize the source code to retrieve comments
+    tokens = tokenize.tokenize(io.BytesIO(source_code.encode("utf-8")).readline)
+    current_comment = "", -1
+    prev_name = ""
+    prev_assigned = "", -1
+
+    for token in tokens:
+        if token.type == tokenize.COMMENT:
+            maybe_current = token.string.strip()
+            if COMPILE_IGNORED_MARKER in maybe_current:
+                assert current_comment == (
+                    "",
+                    -1,
+                ), f"unconsumed {COMPILE_IGNORED_MARKER}"
+                current_comment = maybe_current, token.start[0]
+                if token.start[0] == prev_assigned[1]:
+                    # Check if the current assignment is followed with
+                    # a same-line comment with COMPILE_IGNORED_MARKER
+                    assignments.add(prev_assigned[0])
+                    current_comment = "", -1  # reset
+        elif token.type == tokenize.NAME:
+            prev_name = token.string
+        elif token.type == tokenize.OP and token.string == "=":
+            prev_assigned = prev_name, token.start[0]
+            # Check if the current assignment follows a comment
+            # with COMPILE_IGNORED_MARKER
+            if (
+                COMPILE_IGNORED_MARKER in current_comment[0]
+                and current_comment[1] == token.start[0] - 1
+            ):
+                assignments.add(prev_name)
+                current_comment = "", -1  # reset
+    assert current_comment == ("", -1), f"unconsumed {COMPILE_IGNORED_MARKER}"
+    return assignments
 
 
 class ConfigModule(ModuleType):
@@ -59,6 +114,7 @@ class ConfigModule(ModuleType):
     _config: Dict[str, Any]
     _allowed_keys: Set[str]
     _bypass_keys: Set[str]
+    _compile_ignored_keys: Set[str]
 
     def __init__(self):
         raise NotImplementedError(
@@ -76,9 +132,9 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name):
         try:
             return self._config[name]
-        except KeyError:
+        except KeyError as e:
             # make hasattr() work properly
-            raise AttributeError(f"{self.__name__}.{name} does not exist")
+            raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name):
         # must support delete because unittest.mock.patch deletes
@@ -106,12 +162,37 @@ class ConfigModule(ModuleType):
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
-    def load_config(self, data):
-        """Restore from a prior call to save_config()"""
-        self.to_dict().update(pickle.loads(data))
+    def get_hash(self):
+        """Hashes the configs that are not compile_ignored"""
+        if self._is_dirty or self._hash_digest is None:
+            dict_to_hash = {
+                k: v
+                for k, v in self._config.items()
+                if k not in self._compile_ignored_keys
+            }
+            string_to_hash = repr(sorted(dict_to_hash.items()))
+            self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
+            self._is_dirty = False
+        return self._hash_digest
 
     def to_dict(self):
-        return self._config
+        warnings.warn(
+            (
+                "config.to_dict() has been deprecated. It may no longer change the underlying config.",
+                "use config.shallow_copy_dict() or config.get_config_copy() instead",
+            ),
+            DeprecationWarning,
+        )
+        return self.shallow_copy_dict()
+
+    def shallow_copy_dict(self):
+        return {**self._config}
+
+    def load_config(self, config):
+        """Restore from a prior call to save_config() or shallow_copy_dict()"""
+        if not isinstance(config, dict):
+            config = pickle.loads(config)
+        self._config.update(config)
 
     def get_config_copy(self):
         return copy.deepcopy(self._config)
@@ -123,7 +204,7 @@ class ConfigModule(ModuleType):
         As a decorator:
 
             @config.patch("name", val)
-            @config.patch(name1=val1, name2=val2):
+            @config.patch(name1=val1, name2=val2)
             @config.patch({"name1": val1, "name2", val2})
             def foo(...):
                 ...
@@ -148,17 +229,23 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior = {}
         config = self
+        dirty = False
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self):
                 assert not prior
+                nonlocal dirty
                 for key in changes.keys():
                     # KeyError on invalid entry
                     prior[key] = config._config[key]
+                    dirty = key not in config._compile_ignored_keys
                 config._config.update(changes)
+                config._is_dirty = dirty
 
             def __exit__(self, exc_type, exc_val, exc_tb):
+                nonlocal dirty
                 config._config.update(prior)
+                config._is_dirty = dirty
                 prior.clear()
 
         return ConfigPatch()

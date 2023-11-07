@@ -39,7 +39,7 @@ def compiler_fn(gm):
     def inner_compiler(gm_, example_inputs_):
         return inductor.compile(gm_, example_inputs_)
 
-    gm = torch.compile(gm, fullgraph=True, dynamic=True, backend=inner_compiler)
+    # gm = torch.compile(gm, fullgraph=True, dynamic=True, backend=inner_compiler)
     return gm
 
 
