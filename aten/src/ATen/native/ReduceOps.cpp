@@ -28,9 +28,10 @@
 #include <ATen/ops/_is_any_true_native.h>
 #include <ATen/ops/_logcumsumexp.h>
 #include <ATen/ops/_logcumsumexp_native.h>
+#include <ATen/ops/_sparse_csr_sum.h>
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_native.h>
-#include <ATen/ops/_sparse_csr_sum.h>
+#include <ATen/ops/_to_copy.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/all_meta.h>
 #include <ATen/ops/all_native.h>
@@ -85,6 +86,7 @@
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/narrow.h>
 #include <ATen/ops/native_norm.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/norm_meta.h>
 #include <ATen/ops/norm_native.h>
@@ -184,26 +186,32 @@ static void allany_meta(
     impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   const auto& result = meta.maybe_get_output();
   check_result_is_bytebool(name, self, result);
   auto out_dtype = get_result_or_bytebool_dtype(self, result);
-  resize_reduction(meta, self, dims, keepdim, out_dtype);
+  resize_reduction(meta, self, dims, keepdim, out_dtype, /*allow_empty_dims=*/true);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "all", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(all, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC2(all, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
+  allany_meta(*this, "all", self, dim, keepdim);
 }
 
 TORCH_META_FUNC(all)(const Tensor& self) {
   allany_meta(*this, "all", self, {}, false);
 }
 
-TORCH_PRECOMPUTE_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
+TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   allany_meta(*this, "any", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(any, dim)().set_dim(maybe_wrap_dim(dim, self.dim()));
+}
+
+TORCH_META_FUNC2(any, dims)(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
+  allany_meta(*this, "any", self, dim, keepdim);
 }
 
 TORCH_META_FUNC(any)(const Tensor& self) {
@@ -786,7 +794,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
 }
 
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf,
     self.scalar_type(), "cummax_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::greater_equal<scalar_t>>);
@@ -821,7 +829,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 }
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf,
     self.scalar_type(), "cummin_cpu",
     [&] {
       at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::less_equal<scalar_t>>);
@@ -1507,7 +1515,7 @@ Tensor norm(const Tensor& self, const Scalar& p) {
 inline TensorIterator get_allany_iter(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim) {
   if (self.is_cuda()) {
     // As CUDA supports dynamic type casting, we use this overload of
@@ -1524,7 +1532,7 @@ template <int identity, typename Stub>
 inline void allany_impl(
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
+    OptionalIntArrayRef dims,
     bool keepdim,
     Stub& stub) {
   if (self.numel() == 0) {
@@ -1542,6 +1550,11 @@ TORCH_IMPL_FUNC(all_out)
   allany_impl<1>(self, result, dim, keepdim, and_stub);
 }
 
+TORCH_IMPL_FUNC(all_dims_out)
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
+  allany_impl<1>(self, result, dim, keepdim, and_stub);
+}
+
 TORCH_IMPL_FUNC(all_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<1>(self, result, {}, false, and_stub);
 }
@@ -1551,8 +1564,76 @@ TORCH_IMPL_FUNC(any_out)
   allany_impl<0>(self, result, dim, keepdim, or_stub);
 }
 
+TORCH_IMPL_FUNC(any_dims_out)
+(const Tensor& self, OptionalIntArrayRef dim, bool keepdim, const Tensor& result) {
+  allany_impl<0>(self, result, dim, keepdim, or_stub);
+}
+
 TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
+}
+
+template <bool is_all>
+Tensor allany_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  // Default implementation in terms of all-reduce or single dim reduce
+  if (!dim) {
+    Tensor out;
+    if constexpr (is_all) {
+      out = self.all();
+    } else {
+      out = self.any();
+    }
+
+    if (keepdim) {
+      DimVector out_shape(self.dim(), 1);
+      return out.expand(out_shape);
+    }
+    return out;
+  }
+
+  if (dim->size() == 0) {
+    if (self.scalar_type() == kByte) {
+      // Convert to a 1 or 0 mask
+      auto out = at::empty_like(self);
+      return at::ne_outf(self, 0, out);
+    } else {
+      return at::_to_copy(self, kBool);
+    }
+  }
+
+  Tensor out = self;
+  for (auto d : *dim) {
+    if constexpr (is_all) {
+      out = out.all(d, /*keepdim=*/true);
+    } else {
+      out = out.any(d, /*keepdim=*/true);
+    }
+  }
+  return keepdim ? out : out.squeeze(*dim);
+}
+
+Tensor all_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  return allany_dims_default<true>(self, dim, keepdim);
+}
+
+Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdim) {
+  return allany_dims_default<false>(self, dim, keepdim);
+}
+
+Tensor& all_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
+  auto tmp = self.all(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
+}
+
+Tensor& any_dims_out_default(
+    const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
+  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
+  auto tmp = self.any(dim, keepdim);
+  at::native::resize_output(result, tmp.sizes());
+  return result.copy_(tmp);
 }
 
 TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
@@ -2096,7 +2177,27 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       && self.layout() == other.layout()
       && self.is_neg() == other.is_neg()
       && self.is_conj() == other.is_conj()) {
-    return true;
+    if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+      return true;
+    }
+    std::atomic<bool> result{true};
+    auto iter = TensorIteratorConfig().add_input(self).build();
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
+      iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
+        if (!result) {
+            return;
+        }
+        char* self_data = data[0];
+        for (C10_UNUSED const auto i : c10::irange(dim_size)) {
+          if (isnan_(c10::load<scalar_t>(self_data))) {
+            result = false;
+            return;
+          }
+          self_data += strides[0];
+        }
+      });
+    });
+    return result.load();
   }
 
   std::atomic<bool> result{true};

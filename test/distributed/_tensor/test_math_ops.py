@@ -5,7 +5,7 @@ import itertools
 
 import torch
 
-from torch.distributed._tensor import distribute_tensor
+from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -16,29 +16,43 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 class DistMathOpsTest(DTensorTestBase):
-    @with_comms
-    def test_sum(self):
+    def linear_op_reductions(self, op_str):
         device_mesh = self.build_device_mesh()
-
         shard_spec = [Shard(0)]
 
-        tensor_to_sum = torch.randn(12, 8, 8)
+        tensor = torch.randn(12, 8, 8)
+        dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
-        mat1 = distribute_tensor(tensor_to_sum, device_mesh, shard_spec)
+        op = getattr(tensor, op_str)
+        op_dt = getattr(dtensor, op_str)
 
         keep_dim_or_not = [True, False, None]
-        for dim in range(tensor_to_sum.ndim):
+        for dim in range(tensor.ndim):
             for keep_dim in keep_dim_or_not:
-                sum_args = (dim, keep_dim) if keep_dim is not None else (dim,)
-                dim_sumed_tensor = tensor_to_sum.sum(*sum_args)
-                dt_dim_sumed_tensor = mat1.sum(*sum_args).redistribute(
-                    device_mesh, [Replicate()] * device_mesh.ndim
-                )
-                self.assertEqual(dt_dim_sumed_tensor.to_local(), dim_sumed_tensor)
+                args = (dim, keep_dim) if keep_dim is not None else (dim,)
+                if op_str in ("max", "min"):
+                    # min and max return a tuple when dim specified
+                    dim_reduced_tensor, _ = op(*args)
+                    dt_reduced, _ = op_dt(*args)
+                else:
+                    dim_reduced_tensor = op(*args)
+                    dt_reduced = op_dt(*args)
+                dt_dim_reduced_tensor = dt_reduced.full_tensor()
+                self.assertEqual(dt_dim_reduced_tensor, dim_reduced_tensor)
 
-        full_sumed_tensor = tensor_to_sum.sum()
-        dt_sum = mat1.sum().redistribute(device_mesh, [Replicate()] * device_mesh.ndim)
-        self.assertEqual(dt_sum.to_local(), full_sumed_tensor)
+        full_reduced_tensor = op()
+        dt_full_reduced = op_dt().full_tensor()
+        self.assertEqual(dt_full_reduced, full_reduced_tensor)
+
+    @with_comms
+    def test_linear_op_reductions(self):
+        for op_str in ("all", "sum", "prod", "max", "min"):
+            self.linear_op_reductions(op_str)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_mean(self):
+        self.linear_op_reductions("mean")
 
     # TODO: forward test can be removed once test_softmax_with_bwd passes on CPU
     @with_comms
@@ -67,9 +81,9 @@ class DistMathOpsTest(DTensorTestBase):
                 dist_y = torch.nn.functional.softmax(
                     dist_x, dim=softmax_dim, dtype=torch.float32
                 )
+                shard_dim = shard_dim + dist_y.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_y.placements[0].is_shard(dim=shard_dim))
-                dist_y = dist_y.redistribute(device_mesh, [Replicate()])
-                self.assertEqual(dist_y.to_local(), local_y)
+                self.assertEqual(dist_y.full_tensor(), local_y)
 
     # TODO: get test_softmax_with_bwd pass on CPU
     # DTensor's _softmax_backward_data produces wrong result on CPU on certain dimension.
@@ -102,6 +116,7 @@ class DistMathOpsTest(DTensorTestBase):
                     dist_softmax = dist_x.softmax(dim=softmax_dim)
             else:
                 dist_softmax = dist_x.softmax(dim=softmax_dim)
+                shard_dim = shard_dim + dist_x.ndim if shard_dim < 0 else shard_dim
                 self.assertTrue(dist_softmax.placements[0].is_shard(dim=shard_dim))
                 dist_y = dist_softmax.sum()
                 dist_y = dist_y.redistribute(device_mesh, [Replicate()])
@@ -109,8 +124,31 @@ class DistMathOpsTest(DTensorTestBase):
                 self.assertIsNone(dist_x.grad)
                 dist_y.backward()
                 self.assertIsNotNone(dist_x.grad)
-                dist_x_grad = dist_x.grad.redistribute(device_mesh, [Replicate()])
-                self.assertEqual(dist_x_grad.to_local(), x.grad)
+                self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    def test_full_shard_math_ops(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(*mesh_shape),
+        )
+        global_tensor = torch.ones(4, 4)
+        double_shard_tensor = distribute_tensor(
+            global_tensor, mesh, [Shard(0), Shard(0)]
+        )
+        fully_shard_tensor = distribute_tensor(
+            global_tensor, mesh, [Shard(0), Shard(1)]
+        )
+
+        # for op in [torch.add, torch.sub, torch.mul, torch.div]:
+        for op in [torch.add, torch.sub, torch.mul, torch.div]:
+            expect_rs = op(global_tensor, 2)
+            actual_rs = op(double_shard_tensor, 2).redistribute(
+                mesh, [Replicate(), Replicate()]
+            )
+            actual_local_res = actual_rs.to_local()
+            self.assertEqual(actual_local_res, expect_rs)
 
 
 if __name__ == "__main__":

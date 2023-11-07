@@ -376,7 +376,7 @@ class Tensor(torch._C.TensorBase):
                 self._nested_tensor_strides(),
                 self._nested_tensor_storage_offsets(),
             )
-            return (torch._nested_view_from_buffer, args_nested)
+            return (torch._utils._rebuild_nested_tensor, args_nested)
         elif (
             self.data_ptr() == 0
             and type(self) is not torch.Tensor
@@ -689,6 +689,8 @@ class Tensor(torch._C.TensorBase):
 
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
+
+        See :meth:`torch.UntypedStorage.share_memory_` for more details.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.share_memory_, (self,), self)

@@ -309,6 +309,11 @@ ALLOW_LIST = [
     ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
     ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
     ("aten::sym_constrain_range", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2023, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2023, 12, 31)),
+    ("onednn::qlinear_pointwise", datetime.date(2023, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
