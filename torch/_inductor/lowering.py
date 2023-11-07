@@ -1034,7 +1034,7 @@ def cat(inputs, dim=0):
         # code gen with uint8 data type directly.
         for input in inputs:
             input.realize()
-        if all(len(input.layout.size) == 4 for input in inputs):
+        if all(len(input.get_size()) == 4 for input in inputs):
             inputs, _ = require_channels_last(aten.cat, *inputs)
         return fallback_handler(aten.cat.default)(inputs, dim)
 
@@ -1443,7 +1443,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1463,7 +1463,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -1490,7 +1490,7 @@ def register_onednn_fusion_ops():
             groups,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
@@ -1515,7 +1515,7 @@ def register_onednn_fusion_ops():
                     groups,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     binary_attr,
                     alpha,
                     unary_attr,
@@ -1535,7 +1535,7 @@ def register_onednn_fusion_ops():
             bias: TensorBox,
             o_inv_scale,
             o_zero_point,
-            fp32_output,
+            output_dtype,
             attr,
             scalars,
             algorithm,
@@ -1551,7 +1551,7 @@ def register_onednn_fusion_ops():
                     bias,
                     o_inv_scale,
                     o_zero_point,
-                    fp32_output,
+                    output_dtype,
                     attr,
                     scalars,
                     algorithm,
@@ -3559,7 +3559,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     for l, h in bounds:
         l_precomp = (
             V.graph.sizevars.lookup_precomputed_size(l)
-            if isinstance(l, sympy.Expr) and l.free_symbols
+            if isinstance(l, sympy.Expr) and not l.is_number
             else l
         )
         bounds_precomp.append((l_precomp, h))
@@ -5067,7 +5067,9 @@ def accumulate_grad_(variable, new_grad):
 
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
+    ir.UserDefinedTritonKernel.create(
+        kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs
+    )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 
