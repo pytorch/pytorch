@@ -265,7 +265,7 @@ class ExportedProgram:
             # Exclude dependency token from final result.
             assertion_dep_token = self.graph_signature.assertion_dep_token
             if assertion_dep_token is not None:
-                assertion_dep_token_index = list(assertion_dep_token.keys())[0]
+                assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
                 res = res[:assertion_dep_token_index]
 
             res = res[num_mutated:]

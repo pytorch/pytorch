@@ -1260,7 +1260,7 @@ class TritonKernel(Kernel):
 
         if mask_vars:
             mask = (
-                f"{list(mask_vars)[0]}"
+                f"{next(iter(mask_vars))}"
                 if len(mask_vars) == 1
                 else f"({' & '.join(str(v) for v in mask_vars)})"
             )

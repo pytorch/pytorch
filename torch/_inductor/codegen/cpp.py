@@ -1967,7 +1967,7 @@ class CppVecKernelChecker(CppVecKernel):
         if load_type is not torch.uint8:
             return False
         if len(users) == 1:
-            user = list(users)[0]
+            user = next(iter(users))
             if (user.target == "to_dtype") and (user.args[-1] == torch.float):
                 return True
             return False

@@ -113,7 +113,7 @@ class Match:
         ]
 
     def output_node(self) -> torch.fx.Node:
-        return [p for p in self.output_nodes() if p][0]
+        return next(p for p in self.output_nodes() if p)
 
     def replace_with_graph(self, replacement_graph, args):
         assert self.ctx
