@@ -503,7 +503,7 @@ def _compile(
         )
 
         try:
-            with tracing(tracer.output.tracing_context):
+            with tracing(tracer.output.tracing_context), tracer.set_current_tx():
                 tracer.run()
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()

@@ -30,6 +30,7 @@ from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple, Union
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -915,11 +916,13 @@ def enum_repr(value, local):
 def _get_fake_tensor(vt):
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
+        from .exc import unimplemented
+
         unimplemented("Cannot check Tensor object identity without its fake value")
     return fake_tensor
 
 
-def iter_contains(items, search, tx, options, check_tensor_identity=False):
+def iter_contains(items, search, tx, check_tensor_identity=False):
     from .variables import BuiltinVariable, ConstantVariable, TensorVariable
 
     if search.is_python_constant():
@@ -928,7 +931,7 @@ def iter_contains(items, search, tx, options, check_tensor_identity=False):
             and x.as_python_constant() == search.as_python_constant()
             for x in items
         )
-        return ConstantVariable.create(found, **options)
+        return ConstantVariable.create(found)
 
     must_check_tensor_id = False
     if check_tensor_identity and isinstance(search, TensorVariable):
