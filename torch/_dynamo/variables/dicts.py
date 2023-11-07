@@ -414,27 +414,13 @@ class SetVariable(VariableTracker):
 
 
 def _is_matching_transformers_cls(cls) -> bool:
-    if not cls.__module__.startswith("transformers."):
-        return False
-
-    try:
-        from transformers.file_utils import ModelOutput
-
-        return issubclass(cls, ModelOutput)
-    except ImportError:
-        return False
+    mod = sys.modules.get("transformers.file_utils")
+    return mod is not None and issubclass(cls, mod.ModelOutput)
 
 
 def _is_matching_diffusers_cls(cls) -> bool:
-    if not cls.__module__.startswith("diffusers."):
-        return False
-
-    try:
-        from diffusers.utils import BaseOutput
-
-        return issubclass(cls, BaseOutput)
-    except ImportError:
-        return False
+    mod = sys.modules.get("diffusers.utils")
+    return mod is not None and issubclass(cls, mod.BaseOutput)
 
 
 class DataClassVariable(ConstDictVariable):
@@ -588,8 +574,6 @@ class CustomizedDictVariable(ConstDictVariable):
         # hack for HF usecase:
         #   assume dataclass annotation for ModelOutput subclass
         #   assume self.create is AA to ModelOutput.__post_init__
-        # for non-HF usecase:
-        #   check __module__ string to avoid costy HF import
         return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
@@ -692,6 +676,23 @@ class CustomizedDictVariable(ConstDictVariable):
         super().var_getattr(tx, name)
 
 
+@functools.lru_cache(None)
+def _install_PretrainedConfig_patch():
+    import transformers
+
+    # We need to monkeypatch transformers here, sadly.
+    # TODO(voz): Upstream to transformers lib
+
+    def _dynamo_overriden_transformers_eq(self, other):
+        if not hasattr(other, "__dict__"):
+            return False
+        return self.__dict__ == other.__dict__
+
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
+
+
 class HFPretrainedConfigVariable(VariableTracker):
     """
     Hack for HuggingFace PretrainedConfig
@@ -699,12 +700,13 @@ class HFPretrainedConfigVariable(VariableTracker):
 
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            from transformers.configuration_utils import PretrainedConfig
+        mod = sys.modules.get("transformers.configuration_utils")
+        is_match = mod is not None and issubclass(cls, mod.PretrainedConfig)
 
-            return issubclass(cls, PretrainedConfig)
-        except ImportError:
-            return False
+        # Lazily install monkeypatch the first time we see it in dynamo
+        if is_match:
+            _install_PretrainedConfig_patch()
+        return is_match
 
     @classmethod
     def is_matching_object(cls, obj):
