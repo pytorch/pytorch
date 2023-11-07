@@ -212,11 +212,12 @@ Keyword arguments:
 
 Example::
 
-    >>> a = torch.arange(3, dtype=torch.float, requires_grad=True)
-    >>> b = torch.arange(5, dtype=torch.float, requires_grad=True)
-    >>> nt = torch.nested.nested_tensor([a, b], requires_grad=True)
-    >>> nt.is_leaf
-    True
+    >>> starts = torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64)
+    >>> lengths = torch.tensor([3, 2, 2, 1, 5], dtype=torch.int64)
+    >>> narrow_base = torch.randn(5, 10, 20)
+    >>> nt_narrowed = torch.nested.narrow(narrow_base, 1, starts, lengths, layout=torch.jagged)
+    >>> nt_narrowed.is_contiguous()
+    False
     """
     if not isinstance(start, (int, SymInt, Tensor)):
         raise RuntimeError("start must be an integer or a tensor")
