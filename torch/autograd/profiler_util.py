@@ -68,7 +68,7 @@ class EventList(list):
 
     def _populate_cpu_children(self):
         """Populate child events into each underlying FunctionEvent object.
-        
+
         One event is a child of another if [s1, e1) is inside [s2, e2). Where
         s1 and e1 would be start and end of the child event's interval. And
         s2 and e2 start and end of the parent event's interval
