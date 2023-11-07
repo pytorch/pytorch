@@ -3079,6 +3079,8 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
+        # tl.atomic_add does not support bf16
+        or src.get_dtype() in {torch.bfloat16}
         or (
             fn == "aten.scatter_reduce_"
             and reduce == "sum"
