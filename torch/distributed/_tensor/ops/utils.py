@@ -76,6 +76,16 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
     return dims
 
 
+def normalize_to_torch_size(size) -> torch.Size:
+    # convert Union[Tuple[int], Tuple[Sequence[int]]] to torch.Size
+    # normalize the size argument
+    if len(size) == 1 and isinstance(size[0], Sequence):
+        torch_size = size[0]
+    else:
+        torch_size = list(size)
+    return torch.Size(torch_size)
+
+
 def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
 
