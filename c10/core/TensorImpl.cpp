@@ -689,8 +689,7 @@ int64_t TensorImpl::dim_custom() const {
 
 int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    // TODO: fix this
-    return pyobj_slot_.load_pyobj_interpreter()->sym_numel(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()->numel(this);
   }
   return numel_default();
 }
