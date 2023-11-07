@@ -862,6 +862,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
+      terminateHeartbeatMonitorThread_(false),
       uid_(process_group_id++) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
@@ -1131,23 +1132,20 @@ void ProcessGroupNCCL::shutdown() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
-  monitorWakeUpCV_.notify_one();
 
   std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
   abort(abortReason);
 
   workMetaListCV_.notify_one();
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
-  monitorWakeUpCV_.notify_one();
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (ncclHeartbeatMonitorThread_.joinable()) {
-    ncclHeartbeatMonitorThread_.join();
-  }
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
   }
@@ -1160,6 +1158,16 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // threads dying due to aborted communicator and raising a SIGABRT
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+
+  // We need to wait for abort to finish before we can safely shut down
+  // heartbeat monitoring thread.
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+  if (ncclHeartbeatMonitorThread_.joinable()) {
+    ncclHeartbeatMonitorThread_.join();
+  }
+#endif
 }
 
 void dump_debugging_info() {
@@ -1181,10 +1189,13 @@ void ProcessGroupNCCL::terminateProcess(std::string errMsg) {
 void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   while (true) {
+    // This won't have any lock since this lock is only used here.
+    // Please be aware that mutex `monitorMutex_` should not be used
+    // somewhere else to avoid the deadlock.
     std::unique_lock<std::mutex> lock(monitorMutex_);
     if (monitorWakeUpCV_.wait_for(
             lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
-              return terminateProcessGroup_.load();
+              return terminateHeartbeatMonitorThread_.load();
             })) {
       // If monitorWakeUpCV_ gets notified, we early return.
       return;
@@ -1211,7 +1222,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       rank_,
       "] NCCL monitor thread timeout. Basically, this could ",
       "be a system error and please file a bug to pytorch.");
-  if (!terminateProcessGroup_.load()) {
+
+  // There might be some cases when we first kill the watchdog thread and get
+  // stuck in abort() method, so we want to wait for some buffer time before
+  // killing the process.
+  if (terminateProcessGroup_.load() and
+      !terminateHeartbeatMonitorThread_.load()) {
+    std::this_thread::sleep_for(std::chrono::seconds(120));
+  }
+
+  if (!terminateHeartbeatMonitorThread_.load()) {
     LOG(ERROR)
         << "monitoring thread detects no heartbeat and will kill the process!";
     terminateProcess(exitMsg);
