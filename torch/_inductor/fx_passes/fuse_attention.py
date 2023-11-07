@@ -323,23 +323,19 @@ def _sfdp_replacement_13(query, key, value, dropout_p):
 
 def _sfdp_pattern_14(query, key, value, attn_mask, inv_scale):
     # for BertLarge
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    a = (
-        (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask)
+    return (
+        (torch.matmul(query, key.transpose(-2, -1)).div(inv_scale) + attn_mask)
         .softmax(dim=-1)
-        .matmul(v)
+        .matmul(value)
     )
-    return a
 
 
 def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return aten.scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
@@ -349,34 +345,28 @@ def _sfdp_replacement_14(query, key, value, attn_mask, inv_scale):
 
 def _sfdp_pattern_15(query, key, value, attn_mask, inv_scale, fill_value):
     # for DistilBert
-    q = query.transpose(1, 2)
-    k = key.transpose(1, 2)
-    v = value.transpose(1, 2)
-    bs = q.size(0)
-    k_len = k.size(-2)
-    q = q.div(inv_scale)
-    scores = q @ k.transpose(-2, -1)
+    bs = query.size(0)
+    k_len = key.size(-2)
+    query = query.div(inv_scale)
+    scores = query @ key.transpose(-2, -1)
     attn_mask = (attn_mask == 0).view((bs, 1, 1, k_len)).expand_as(scores)
-    return torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1) @ v
+    return torch.softmax(scores.masked_fill(attn_mask, fill_value), dim=-1) @ value
 
 
 def _sfdp_replacement_15(query, key, value, attn_mask, inv_scale, fill_value):
     counters["inductor"]["fuse_attention"] += 1
-    q = query.transpose(1, 2)
-    k = key.transpose(1, 2)
-    v = value.transpose(1, 2)
-    bs = q.size(0)
-    n_head = q.size(1)
-    q_len = q.size(-2)
-    k_len = k.size(-2)
+    bs = query.size(0)
+    n_head = query.size(1)
+    q_len = query.size(-2)
+    k_len = key.size(-2)
     # do attn_mask->logical_not() in aten.scaled_dot_product_attention
     attn_mask = (
         (attn_mask == 1).view((bs, 1, 1, k_len)).expand((bs, n_head, q_len, k_len))
     )
     return aten.scaled_dot_product_attention(
-        q,
-        k,
-        v,
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=torch.bool),
         dropout_p=0.0,
         is_causal=False,
@@ -463,7 +453,7 @@ def _get_sfdp_patterns():
     )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
-    m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    m_inp = functools.partial(torch.empty, (2, 1, 1, 8), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # fill_value
@@ -582,7 +572,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_14,
                 _sfdp_replacement_14,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), b(), c()],
                 {},
                 _sfdp_scale_factor_check(aten.div.Tensor),
             ),
