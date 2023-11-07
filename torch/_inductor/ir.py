@@ -751,6 +751,16 @@ class Reduction(Loops):
                         sympy_product(new_ranges + new_reduction_ranges)
                     )
                     if reduction_numel_hint == extracted_numel_hint:
+                        log.debug(
+                            "Use previous IRNode's range and reduction_ranges instead of split. "
+                            "current ranges: %s, current reduction ranges: %s, current split: %d, "
+                            "new ranges: %s, new reduction ranges: %s",
+                            ranges,
+                            reduction_ranges,
+                            split,
+                            new_ranges,
+                            new_reduction_ranges,
+                        )
                         # If the input_node or its dependent nodes are also Reduction nodes,
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
@@ -2427,7 +2437,7 @@ class FlexibleLayout(Layout):
 class AliasedLayout(Layout):
     """Shares the same storage as another tensor"""
 
-    def __init__(self, view: IRNode):
+    def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2746,6 +2756,10 @@ class Buffer(IRNode):
         """
         return 0
 
+    def should_allocate(self):
+        # Returns False by default.
+        return False
+
 
 class InputBuffer(Buffer):
     pass
@@ -2789,6 +2803,17 @@ class ShapeAsConstantBuffer(IRNode):
 @dataclasses.dataclass
 class ComputedBuffer(Buffer):
     data: Loops
+
+    def get_computed_buffer_name(self):
+        """
+        Returns self.name if it exists, otherwise returns the name of the data node if that exists.
+        If neither exist, returns None.
+        """
+        if self.name is not None:
+            return self.name
+        if hasattr(self.data, "name"):
+            return self.data.name
+        return None
 
     @cache_on_self
     def num_reads(self):
@@ -3115,11 +3140,13 @@ class CUDATemplateBuffer(TemplateBuffer):
         layout,
         inputs,
         make_kernel_render,
-        workspace_size: int = 0,
+        workspace_size: int,
+        template: "CUDATemplate",  # type: ignore[name-defined]
     ):
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
+        self.template = template
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
@@ -3783,6 +3810,7 @@ class UserDefinedTritonKernel(ExternKernel):
         wrapper.generate_user_defined_triton_kernel(
             new_name,
             self.grid,
+            configs,
             self.codegen_kwargs(),
         )
         wrapper.define_user_defined_triton_kernel(
@@ -3801,16 +3829,14 @@ class UserDefinedTritonKernel(ExternKernel):
         return {}
 
     def get_mutation_names(self):
-        return [t.get_name() for t in self.inputs]
+        return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
         constant_args = []
-        device = None
         for k, v in kernel_args.items():
             if isinstance(v, TensorBox):
-                device = v.get_device()
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
@@ -3818,7 +3844,9 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 constant_args.append(v)
                 kwargs[k] = v
-        assert device is not None
+
+        assert len(inputs) != 0
+        device = inputs[0].get_device()
 
         super().__init__(
             None,
@@ -3830,6 +3858,39 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+    @classmethod
+    def create(cls, *, kernel_idx, grid, kernel_args):
+        packed = UserDefinedTritonKernel(
+            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
+        )
+        for arg in kernel_args.values():
+            if isinstance(arg, TensorBox):
+                MutationOutput(arg.layout, arg, packed)
+
+    def get_alias_names(self):
+        return [i.get_name() for i in self.inputs]
+
+
+class MutationOutput(ExternKernel):
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def __init__(self, layout, input, parent):
+        super().__init__(None, layout, [input, parent], ())
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return False
+
+    def is_no_op(self):
+        return True
+
+    def has_side_effects(self):
+        return True
+
+    def get_alias_names(self):
+        return [self.inputs[0].get_name()]
 
 
 class InplaceBernoulliFallback(ExternKernel):
@@ -4261,11 +4322,15 @@ class FallbackKernel(ExternKernelAlloc):
             return False
         return get_schema_info(self.op_overload).is_mutable()
 
-    def has_aliasing(self):
+    def get_alias_names(self):
         # TODO - some fallbacks are still OpOverloadPackets
         if not isinstance(self.op_overload, torch._ops.OpOverload):
-            return False
-        return torch._inductor.utils.is_view(self.op_overload)
+            return []
+        if torch._inductor.utils.is_view(self.op_overload):
+            # TODO - use op._schema.arguments alias_info to figure out
+            # precise list
+            return [inp.get_name() for inp in self.inputs]
+        return []
 
     # ProxyExecutor Design Note
     # We export the ExternFallbackNodes (for custom ops) into a serialized file
@@ -4440,9 +4505,6 @@ class ComplexView(ExternKernelAlloc):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return True
-
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
@@ -4541,11 +4603,13 @@ class MultiOutput(ExternKernel):
     def should_allocate(self):
         return False
 
-    def has_aliasing(self):
-        return any(
-            isinstance(inp, (FallbackKernel, ComplexView)) and inp.has_aliasing()
+    def get_alias_names(self):
+        return [
+            inp.get_name()
             for inp in self.inputs
-        )
+            if isinstance(inp, (FallbackKernel, ComplexView))
+            and len(inp.get_alias_names()) > 0
+        ]
 
 
 def _prepare_convolution_fusion_create(
@@ -5392,7 +5456,34 @@ class QConvPointWisePT2E(ExternKernelAlloc):
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 5
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qconv2d_pointwise",
+            cpp_kernel="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_key = "qconv2d_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5413,33 +5504,38 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
         ) = const_args[-12:]
 
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise"
         codegen_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {stride}"
-            + f", {padding}"
-            + f", {dilation}"
-            + f", {groups}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zp,
+            output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5459,7 +5555,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5492,16 +5588,17 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWisePT2E(
             layout=kernel_layout,
@@ -5529,7 +5626,40 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 6
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qconv2d_pointwise.binary",
+            cpp_kernel="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_key = "qconv2d_pointwise_binary"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor accum,
+                double accum_scale,
+                int64_t accum_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::string_view binary_attr,
+                c10::optional<at::Scalar> alpha,
+                c10::optional<c10::string_view> attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5552,39 +5682,45 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
             unary_scalars,
             unary_algorithm,
         ) = const_args[-16:]
-        self.kernel = "torch.ops.onednn.qconv2d_pointwise.binary"
         conv_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {accum}"
-            + f", {accum_scale}"
-            + f", {accum_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {stride}"
-            + f", {padding}"
-            + f", {dilation}"
-            + f", {groups}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {binary_attr}"
-            + f", {alpha}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            accum,
+            accum_scale,
+            accum_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zp,
+            output_dtype,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            conv_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overlad_name,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5607,7 +5743,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         groups: int,
         o_inv_scale: "TensorBox",
         output_zero_point: "TensorBox",
-        fp32_output,
+        output_dtype,
         binary_attr,
         alpha,
         unary_attr,
@@ -5653,17 +5789,17 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             accum_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             binary_attr,
             alpha,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        if fp32_output:
+        if output_dtype is not None:
             # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            # if output_dtype is not None, the output buf should be dtype output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QConvPointWiseBinaryPT2E(
             layout=kernel_layout,
@@ -5690,7 +5826,30 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = len(inputs) == 5
-        super().__init__(layout, inputs, constant_args)
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.onednn.qlinear_pointwise",
+            cpp_kernel="onednn::qlinear_pointwise",
+        )
+        self.cpp_kernel_key = "qlinear_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                std::string post_op_name,
+                torch::List<c10::optional<at::Scalar>> post_op_args,
+                std::string post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -5707,29 +5866,34 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             o_zp,
-            fp32_output,
+            output_dtype,
             unary_attr,
             unary_scalars,
             unary_algorithm,
         ) = const_args[-8:]
 
-        self.kernel = "torch.ops.onednn.qlinear_pointwise"
         codegen_args = (
-            f"{x}"
-            + f", {x_scale}"
-            + f", {x_zp}"
-            + f", {packed_weight}"
-            + f", {w_scale}"
-            + f", {w_zp}"
-            + f", {bias}"
-            + f", {o_inv_scale}"
-            + f", {o_zp}"
-            + f", {fp32_output}"
-            + f", {unary_attr}"
-            + f", {unary_scalars}"
-            + f", {unary_algorithm}"
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            o_inv_scale,
+            o_zp,
+            output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
         )
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -5745,7 +5909,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         bias: "TensorBox",
         o_inv_scale: float,
         output_zero_point: int,
-        fp32_output,
+        output_dtype,
         unary_attr,
         unary_scalars,
         unary_algorithm,
@@ -5765,16 +5929,17 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             x_zp,
             o_inv_scale,
             output_zero_point,
-            fp32_output,
+            output_dtype,
             unary_attr,
-            unary_scalars,
+            may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
 
-        if fp32_output:
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
             # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
             # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = torch.float32
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwisePT2E(
             layout=kernel_layout,
@@ -6152,7 +6317,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def indirect_indexing(index_proxy, size, add_asserts=True):
+            def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
                 Introduce a call_module to update the indexing.
@@ -6162,7 +6327,7 @@ class LoopBodyBlock:
 
                 def set_indirect(new_var):
                     self.body.replace_indirect(
-                        var, V.ops.indirect_indexing(new_var, size, add_asserts)
+                        var, V.ops.indirect_indexing(new_var, size, check)
                     )
 
                 tracer.create_proxy(

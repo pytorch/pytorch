@@ -68,7 +68,7 @@ try:
 except ImportError:
     from _dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -566,7 +566,10 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -1524,31 +1527,31 @@ class OnnxModelFromDynamo(OnnxModel):
     def __init__(self, output_directory, model, example_inputs, dynamic_shapes: bool):
         super().__init__(output_directory, model, example_inputs, dynamic_shapes)
         self._dynamic_shapes = dynamic_shapes
-        self._export_output = self._export(model, example_inputs, self.model_path)
+        self._onnx_program = self._export(model, example_inputs, self.model_path)
         # Clear the model proto to save memory.
-        # The model proto is saved to disk and no longer needed from `export_output`.
-        # `export_output` is kept for i/o adapter usage.
-        self._export_output.model_proto.Clear()
+        # The model proto is saved to disk and no longer needed from `onnx_program`.
+        # `onnx_program` is kept for i/o adapter usage.
+        self._onnx_program.model_proto.Clear()
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(
         self, model, example_inputs, output_path: str
-    ) -> torch.onnx.ExportOutput:
+    ) -> torch.onnx.ONNXProgram:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
 
-        export_output.save(output_path)
-        return export_output
+        onnx_program.save(output_path)
+        return onnx_program
 
     def format_pt_inputs(self, pt_inputs):
         pt_args, pt_kwargs = _normalize_bench_inputs(pt_inputs)
-        return self._export_output.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
+        return self._onnx_program.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
 
     def format_pt_outputs(self, pt_outputs):
-        return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+        return self._onnx_program.adapt_torch_outputs_to_onnx(pt_outputs)
 
 
 class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
@@ -1558,10 +1561,10 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
 
     def _export(
         self, model, example_inputs, output_path: str
-    ) -> torch.onnx.ExportOutput:
+    ) -> torch.onnx.ONNXProgram:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
         # Apply AOT inline post export.
@@ -1572,12 +1575,12 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
         # Workaround for inliner not supporting with models larger than 2GB.
         # Save model to disk first separating out external data,
         # and load back without external data for inliner to work on.
-        model_proto = export_output.model_proto
+        model_proto = onnx_program.model_proto
         onnx.save_model(model_proto, output_path, save_as_external_data=True)
         model_proto = onnx.load(output_path, load_external_data=False)
         model_proto = onnx.inliner.inline_local_functions(model_proto)
         onnx.save_model(model_proto, output_path)
-        return export_output
+        return onnx_program
 
 
 class _OnnxPatch:
@@ -1783,7 +1786,7 @@ def optimize_onnx_ctx(
             return outputs
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
-            diagnostic_context = e.export_output.diagnostic_context
+            diagnostic_context = e.onnx_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
@@ -3882,6 +3885,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:

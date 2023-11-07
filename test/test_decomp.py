@@ -428,9 +428,8 @@ def any_unsupported(args, kwargs):
         else:
             return False
 
-    flat_args = pytree.tree_leaves(args)
-    flat_kwargs = pytree.tree_leaves(kwargs)
-    return any(test_unsupported(x) for x in itertools.chain(flat_args, flat_kwargs))
+    flat_args = pytree.arg_tree_leaves(*args, **kwargs)
+    return any(test_unsupported(x) for x in flat_args)
 
 
 core_backward_failures = {
@@ -885,6 +884,18 @@ class DecompOneOffTests(TestCase):
         ref = torch.ops.aten.threshold_backward(grad, input_tensor, 1)
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_weight_norm_interface(self, device):
+        g = torch.randn((3, 10, 10), device=device)
+        v = torch.randn((1, 1, 10), device=device)
+
+        ref = torch.ops.aten._weight_norm_interface(g, v, 2)
+        res = torch._decomp.decompositions._weight_norm_interface(g, v, 2)
+        self.assertTrue(torch.allclose(ref[0], res[0]))
+        self.assertTrue(torch.allclose(ref[1], res[1]))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())

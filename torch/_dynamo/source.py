@@ -439,7 +439,7 @@ class ConstantSource(Source):
     def name(self):
         return self.source_name
 
-    def make_guard(self, fn, is_volatile=False):
+    def make_guard(self, fn):
         raise NotImplementedError()
 
 

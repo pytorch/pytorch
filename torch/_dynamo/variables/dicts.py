@@ -437,6 +437,30 @@ class SetVariable(VariableTracker):
         return [x.add_options(self) for x in self.items]
 
 
+def _is_matching_transformers_cls(cls) -> bool:
+    if not cls.__module__.startswith("transformers."):
+        return False
+
+    try:
+        from transformers.file_utils import ModelOutput
+
+        return issubclass(cls, ModelOutput)
+    except ImportError:
+        return False
+
+
+def _is_matching_diffusers_cls(cls) -> bool:
+    if not cls.__module__.startswith("diffusers."):
+        return False
+
+    try:
+        from diffusers.utils import BaseOutput
+
+        return issubclass(cls, BaseOutput)
+    except ImportError:
+        return False
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -452,20 +476,27 @@ class DataClassVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once():
-        from transformers.file_utils import ModelOutput
-
-        for obj in ModelOutput.__dict__.values():
-            if callable(obj):
-                skip_code(obj.__code__)
-
-    @staticmethod
-    def is_matching_cls(cls):
         try:
             from transformers.file_utils import ModelOutput
 
-            return issubclass(cls, ModelOutput)
+            for obj in ModelOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
         except ImportError:
-            return False
+            pass
+
+        try:
+            from diffusers.utils import BaseOutput
+
+            for obj in BaseOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
+        except ImportError:
+            pass
+
+    @staticmethod
+    def is_matching_cls(cls):
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -578,26 +609,19 @@ class DataClassVariable(ConstDictVariable):
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            # True if using default OrderedDict.__init__ and did not implement __post_init__
-            if (
-                issubclass(cls, collections.OrderedDict)
-                and cls.__init__ is collections.OrderedDict.__init__
-                and not hasattr(cls, "__post_init__")
-            ):
-                return True
-            # hack for HF usecase:
-            #   assume dataclass annotation for ModelOutput subclass
-            #   assume self.create is AA to ModelOutput.__post_init__
-            # for non-HF usecase:
-            #   check __module__ string to avoid costy HF import
-            if cls.__module__ != "transformers.modeling_outputs":
-                return False
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
+        # True if using default OrderedDict.__init__ and did not implement __post_init__
+        if (
+            issubclass(cls, collections.OrderedDict)
+            and cls.__init__ is collections.OrderedDict.__init__
+            and not hasattr(cls, "__post_init__")
+        ):
+            return True
+        # hack for HF usecase:
+        #   assume dataclass annotation for ModelOutput subclass
+        #   assume self.create is AA to ModelOutput.__post_init__
+        # for non-HF usecase:
+        #   check __module__ string to avoid costy HF import
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -623,11 +647,14 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
             raw_items = bound.arguments
+        elif not args:
+            # CustomDict(a=1, b=2) in the general (non-dataclass) case.
+            raw_items = collections.OrderedDict(kwargs)
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             raw_items = args[0].items
         else:
-            unimplemented("custome dict init with args/kwargs unimplemented")
+            unimplemented("custom dict init with args/kwargs unimplemented")
 
         items = collections.OrderedDict()
         for key in raw_items.keys():

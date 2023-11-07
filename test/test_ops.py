@@ -2114,7 +2114,7 @@ class TestFakeTensor(TestCase):
 
                 if torch.Tag.pointwise in func.tags:
                     shapes = []
-                    for inp in pytree.tree_leaves((args, kwargs)):
+                    for inp in pytree.arg_tree_leaves(*args, **kwargs):
                         if isinstance(inp, torch.Tensor):
                             shapes.append(inp.shape)
 
