@@ -1295,6 +1295,7 @@ def main():
         "include/torch/csrc/lazy/python/python_util.h",
         "include/torch/csrc/lazy/ts_backend/*.h",
         "include/pybind11/*.h",
+        "include/pybind11/detail/*.h",
         "include/pybind11/eigen/*.h",
         "include/TH/*.h*",
         "include/TH/generic/*.h*",
