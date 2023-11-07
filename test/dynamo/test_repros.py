@@ -1546,11 +1546,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
+            x += 1
             x.data = y
             x.add_(1)
             return x
 
         def func2(x, y):
+            x += 1
             x.data = y
             y.data = torch.zeros([0])
             return x
@@ -1581,6 +1583,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(y):
             x = torch.tensor([0])
+            x += 1
             x.data = y  # Setattr for untracked tensors is unsupported
             x.add_(1)
             return x

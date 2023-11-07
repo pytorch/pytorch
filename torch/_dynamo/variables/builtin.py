@@ -538,7 +538,10 @@ class BuiltinVariable(VariableTracker):
                     ret = wrap_fx_proxy_cls(
                         variables.NumpyNdarrayVariable, tx, proxy, **options
                     )
-                    if self.fn in self._self_assigning_ops():
+                    if (
+                        self.fn in self._self_assigning_ops()
+                        and args[0].mutable_local is not None
+                    ):
                         ret = tx.replace_all(args[0], ret)
                     return ret
 
@@ -583,7 +586,10 @@ class BuiltinVariable(VariableTracker):
                         args[0] = args[0].convert_to_constant(tx)
                     ret = wrap_fx_proxy(tx, proxy, **options)
 
-                if self.fn in self._self_assigning_ops():
+                if (
+                    self.fn in self._self_assigning_ops()
+                    and args[0].mutable_local is not None
+                ):
                     ret = tx.replace_all(args[0], ret)
                 return ret
 
