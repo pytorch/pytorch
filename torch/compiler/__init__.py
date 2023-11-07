@@ -117,4 +117,4 @@ def cudagraph_mark_step_begin():
     """
     import torch._inductor
 
-    torch._inductor.cudagraph_trees.mark_step_begin()
+    torch._inductor.cudagraph_mark_step_begin()
