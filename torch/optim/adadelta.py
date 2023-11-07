@@ -171,7 +171,6 @@ Adadelta.__doc__ = r"""Implements Adadelta algorithm.
         {maximize}
         {differentiable}
 
-
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
 
