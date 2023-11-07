@@ -98,6 +98,10 @@ class ProxyableClassMeta(type):
     def __call__(cls, *args, **kwargs):
         instance = cls.__new__(cls)  # type: ignore[call-overload]
 
+        if not is_fx_tracing():
+            cls.__init__(instance, *args, **kwargs)  # type: ignore[misc]
+            return instance
+
         found_proxies = []
 
         def check_proxy(a):
