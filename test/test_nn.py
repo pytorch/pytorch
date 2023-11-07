@@ -12754,7 +12754,7 @@ class TestNNDeviceType(NNTestCase):
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
-    @largeTensorTest("30GB", "cuda")
+    @largeTensorTest("41GB" if TEST_WITH_ROCM else "30GB", "cuda")
     def test_softmax_forward_64bit_indexing(self, device):
         batch_size = 70
         seq_len = 2048
