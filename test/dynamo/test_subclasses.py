@@ -197,7 +197,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             x.sigmoid()
 
         msg = (
-            "Accessing overidden method/attribute sigmoid on a tensor"
+            "Accessing overridden method/attribute sigmoid on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -221,7 +221,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             return x.ndim
 
         msg = (
-            "Accessing overidden method/attribute ndim on a tensor"
+            "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -254,7 +254,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             return x.ndim
 
         msg = (
-            "Accessing overidden method/attribute ndim on a tensor"
+            "Accessing overridden method/attribute ndim on a tensor"
             " subclass with a __torch_function__ override is not supported"
         )
         with torch._dynamo.config.patch(
@@ -280,7 +280,17 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         ):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
-            x.sigmoid = False
+            fn(x)
+            x = torch.ones(2, 2).as_subclass(LocalSubclass)
+            fn(x)
+
+        with torch._dynamo.config.patch(
+            traceable_tensor_subclasses={LocalSubclass}
+        ), self.assertRaisesRegex(
+            TypeError,
+            "'bool' object is not callable",
+        ):
+            LocalSubclass.sigmoid = False
             fn(x)
 
     def test_torch_function_call_on_attr(self):
@@ -613,7 +623,7 @@ class GraphModule(torch.nn.Module):
             context = torch._guards.TracingContext.get()
             val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
-            # Grab info on sources and guards from the shapenv
+            # Grab info on sources and guards from the shapeenv
             nonlocal lower_bound_str
             nonlocal upper_bound_str
             nonlocal curr_var_to_val

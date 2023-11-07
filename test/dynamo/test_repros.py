@@ -513,7 +513,7 @@ class PartialMaml(torch.nn.Module):
         corrects = [0 for _ in range(self.update_step_test + 1)]
 
         # in order to not ruin the state of running_mean/variance and bn_weight/bias
-        # we finetunning on the copied model instead of self.net
+        # we finetuning on the copied model instead of self.net
         net = deepcopy(self.net)
 
         # 1. run the i-th task and compute loss for k=0
@@ -1538,6 +1538,85 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
         self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
+
+    def test_tensor_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func1(x, y):
+            x.data = y
+            x.add_(1)
+            return x
+
+        def func2(x, y):
+            x.data = y
+            y.data = torch.zeros([0])
+            return x
+
+        for func in [func1, func2]:
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+            b = torch.rand([6])
+            b1 = torch.clone(b)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            _ = func(a, b)
+            _ = torch.compile(func, backend=cnt)(a1, b1)
+
+            self.assertEqual(a, a1)
+            self.assertEqual(b, b1)
+            self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_untracked_setattr_data_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(y):
+            x = torch.tensor([0])
+            x.data = y  # Setattr for untracked tensors is unsupported
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        _ = func(a)
+        _ = torch.compile(func, backend=cnt)(a1)
+
+        self.assertEqual(a, a1)
+        self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+    def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
+        # https://github.com/pytorch/pytorch/issues/113030
+        def func(x):
+            y = torch.tensor([0])
+            # If we setattr to untracked tensor, it aliases a new tensor.
+            # we need to start tracking y even though it is created in graph
+            x.data = y
+            x.add_(1)
+            return x, y
+
+            a = torch.rand([6])
+            a1 = torch.clone(a)
+
+            cnt = torch._dynamo.testing.CompileCounter()
+
+            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
+            self.assertEqual(a, a1)
+            self.assertEqual(cnt.frame_count, 2)
+
+    def test_setattr_data_tensor_raises(self):
+        def func(x):
+            x.data = None
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+
+        with self.assertRaises(TypeError):
+            func(a)
+        with self.assertRaises(TypeError):
+            torch.compile(func, backend="eager")(a1)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
@@ -3557,6 +3636,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn = torch.compile(torch.addr, dynamic=True)
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
+
+    def test_inductor_no_recursionerror_on_for_loops(self):
+        def forward(x):
+            for _ in range(1000):
+                x = 1.0 * x
+            return x
+
+        self.assertTrue(
+            same(torch.compile(forward)(torch.tensor([1.0])), torch.tensor([1.0]))
+        )
 
     def test_numpy_not_ndarray_recompiles(self):
         import torch

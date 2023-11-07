@@ -16,6 +16,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <c10/core/DeviceType.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/CallOnce.h>
@@ -316,6 +317,55 @@ c10::List<c10::IValue> new_list() {
 }
 
 } // namespace
+
+// Map from each communicator to its device index.
+// This map is used when register/deregister cache segments from cache
+// allocator. See design notes below:
+// - Each segment should be registered only to the communicator on the
+//   same device.
+// - We cannot reuse devNCCLCommMap_ in each ProcessGroup because the key may be
+//   ranks rather than device in point-to-point case.
+// - This map has also to be maintained as global variable since the register
+//   hooks are called outside the scope of any PG, thus we need traverse
+//   communicators in all PGs.
+static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
+static std::mutex ncclCommDevIdxMapMutex;
+static bool allocatorHooksAttached = false;
+void cacheAllocatorRegisterHook(
+    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+  // Register after SEGMENT_ALLOC
+  if (te.action_ !=
+      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+  for (auto& it : ncclCommDevIdxMap) {
+    auto& ncclComm = it.first;
+    auto& devIdx = it.second;
+    if (te.device_ == devIdx) {
+      ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
+    }
+  }
+}
+
+void cacheAllocatorDeregisterHook(
+    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+  // deregister before SEGMENT_FREE
+  if (te.action_ !=
+      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(ncclCommDevIdxMapMutex);
+  for (auto& it : ncclCommDevIdxMap) {
+    auto& ncclComm = it.first;
+    auto& devIdx = it.second;
+    if (te.device_ == devIdx) {
+      ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
+    }
+  }
+}
 
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
@@ -817,6 +867,12 @@ void ProcessGroupNCCL::WorkNCCL::abort() {
   for (const auto& ncclComm : ncclComms_) {
     ncclComm->ncclCommAbort();
   }
+
+  ncclCommDevIdxMapMutex.lock();
+  for (const auto& comm : ncclComms_) {
+    ncclCommDevIdxMap.erase(comm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
 }
 
 ProcessGroupNCCL::CoalescedWorkNCCL::CoalescedWorkNCCL(
@@ -881,6 +937,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault("TORCH_NCCL_TRACE_BUFFER_SIZE", 0) > 0);
 #endif
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
+#ifdef NCCL_HAS_COMM_REGISTER
+  useTensorRegisterAllocatorHook_ =
+      parseEnvVarFlag(NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK);
+  if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+          expandable_segments()) {
+    useTensorRegisterAllocatorHook_ = false;
+    LOG(INFO)
+        << "[Rank " << rank_
+        << "] disables NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK because it is not compatible with CUDA allocator expandable segments mode.";
+  }
+#endif
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
@@ -932,6 +999,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << ", TORCH_DISTRIBUTED_DEBUG: "
             << std::string(torch_distributed_debug)
+#ifdef NCCL_HAS_COMM_REGISTER
+            << ", NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+            << useTensorRegisterAllocatorHook_
+#endif
             << ", NCCL_DEBUG: " << std::string(nccl_debug)
             << ", ID=" << this->getID();
 
@@ -946,6 +1017,19 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>(), // outSplitSizes
       size_); // worldSize
+
+  // Attach hooks to cache allocator to trigger the hooks whenever a traced
+  // action is called. In the following hooks, we register a newly allocated
+  // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
+  // SEGMENT_FREE action occurs.
+  // We attach hooks only once at the first PG creation.
+  if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorRegisterHook);
+    c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
+        &cacheAllocatorDeregisterHook);
+    allocatorHooksAttached = true;
+  }
 
 #ifdef USE_NCCL_WITH_UCC
   static c10::once_flag initialize_ucc_lib_flag;
@@ -1124,6 +1208,20 @@ void abortCommsFromMap(
 
 // Abort all communicators on this rank
 void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+  // Remove record from global ncclCommDevIdxMapMutex before aboarting,
+  // so that a new cache segment would not register to already aborded
+  // communicators. Note that ncclCommDevIdxMap is a global container which may
+  // contain other PG's communicators, thus we need to only erase communicators
+  // for the current PG.
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& it : devNCCLCommMap_) {
+    auto& ncclComms = it.second;
+    for (const auto& ncclComm : ncclComms) {
+      ncclCommDevIdxMap.erase(ncclComm);
+    }
+  }
+  ncclCommDevIdxMapMutex.unlock();
+
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
@@ -1498,6 +1596,12 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   devNCCLCommMap_.erase(devNCCLCommMapKey);
   // Clear used device indices.
   usedDeviceIdxs_.clear();
+
+  ncclCommDevIdxMapMutex.lock();
+  for (const auto& comm : ncclComms) {
+    ncclCommDevIdxMap.erase(comm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
 }
 
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
@@ -1662,6 +1766,34 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (it != inInitializationCommMap_.end()) {
     devNCCLCommMap_.emplace(devicesKey, std::move(it->second));
     inInitializationCommMap_.erase(devicesKey);
+
+    // Now ncclComms are fully initialized.
+    // Register all active CUDA memory segments in cache allocator to
+    // the new NCCL communicators
+    if (useTensorRegisterAllocatorHook_) {
+      auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+      // Register the segment to a new NCCL communicator if on the same device
+      for (const auto& segmentInfo : snapshot.segments) {
+        for (const auto i : c10::irange(devices.size())) {
+          if (segmentInfo.device != devices[i].index())
+            continue;
+          ncclComms[i]->registerSegment(
+              reinterpret_cast<void*>(segmentInfo.address),
+              segmentInfo.total_size);
+        }
+      }
+
+      // Record the mapping between ncclComm and device index so that later
+      // register hook can register a newly allocated segment to communicators
+      // on the same device.
+      // NOTE: we need remove the communicator from this map when it is
+      // destroyed, otherwise may register onto an invalid communicator.
+      ncclCommDevIdxMapMutex.lock();
+      for (const auto i : c10::irange(devices.size())) {
+        ncclCommDevIdxMap.emplace(ncclComms[i], devices[i].index());
+      }
+      ncclCommDevIdxMapMutex.unlock();
+    }
   }
 
   it = devNCCLCommMap_.find(devicesKey);
@@ -1898,7 +2030,7 @@ void ProcessGroupNCCL::workEnqueue(
 }
 
 ProcessGroupNCCL::Options::Options(bool is_high_priority_stream)
-    : Backend::Options(NCCL_BACKEND_NAME),
+    : Backend::Options(NCCL_BACKEND_NAME, kProcessGroupNCCLDefaultTimeout),
       is_high_priority_stream(is_high_priority_stream) {}
 
 static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
