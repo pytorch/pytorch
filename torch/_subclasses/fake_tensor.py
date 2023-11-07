@@ -376,6 +376,16 @@ class FakeTensorConverter:
             constraint_dims=constraint_dims,
             force_fresh=force_fresh,
         )
+        # Bind original shape and stride to the FakeTensor
+        # We must do this because as we trace, transforms like setting .data will
+        # change the fake tensor. This means that if we do not keep track of the original meta,
+        # we will lose it.
+        # This matters, because there will be points where we enter tracing
+        # (like aot_autograd after dynamo), where accessing memo will give us the tensor
+        # as it is at the end of trace, but we need to get the tensor as it was before tracing.
+        out._original_sym_shape = out.size()
+        out._original_sym_stride = out.stride()
+        out._original_sym_storage_offset = out.storage_offset()
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
         if make_constant:
@@ -1066,6 +1076,10 @@ class FakeTensor(torch.Tensor):
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
+
+    _original_sym_shape: Optional[torch.Size] = None
+    _original_sym_stride: Optional[Tuple[torch.SymInt]] = None
+    _original_sym_storage_offset: Optional[torch.SymInt] = None
 
     @property
     def nonzero_memo(self):
