@@ -3,7 +3,8 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/DimVector.h>
 
-#include <bitset>
+#include <atomic>
+#include <mutex>
 
 namespace c10 {
 
@@ -16,23 +17,23 @@ class C10_API SymbolicShapeMeta {
 
   bool strides_valid_ = true; // e.g. for sparse where there are no strides
 
+  SymbolicShapeMeta() = default;
+  SymbolicShapeMeta(const SymbolicShapeMeta& other);
+
   void refresh_numel() {
-    available_.reset(numel_avail);
+    // Non-const, don't need to hold mutables_ lock
+    available_.fetch_and(~numel_avail);
     numel_ = 1;
   }
 
   void refresh_contiguous() {
-    available_.reset(is_contiguous_avail);
+    // Non-const, don't need to hold mutables_ lock
+    available_.fetch_and(numel_avail);
     is_contiguous_ = false;
-    available_.reset(is_channels_last_contiguous_avail);
     is_channels_last_contiguous_ = false;
-    available_.reset(is_channels_last_3d_contiguous_avail);
     is_channels_last_3d_contiguous_ = false;
-    available_.reset(is_channels_last_avail);
     is_channels_last_ = false;
-    available_.reset(is_channels_last_3d_avail);
     is_channels_last_3d_ = false;
-    available_.reset(is_non_overlapping_and_dense_avail);
     is_non_overlapping_and_dense_ = false;
   }
 
@@ -42,79 +43,104 @@ class C10_API SymbolicShapeMeta {
 
   // Accessors for derived quantities, computed lazily on first access
 
+  bool has_numel() const {
+    return available_.load() & numel_avail;
+  }
+  bool has_is_contiguous() const {
+    return available_.load() & is_contiguous_avail;
+  }
+  bool has_is_channels_last_contiguous() const {
+    return available_.load() & is_channels_last_contiguous_avail;
+  }
+  bool has_is_channels_last_3d_contiguous() const {
+    return available_.load() & is_channels_last_3d_contiguous_avail;
+  }
+  bool has_is_channels_last() const {
+    return available_.load() & is_channels_last_avail;
+  }
+  bool has_is_channels_last_3d() const {
+    return available_.load() & is_channels_last_3d_avail;
+  }
+  bool has_is_non_overlapping_and_dense() const {
+    return available_.load() & is_non_overlapping_and_dense_avail;
+  }
+
+  // Accessors to cached derived properties
+  // DO NOT call with mutables_ lock held
   const SymInt& numel() const {
-    if (C10_UNLIKELY(!available_.test(numel_avail))) {
+    if (C10_UNLIKELY(!has_numel())) {
       init_numel();
     }
     return numel_;
   }
 
   const SymBool& is_contiguous() const {
-    if (C10_UNLIKELY(!available_.test(is_contiguous_avail))) {
+    if (C10_UNLIKELY(!has_is_contiguous())) {
       init_is_contiguous();
     }
     return is_contiguous_;
   }
 
   const SymBool& is_channels_last_contiguous() const {
-    if (C10_UNLIKELY(!available_.test(is_channels_last_contiguous_avail))) {
+    if (C10_UNLIKELY(!has_is_channels_last_contiguous())) {
       init_is_channels_last_contiguous();
     }
     return is_channels_last_contiguous_;
   }
 
   const SymBool& is_channels_last_3d_contiguous() const {
-    if (C10_UNLIKELY(!available_.test(is_channels_last_3d_contiguous_avail))) {
+    if (C10_UNLIKELY(!has_is_channels_last_3d_contiguous())) {
       init_is_channels_last_3d_contiguous();
     }
     return is_channels_last_3d_contiguous_;
   }
 
   const SymBool& is_channels_last() const {
-    if (C10_UNLIKELY(!available_.test(is_channels_last_avail))) {
+    if (C10_UNLIKELY(!has_is_channels_last())) {
       init_is_channels_last();
     }
     return is_channels_last_;
   }
 
   const SymBool& is_channels_last_3d() const {
-    if (C10_UNLIKELY(!available_.test(is_channels_last_3d_avail))) {
+    if (C10_UNLIKELY(!has_is_channels_last_3d())) {
       init_is_channels_last_3d();
     }
     return is_channels_last_3d_;
   }
 
   const SymBool& is_non_overlapping_and_dense() const {
-    if (C10_UNLIKELY(!available_.test(is_non_overlapping_and_dense_avail))) {
+    if (C10_UNLIKELY(!has_is_non_overlapping_and_dense())) {
       init_is_non_overlapping_and_dense();
     }
     return is_non_overlapping_and_dense_;
   }
 
   // Assumptions so we can short-circuit computation
+  // NOTE: Don't need to lock mutables_ since these aren't const
   void assume_contiguous() {
-    available_.set(is_contiguous_avail);
     is_contiguous_ = true;
+    available_.fetch_or(is_contiguous_avail);
   }
   void assume_channels_last_contiguous() {
-    available_.set(is_channels_last_contiguous_avail);
     is_channels_last_contiguous_ = true;
+    available_.fetch_or(is_channels_last_contiguous_avail);
   }
   void assume_channels_last_3d_contiguous() {
-    available_.set(is_channels_last_3d_contiguous_avail);
     is_channels_last_3d_contiguous_ = true;
+    available_.fetch_or(is_channels_last_3d_contiguous_avail);
   }
   void assume_channels_last() {
-    available_.set(is_channels_last_avail);
     is_channels_last_ = true;
+    available_.fetch_or(is_channels_last_avail);
   }
   void assume_channels_last_3d() {
-    available_.set(is_channels_last_3d_avail);
     is_channels_last_3d_ = true;
+    available_.fetch_or(is_channels_last_3d_avail);
   }
   void assume_non_overlapping_and_dense() {
-    available_.set(is_non_overlapping_and_dense_avail);
     is_non_overlapping_and_dense_ = true;
+    available_.fetch_or(is_non_overlapping_and_dense_avail);
   }
 
  private:
@@ -133,13 +159,14 @@ class C10_API SymbolicShapeMeta {
   // if its correct, and reason if the simpler expressions are better for
   // analysis (maybe not!)
 
-  SymBool compute_channels_last_contiguous_3d_dim5() const;
-  SymBool compute_channels_last_2d_dim5() const;
-  SymBool compute_channels_last_3d_dim5() const;
-  SymBool compute_is_non_overlapping_and_dense_dim4() const;
-  SymBool compute_is_non_overlapping_and_dense_dim5() const;
-  SymBool compute_is_non_overlapping_and_dense_anydim() const;
+  SymBool compute_channels_last_contiguous_3d_dim5_locked() const;
+  SymBool compute_channels_last_2d_dim5_locked() const;
+  SymBool compute_channels_last_3d_dim5_locked() const;
+  SymBool compute_is_non_overlapping_and_dense_dim4_locked() const;
+  SymBool compute_is_non_overlapping_and_dense_dim5_locked() const;
+  SymBool compute_is_non_overlapping_and_dense_anydim_locked() const;
 
+  // Versions which lock, called by the public API
   void init_numel() const;
   void init_is_contiguous() const;
   void init_is_channels_last_contiguous() const;
@@ -148,19 +175,31 @@ class C10_API SymbolicShapeMeta {
   void init_is_channels_last_3d() const;
   void init_is_non_overlapping_and_dense() const;
 
+  // Verions callend when the mutex is already locked (to prevent recursive locking)
+  void init_numel_locked() const;
+  void init_is_contiguous_locked() const;
+  void init_is_channels_last_contiguous_locked() const;
+  void init_is_channels_last_3d_contiguous_locked() const;
+  void init_is_channels_last_locked() const;
+  void init_is_channels_last_3d_locked() const;
+  void init_is_non_overlapping_and_dense_locked() const;
+
   // Lazily initialized variables, with the corresponding available_ flag
   // indicating whether the value has been initialized
-  mutable std::bitset<7> available_;
+  // During intialization, the variable may only be accessed with the mutables_ lock held
+  mutable std::atomic<int> available_{0};
   enum avail {
-    numel_avail = 0,
-    is_contiguous_avail,
-    is_channels_last_contiguous_avail,
-    is_channels_last_3d_contiguous_avail,
-    is_channels_last_avail,
-    is_channels_last_3d_avail,
-    is_non_overlapping_and_dense_avail,
+    numel_avail = 1 << 0,
+    is_contiguous_avail = 1 << 1,
+    is_channels_last_contiguous_avail = 1 << 2,
+    is_channels_last_3d_contiguous_avail = 1 << 3,
+    is_channels_last_avail = 1 << 4,
+    is_channels_last_3d_avail = 1 << 5,
+    is_non_overlapping_and_dense_avail = 1 << 6,
   };
 
+  // Mutex to prevent races on const accesses
+  mutable std::mutex mutables_;
   mutable SymInt numel_ = 1;
   mutable SymBool is_contiguous_{true};
   mutable SymBool is_channels_last_contiguous_{false};

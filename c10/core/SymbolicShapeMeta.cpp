@@ -5,6 +5,22 @@
 
 namespace c10 {
 
+SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other) {
+  std::scoped_lock lock{other.mutables_};
+  sizes_ = other.sizes_;
+  strides_ = other.strides_;
+  storage_offset_ = other.storage_offset_;
+  strides_valid_ = other.strides_valid_;
+  numel_ = other.numel_;
+  is_contiguous_ = other.is_contiguous_;
+  is_channels_last_contiguous_ = other.is_channels_last_contiguous_;
+  is_channels_last_3d_contiguous_ = other.is_channels_last_3d_contiguous_;
+  is_channels_last_ = other.is_channels_last_;
+  is_channels_last_3d_ = other.is_channels_last_3d_;
+  is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
+  available_.store(other.available_.load());
+}
+
 // base, sizes, strides
 static c10::optional<
     std::tuple<SymNode, std::vector<SymNode>, std::vector<SymNode>>>
@@ -113,71 +129,118 @@ static bool definitely_true(const SymBool& b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
-SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4() const {
-  if (definitely_true(is_contiguous())) {
+SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim4_locked() const {
+  init_is_contiguous_locked();
+  if (definitely_true(is_contiguous_)) {
     return true;
   }
-  if (definitely_true(is_channels_last_contiguous())) {
+  init_is_channels_last_contiguous_locked();
+  if (definitely_true(is_channels_last_contiguous_)) {
     return true;
   }
-  return is_contiguous() | is_channels_last_contiguous() |
+  return is_contiguous_ | is_channels_last_contiguous_ |
       compute_non_overlapping_and_dense();
 }
 
-SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5() const {
-  if (definitely_true(is_channels_last_contiguous())) {
+SymBool SymbolicShapeMeta::compute_channels_last_contiguous_3d_dim5_locked() const {
+  init_is_channels_last_contiguous_locked();
+  if (definitely_true(is_channels_last_contiguous_)) {
     return false;
   }
-  return ~is_channels_last_contiguous() & compute_channels_last_contiguous_3d();
+  return ~is_channels_last_contiguous_ & compute_channels_last_contiguous_3d();
 }
 
-SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5() const {
-  if (definitely_true(is_channels_last_3d_contiguous())) {
+SymBool SymbolicShapeMeta::compute_channels_last_2d_dim5_locked() const {
+  init_is_channels_last_3d_contiguous_locked();
+  if (definitely_true(is_channels_last_3d_contiguous_)) {
     return false;
   }
-  return ~is_channels_last_3d_contiguous() &
+  return ~is_channels_last_3d_contiguous_ &
       compute_strides_like_channels_last_2d();
 }
 
-SymBool SymbolicShapeMeta::compute_channels_last_3d_dim5() const {
-  if (definitely_true(is_channels_last())) {
+SymBool SymbolicShapeMeta::compute_channels_last_3d_dim5_locked() const {
+  init_is_channels_last_locked();
+  if (definitely_true(is_channels_last_)) {
     return false;
   }
-  return ~is_channels_last() & compute_strides_like_channels_last_3d();
+  return ~is_channels_last_ & compute_strides_like_channels_last_3d();
 }
 
-SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5() const {
-  if (definitely_true(is_contiguous())) {
+SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_dim5_locked() const {
+  init_is_contiguous_locked();
+  if (definitely_true(is_contiguous_)) {
     return true;
   }
-  if (definitely_true(is_channels_last_contiguous())) {
+  init_is_channels_last_contiguous_locked();
+  if (definitely_true(is_channels_last_contiguous_)) {
     return true;
   }
-  if (definitely_true(is_channels_last_3d_contiguous())) {
+  init_is_channels_last_3d_contiguous_locked();
+  if (definitely_true(is_channels_last_3d_contiguous_)) {
     return true;
   }
-  return is_contiguous() | is_channels_last_contiguous() |
-      is_channels_last_3d_contiguous() | compute_non_overlapping_and_dense();
+  return is_contiguous_ | is_channels_last_contiguous_ |
+      is_channels_last_3d_contiguous_ | compute_non_overlapping_and_dense();
 }
 
-SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
-  if (definitely_true(is_contiguous())) {
+SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim_locked() const {
+  init_is_contiguous_locked();
+  if (definitely_true(is_contiguous_)) {
     return true;
   }
-  return is_contiguous() | compute_non_overlapping_and_dense();
+  return is_contiguous_ | compute_non_overlapping_and_dense();
 }
 
 void SymbolicShapeMeta::init_numel() const {
-  numel_ = multiply_integers(sizes_);
-  available_.set(numel_avail);
+  std::scoped_lock lock{mutables_};
+  init_numel_locked();
 }
 
 void SymbolicShapeMeta::init_is_contiguous() const {
-  is_contiguous_ = compute_contiguous();
-  available_.set(is_contiguous_avail);
+  std::scoped_lock lock{mutables_};
+  init_is_contiguous_locked();
 }
 
 void SymbolicShapeMeta::init_is_channels_last_contiguous() const {
+  std::scoped_lock lock{mutables_};
+  init_is_channels_last_contiguous_locked();
+}
+
+void SymbolicShapeMeta::init_is_channels_last_3d_contiguous() const {
+  std::scoped_lock lock{mutables_};
+  init_is_channels_last_3d_contiguous_locked();
+}
+
+void SymbolicShapeMeta::init_is_channels_last() const {
+  std::scoped_lock lock{mutables_};
+  init_is_channels_last_locked();
+}
+
+void SymbolicShapeMeta::init_is_channels_last_3d() const {
+  std::scoped_lock lock{mutables_};
+  init_is_channels_last_3d_locked();
+}
+
+void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
+  std::scoped_lock lock{mutables_};
+  init_is_non_overlapping_and_dense_locked();
+}
+
+void SymbolicShapeMeta::init_numel_locked() const {
+  if (has_numel()) { return; }
+  numel_ = multiply_integers(sizes_);
+  available_.fetch_or(numel_avail);
+}
+
+void SymbolicShapeMeta::init_is_contiguous_locked() const {
+  if (has_is_contiguous()) { return; }
+  is_contiguous_ = compute_contiguous();
+  available_.fetch_or(is_contiguous_avail);
+}
+
+void SymbolicShapeMeta::init_is_channels_last_contiguous_locked() const {
+  if (has_is_channels_last_contiguous()) { return; }
   is_channels_last_contiguous_ = [&] {
     switch (dim()) {
       case 5:
@@ -188,59 +251,63 @@ void SymbolicShapeMeta::init_is_channels_last_contiguous() const {
         return SymBool{false};
     }
   }();
-  available_.set(is_channels_last_contiguous_avail);
+  available_.fetch_or(is_channels_last_contiguous_avail);
 }
 
-void SymbolicShapeMeta::init_is_channels_last_3d_contiguous() const {
+void SymbolicShapeMeta::init_is_channels_last_3d_contiguous_locked() const {
+  if (has_is_channels_last_3d_contiguous()) { return; }
   is_channels_last_3d_contiguous_ = [&] {
     switch (dim()) {
       case 5:
-        return compute_channels_last_contiguous_3d_dim5();
+        return compute_channels_last_contiguous_3d_dim5_locked();
       default:
         return SymBool{false};
     }
   }();
-  available_.set(is_channels_last_3d_contiguous_avail);
+  available_.fetch_or(is_channels_last_3d_contiguous_avail);
 }
 
-void SymbolicShapeMeta::init_is_channels_last() const {
+void SymbolicShapeMeta::init_is_channels_last_locked() const {
+  if (has_is_channels_last()) { return; }
   is_channels_last_ = [&] {
     switch (dim()) {
       case 5:
-        return compute_channels_last_2d_dim5();
+        return compute_channels_last_2d_dim5_locked();
       case 4:
         return compute_strides_like_channels_last_2d();
       default:
         return SymBool{false};
     }
   }();
-  available_.set(is_channels_last_avail);
+  available_.fetch_or(is_channels_last_avail);
 }
 
-void SymbolicShapeMeta::init_is_channels_last_3d() const {
+void SymbolicShapeMeta::init_is_channels_last_3d_locked() const {
+  if (has_is_channels_last_3d()) { return; }
   is_channels_last_3d_ = [&] {
     switch (dim()) {
       case 5:
-        return compute_channels_last_3d_dim5();
+        return compute_channels_last_3d_dim5_locked();
       default:
         return SymBool{false};
     }
   }();
-  available_.set(is_channels_last_3d_avail);
+  available_.fetch_or(is_channels_last_3d_avail);
 }
 
-void SymbolicShapeMeta::init_is_non_overlapping_and_dense() const {
+void SymbolicShapeMeta::init_is_non_overlapping_and_dense_locked() const {
+  if (has_is_non_overlapping_and_dense()) { return; }
   is_non_overlapping_and_dense_ = [&] {
     switch (dim()) {
       case 5:
-        return compute_is_non_overlapping_and_dense_dim5();
+        return compute_is_non_overlapping_and_dense_dim5_locked();
       case 4:
-        return compute_is_non_overlapping_and_dense_dim4();
+        return compute_is_non_overlapping_and_dense_dim4_locked();
       default:
-        return compute_is_non_overlapping_and_dense_anydim();
+        return compute_is_non_overlapping_and_dense_anydim_locked();
     }
   }();
-  available_.set(is_non_overlapping_and_dense_avail);
+  available_.fetch_or(is_non_overlapping_and_dense_avail);
 }
 
 } // namespace c10
