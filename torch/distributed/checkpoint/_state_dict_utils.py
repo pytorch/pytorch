@@ -8,7 +8,6 @@ from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, Replicate
 
-__all__ = []
 
 def _all_gather_sharded_tensor(
     sharded_tensor: ShardedTensor,
