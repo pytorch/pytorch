@@ -3180,11 +3180,14 @@ class GraphModule(torch.nn.Module):
 
         actual = fn(x, y)
         expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
-        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(len(counters["graph_break"]), 2)
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {
+                ".*HigherOrderOperator with body that accepts non-Tensors as input": 2,
+                "Unsupported: meta converter nyi with fake tensor propagation.": 1,
+            },
         )
         self.assertEqual(actual, expected)
 

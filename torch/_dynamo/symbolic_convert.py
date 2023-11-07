@@ -12,6 +12,7 @@ import logging
 import operator
 import sys
 import textwrap
+import threading
 import traceback
 import types
 import typing
@@ -129,6 +130,7 @@ log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
+tls = threading.local()
 
 
 @dataclasses.dataclass
@@ -1135,7 +1137,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(tos)
 
     def FOR_ITER(self, inst):
-        it = self.pop()
+        it = self.pop().realize()
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             self.output.guards.update(it.guards)
             try:
@@ -1477,7 +1479,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def MAP_ADD(self, inst):
         k, v = self.popn(2)
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ConstDictVariable)
         assert obj.mutable_local
         items = dict(obj.items)
@@ -1502,7 +1504,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def LIST_APPEND(self, inst):
         v = self.pop()
         assert inst.argval > 0
-        obj = self.stack[-inst.arg]
+        obj = self.stack[-inst.arg].realize()
         assert isinstance(obj, ListVariable)
         assert obj.mutable_local
         self.replace_all(
@@ -2071,6 +2073,19 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 class InstructionTranslator(InstructionTranslatorBase):
     mutated_closure_cell_contents: Set[str]
 
+    @staticmethod
+    def current_tx() -> "InstructionTranslator":
+        return tls.current_tx
+
+    @contextlib.contextmanager
+    def set_current_tx(self):
+        prior = getattr(tls, "current_tx", None)
+        tls.current_tx = self
+        try:
+            yield
+        finally:
+            tls.current_tx = prior
+
     def __init__(
         self,
         instructions: List[Instruction],
@@ -2119,7 +2134,7 @@ class InstructionTranslator(InstructionTranslatorBase):
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
-        with tracing(self.output.tracing_context):
+        with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
             self.mutated_closure_cell_contents = mutated_closure_cell_contents
@@ -2144,6 +2159,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             )
+            if export:
+                # export gets super confused if we never realize unused inputs
+                # in export mode just eagerly realize everything
+                self.symbolic_locals = VariableTracker.apply(
+                    lambda x: x.realize(), self.symbolic_locals
+                )
 
             self.init_local_index_guards_hack()
 
@@ -2633,7 +2654,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_FROM(self, inst):
         while True:
-            tos = self.stack[-1]
+            tos = self.stack[-1].realize()
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return

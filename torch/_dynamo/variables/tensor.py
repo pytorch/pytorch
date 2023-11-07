@@ -132,19 +132,6 @@ class TensorVariable(VariableTracker):
     def python_type(self):
         return self.class_type
 
-    def call_isinstance(self, tensor_type):
-        def check_type(ty):
-            if ty not in tensortype_to_dtype:
-                return issubclass(self.python_type(), ty)
-
-            dtypes = tensortype_to_dtype[ty]
-            return self.dtype in dtypes
-
-        if type(tensor_type) is tuple:
-            return any(check_type(ty) for ty in tensor_type)
-        else:
-            return check_type(tensor_type)
-
     @staticmethod
     def specialize(value: torch.Tensor):
         props = {

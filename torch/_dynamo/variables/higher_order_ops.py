@@ -385,6 +385,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        args, kwargs = VariableTracker.apply(lambda x: x.realize(), (args, kwargs))
+
         for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
             if v := kwargs.pop(k, None):
                 assert i == len(
@@ -623,8 +625,11 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
-        assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
-        assert type(args[1]) is TensorVariable
+        assert type(args[0].realize()) in (
+            UserFunctionVariable,
+            NestedUserFunctionVariable,
+        )
+        assert type(args[1].realize()) is TensorVariable
 
         sample_shape = get_fake_value(args[1].as_proxy().node, tx).size()
 
