@@ -7,7 +7,6 @@
 #ifdef USE_C10D_NCCL
 
 #include <exception>
-#include <functional>
 #include <map>
 #include <stdexcept>
 #include <tuple>
@@ -863,7 +862,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
-      shutDownMode_(false),
+      shutdownMode_(false),
       uid_(process_group_id++) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
@@ -1227,9 +1226,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // There might be some cases when we first kill the watchdog thread and get
   // stuck in abort() method, so we want to wait for some buffer time before
   // killing the process.
-  if ((terminateProcessGroup_.load() || shutDownMode_.load()) &&
+  if ((terminateProcessGroup_.load() || shutdownMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
-    auto timeout = heartbeatTimeoutInSec_;
     // Leave six mins for desync report generation or process group destroy.
     std::this_thread::sleep_for(
         std::chrono::seconds(heartbeatTimeoutInSec_ * 3));
@@ -1342,7 +1340,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
-            shutDownMode_.store(true);
+            shutdownMode_.store(true);
             auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {

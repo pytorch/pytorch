@@ -729,9 +729,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not we should terminate the heartbeat monitoring threads.
   std::atomic<bool> terminateHeartbeatMonitorThread_;
 
-  // Whether we are in the shut down mode when we are trying to get debug info,
+  // Whether we are in the shutdown mode when we are trying to get debug info,
   // such as desync report.
-  std::atomic<bool> shutDownMode_;
+  std::atomic<bool> shutdownMode_;
 
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
