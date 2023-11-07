@@ -54,7 +54,7 @@ from .codegen import PyCodegen
 from .current_scope_id import current_scope_id
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .funcname_cache import get_funcname
-from .guards import GuardBuilder
+from .guards import GuardBuilder, install_guard
 from .output_graph import GraphCompileReason, OutputGraph, OutputGraphState
 from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
@@ -323,13 +323,11 @@ def _detect_and_normalize_assert_statement(
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
-        self.output.guards.update(value.guards)
         if (
             config.rewrite_assert_with_torch_assert
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
         ):
             error_msg: VariableTracker = self.pop()
-            self.output.guards.update(error_msg.guards)
             # Skip over things like `assert True`
             if value.is_python_constant() and bool(value.as_python_constant()):
                 self.jump(inst)
@@ -419,7 +417,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if isinstance(result, ConstantVariable) and isinstance(
                     result.value, (bool, int)
                 ):
-                    self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
@@ -686,9 +683,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """
         A call to some user defined function by inlining it.
         """
-        result = InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
-        self.output.guards.update(fn.guards)
-        return result
+        return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
 
     def get_line_of_code_header(self, lineno=None):
         if lineno is None:
@@ -1139,7 +1134,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def FOR_ITER(self, inst):
         it = self.pop().realize()
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
-            self.output.guards.update(it.guards)
             try:
                 val, next_iter = it.next_variables(self)
                 self.push(next_iter)
@@ -1233,8 +1227,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if sys.version_info >= (3, 11):
             null = self.pop()
             assert isinstance(null, NullVariable)
-        self.output.guards.update(argsvars.guards)
-        self.output.guards.update(kwargsvars.guards)
 
         if (
             isinstance(fn, GetAttrVariable)
@@ -1327,12 +1319,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ), f"Mutating module attribute {inst.argval} during export."
 
         try:
-            self.output.guards.update(
-                BuiltinVariable(setattr)
-                .call_function(
-                    self, [obj, ConstantVariable.create(inst.argval), val], {}
-                )
-                .guards
+            BuiltinVariable(setattr).call_function(
+                self, [obj, ConstantVariable.create(inst.argval), val], {}
             )
             return
         except Unsupported as e:
@@ -1355,10 +1343,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def DELETE_ATTR(self, inst):
         obj = self.pop()
-        self.output.guards.update(
-            BuiltinVariable(delattr)
-            .call_function(self, [obj, ConstantVariable.create(inst.argval)], {})
-            .guards
+        BuiltinVariable(delattr).call_function(
+            self, [obj, ConstantVariable.create(inst.argval)], {}
         )
 
     def create_call_resume_at(self, offset):
@@ -1375,8 +1361,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
-        # no result is pushed, so need to lift the guards to global
-        self.output.guards.update(result.guards)
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -1511,7 +1495,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             obj,
             ListVariable(
                 obj.items + [v],
-                regen_guards=False,
                 **VariableTracker.propagate([obj, v]),
             ),
         )
@@ -1559,7 +1542,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
         if isinstance(seq, (BaseListVariable, SetVariable)):
-            self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
             val = seq.unpack_var_sequence(self)
@@ -1874,8 +1856,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(ctx, GenericContextWrappingVariable):
             self.generic_context_manager_depth += 1
 
-        self.output.guards.update(ctx.guards)
-
         exit = WithExitFunctionVariable(
             ctx,
             inst.target,
@@ -1961,9 +1941,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def store_global_weakref(self, name, value):
-        self.output.guards.add(
-            GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
-        )
+        install_guard(GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE))
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
@@ -2148,66 +2126,25 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars.extend(cells_and_freevars)
             cells_and_freevars_set = set(cells_and_freevars)
 
-            self.symbolic_locals = collections.OrderedDict(
-                (
-                    k,
-                    VariableBuilder(
-                        self,
-                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
-                    )(f_locals[k]),
+            self.symbolic_locals = {
+                k: variables.LazyVariableTracker.create(
+                    f_locals[k],
+                    source=LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
                 )
                 for k in vars
                 if k in f_locals
-            )
+            }
             if export:
-                # export gets super confused if we never realize unused inputs
+                # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
                 self.symbolic_locals = VariableTracker.apply(
                     lambda x: x.realize(), self.symbolic_locals
                 )
 
-            self.init_local_index_guards_hack()
-
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
-
-    def init_local_index_guards_hack(self):
-        # symbolic_locals contains the mapping from original f_locals to the
-        # Variable objects. During the Variable building phase, each object also
-        # has its associated guards. At the end, we will accumulate these
-        # guards.
-        #
-        # One way of handling these guards is to just accumulate all of them
-        # right now. However, many f_locals might not be used in the frame and
-        # thus can unnecessarily increase guard execution overhead.  Therefore,
-        # we selectively update output.guards as we run the Python Bytecode
-        # instruction by instruction.
-        #
-        # An exception here is list/dict variables. Guards related to these
-        # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-        # next invocation when args is not a list, and args[0] is a runtime
-        # error. Therefore, we recursively add guards for list/dict variable here.
-        for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-            ):
-                local_guards = VariableTracker.propagate(val)["guards"]
-                index_guards = [
-                    guard
-                    for guard in local_guards
-                    if guard.create_fn
-                    in (
-                        GuardBuilder.LIST_LENGTH,
-                        GuardBuilder.DICT_KEYS,
-                        GuardBuilder.ODICT_KEYS,
-                        GuardBuilder.TUPLE_ITERATOR_LEN,
-                    )
-                ]
-                self.output.guards.update(index_guards)
 
     def run(self):
         super().run()
@@ -2661,7 +2598,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(
                 tos, (variables.ListIteratorVariable, variables.IteratorVariable)
             ):
-                self.output.guards.update(tos.guards)
                 try:
                     val, next_iter = tos.next_variables(self)
                     self.push(val)

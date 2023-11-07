@@ -23,7 +23,6 @@ class LazyCache:
         self.vt.parents_tracker.add(parents_tracker)
         del self.value
         del self.source
-        tx.output.guards.update(self.vt.guards)
 
 
 class LazyVariableTracker(VariableTracker):
@@ -79,8 +78,6 @@ class LazyVariableTracker(VariableTracker):
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
-    add_guards = VariableTracker.add_guards
-    add_guard = VariableTracker.add_guard
     add_options = VariableTracker.add_options
     apply = VariableTracker.apply
     copy = VariableTracker.copy
