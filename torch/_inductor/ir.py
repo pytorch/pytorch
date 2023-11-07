@@ -6687,14 +6687,13 @@ class Broadcast(InPlaceCollectiveKernel):
         cls, x: "TensorBox", src: int, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MutationLayout(inplace_inputs[0])
-
-        _ = Broadcast(
-            layout=layout,
+        packed = Broadcast(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             src=src,
         )
+        mark_node_as_mutating(packed, inplace_inputs[0])
         return inplace_inputs[0]
 
     def codegen_collective(self, wrapper, output_name, input_names):
