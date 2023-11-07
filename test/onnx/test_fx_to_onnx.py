@@ -120,12 +120,12 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        export_output = dynamo_export(
+        onnx_program = dynamo_export(
             MNISTModel(), tensor_x, export_options=ExportOptions(op_level_debug=True)
         )
 
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostic_rule,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
@@ -156,9 +156,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        export_output = dynamo_export(
-            TopKModel(), x, export_options=self.export_options
-        )
+        onnx_program = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -169,14 +167,14 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         x = torch.randint(4, (4, 3, 2))
         embedding_matrix = torch.rand(10, 3)
 
-        export_output = dynamo_export(
+        onnx_program = dynamo_export(
             model,
             x,
             embedding_matrix,
             export_options=ExportOptions(op_level_debug=True),
         )
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostics.rules.op_level_debugging,
             diagnostics.levels.WARNING,
             expected_node="aten.embedding.default",
@@ -190,10 +188,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return input.new_zeros(())
 
         x = torch.randn((2, 3), dtype=torch.float32)
-        export_output = dynamo_export(TraceModel(), x)
+        onnx_program = dynamo_export(TraceModel(), x)
 
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
             diagnostics.levels.WARNING,
             expected_node="aten.new_zeros.default",
@@ -213,11 +211,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.conv2(input)
 
         x = torch.randn(20, 16, 50, 50)
-        export_output = dynamo_export(
+        onnx_program = dynamo_export(
             TraceModel(), x, export_options=ExportOptions(op_level_debug=False)
         )
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
             diagnostics.levels.NONE,
             expected_node="aten.convolution.default",
@@ -242,11 +240,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         onnx_registry._registry.pop(aten_add_Tensor)
 
         x = torch.tensor(3)
-        export_output = dynamo_export(
+        onnx_program = dynamo_export(
             TraceModel(), x, export_options=ExportOptions(onnx_registry=onnx_registry)
         )
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostics.rules.find_operator_overloads_in_onnx_registry,
             diagnostics.levels.WARNING,
             expected_node="aten.add.Tensor",
@@ -258,9 +256,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.ops.aten.clone(input, memory_format=torch.preserve_format)
 
         x = torch.tensor(3)
-        export_output = dynamo_export(CustomModule(), x)
+        onnx_program = dynamo_export(CustomModule(), x)
         assert_has_diagnostics(
-            export_output.diagnostic_context,
+            onnx_program.diagnostic_context,
             diagnostics.rules.find_opschema_matched_symbolic_function,
             diagnostics.levels.NONE,
             expected_node="aten.clone.default",
@@ -302,8 +300,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
 
         model = MNISTModel()
-        export_output = torch.onnx.dynamo_export(model, tensor_x)
-        model_proto = export_output.model_proto
+        onnx_program = torch.onnx.dynamo_export(model, tensor_x)
+        model_proto = onnx_program.model_proto
         self.assertEqual(
             {initializer.name for initializer in model_proto.graph.initializer},
             {*model.state_dict().keys()},
@@ -323,25 +321,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             x = torch.rand(5, 2, 2)
             model = Model()
             export_options = ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 model, x, export_options=export_options
             )
 
         assert (
-            export_output is not None
-        ), "ExportOutput must be created on successful export"
+            onnx_program is not None
+        ), "ONNXProgram must be created on successful export"
         assert (
-            export_output.model_proto is not None
+            onnx_program.model_proto is not None
         ), "A model protobuf must be created on a successful export"
-        onnx.checker.check_model(export_output.model_proto, full_check=True)
+        onnx.checker.check_model(onnx_program.model_proto, full_check=True)
         assert (
-            len(export_output.model_proto.graph.initializer) == 0
+            len(onnx_program.model_proto.graph.initializer) == 0
         ), "Initializers cannot exist when fake mode is enabled"
 
         # Variant 1: Save ONNX proto using Model's state_dict()
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             model_state_dict = Model().state_dict()  # Create a state_dict for testing
-            export_output.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
+            onnx_program.save(tmp_onnx_file.name, model_state_dict=model_state_dict)
             assert (
                 len(onnx.load(tmp_onnx_file.name).graph.initializer) == 2
             ), "Initializers must be present after loading it from model_state_dict"
@@ -355,7 +353,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             torch.save(
                 Model().state_dict(), tmp_checkpoint_file.name
             )  # Create checkpoint file for testing
-            export_output.save(
+            onnx_program.save(
                 tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
             )
             assert (
@@ -424,15 +422,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             position_ids = position_ids.unsqueeze(0).view(-1, seq)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 model,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 export_options=export_options,
             )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
+            onnx.checker.check_model(onnx_program.model_proto)
+            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_fake_tensor_mode_huggingface_open_llama(self):
         config = transformers.OpenLlamaConfig(
@@ -448,15 +446,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             position_ids = position_ids.unsqueeze(0).view(-1, seq)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 model,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 export_options=export_options,
             )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
+            onnx.checker.check_model(onnx_program.model_proto)
+            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
         "This is addressed in main branch of transformers."
@@ -476,15 +474,15 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             position_ids = position_ids.unsqueeze(0).view(-1, seq)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 model,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 export_options=export_options,
             )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
+            onnx.checker.check_model(onnx_program.model_proto)
+            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
         "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
@@ -501,14 +499,14 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
 
             export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 model,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 export_options=export_options,
             )
-            onnx.checker.check_model(export_output.model_proto)
-            onnx.shape_inference.infer_shapes(export_output.model_proto)
+            onnx.checker.check_model(onnx_program.model_proto)
+            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     def test_exported_program_input_with_custom_fx_tracer(self):
         from torch.onnx._internal import exporter
@@ -529,14 +527,30 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             dynamo_graph_extractor.DynamoExport()
         )  # Override fx_tracer to an unsupported tracer
         with self.assertRaises(torch.onnx.OnnxExporterError):
-            export_output = torch.onnx.dynamo_export(
+            onnx_program = torch.onnx.dynamo_export(
                 exported_program,
                 x,
                 export_options=export_options,
             )
-            self.assertTrue(export_output._export_exception is not None)
+            self.assertTrue(onnx_program._export_exception is not None)
             with self.assertRaises(torch.onnx.InvalidExportOptionsError):
                 raise self._export_exception
+
+    def test_exported_program_torch_distributions_normal_Normal(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                self.normal = torch.distributions.normal.Normal(0, 1)
+                super().__init__()
+
+            def forward(self, x):
+                return self.normal.sample(x.shape)
+
+        x = torch.randn(2, 3)
+        exported_program = torch.export.export(Model(), args=(x,))
+        _ = torch.onnx.dynamo_export(
+            exported_program,
+            x,
+        )
 
 
 if __name__ == "__main__":

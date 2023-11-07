@@ -4,6 +4,7 @@ import operator
 import types
 from typing import Dict, List
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -18,12 +19,18 @@ import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 
-from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    guard_scalar,
+    GuardOnDataDependentSymNode,
+    has_free_symbols,
+    is_symbolic,
+    SymTypes,
+)
 
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 
-from ..exc import unimplemented
+from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
@@ -60,7 +67,7 @@ supported_const_comparison_ops = {
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
-    _nonvar_fields = [
+    _nonvar_fields = {
         "proxy",
         "dtype",
         "device",
@@ -71,7 +78,11 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-    ]
+        "is_sparse",
+        "class_type",
+        "specialized_value",
+        *VariableTracker._nonvar_fields,
+    }
 
     def get_real_value(self):
         """
@@ -146,14 +157,18 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not free_symbols(value):
+        if not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
             # We have to cast to int here, because these might get accessed as ConstantVariable, which has
             # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple([int(s) for s in value.size()])
+            props["size"] = tuple(
+                # the non is_symbolic case applies to the jagged layout
+                # NestedTensor case as singleton ints are not symbolic
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
@@ -223,9 +238,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = ConstantVariable.create(self.dtype, **options)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
@@ -386,13 +401,13 @@ class TensorVariable(VariableTracker):
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 if dim is None:
                     fake_r = getattr(fake, name)()
-                    if not free_symbols(fake_r):
+                    if not has_free_symbols(fake_r):
                         # int conversion for safety, in case a SymInt refined
                         # to constant
                         return RetVariable(tuple(int(r) for r in fake_r), **options)
                 else:
                     fake_r = getattr(fake, name)(dim)
-                    if not free_symbols(fake_r):
+                    if not has_free_symbols(fake_r):
                         return ConstantVariable.create(int(fake_r), **options)
 
             # Oops, it's not constant.  Do the dynamic shapes path.
@@ -413,7 +428,7 @@ class TensorVariable(VariableTracker):
             # It might still be constant!  Consult the fake tensor and see
             if (fake := self.proxy.node.meta.get("example_value")) is not None:
                 fake_r = fake.numel()
-                if not free_symbols(fake_r):
+                if not has_free_symbols(fake_r):
                     return ConstantVariable.create(int(fake_r), **options)
 
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
@@ -664,7 +679,8 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "register_hook":
+        elif name in {"register_hook", "register_post_accumulate_grad_hook"}:
+            # Note - do not arbitrarily add hooks here - make sure they match the same contract
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -688,10 +704,8 @@ class TensorVariable(VariableTracker):
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
@@ -738,7 +752,8 @@ class TensorVariable(VariableTracker):
                 fn = functools.partial(trace_wrapped, fn=fn)
 
                 def _register_hook_trampoline(tensor):
-                    tensor.register_hook(fn)
+                    hook_callable = getattr(tensor, name)
+                    hook_callable(fn)
                     return tensor
 
                 return wrap_fx_proxy(
@@ -752,7 +767,7 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
 
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
@@ -816,7 +831,14 @@ class SymNodeVariable(VariableTracker):
         return self.proxy
 
     def evaluate_expr(self, output_graph=None):
-        return guard_scalar(self.sym_num)
+        try:
+            return guard_scalar(self.sym_num)
+        except GuardOnDataDependentSymNode as e:
+            raise UserError(  # noqa: TRY200
+                UserErrorType.ANTI_PATTERN,
+                f"Consider annotating your code using torch._constrain_as_*(). {str(e)}",
+                case_name="constrain_as_size_example",
+            )
 
     def call_method(
         self,
@@ -905,11 +927,11 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ("ndim", "itemsize"):
             return ConstantVariable.create(getattr(example_ndarray, name), **options)
         elif name in ("shape", "stride"):
-            if not free_symbols(r := getattr(example_ndarray, name)):
+            if not has_free_symbols(r := getattr(example_ndarray, name)):
                 return ConstantVariable.create(tuple(int(r) for r in r), **options)
             return insert_into_graph()
         elif name == "size":
-            if not free_symbols(r := example_ndarray.size):
+            if not has_free_symbols(r := example_ndarray.size):
                 return ConstantVariable.create(int(r), **options)
             return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
@@ -949,9 +971,9 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
-    def __init__(self, proxy: torch.fx.Proxy, **kwargs):
-        raw_value = kwargs.pop("raw_value", None)
-        need_unwrap = kwargs.pop("need_unwrap", True)
+    def __init__(
+        self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
+    ):
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value
         self.need_unwrap = need_unwrap
@@ -964,17 +986,6 @@ class UnspecializedPythonVariable(TensorVariable):
             raw_value=raw_value,
             need_unwrap=need_unwrap,
         )
-
-    def as_specialized(self, tx):
-        for graph_arg in tx.output.graphargs:
-            if graph_arg.source is self.source:
-                graph_arg.erase()
-
-        for g in self.guards:
-            if g.is_volatile:
-                g.create_fn = GuardBuilder.CONSTANT_MATCH
-
-        return ConstantVariable.create(value=self.raw_value, guards=self.guards)
 
 
 class FakeItemVariable(TensorVariable):

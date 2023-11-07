@@ -22,9 +22,12 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
 # Remove when migration is done.
-from torch.export import (
+from torch.export.graph_signature import (
     ExportBackwardSignature,
     ExportGraphSignature,
+)
+
+from torch.export.exported_program import (
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
@@ -68,7 +71,9 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
         # Step 2: Find the all the buffers that were mutated and update them
         if node.op == "output":
             user_output_nodes = []
-            for return_node in node.all_input_nodes:
+            # In the case that the same node is returned multiple times,
+            # node.all_input_nodes will only iterate that node once
+            for return_node in pytree.tree_flatten(node.args)[0]:
                 return_node_name = return_node.name
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
@@ -190,22 +195,19 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
     gm.recompile()
     return gm
 
-
-def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
-    new_gm = copy.deepcopy(ep.graph_module)
-
+def _construct_inp_pos_to_param_buffer_name(new_gm, graph_signature, state_dict):
     # TODO Fix the period in params/buffers names later
     # maybe a pass to replace graph signature with fixed names
     param_buffer_name_to_corrected_name = {}
 
-    for name, value in ep.state_dict.items():
-        if name in ep.graph_signature.buffers:
+    for name, value in state_dict.items():
+        if name in graph_signature.buffers:
             if "." in name:
                 new_gm.register_buffer(name.replace(".", "_"), value)
                 param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
             else:
                 new_gm.register_buffer(name, value)
-        if name in ep.graph_signature.parameters:
+        if name in graph_signature.parameters:
             if "." in name:
                 new_gm.register_parameter(name.replace(".", "_"), value)
                 param_buffer_name_to_corrected_name[name] = name.replace(".", "_")
@@ -216,16 +218,16 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
     inp_pos_to_param_buffer_name = {}
     for node in new_gm.graph.nodes:
         if node.op == "placeholder":
-            if node.name in ep.graph_signature.inputs_to_buffers:
-                buffer_name = ep.graph_signature.inputs_to_buffers[node.name]
+            if node.name in graph_signature.inputs_to_buffers:
+                buffer_name = graph_signature.inputs_to_buffers[node.name]
                 if buffer_name in param_buffer_name_to_corrected_name:
                     inp_pos_to_param_buffer_name[
                         count
                     ] = param_buffer_name_to_corrected_name[buffer_name]
                 else:
                     inp_pos_to_param_buffer_name[count] = buffer_name
-            if node.name in ep.graph_signature.inputs_to_parameters:
-                param_name = ep.graph_signature.inputs_to_parameters[node.name]
+            if node.name in graph_signature.inputs_to_parameters:
+                param_name = graph_signature.inputs_to_parameters[node.name]
                 if param_name in param_buffer_name_to_corrected_name:
                     inp_pos_to_param_buffer_name[
                         count
@@ -233,6 +235,35 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
                 else:
                     inp_pos_to_param_buffer_name[count] = param_name
             count += 1
+
+    return inp_pos_to_param_buffer_name
+
+
+class _UnliftedGraphModule(torch.fx.GraphModule):
+    def __init__(self, root, graph, range_constraints=None, equality_constraints=None):
+        super().__init__(root, graph)
+        self.range_constraints = range_constraints or []
+        self.equality_constraints = equality_constraints or []
+
+    @torch._dynamo.disable
+    def _check_input_constraints(self, *args, **kwargs):
+        flat_args, _ = pytree.tree_flatten(args)
+        return _check_input_constraints_for_graph(
+            self.graph,
+            range_constraints=self.range_constraints,
+            equality_constraints=self.equality_constraints
+        )(*flat_args)
+
+    def __call__(self, *args, **kwargs):
+        self._check_input_constraints(*args, **kwargs)
+        return super().__call__(*args, **kwargs)
+
+
+def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
+    new_gm = copy.deepcopy(ep.graph_module)
+    inp_pos_to_param_buffer_name = _construct_inp_pos_to_param_buffer_name(
+        new_gm, ep.graph_signature, ep.state_dict
+    )
     new_gm = _unlift(
         new_gm,
         inp_pos_to_param_buffer_name,
@@ -242,8 +273,14 @@ def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> t
         ep.graph_signature.buffers_to_mutate,
         ep.graph_signature.user_outputs,
     )
-    new_gm.meta.update(ep.graph_module.meta)
-    return new_gm
+    unlift_gm = _UnliftedGraphModule(
+        new_gm,
+        new_gm.graph,
+        range_constraints=ep.range_constraints,
+        equality_constraints=ep.equality_constraints
+    )
+    unlift_gm.meta.update(ep.graph_module.meta)
+    return unlift_gm
 
 
 def _create_graph_module_for_export(root, graph):
@@ -269,7 +306,7 @@ def _create_graph_module_for_export(root, graph):
 
 def _process_constraints(
     graph_module: torch.fx.GraphModule,
-    graph_signature: ExportGraphSignature,
+    num_lifted_params_buffers: int,
     example_inputs: List[torch.Tensor],
 ) -> Tuple[Dict[sympy.Symbol, ValueRanges], List[Tuple[InputDim, InputDim]]]:
     """
@@ -293,7 +330,6 @@ def _process_constraints(
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
-    num_params_buffer = len(graph_signature.buffers) + len(graph_signature.parameters)
 
     # Create dict mapping tensor_id to node names
     tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
@@ -304,8 +340,8 @@ def _process_constraints(
             # All placeholder nodes should be together in the beginning of the
             # graph
             break
-        if i >= num_params_buffer:
-            example_input = example_inputs[i - num_params_buffer]
+        if i >= num_lifted_params_buffers:
+            example_input = example_inputs[i - num_lifted_params_buffers]
             tensor_id_to_nodes[id(example_input)].append(node.name)
             placeholder_nodes[node.name] = node
 
@@ -354,6 +390,30 @@ def _process_constraints(
         range_constraints[symbol] = ValueRanges(min_val, max_val)
 
     return range_constraints, equality_constraints
+
+def _check_input_constraints_for_graph(graph: torch.fx.Graph, range_constraints, equality_constraints):
+    from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+        _AddRuntimeAssertionsForConstraintsPass,
+    )
+
+    def inner(*args):
+        # TODO(zhxchen17) Don't generate a runtime graph on the fly.
+        _assertion_graph = torch.fx.GraphModule({}, torch.fx.Graph())
+        for p in graph.nodes:
+            if p.op != "placeholder":
+                continue
+            new_p = _assertion_graph.graph.placeholder(p.name)
+            new_p.meta = p.meta
+        _assertion_graph.graph.output(())
+        _assertion_graph_res = _AddRuntimeAssertionsForConstraintsPass(
+            range_constraints,
+            equality_constraints,
+        )(_assertion_graph)
+        assert _assertion_graph_res is not None
+        _assertion_graph = _assertion_graph_res.graph_module
+        _assertion_graph(*args)
+
+    return inner
 
 def combine_args_kwargs(args, kwargs):
     kwargs = kwargs or {}

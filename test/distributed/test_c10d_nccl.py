@@ -11,6 +11,7 @@ import tempfile
 import threading
 import pickle
 import time
+import warnings
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import chain, product
@@ -1198,6 +1199,78 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Try another collective.
         with self.assertRaises(dist.DistBackendError):
             pg.allreduce([t])
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
+    def test_init_process_group_nccl_timeout(self):
+        # nccl is handled 'specially' inside init_process_group and its options class is different from the options
+        # used by the other PG's.  There are specific edge cases for nccl that need to be tested.
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        base_opts = dict(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+
+        def _check_nccl_timeout(expected_timeout):
+            pg = dist.distributed_c10d._get_default_group()
+            options = pg._get_backend(torch.device(f"cuda:{self.rank}")).options
+            self.assertEqual(options._timeout, expected_timeout)
+
+        # test the default value coming from the `init_process_group` kwarg default
+        dist.init_process_group(**base_opts)
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that `kwarg` timeout takes effect
+        new_timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, timeout=new_timeout)
+        _check_nccl_timeout(new_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg (or its kwdefault) taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        with warnings.catch_warnings(record=True) as w:
+            dist.init_process_group(**base_opts, pg_options=opts)
+            # TODO(whc) i verified that we are indeed emitting this warning, and i can't figure out why i can't catch it.
+            # self.assertEqual(len(w), 1)
+            # self.assertTrue("pg_options._timeout was specified" in str(w[-1].message))
+        _check_nccl_timeout(torch.distributed.distributed_c10d.default_pg_timeout)
+        dist.destroy_process_group()
+
+        # test that timeout value provided via `pg_options` kwarg is ignored and issues warning,
+        # 'timeout' kwarg taking precedence
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=123)
+        dist.init_process_group(**base_opts, pg_options=opts, timeout=timedelta(seconds=1240))
+        _check_nccl_timeout(timedelta(seconds=1240))
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_tensor_register_hook(self):
+        os.environ["NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "1"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_id = self.rank_to_GPU[self.rank][0]
+
+        def allgather_base(output_t, input_t):
+            work = pg._allgather_base(output_t, input_t)
+            work.wait()
+
+        # allgather_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        tensor = torch.tensor([self.rank]).cuda(local_device_id)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(local_device_id)
+
+        allgather_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(torch.arange(self.world_size), output_t)
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
@@ -2584,7 +2657,7 @@ class WorkHookTest(MultiProcessTestCase):
         pg._register_on_completion_hook(hook)
         tensor = torch.ones([2, 3]).cuda(self.rank)
         tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
-        # intentionall using async ops.
+        # intentionally using async ops.
         pg.allreduce(tensor)
         pg.allgather(tensor_list, tensor)
         pg.allreduce(tensor)
@@ -2890,7 +2963,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(DistBackendError, self.blocking_wait_error_msg):
+            with self.assertRaisesRegex(dist.DistBackendError, self.blocking_wait_error_msg):
                 process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=failed_collective_timeout)
             # Now do a barrier to tell other rank to go ahead.
             pg_gloo.barrier().wait()
@@ -2936,7 +3009,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         target += torch.arange(60, dtype=half, device=device).chunk(5)
         target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
 
-        # The tensors to pass to broadcast are idential to the target
+        # The tensors to pass to broadcast are identical to the target
         # only on the process that is the root of the broadcast.
         if self.rank == root_rank:
             tensors = [tensor.clone() for tensor in target]
@@ -3093,7 +3166,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                DistBackendError, "Health check failure"
+                dist.DistBackendError, "Health check failure"
             ):
                 c10d.init_process_group(
                     backend="nccl",

@@ -20,12 +20,12 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
-from torch._logging import warning_once
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..device_interface import device_interfaces
 from ..exc import unimplemented
+from ..guards import GuardBuilder
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -34,7 +34,6 @@ from ..utils import (
     istype,
     product,
     proxy_args_kwargs,
-    specialize_args_kwargs,
     tensortype_to_dtype,
 )
 from .base import VariableTracker
@@ -149,35 +148,93 @@ except ImportError:
     pass
 
 
-err_epilogue = (
-    "With the current config, we will graph break "
-    "(and fall back to eager-mode PyTorch) on all ops "
-    "that have do not have the 'pt2_compliant_tag'. "
-    "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
-)
+def torch_reconstruct(codegen, value):
+    name = torch_get_name(value, f"allowed_fn_{id(value)}")
+    unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+    return codegen.setup_globally_cached(unique_var_name, value, False)
 
 
-def check_allowed_op(value):
-    if not config.only_allow_pt2_compliant_ops:
-        return
-    if isinstance(value, torch._ops.OpOverload):
-        if torch.Tag.pt2_compliant_tag in value.tags:
-            return
-        unimplemented(
-            f"Encountered the torch.ops.OpOverload {value} "
-            f"that is not PT2 compliant. " + err_epilogue
+class TorchCtxManagerClassVariable(VariableTracker):
+    """Points to a context manager class in torch.* that dynamo has implementations"""
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        return TorchCtxManagerClassVariable(
+            value,
+            source=source,
+            guards={source.make_guard(GuardBuilder.FUNCTION_MATCH)},
         )
-    if isinstance(value, torch._ops.OpOverloadPacket):
-        for overload in value.overloads():
-            op = getattr(value, overload)
-            if torch.Tag.pt2_compliant_tag in op.tags:
-                continue
-            unimplemented(
-                f"Encountered the torch.ops.OpOverloadPacket {value} "
-                f"which has an overload ({overload}) that is not PT2 compliant. "
-                + err_epilogue
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def reconstruct(self, codegen):
+        return torch_reconstruct(codegen, self.value)
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import GradModeVariable, InferenceModeVariable, StreamVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.value is torch.no_grad:
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
+            else:
+                return GradModeVariable.create(tx, False, **options)
+        elif self.value is torch.enable_grad:
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
+                return ctx.call_function(tx, args, kwargs)
+            return GradModeVariable.create(tx, True, **options)
+        elif self.value is torch.set_grad_enabled and len(args) == 1:
+            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
+                tx, args[0].as_python_constant(), **options
             )
+        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
+            return wrap_fx_proxy_cls(
+                StreamVariable,
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    (),
+                    {},
+                ),
+                **options,
+            )
+        elif self.value in [
+            torch.amp.autocast_mode.autocast,
+            torch.cuda.amp.autocast,
+            torch.cpu.amp.autocast,
+        ]:
+            return AutocastModeVariable.create(self.value, args, kwargs)
+        elif self.value in (
+            torch.profiler.profile,
+            torch.profiler.record_function,
+            torch.autograd.profiler.profile,
+            torch.autograd.profiler.record_function,
+        ):
+            log.warning("Profiler function %s will be ignored", self.value)
+            return NullContextVariable(**options)
+        elif self.value is torch._C.DisableTorchFunctionSubclass:
+            assert not (args or kwargs)
+            return TorchFunctionDisableVariable.create(tx, **options)
 
 
 class TorchVariable(VariableTracker):
@@ -191,9 +248,11 @@ class TorchVariable(VariableTracker):
         ):
             value = tensor_dunder_fns_remap[value]
 
-        check_allowed_op(value)
         self.value = value
 
+        assert not isinstance(
+            value, (torch.dtype, torch.device)
+        ), "should use ConstantVariable"
         # the remainder of this is just optional debug checks
         try:
             self_should_be_none = getattr(self.value, "__self__", None)
@@ -226,12 +285,8 @@ class TorchVariable(VariableTracker):
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result).add_options(self)
 
-    def unique_var_name(self):
-        name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
-        return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
+        return torch_reconstruct(codegen, self.value)
 
     def as_proxy(self):
         return self.value
@@ -259,9 +314,7 @@ class TorchVariable(VariableTracker):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
-            InferenceModeVariable,
             StreamContextVariable,
-            StreamVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -306,7 +359,6 @@ class TorchVariable(VariableTracker):
             ).call_function(tx, args, kwargs)
             return op
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
-            args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
@@ -371,23 +423,6 @@ class TorchVariable(VariableTracker):
             torch.nn.modules.utils._ntuple,
         ):
             return self._call_ntuple(tx, args, kwargs, options)
-        elif self.value is torch.no_grad:
-            if len(args) == 1 and isinstance(
-                args[0], variables.functions.BaseUserFunctionVariable
-            ):
-                ctx = GradModeVariable.create(tx, False, initialized=False, **options)
-                return ctx.call_function(tx, args, kwargs)
-            else:
-                return GradModeVariable.create(tx, False, **options)
-        elif self.value is torch.enable_grad:
-            if len(args) == 1 and isinstance(
-                args[0], variables.functions.BaseUserFunctionVariable
-            ):
-                ctx = GradModeVariable.create(tx, True, initialized=False, **options)
-                return ctx.call_function(tx, args, kwargs)
-            return GradModeVariable.create(tx, True, **options)
-        elif self.value is torch.set_grad_enabled and len(args) == 1:
-            return GradModeVariable.create(tx, args[0].as_python_constant(), **options)
         elif self.value is torch.is_grad_enabled:
             assert not (args or kwargs)
             return ConstantVariable.create(
@@ -395,10 +430,6 @@ class TorchVariable(VariableTracker):
             ).add_guards(GradModeVariable._guards_singleton)
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
-                tx, args[0].as_python_constant(), **options
-            )
-        elif self.value is torch.inference_mode:
-            return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:
@@ -416,29 +447,6 @@ class TorchVariable(VariableTracker):
             return ConstantVariable.create(
                 tx.output.torch_function_enabled, **options
             ).add_guards(TorchFunctionDisableVariable._guards_singleton)
-        elif self.value is torch._C.DisableTorchFunctionSubclass:
-            assert not (args or kwargs)
-            return TorchFunctionDisableVariable.create(tx, **options)
-        elif any(
-            self.value is method
-            for method in [
-                interface_elem.stream for interface_elem in device_interfaces.values()
-            ]
-        ):
-            assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0], **options)
-        elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
-            return wrap_fx_proxy_cls(
-                StreamVariable,
-                tx,
-                tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    (),
-                    {},
-                ),
-                **options,
-            )
         elif self.value in (
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
@@ -447,6 +455,14 @@ class TorchVariable(VariableTracker):
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args), **options
             )
+        elif any(
+            self.value is method
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
+        ):
+            assert len(args) == 1
+            return StreamContextVariable.create(tx, args[0], **options)
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
@@ -474,20 +490,6 @@ class TorchVariable(VariableTracker):
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
-        elif self.value in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
-            return AutocastModeVariable.create(self.value, args, kwargs)
-        elif self.value in (
-            torch.profiler.profile,
-            torch.profiler.record_function,
-            torch.autograd.profiler.profile,
-            torch.autograd.profiler.record_function,
-        ):
-            warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable(**options)
         elif self.value is torch.autograd._profiler_enabled:
             unimplemented("torch.autograd._profiler_enabled not supported yet")
         elif self.value is torch.jit.annotate:
@@ -543,8 +545,10 @@ class TorchVariable(VariableTracker):
                 ),
                 **options,
             )
+        # TODO: These special cases shouldn't be necessary; we should
+        # generically support torch.ops that return int
         elif (
-            self.value is torch.ops.aten.sym_size
+            self.value in [torch.ops.aten.sym_size, torch.ops.aten.sym_size.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -552,7 +556,7 @@ class TorchVariable(VariableTracker):
             # we see this when retracing already traced code
             return args[0].call_method(tx, "size", [args[1]], {})
         elif (
-            self.value is torch.ops.aten.sym_stride
+            self.value is [torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int]
             and len(args) == 2
             and len(kwargs) == 0
             and isinstance(args[0], TensorVariable)
@@ -614,6 +618,14 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
+        elif (
+            self.value is torch.nested.nested_tensor
+            and kwargs.get("layout", torch.strided) == torch.strided
+        ) or self.value in (
+            torch._nested_tensor_from_mask,
+            torch._nested_from_padded,
+        ):
+            raise unimplemented("torch.compile does not support strided NestedTensor")
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
@@ -638,18 +650,27 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 """
                 log.warning(msg)
                 raise unimplemented(msg)
-            # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
-            # as FX symbolic trace doesn't support numpy int/float as base types.
+            # torch.LongTensor cannot accept a list of FakeTensors.
+            # So we stack the list of FakeTensors instead.
             if (
                 np
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
                 and isinstance(args[0], ListVariable)
-                and args[0].is_python_constant()
+                and len(args[0].items) > 1
+                and all(isinstance(x, variables.TensorVariable) for x in args[0].items)
             ):
-                for x in args[0].items:
-                    if isinstance(x.value, np.generic):
-                        x.value = x.value.item()
+                # Stack FakeTensor
+                stacked = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        torch.stack,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
+                args = [stacked]
 
             # TODO(voz): Replace w/ dynamic shape rewrite table.
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
@@ -657,7 +678,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             fn_ = self.value
             if any(isinstance(x, SymNodeVariable) for x in args):
                 if self.value == math.sqrt:
-                    from torch.fx.experimental.symbolic_shapes import sym_sqrt
+                    from torch.fx.experimental.sym_node import sym_sqrt
 
                     fn_ = sym_sqrt
 

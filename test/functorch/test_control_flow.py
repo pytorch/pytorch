@@ -238,8 +238,8 @@ class TestControlFlow(TestCase):
 
         def fwbw(map_op, f, x, y):
             z = map_op(f, x, y)
-            flat_x, _ = pytree.tree_flatten(x)
-            flat_z, _ = pytree.tree_flatten(z)
+            flat_x = pytree.tree_leaves(x)
+            flat_z = pytree.tree_leaves(z)
             grads = torch.autograd.grad(flat_z, flat_x, [torch.ones_like(z) for z in flat_z])
             return z, grads
 
@@ -885,7 +885,7 @@ def forward(self, arg0_1):
         i = 0
         for m in gm.modules():
             for node in m.graph.nodes:
-                if node.op == "call_function" and node.target == torch.ops.map_impl:
+                if node.op == "call_function" and node.target == torch.ops.higher_order.map_impl:
                     i += 1
         self.assertEqual(i, op_count)
 
@@ -975,8 +975,8 @@ def forward(self, arg0_1):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 
@@ -995,8 +995,8 @@ def forward(self, arg0_1):
 
         def g(xs, y):
             out = control_flow.map(f, xs, y)
-            flat_out, _ = pytree.tree_flatten(out)
-            flat_inp, _ = pytree.tree_flatten((xs, y))
+            flat_out = pytree.tree_leaves(out)
+            flat_inp = pytree.tree_leaves((xs, y))
             requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
             return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
 
@@ -1041,13 +1041,13 @@ def forward(self, arg0_1):
             c = 0
             for node in gm.graph.nodes:
                 if node.op == "call_function":
-                    if node.target == torch.ops.map_impl:
+                    if node.target == torch.ops.higher_order.map_impl:
                         c += count_mutable(getattr(gm, str(node.args[0])))
                     elif schema := getattr(node.target, "_schema", None):
                         c += int(schema.is_mutable)
             return c
         self.assertEqual(count_mutable(fgm), 0)
-        # One for forward, one for recompuation logic in backward
+        # One for forward, one for recomputation logic in backward
         self.assertEqual(count_mutable(gm), 2)
 
     def test_map_functionalized(self):
@@ -1250,13 +1250,13 @@ def forward(self, arg0_1):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
-        # The symbols in make_fx's shape_env should not be speciliazed.
+        # The symbols in make_fx's shape_env should not be specialized.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 4;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
@@ -1446,7 +1446,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);  body_graph_0 = x_1 = pred_1 = None
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, 1, x_1, pred_1);\
+  body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
     return getitem""")
         self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
@@ -1514,8 +1515,8 @@ def forward(self, arg0_1, arg1_1):
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
             self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):
-    sym_size = torch.ops.aten.sym_size(x_1, 0)
-    eq = sym_size == 4;  sym_size = None
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 0)
+    eq = sym_size_int == 4;  sym_size_int = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
