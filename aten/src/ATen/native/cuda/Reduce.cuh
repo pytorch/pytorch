@@ -732,7 +732,7 @@ struct ReduceOp {
     at::detail::Array<arg_t, output_vec_size>,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    CUDA_KERNEL_ASSERT(false); // can't use AT_CUDA_KERNEL_ASSERT in Cuda.
+    CUDA_KERNEL_ASSERT(false);
     return arg_t {};
   }
 
