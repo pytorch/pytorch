@@ -452,7 +452,7 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {b}"
 
     @staticmethod
-    def div(a, b):
+    def truediv(a, b):
         return f"{a} / {b}"
 
     @staticmethod
@@ -2059,7 +2059,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if len(index.free_symbols) == 0:
+            if index.is_number:
                 self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")

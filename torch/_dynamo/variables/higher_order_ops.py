@@ -385,6 +385,16 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
+        for i, k in enumerate(["pred", "true_fn", "false_fn", "operands"]):
+            if v := kwargs.pop(k, None):
+                assert i == len(
+                    args
+                ), "did not provide the right number of non-keyword args"
+                args.append(v)
+
+        if kwargs:
+            unimplemented(f"torch.cond: Got unexpected kwargs: {list(kwargs.keys())}")
+
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
@@ -574,8 +584,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # consistent
         example_value = true_r.as_proxy().node.meta["example_value"]
 
-        _, p_kwargs = proxy_args_kwargs([], kwargs)
-
         # Store the invocation as a call
         return wrap_fx_proxy(
             tx=tx,
@@ -583,7 +591,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "call_function",
                 torch.ops.higher_order.cond,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
@@ -611,7 +619,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         if len(kwargs) > 0:
-            unsupported(
+            unimplemented(
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
@@ -720,7 +728,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
                 "call_function",
                 self.value,
                 args=tuple(p_args),
-                kwargs=p_kwargs,
+                kwargs={},
             ),
             example_value=example_value,
         )
@@ -1129,9 +1137,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
-            for freevar in body_lifted_freevars.keys():
-                if "saved_tensor_marked" not in freevar.node.meta:
-                    unimplemented("NYI - freevars in autograd function.")
+            unimplemented("NYI - freevars in autograd function.")
 
         if always_restore:
             if post_guards - pre_guards:
@@ -1143,9 +1149,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
 
         # Store the invocation as a call
         return wrap_fx_proxy(

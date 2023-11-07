@@ -1324,6 +1324,7 @@ class FileCheck:
     ) -> FileCheck: ...
     def check_dag(self, test_string: str) -> FileCheck: ...
     def check_source_highlighted(self, test_string: str) -> FileCheck: ...
+    def check_regex(self, test_string: str) -> FileCheck: ...
 
 # Defined in torch/csrc/jit/python/init.cpp
 class PyTorchFileReader:
@@ -1733,6 +1734,7 @@ class _CudaDeviceProperties:
     is_integrated: _int
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
+    gcnArchName: str
 
 # Defined in torch/csrc/cuda/python_comm.cpp
 def _broadcast(tensor: Tensor, devices: List[_int]) -> List[Tensor]: ...
@@ -1906,6 +1908,10 @@ class StringType(JitType):
 class DeviceObjType(JitType):
     @staticmethod
     def get() -> DeviceObjType: ...
+
+class _GeneratorType(JitType):
+    @staticmethod
+    def get() -> _GeneratorType: ...
 
 class StreamObjType(JitType):
     @staticmethod
