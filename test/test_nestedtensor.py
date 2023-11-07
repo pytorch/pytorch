@@ -103,7 +103,6 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.
     while not has_non_empty:
         # Repeat until we have at least one non-empty tensor
         ts1 = []
-        has_non_empty = False
         for _ in range(num_tensors):
             tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
                                 for (min_dim, max_dim) in zip(min_dims, max_dims)])
