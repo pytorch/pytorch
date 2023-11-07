@@ -610,6 +610,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
+            log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)
             return out
         except Exception as e:
@@ -711,7 +712,9 @@ class GraphLowering(torch.fx.Interpreter):
             self.current_node = old
 
     def run_node(self, n: torch.fx.Node):
-        log.debug("lowering %s", LazyString(lambda: n.format_node()))
+        def debug(msg):
+            log.debug("lowering %s %s", LazyString(lambda: n.format_node()), msg)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -724,13 +727,16 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and fallback_node_due_to_unsupported_type(n)
             ):
+                debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args, **kwargs
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
+                debug("layout_constraints")
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride:
+            elif n.target == torch.ops.aten.sym_stride.int:
+                debug("sym_stride")
                 # inductor graphs can occasionally return sizes/strides,
                 # e.g. if we need to save symints for the backward graph.
                 if isinstance(n.meta["val"], torch.SymInt):
@@ -738,11 +744,13 @@ class GraphLowering(torch.fx.Interpreter):
                 else:
                     result = super().run_node(n)
             elif is_magic_method(n.target):
+                debug("is_magic_method")
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
             else:
+                debug("")
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,

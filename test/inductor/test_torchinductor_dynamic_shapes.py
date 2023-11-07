@@ -369,6 +369,15 @@ class TestInductorDynamic(TestCase):
         actual = cfn(a, b)
         self.assertEqual(expect, actual)
 
+    def test_sym_stride_lowering(self, device):
+        def fn(x):
+            s0 = (x + 1).stride(0)
+            return x * s0
+
+        a = torch.randn(32, 32, device=device)
+        cfn = self.compile_fn(fn)
+        self.assertEqual(fn(a), cfn(a))
+
     def test_abs(self, device):
         def fn(x, y):
             y0, y1 = y.shape
