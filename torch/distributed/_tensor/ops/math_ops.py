@@ -255,6 +255,10 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     return pointwise_rule(op_schema)
 
 
+@register_op_strategy(
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(),
+)
 def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     # args must be: input, normalized_shape, weight, bias, eps
     # for None weight and bias, their corresponding objects will
@@ -287,6 +291,8 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         input_src_spec = input_placement_strategy.output_spec
 
         # for the input tensor, we replicate it on the inner dims if necessary
+        # TODO: we can avoid forcing the redistribution once we figure out
+        # how to decompose layer norm
         input_target_spec = DTensorSpec(
             mesh=mesh,
             placements=_replicate_dims_start_at(input_src_spec.placements, axis),
@@ -302,6 +308,8 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
             weight_src_spec = weight_strategy.strategies[idx].output_spec
 
             # for the weight tensor, we replicate it on all dims if necessary
+            # TODO: we can avoid forcing the redistribution once we figure out
+            # how to decompose layer norm
             weight_target_spec = DTensorSpec(
                 mesh=mesh,
                 placements=_replicate_dims_start_at(weight_src_spec.placements),
@@ -317,6 +325,8 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
             bias_src_spec = bias_strategy.strategies[idx].output_spec
 
             # for the bias tensor, we replicate it on all dims if necessary
+            # TODO: we can avoid forcing the redistribution once we figure out
+            # how to decompose layer norm
             bias_target_spec = DTensorSpec(
                 mesh=mesh,
                 placements=_replicate_dims_start_at(bias_src_spec.placements),
@@ -345,13 +355,8 @@ def _replicate_dims_start_at(
 ) -> Tuple[Placement, ...]:
     new_placements: List[Placement] = []
     for p in placements:
-        if p.is_partial() or (isinstance(p, Shard) and p.dim < start_dim):
+        if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
             new_placements.append(Replicate())  # make it replicate
         else:
             new_placements.append(p)  # keep the placement
     return tuple(new_placements)
-
-
-register_op_strategy(aten.native_layer_norm.default, schema_info=RuntimeSchemaInfo())(
-    layer_norm_strategy
-)
