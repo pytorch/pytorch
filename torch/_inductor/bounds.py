@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict
 from sympy import Expr
 
 import torch
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes

@@ -829,12 +829,22 @@ class CommonTemplate:
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
-        def test(fn, inps, has_assert: bool, has_wrapping: bool):
+        def test(
+            fn,
+            inps,
+            has_assert: typing.Union[bool, typing.Callable[[bool], bool]],
+            has_wrapping: bool,
+        ):
             for dynamic in (True, False):
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
 
                 import inspect
-                has_assert_ = has_assert(dynamic) if inspect.isfunction(has_assert) else has_assert
+
+                has_assert_ = (
+                    has_assert(dynamic)
+                    if inspect.isfunction(has_assert)
+                    else has_assert
+                )
                 if inspect.isfunction(has_assert):
                     has_assert_ = has_assert(dynamic)
 
@@ -878,7 +888,8 @@ class CommonTemplate:
             b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device=self.device)
             return a[b]
 
-        is_dynamic = lambda dynamic: dynamic
+        def is_dynamic(dynamic: bool) -> bool:
+            return dynamic
 
         # Wrapping is constant-folded
         test(flip_with_index_constant, (a,), has_assert=is_dynamic, has_wrapping=False)

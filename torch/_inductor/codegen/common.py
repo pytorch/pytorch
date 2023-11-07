@@ -25,7 +25,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from torch.utils._sympy.value_ranges import ValueRanges, bound_sympy
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
 from ..utils import (
@@ -991,7 +991,7 @@ class Kernel(CodeGen):
 
                     csevar = self.cse.generate(
                         self.compute,
-                        getattr(parent_handler, name)(*args, **kwargs),
+                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
                         bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
