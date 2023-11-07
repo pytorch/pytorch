@@ -702,6 +702,9 @@ def reinplace_inplaceable_ops(graph):
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg):
+                # TODO(yifu): this doesn't properly remove copy epilogues for
+                # ops that mutate multiple inputs. Need to revise the copy
+                # node tracking logic to support the case.
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     graph.erase_node(copy_node)
