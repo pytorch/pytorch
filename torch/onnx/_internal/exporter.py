@@ -802,9 +802,8 @@ class ExportOutput:
                     model_state_dict, str
                 ), "model_state_dict must be a path to the model's state_dict or the actual state_dict"
                 _model_state_dict_files.append(model_state_dict)
-
-        # Load state from previous model.load_state_dict() call within enable_fake_mode() context
-        if self._fake_context and self._fake_context.state_dict_paths:
+        elif self._fake_context and self._fake_context.state_dict_paths:
+            # Load state from previous model.load_state_dict() call within enable_fake_mode() context
             for path in self._fake_context.state_dict_paths:
                 if path in _model_state_dict_files:
                     # ignore duplicate

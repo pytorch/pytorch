@@ -127,6 +127,7 @@ CLOSURE_VARS = collections.OrderedDict(
             if isinstance(a, (np.generic, np.ndarray))
             else a,
         ),
+        ("torch", torch),
     ]
 )
 
@@ -410,12 +411,6 @@ class GuardBuilder(GuardBuilderBase):
                 val,
                 ok_types,
             ), t.__name__
-
-        if istype(val, (torch.device, torch.dtype)):
-            # TODO(jansel): is this slow? perhaps optimize it
-            code = [f"str({ref}) == {str(val)!r}"]
-            self._produce_guard_code(guard, code)
-            return
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
@@ -932,7 +927,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
-        guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
+        guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self.valid = True
