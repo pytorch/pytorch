@@ -673,7 +673,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
         else:
-            assert type(oldvar.mutable_local) is variables.base.MutableLocal
+            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
             newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
