@@ -5,7 +5,7 @@ from torch import Tensor
 from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
                         _capturable_doc, _differentiable_doc, _foreach_doc, _fused_doc,
-                        _maximize_doc)
+                        _maximize_doc, _view_as_real)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['Adam', 'adam']
@@ -495,17 +495,19 @@ def _multi_tensor_adam(params: List[Tensor],
 
         # Handle complex parameters
         if has_complex:
-            for i in range(len(device_params)):
-                if torch.is_complex(device_params[i]):
-                    device_params[i] = torch.view_as_real(device_params[i])
-                    device_grads[i] = torch.view_as_real(device_grads[i])
-                    device_exp_avgs[i] = torch.view_as_real(device_exp_avgs[i])
-                    device_exp_avg_sqs[i] = torch.view_as_real(device_exp_avg_sqs[i])
-                    if len(device_max_exp_avg_sqs) > 0:
-                        device_max_exp_avg_sqs[i] = torch.view_as_real(device_max_exp_avg_sqs[i])
+            if amsgrad:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs, device_max_exp_avg_sqs)
+            else:
+                _view_as_real(device_params, device_grads, device_exp_avgs, device_exp_avg_sqs)
 
-        # update steps
-        torch._foreach_add_(device_state_steps, 1)
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(device_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+        else:
+            torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
             # Re-use the intermediate memory (device_grads) already allocated for maximize
