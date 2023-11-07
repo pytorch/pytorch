@@ -18,7 +18,7 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch._logging import LazyString
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, SymTypes
+from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
@@ -156,9 +156,10 @@ class GraphLowering(torch.fx.Interpreter):
             register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
 
         if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
+            from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+            # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
 
     def __init__(
         self,
@@ -281,7 +282,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         if any(
-            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+            has_free_symbols(n.args[idx].meta["val"])
+            for n in conv_nodes
+            for idx in [0, 1]
         ):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
