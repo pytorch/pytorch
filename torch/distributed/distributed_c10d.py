@@ -601,7 +601,11 @@ class GroupMember(metaclass=_WorldMeta):
 def _get_default_timeout(backend: Backend) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
     if backend == Backend.NCCL:
-        assert isinstance(default_pg_nccl_timeout, timedelta), "no NCCL default timeout, is NCCL support compiled?"
+        if not isinstance(default_pg_nccl_timeout, timedelta):
+            # TODO moco benchmark on CPU initializes pgnccl backend today, triggered this assert in CI before it was
+            # changed to be a warning.  We should fix the moco model.
+            warnings.warn("Attempted to get default timeout for nccl backend, but NCCL support is not compiled")
+            return default_pg_timeout
         return default_pg_nccl_timeout
     else:
         return default_pg_timeout
@@ -1093,8 +1097,6 @@ def init_process_group(
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value is 10 minutes for NCCL and 30 minutes for other backends.
             This is the duration after which collectives will be aborted asynchronously and the process will crash.
-            When ``NCCL_ASYNC_ERROR_HANDLING`` is set, this is the duration after which collectives will be aborted
-            asynchronously and the process will crash.
             This is done since CUDA execution is async and it is no longer safe to continue executing user code since
             failed async NCCL operations might result in subsequent CUDA operations running on corrupted data.
             When NCCL_BLOCKING_WAIT is set, the process will block and wait for this timeout.
@@ -1894,6 +1896,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = src_tensor
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -1937,6 +1940,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     opts = BroadcastOptions()
     opts.rootRank = src
     opts.rootTensor = 0
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
@@ -3215,6 +3219,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     opts = ScatterOptions()
     opts.rootRank = src
+    opts.asyncOp = async_op
 
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()

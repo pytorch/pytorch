@@ -109,12 +109,12 @@ def cudagraph_mark_step_begin():
         def rand_foo():
             return torch.rand([4], device="cuda")
 
-        for _ in range(ITERS):
-            torch.compile.cudagraph_mark_step_begin()
+        for _ in range(5):
+            torch.compiler.cudagraph_mark_step_begin()
             rand_foo() + rand_foo()
 
     For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
     """
-    import torch._inductor
+    from torch._inductor import cudagraph_trees
 
-    torch._inductor.cudagraph_trees.mark_step_begin()
+    cudagraph_trees.mark_step_begin()
