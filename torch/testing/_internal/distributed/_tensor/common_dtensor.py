@@ -127,7 +127,7 @@ class DTensorTestBase(MultiProcessTestCase):
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         if self.backend not in ["nccl", "gloo", "mpi", "cpu:gloo,cuda:nccl"]:
-            raise RuntimeError(f"Backend {backend} not supported!")
+            raise RuntimeError(f"Backend {self.backend} not supported!")
 
         dist.init_process_group(
             backend=self.backend,
