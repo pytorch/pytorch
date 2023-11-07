@@ -49,10 +49,6 @@ ignored_torch_name_rule_set = {
     "torch._C._InferenceMode",
     "torch._C._RestorePythonTLSSnapshot",
     "torch._C._SetExcludeDispatchKeyGuard",
-    "torch._C._profiler._RecordFunctionFast",
-    "torch._subclasses.fake_tensor.FakeTensorMode",
-    "torch._subclasses.functional_tensor.FunctionalTensorMode",
-    "torch.ao.nn.sparse.quantized.utils.LinearBlockSparsePattern",
     "torch.autograd.anomaly_mode.detect_anomaly",
     "torch.autograd.anomaly_mode.set_detect_anomaly",
     "torch.autograd.forward_ad._set_fwd_grad_enabled",
@@ -72,32 +68,8 @@ ignored_torch_name_rule_set = {
     "torch.cuda.device",
     "torch.cuda.graphs.graph",
     "torch.device",  # constant folding
-    "torch.distributed.autograd.context",
-    "torch.hub._Faketqdm",
-    "torch.jit._ir_utils._InsertPoint",
-    "torch.jit._script.RecursiveScriptClass",
-    "torch.jit.strict_fusion",
-    "torch.onnx._internal.diagnostics.infra.context.DiagnosticContext",
-    "torch.onnx._internal.fx.patcher.ONNXTorchPatcher",
-    "torch.overrides.TorchFunctionMode",
-    "torch.package.package_exporter.PackageExporter",
-    "torch.serialization._opener",
     "torch.sparse.check_sparse_tensor_invariants",
-    "torch.utils._contextlib._DecoratorContextManager",
-    "torch.utils._device.DeviceContext",
-    "torch.utils._python_dispatch.TorchDispatchMode",
-    "torch.utils.data.datapipes._decorator.guaranteed_datapipes_determinism",
-    "torch.utils.data.datapipes._decorator.runtime_validation_disabled",
-    "torch.utils.data.datapipes.dataframe.dataframes.CaptureLikeMock",
-    "torch.utils.hooks.RemovableHandle",
 }
-
-
-if torch.distributed.is_available():
-    ignored_torch_name_rule_set |= {
-        "torch.distributed.rpc.server_process_global_profiler._server_process_global_profile",
-        "torch.distributed._device_mesh.DeviceMesh",
-    }
 
 
 def gen_get_func_inlinelist(dummy_func_inlinelist):
@@ -193,6 +165,16 @@ def generate_allow_list():
             # print(f"\"{module.__name__}.{name}\": TorchInGraphFunctionVariable,")
             # if module.__name__ == "torch._functorch.vmap" and name == "restore_vmap":
             #     breakpoint()
+            # obj = load_object(f"{module.__name__}.{name}")
+            torch_objects.add(load_object(f"{module.__name__}.{name}"))
+
+    def heuristic_record_if_ctx_manager(obj, module, name):
+        if (
+            issubclass(type(obj), type)
+            and "__enter__" in obj.__dict__
+            and "__exit__" in obj.__dict__
+        ):
+            # obj = load_object(f"{module.__name__}.{name}")
             torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
@@ -309,22 +291,12 @@ def generate_allow_list():
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     heuristic_record_if_in_graph_function(obj, module, name)
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                    if (
-                        issubclass(type(obj), type)
-                        and "__enter__" in obj.__dict__
-                        and "__exit__" in obj.__dict__
-                    ):
-                        torch_objects.add(obj)
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
                     heuristic_record_if_in_graph_function(obj, module, name)
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                    if (
-                        issubclass(type(obj), type)
-                        and "__enter__" in obj.__dict__
-                        and "__exit__" in obj.__dict__
-                    ):
-                        torch_objects.add(obj)
 
     _find_torch_objects(torch)
     _find_torch_objects(math)

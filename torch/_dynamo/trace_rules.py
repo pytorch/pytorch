@@ -41,6 +41,7 @@ and trace_rules.lookup consolidation is done. Then the explicit listing of skip/
 a higher priority, which can be used to override the skipfiles.check rules in some cases.
 """
 manual_torch_name_rule_map = {
+    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
     "torch.default_generator#get_state": TorchInGraphFunctionVariable,
     "torch._C.Generator#get_state": TorchInGraphFunctionVariable,
     "torch.default_generator#set_state": TorchInGraphFunctionVariable,
@@ -75,7 +76,6 @@ auto_torch_name_rule_map = {
     "torch.autograd.profiler.record_function": TorchCtxManagerClassVariable,
     "torch.cpu.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
     "torch.cuda.amp.autocast_mode.autocast": TorchCtxManagerClassVariable,
-    "torch.profiler.profiler.profile": TorchCtxManagerClassVariable,
     # In graph functions
     "torch._running_with_deploy": TorchInGraphFunctionVariable,
     "torch._preload_cuda_deps": TorchInGraphFunctionVariable,
@@ -1198,7 +1198,6 @@ auto_torch_name_rule_map = {
     "torch.cuda.nccl.broadcast": TorchInGraphFunctionVariable,
     "torch.cuda.nccl.all_gather": TorchInGraphFunctionVariable,
     "torch.cuda.nccl.reduce_scatter": TorchInGraphFunctionVariable,
-    "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.sparse.semi_structured.to_sparse_semi_structured": TorchInGraphFunctionVariable,
     "torch.sparse.sum": TorchInGraphFunctionVariable,
     "torch.sparse.as_sparse_gradcheck": TorchInGraphFunctionVariable,
@@ -2720,7 +2719,7 @@ def get_torch_obj_rule_map():
         try:
             obj = load_object(k)
             d[obj] = v
-        except Exception:
+        except AttributeError:
             pass
     return d
 
