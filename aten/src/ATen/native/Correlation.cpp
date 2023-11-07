@@ -114,7 +114,7 @@ Tensor cov(
   }
 
   if (at::is_scalar_tensor_true(norm_factor.le(0))) {
-    TORCH_WARN("cov(): degrees of freedom is <= 0");
+    TORCH_WARN("cov(): degrees of freedom is <= 0. Correction should be strictly less than the number of observations.");
     norm_factor.zero_();
   }
 

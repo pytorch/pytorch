@@ -14,6 +14,7 @@ _ROOT_MODULE_PREFIX = ""
 
 class _ReplicateState(_State):
     def __init__(self) -> None:
+        super().__init__()
         self.module: Optional[nn.Module] = None
         self.has_initialized: bool = False
         self._param_list: nn.ParameterList = nn.ParameterList()

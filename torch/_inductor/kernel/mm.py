@@ -1,7 +1,8 @@
 import logging
+from typing import Any, Dict, List
 
 import torch
-
+from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
@@ -142,6 +143,20 @@ def tuned_mm(mat1, mat2, *, layout=None):
             )
         log.debug("Added %d cutlass gemm configs.", len(ops))
 
+    from torch._inductor.ir import FixedLayout, FlexibleLayout
+
+    if (
+        len(choices) == 1
+        and use_aten_gemm_kernels()
+        and isinstance(layout, FixedLayout)
+    ):
+        # If we are not autotuning, we can swap to a FlexibleLayout
+        # in order to get fusion optimizations to kick in, e.g. ConcatFusion
+        layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
+        choices = [aten_mm.bind((mat1, mat2), layout)]
+
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
 
@@ -272,3 +287,29 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             **mm_options(config, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+
+
+# This op is a special case of the int_mm op which we use based on the pattern
+# _int_mm -> mul (defined in ../fx_passes/post_grad.py) in order to prevent
+# realization of the int32 _int_mm output by forcing fusion with the mul op.
+# This is only used when config.force_fuse_int_mm_with_mul = True
+def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
+    out_dtype = (
+        torch.promote_types(mat3.get_dtype(), torch.int32)
+        if out_dtype is None
+        else out_dtype
+    )
+    m, n, k, layout, mat1, mat2, mat3 = mm_args(
+        mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
+    )
+    choices: List[Dict[Any, Any]] = []
+    for config in int8_mm_configs(m, n, k):
+        mm_template.maybe_append_choice(
+            choices,
+            input_nodes=(mat1, mat2, mat3),
+            layout=layout,
+            **dict(mm_options(config, k, layout), **{"ACC_TYPE": "tl.int32"}),
+            suffix_args=1,
+            epilogue_fn=lambda acc, mat3: V.ops.mul(acc, mat3),
+        )
+    return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)

@@ -73,6 +73,8 @@ decomps_to_exclude = [
     aten.clamp_min,
     aten.glu,  # inductor lowers this directly
     aten.split.Tensor,  # inductor lowers this directly
+    aten.squeeze,  # inductor lowers this directly
+    aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
 ]
 
@@ -203,6 +205,9 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
+        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+            out = (mat1.T * mat2).sum(dim=0, keepdim=True)
+            return alpha * out + beta * self
     return NotImplemented
 
 
@@ -244,7 +249,7 @@ def cat(tensors, dim=0):
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
-    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
+    # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
@@ -262,6 +267,19 @@ def angle(x):
         ret = torch.where(x < 0, math.pi, 0.0)
         nan = torch.where(torch.isnan(x), float("nan"), 0.0)
         return ret + nan
+
+
+@register_decomposition([aten.add])
+def add(x, y, *, alpha=None):
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+    z = y
+    if alpha is not None:
+        z = alpha * y
+    complex_type = torch.promote_types(x.dtype, y.dtype)
+    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
 
 
 @register_decomposition([aten.conj_physical])
@@ -289,6 +307,20 @@ def fmin(self, other):
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition(aten.amax)
+def amax(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.any(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
+
+
+@register_decomposition(aten.amin)
+def amin(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.all(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
 
 
 @register_decomposition([aten.narrow_copy])
@@ -405,6 +437,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -434,6 +468,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max

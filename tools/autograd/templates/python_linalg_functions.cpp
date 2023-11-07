@@ -29,7 +29,7 @@ using at::TensorList;
 
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 // generated forward declarations start here
 
@@ -65,4 +65,4 @@ void initLinalgFunctions(PyObject* module) {
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

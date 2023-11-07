@@ -21,7 +21,7 @@ GEMM_TEMPLATE = r"""
 {{template.globals().getvalue()}}
 {{instance_definition}}
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
-// Otherwise, compuates the Gemm kernel using the given workspace ptr.
+// Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
 {{kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=input_reorder)}} {
   try {
@@ -131,7 +131,6 @@ GEMM_ARGS_CUTLASS_3X = r"""
   };
 """
 
-
 GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
     {
       {ElementComputeEpilogue({{alpha}}), ElementComputeEpilogue({{beta}})},  // typename ThreadEpilogueOp::Params thread
@@ -156,7 +155,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def __init__(
         self,
-        input_nodes: List[IRNode],
+        input_nodes: List[Buffer],
         layout: Layout,
         alpha: float,
         beta: float,
@@ -183,7 +182,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
@@ -197,7 +196,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
     ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
             return cutlass_lib.LayoutType.ColumnMajor
@@ -220,7 +219,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def has_tma_epilogue(op) -> bool:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         result = False
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
@@ -233,8 +232,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> Tuple[str, str]:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -291,7 +290,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
         if (
@@ -306,7 +305,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             cutlass_lib.GemmKind.Universal3x,
         }:
             return None
-
         # Filter ops by dtypes.
         X = self.input_nodes[0]
         W = self.input_nodes[1]
@@ -372,21 +370,22 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.gemm_operation as cutlass_gemm_op  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         num_3x_ops = 0
         num_2x_ops = 0
-        for op_list in ops.values():
-            for op in op_list:
-                filter_res = self.filter_op(op)
-                if (
-                    filter_res is not None
-                    and res.get(filter_res.configuration_name(), None) is None
-                ):
-                    res[filter_res.configuration_name()] = filter_res
+        for op_dict in ops.values():
+            for op_list in op_dict.values():
+                for op in op_list:
+                    filter_res = self.filter_op(op)
+                    if (
+                        filter_res is not None
+                        and res.get(filter_res.configuration_name(), None) is None
+                    ):
+                        res[filter_res.configuration_name()] = filter_res
         for op in res.values():
             if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
                 num_3x_ops += 1
@@ -478,10 +477,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         kernel: CUDATemplateKernel,
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
-        output_node: IRNode = None,
+        output_node: Optional[Buffer] = None,
     ) -> str:
         assert cutlass_utils.try_import_cutlass()
-        import cutlass_library as cutlass_lib  # type: ignore[import]
+        import cutlass_library.library as cutlass_lib  # type: ignore[import]
 
         if output_node is not None:
             self.output_node = output_node
@@ -523,6 +522,5 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             instance_type=instance_type,
             input_reorder=self.input_reorder,
         )
-
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res

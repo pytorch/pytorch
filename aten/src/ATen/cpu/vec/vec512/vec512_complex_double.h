@@ -278,15 +278,6 @@ public:
   Vectorized<c10::complex<double>> atanh() const {
     return map(std::atanh);
   }
-  Vectorized<c10::complex<double>> atan2(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erf() const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erfc() const {
-    AT_ERROR("not supported for complex numbers");
-  }
   Vectorized<c10::complex<double>> exp() const {
     //exp(a + bi)
     // = exp(a)*(cos(b) + sin(b)i)
@@ -325,21 +316,9 @@ public:
   Vectorized<c10::complex<double>> floor() const {
     return _mm512_floor_pd(values);
   }
-  Vectorized<c10::complex<double>> hypot(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igamma(const Vectorized<c10::complex<double>> &x) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igammac(const Vectorized<c10::complex<double>> &x) const {
-    AT_ERROR("not supported for complex numbers");
-  }
   Vectorized<c10::complex<double>> neg() const {
     auto zero = _mm512_setzero_pd();
     return _mm512_sub_pd(zero, values);
-  }
-  Vectorized<c10::complex<double>> nextafter(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> round() const {
     return _mm512_roundscale_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -398,18 +377,6 @@ public:
 
   Vectorized<c10::complex<double>> eq(const Vectorized<c10::complex<double>>& other) const;
   Vectorized<c10::complex<double>> ne(const Vectorized<c10::complex<double>>& other) const;
-  Vectorized<c10::complex<double>> lt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> le(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> gt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> ge(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
 };
 
 template <> Vectorized<c10::complex<double>> inline operator+(const Vectorized<c10::complex<double>> &a,

@@ -34,8 +34,8 @@ class MapWrapper(HigherOrderOperator):
         return map_wrapper(xs, *args)
 
 
-map = MapWrapper("map", _deprecated_global_ns=True)
-map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
+map = MapWrapper("map")
+map_impl = HigherOrderOperator("map_impl")
 
 dummy_aot_config = AOTConfig(
     fw_compiler=None,
@@ -358,11 +358,3 @@ def map_functionalize(ctx, f, num_mapped, *args):
 
         map_return = map_impl(wrapped_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
         return ctx.wrap_tensors(map_return)
-
-
-# TODO(voz) Make this automatic for keys, this is very ugly atm
-map_impl.fallthrough(DispatchKey.PythonDispatcher)
-map_impl.fallthrough(DispatchKey.PythonTLSSnapshot)
-map_impl.fallthrough(DispatchKey.ADInplaceOrView)
-map_impl.fallthrough(DispatchKey.BackendSelect)
-map_impl.fallthrough(DispatchKey.AutocastCPU)

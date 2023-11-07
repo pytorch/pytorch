@@ -9,7 +9,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 
@@ -1073,7 +1073,8 @@ def add(
             raise ValueError(msg)
         b = prims.mul(b, alpha)
 
-    return prims.add(a, b)
+    output = prims.add(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
@@ -2004,7 +2005,7 @@ def _to_device(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": device,
         "dtype": dtype,
@@ -2022,7 +2023,7 @@ def _to_device_str(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "device": torch.device(device),
         "dtype": dtype,
@@ -2039,7 +2040,7 @@ def _to_dtype(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     kwargs = {
         "dtype": dtype,
         "non_blocking": non_blocking,
@@ -2055,7 +2056,7 @@ def _to_other(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
-):
+) -> Dict[str, Any]:
     device = other.device
     dtype = other.dtype
     layout = other.layout
@@ -2226,18 +2227,10 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[int] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
-    # case must be handled separately.
-    if dim is None:
-        assert not keepdim
-        result = torch.logical_not(torch.any(torch.logical_not(a)))
-    else:
-        result = torch.logical_not(
-            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
-        )
+    result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
         result = result.to(dtype=torch.uint8)
@@ -2257,7 +2250,10 @@ def any(
     keepdim: bool = False,
 ) -> TensorLikeType:
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = ne(sum(a_, dim=dim, keepdim=keepdim), False)  # type: ignore[arg-type]
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        result = a_.clone()
+    else:
+        result = a_.sum(dim=dim, keepdim=keepdim).ne(False)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -2266,7 +2262,7 @@ def any(
     return result
 
 
-@register_decomposition(aten.sum)
+@register_decomposition([aten.sum.dim_IntList, aten.sum.IntList_out])
 def sum(
     a: TensorLikeType,
     dim: Union[Optional[int], Optional[List[int]]] = None,
@@ -3987,7 +3983,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     return x[idx]
 
 
-@register_decomposition(aten.squeeze)
+@register_decomposition(aten.squeeze.dims)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
@@ -4821,10 +4817,16 @@ def arange(
         end = start
         start = 0
     torch._check(step != 0, lambda: "step must be nonzero")
-    torch._check(
-        (step > 0 and end >= start) or (step < 0 and end <= start),
-        lambda: "upper bound and lower bound inconsistent with step sign",
-    )
+    if step > 0:
+        torch._check(
+            end >= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
+    elif step < 0:
+        torch._check(
+            end <= start,
+            lambda: "upper bound and lower bound inconsistent with step sign",
+        )
 
     def is_finite(x):
         return not isinstance(x, FloatWithoutSymFloat) or math.isfinite(x)
@@ -5921,7 +5923,7 @@ def log_normal(self, mean=1, std=2, generator=None):
 def normal(
     mean=0,
     std=1,
-    shape=None,
+    size=None,
     *,
     generator=None,
     dtype=None,
@@ -5930,37 +5932,37 @@ def normal(
     pin_memory=None,
 ):
     assert generator is None
-    assert layout is None
+    assert layout is None or layout == torch.strided
 
     if not isinstance(std, TensorLike):
         torch._check(
             std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
         )
 
-    if shape is None:
+    if size is None:
         tensors = tuple(t for t in (mean, std) if isinstance(t, TensorLike))
         torch._check(
             len(tensors) > 0,
-            lambda: "normal expects that either mean or std is a tensor, or shape is defined",
+            lambda: "normal expects that either mean or std is a tensor, or size is defined",
         )
         torch._check(
             layout is None and pin_memory is None,
-            lambda: "Cannot pass layout, or pin_memory without shape",
+            lambda: "Cannot pass layout, or pin_memory without size",
         )
 
-        shape = _broadcast_shapes(*(t.shape for t in tensors))
+        size = _broadcast_shapes(*(t.shape for t in tensors))
         dtype = tensors[0].dtype
         device = tensors[0].device
     else:
         torch._check(
             not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
-            lambda: "normal expects mean and std to be scalars when shape is defined",
+            lambda: "normal expects mean and std to be scalars when size is defined",
         )
         dtype = torch.get_default_dtype() if dtype is None else dtype
         device = torch.device("cpu") if device is None else device
 
     normal_samples = prims.normal(
-        shape,
+        size,
         mean=0.0,
         std=1.0,
         dtype=dtype,
@@ -6180,7 +6182,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(
+            raise ValueError(  # noqa: TRY200
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle

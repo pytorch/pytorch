@@ -125,7 +125,7 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
       const {
-    (void)isHighPriority; // Suppress unused varaible warning
+    (void)isHighPriority; // Suppress unused variable warning
     TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
   }
 
