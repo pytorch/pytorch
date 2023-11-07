@@ -114,7 +114,7 @@ class ConstDictVariable(VariableTracker):
             else:
                 return a == b
 
-        def __eq__(self, other: ConstDictVariable._HashableTracker) -> bool:
+        def __eq__(self, other: "ConstDictVariable._HashableTracker") -> bool:
             Hashable = ConstDictVariable._HashableTracker
             assert isinstance(other, Hashable)
             return Hashable._eq_impl(self.underlying_value, other.underlying_value)
