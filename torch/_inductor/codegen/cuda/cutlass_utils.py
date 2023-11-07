@@ -17,6 +17,33 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 
+def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
+    for cutlass_module in cutlass_modules:
+        content = content.replace(
+            f"from {cutlass_module} import ",
+            f"from cutlass_library.{cutlass_module} import ",
+        )
+    return content
+
+
+def _gen_cutlass_file(
+    file_name: str, cutlass_modules: List[str], src_dir: str, dst_dir: str
+) -> None:
+    orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
+    text = ""
+    with open(orig_full_path) as f:
+        text = f.read()
+    text = _rename_cutlass_import(text, cutlass_modules)
+    dst_full_path = os.path.abspath(
+        os.path.join(
+            dst_dir,
+            file_name,
+        )
+    )
+    with open(dst_full_path, "w") as f:
+        f.write(text)
+
+
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
