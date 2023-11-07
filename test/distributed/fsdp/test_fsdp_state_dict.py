@@ -132,6 +132,23 @@ class Model(Module):
         return self.outer(i + j)
 
 
+class TestDummyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+        self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
+        self.net3 = self.net2
+        self.random_parameter = nn.Parameter(torch.Tensor(10))
+        self.shared_parameter = self.random_parameter
+
+    def forward(self, x):
+        return self.net3(self.net2(self.net1(x)))
+
+    def get_input(self):
+        return torch.rand(8, 8, device="cuda")
+
+
 class TestFSDPStateDict(FSDPTest):
     @property
     def world_size(self):
@@ -213,8 +230,8 @@ class TestFSDPStateDict(FSDPTest):
                 bn1 = checkpoint_wrapper(bn1)
                 lin2 = checkpoint_wrapper(lin2)
             seq = nn.Sequential(
-                FSDP(lin1, mixed_precision=lin_mp, *fsdp_args, **fsdp_kwargs),
-                FSDP(bn1, mixed_precision=bn_mp, *fsdp_args, **fsdp_kwargs),
+                FSDP(lin1, *fsdp_args, mixed_precision=lin_mp, **fsdp_kwargs),
+                FSDP(bn1, *fsdp_args, mixed_precision=bn_mp, **fsdp_kwargs),
                 lin2,
             )
             if checkpoint_wrap:
@@ -702,7 +719,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
 
         trained_params = get_full_params(model)
-        # Ensure some training occured
+        # Ensure some training occurred
         self.assertNotEqual(initial_params, trained_params)
         # Save a copy of the state_dict
         fsd_mgr = self._get_state_dict_mgr(
@@ -1153,22 +1170,6 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_shared_module_and_shared_parameter(self):
-        class TestDummyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(0)
-                self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
-                self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
-                self.net3 = self.net2
-                self.random_parameter = nn.Parameter(torch.Tensor(10))
-                self.shared_parameter = self.random_parameter
-
-            def forward(self, x):
-                return self.net3(self.net2(self.net1(x)))
-
-            def get_input(self):
-                return torch.rand(8, 8, device="cuda")
-
         model = FSDP(TestDummyModel().cuda())
         with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
             state_dict = model.state_dict()
@@ -1211,6 +1212,25 @@ class TestFSDPStateDict(FSDPTest):
                 fsdp_model.load_state_dict(sharded)
                 for p1, p2 in zip(param_copy, fsdp_model.parameters()):
                     self.assertEqual(p1, p2, f"not equal: {p1.sum()} vs {p2.sum()}")
+
+    @skip_if_lt_x_gpu(2)
+    def test_world_size_one(self):
+        my_pg = None
+        for i in range(self.world_size):
+            pg = dist.new_group(ranks=[i])
+            if i == self.rank:
+                my_pg = pg
+
+        model = TransformerWithSharedParams.init(
+            my_pg,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+        )
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
+            state_dict = model.state_dict()
+            model.load_state_dict(state_dict)
+
+        dist.barrier()
 
 
 class TestFSDPStateDict4GPUs(FSDPTest):

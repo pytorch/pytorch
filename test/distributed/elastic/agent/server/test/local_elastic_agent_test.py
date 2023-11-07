@@ -336,7 +336,7 @@ class LocalElasticAgentTest(unittest.TestCase):
     ) -> Optional[RunResult]:
         """
         Runs a single agent. This method can be called either on a separate process
-        or the main test process. When calling this method on a sparate process make
+        or the main test process. When calling this method on a separate process make
         sure to pass the ``agent_results`` multiprocessing Queue so that the agent's
         run results can be returned. If ``agent_results`` is omitted, then the
         run result is returned from the method.
