@@ -22,8 +22,8 @@ from .tensor import TensorVariable
 
 
 class ConstDictVariable(VariableTracker):
-    def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+    def __init__(self, items, user_cls, **kwargs):
+        super().__init__(**kwargs)
 
         # All the keys are constants
         assert not any(isinstance(x, VariableTracker) for x in items)
@@ -141,15 +141,9 @@ class ConstDictVariable(VariableTracker):
             newval = collections.OrderedDict(val)
             newval[k] = args[1]
 
-            new_rec_contains = self.recursively_contains.union(
-                args[1].recursively_contains
-            )
-            if args[1].mutable_local is not None:
-                new_rec_contains.add(args[1].mutable_local)
-
             return tx.replace_all(
                 self,
-                self.modifed(newval, new_rec_contains, **options),
+                self.modifed(newval, **options),
             )
         elif (
             name in ("pop", "get")
@@ -168,7 +162,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             result = newval.pop(ConstDictVariable.get_key(args[0]))
-            tx.replace_all(self, self.modifed(newval, None, **options))
+            tx.replace_all(self, self.modifed(newval, **options))
             return result.add_options(options)
         elif (
             name == "update"
@@ -178,12 +172,7 @@ class ConstDictVariable(VariableTracker):
         ):
             newval = collections.OrderedDict(val)
             newval.update(args[0].items)
-            new_rec_contains = self.recursively_contains.union(
-                args[0].recursively_contains
-            )
-            result = self.modifed(
-                newval, recursively_contains=new_rec_contains, **options
-            )
+            result = self.modifed(newval, **options)
             return tx.replace_all(self, result)
         elif (
             name in ("get", "__getattr__")
@@ -202,11 +191,9 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def modifed(self, items, recursively_contains, **options):
+    def modifed(self, items, **options):
         """a copy of self with different items"""
-        return self.clone(
-            items=items, recursively_contains=recursively_contains, **options
-        )
+        return self.clone(items=items, **options)
 
     def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
@@ -285,14 +272,7 @@ class DefaultDictVariable(ConstDictVariable):
                     new_val = collections.OrderedDict(self.items)
                     default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
-                    new_rec_contains = self.recursively_contains.union(
-                        default_var.recursively_contains
-                    )
-                    if default_var.mutable_local is not None:
-                        new_rec_contains.add(default_var.mutable_local)
-                    tx.replace_all(
-                        self, self.modifed(new_val, new_rec_contains, **options)
-                    )
+                    tx.replace_all(self, self.modifed(new_val, **options))
                     return default_var
         else:
             return super().call_method(tx, name, args, kwargs)
@@ -318,11 +298,10 @@ class SetVariable(VariableTracker):
     def __init__(
         self,
         items: List[VariableTracker],
-        recursively_contains=None,
         regen_guards=True,
         **kwargs,
     ):
-        super().__init__(recursively_contains=recursively_contains, **kwargs)
+        super().__init__(**kwargs)
         # Note - Set is still backed by a list, because we want set behavior over the contents,
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
@@ -458,6 +437,30 @@ class SetVariable(VariableTracker):
         return [x.add_options(self) for x in self.items]
 
 
+def _is_matching_transformers_cls(cls) -> bool:
+    if not cls.__module__.startswith("transformers."):
+        return False
+
+    try:
+        from transformers.file_utils import ModelOutput
+
+        return issubclass(cls, ModelOutput)
+    except ImportError:
+        return False
+
+
+def _is_matching_diffusers_cls(cls) -> bool:
+    if not cls.__module__.startswith("diffusers."):
+        return False
+
+    try:
+        from diffusers.utils import BaseOutput
+
+        return issubclass(cls, BaseOutput)
+    except ImportError:
+        return False
+
+
 class DataClassVariable(ConstDictVariable):
     """
     This is a bit of a hack to deal with
@@ -473,20 +476,27 @@ class DataClassVariable(ConstDictVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _patch_once():
-        from transformers.file_utils import ModelOutput
-
-        for obj in ModelOutput.__dict__.values():
-            if callable(obj):
-                skip_code(obj.__code__)
-
-    @staticmethod
-    def is_matching_cls(cls):
         try:
             from transformers.file_utils import ModelOutput
 
-            return issubclass(cls, ModelOutput)
+            for obj in ModelOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
         except ImportError:
-            return False
+            pass
+
+        try:
+            from diffusers.utils import BaseOutput
+
+            for obj in BaseOutput.__dict__.values():
+                if callable(obj):
+                    skip_code(obj.__code__)
+        except ImportError:
+            pass
+
+    @staticmethod
+    def is_matching_cls(cls):
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -599,26 +609,19 @@ class DataClassVariable(ConstDictVariable):
 class CustomizedDictVariable(ConstDictVariable):
     @staticmethod
     def is_matching_cls(cls):
-        try:
-            # True if using default OrderedDict.__init__ and did not implement __post_init__
-            if (
-                issubclass(cls, collections.OrderedDict)
-                and cls.__init__ is collections.OrderedDict.__init__
-                and not hasattr(cls, "__post_init__")
-            ):
-                return True
-            # hack for HF usecase:
-            #   assume dataclass annotation for ModelOutput subclass
-            #   assume self.create is AA to ModelOutput.__post_init__
-            # for non-HF usecase:
-            #   check __module__ string to avoid costy HF import
-            if cls.__module__ != "transformers.modeling_outputs":
-                return False
-            from transformers.file_utils import ModelOutput
-
-            return issubclass(cls, ModelOutput)
-        except ImportError:
-            return False
+        # True if using default OrderedDict.__init__ and did not implement __post_init__
+        if (
+            issubclass(cls, collections.OrderedDict)
+            and cls.__init__ is collections.OrderedDict.__init__
+            and not hasattr(cls, "__post_init__")
+        ):
+            return True
+        # hack for HF usecase:
+        #   assume dataclass annotation for ModelOutput subclass
+        #   assume self.create is AA to ModelOutput.__post_init__
+        # for non-HF usecase:
+        #   check __module__ string to avoid costy HF import
+        return _is_matching_transformers_cls(cls) or _is_matching_diffusers_cls(cls)
 
     @classmethod
     def is_matching_object(cls, obj):
@@ -644,11 +647,14 @@ class CustomizedDictVariable(ConstDictVariable):
             bound = inspect.signature(user_cls).bind(*args, **kwargs)
             bound.apply_defaults()
             raw_items = bound.arguments
+        elif not args:
+            # CustomDict(a=1, b=2) in the general (non-dataclass) case.
+            raw_items = collections.OrderedDict(kwargs)
         elif len(args) == 1 and isinstance(args[0], ConstDictVariable) and not kwargs:
             # CustomDict({'a': 1, 'b': 2})
             raw_items = args[0].items
         else:
-            unimplemented("custome dict init with args/kwargs unimplemented")
+            unimplemented("custom dict init with args/kwargs unimplemented")
 
         items = collections.OrderedDict()
         for key in raw_items.keys():

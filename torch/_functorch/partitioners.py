@@ -79,7 +79,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         elif node.op == 'placeholder':
             env[node] = InvalidNode
         elif node.op == 'call_function':
-            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
             if any(all_args):
                 env[node] = InvalidNode
@@ -124,7 +124,7 @@ def _is_fwd_seed_offset(node):
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
+    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
@@ -431,7 +431,7 @@ def reordering_to_mimic_autograd_engine(gm):
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    output_node = next(node for node in gm.graph.nodes if node.op == "output")
     get_depth(output_node, depths)
 
     def insert_node_in_graph(node):
@@ -588,7 +588,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
     # rng states accordingly.
-    fw_output_node = [node for node in fw_module.graph.nodes if node.op == "output"][0]
+    fw_output_node = next(node for node in fw_module.graph.nodes if node.op == "output")
     fw_outputs = fw_output_node.args[0]
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]

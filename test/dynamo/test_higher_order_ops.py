@@ -1114,6 +1114,17 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result, (x.sin(), x.sin()))
         self.assertEqual(cnt.frame_count, 0)
 
+    def test_map_kwargs(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return control_flow.map(lambda x: x.sin(), x=x)
+
+        x = torch.randn(3)
+        self.assertRaises(TypeError, lambda: f(x))
+        self.assertEqual(cnt.frame_count, 0)
+
     def test_map_symint_input(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1518,6 +1529,61 @@ def forward(self):
             },
         )
 
+    def test_wrap_allow_local_assign_in_body_fn(self):
+        def f(arg1, arg2):
+            def inner_f(arg1, arg2):
+                a = arg1
+                b = arg2
+                ret = []
+                for x in a:
+                    ret.append(x + 1)
+                for x in b:
+                    ret.append(x + 1)
+                return ret
+
+            return wrap(inner_f, arg1, arg2)
+
+        x = torch.ones(3)
+
+        def my_args_generator():
+            yield [x], [x.sin()]
+            yield (x,), (x.sin(),)
+
+        actual_graph = self._test_wrap_simple(
+            f,
+            my_args_generator(),
+            3,
+            3,
+            return_graph=True,
+        )
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_arg1_0_ : torch.Tensor, L_arg2_0_ : torch.Tensor):
+        l_arg1_0_ = L_arg1_0_
+        l_arg2_0_ = L_arg2_0_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_arg1_0_, l_arg2_0_);  wrap_body_0 = l_arg1_0_ = l_arg2_0_ = None
+        getitem = wrap[0]
+        getitem_1 = wrap[1];  wrap = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_arg1_0_, l_arg2_0_):
+            add = l_arg1_0_ + 1;  l_arg1_0_ = None
+
+            add_1 = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (add, add_1)
+""",
+        )
+
     def test_capture_global_num(self):
         def f(x):
             return wrap(lambda x: x + global_num, x)
@@ -1709,9 +1775,9 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            child = l_x_.sin()
-            child_1 = l_x_.cos();  l_x_ = None
-            return (child, child_1)
+            sin = l_x_.sin()
+            cos = l_x_.cos();  l_x_ = None
+            return (sin, cos)
 """,
         )
 
@@ -1744,8 +1810,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            child = -l_x_;  l_x_ = None
-            return (child,)
+            neg = -l_x_;  l_x_ = None
+            return (neg,)
 """,
         )
 
@@ -2907,14 +2973,11 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, select, select_1):
-            child = select
-            child_1 = select_1
-
-            select_2 = child.select(1, 0)
-            select_3 = child_1.select(1, 0)
+            select_2 = select.select(1, 0)
+            select_3 = select_1.select(1, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (1, 1), 0, 'error');  vmap_body_0 = None
-            call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
+            call = vmap_proxy.__call__(select, select_1);  vmap_proxy = select = select_1 = None
             return call
 
         class GraphModule(torch.nn.Module):
@@ -2957,12 +3020,10 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, select, l_x_):
-            child = select
-
-            select_1 = child.select(0, 0)
+            select_1 = select.select(0, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
-            call = vmap_proxy.__call__(child, l_x_);  vmap_proxy = child = l_x_ = None
+            call = vmap_proxy.__call__(select, l_x_);  vmap_proxy = select = l_x_ = None
             return call
 
         class GraphModule(torch.nn.Module):
@@ -3446,17 +3507,61 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             [test_op.py_kernels[key]() for key in default_keys],
         )
 
-    def test_non_aliasing_util(self):
-        from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
+    def test_cond_with_kwargs(self):
+        from torch._higher_order_ops.cond import cond_op
 
-        a = [torch.tensor(1), {"a": torch.tensor(1)}]
-        b = (torch.tensor(1),)
-        _assert_tensors_nonaliasing(a, b)
+        def test(pred, x):
+            def true_fn(x):
+                return x
 
-        with self.assertRaisesRegex(
-            AssertionError, "inputs to function body cannot alias outputs"
-        ):
-            _assert_tensors_nonaliasing(a, a)
+            def false_fn(x):
+                return -x
+
+            return cond_op(pred=pred, true_fn=true_fn, false_fn=false_fn, operands=[x])
+
+        cnt = CompileCounter()
+        opt_test = torch.compile(test, backend=cnt)
+        inp = torch.ones(3, 3)
+        self.assertTrue(torch.allclose(test(True, inp), opt_test(True, inp)))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertTrue(torch.allclose(test(False, inp), opt_test(False, inp)))
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_cond_with_invalid_kwargs(self):
+        from torch._higher_order_ops.cond import cond_op
+
+        def test(pred, mode, x):
+            def true_fn(x):
+                return x
+
+            def false_fn(x):
+                return -x
+
+            if mode:
+                return cond_op(
+                    pred=pred,
+                    true_fn=true_fn,
+                    false_fn=false_fn,
+                    operands=[x],
+                    invalid=True,
+                )
+            else:
+                return cond_op(
+                    pred,
+                    pred=pred,
+                    true_fn=true_fn,
+                    false_fn=false_fn,
+                    operands=[x],
+                )
+
+        cnt = CompileCounter()
+        opt_test = torch.compile(test, backend=cnt)
+        inp = torch.ones(3, 3)
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            opt_test(True, True, inp)
+
+        with self.assertRaises(AssertionError):
+            opt_test(True, False, inp)
 
 
 if __name__ == "__main__":
