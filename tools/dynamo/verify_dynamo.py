@@ -5,7 +5,7 @@ import sys
 import traceback
 import warnings
 
-from pkg_resources import packaging
+import packaging.version
 
 MIN_CUDA_VERSION = packaging.version.parse("11.6")
 MIN_ROCM_VERSION = packaging.version.parse("5.4")

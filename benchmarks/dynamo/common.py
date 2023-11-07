@@ -566,7 +566,10 @@ def _register_dataclass_output_as_pytree(example_outputs) -> None:
     for output_type in output_dataclass_types:
         from torch._export.utils import register_dataclass_as_pytree_node
 
-        register_dataclass_as_pytree_node(output_type)
+        register_dataclass_as_pytree_node(
+            output_type,
+            serialized_type_name=f"{output_type.__module__}.{output_type.__name__}",
+        )
 
 
 class Stats:
@@ -3387,7 +3390,7 @@ def run(runner, args, original_dir=None):
             args.repeat = 2
 
             # Set translation validation on by default on CI accuracy runs.
-            torch._dynamo.config.translation_validation = True
+            torch.fx.experimental._config.translation_validation = True
 
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
@@ -3709,7 +3712,7 @@ def run(runner, args, original_dir=None):
 
     if args.no_translation_validation:
         # Overwrite 'translation_validation' config, if specified.
-        torch._dynamo.config.translation_validation = False
+        torch.fx.experimental._config.translation_validation = False
 
     experiment = functools.partial(experiment, args, runner.model_iter_fn)
 
