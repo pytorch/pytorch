@@ -193,6 +193,16 @@ class TestInductorDynamic(TestCase):
         f(torch.tensor([3], device=device))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_view_divisibility_unbacked(self):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            i0 = x.item()
+            r = torch.zeros(i0, 192)
+            return r.view(12, -1, 192)
+
+        f(torch.tensor(24))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
         def f(x):

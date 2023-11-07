@@ -2266,6 +2266,7 @@ class Layout(IRNode):
 
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
+        return True
         for i in range(len(order)):
             stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
@@ -4125,7 +4126,12 @@ class DynamicScalar(ExternKernel):
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
-        wrapper.writeline(f"{self.sym} = {data}.item()")
+        if not isinstance(self.sym, sympy.Symbol):
+            assert isinstance(self.sym, sympy.Mul) and len(self.sym.args) == 2, self.sym
+            c, i0 = self.sym.args
+            wrapper.writeline(f"{i0} = {data}.item() // {c}")
+        else:
+            wrapper.writeline(f"{self.sym} = {data}.item()")
         # No one should ever use this buffer, but for uniformity
         # define the variable and assign it None
         wrapper.writeline(f"{self.get_name()} = None")
