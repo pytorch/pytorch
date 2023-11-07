@@ -44,6 +44,7 @@ class TestGenericPytree(TestCase):
 
         run_test_with_leaf(1)
         run_test_with_leaf(1.0)
+        run_test_with_leaf(None)
         run_test_with_leaf(bool)
         run_test_with_leaf(torch.randn(3, 3))
 
