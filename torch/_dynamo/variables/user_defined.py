@@ -54,7 +54,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from . import ConstantVariable
         from .builder import VariableBuilder
 
-        options = VariableTracker.propagate(self)
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
             obj = inspect.getattr_static(self.value, name)
@@ -62,12 +61,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             obj = None
         if isinstance(obj, staticmethod):
             return variables.UserFunctionVariable(
-                obj.__get__(self.value), source=source, **options
+                obj.__get__(self.value), source=source
             )
         elif isinstance(obj, classmethod):
-            return variables.UserMethodVariable(
-                obj.__func__, self, source=source, **options
-            )
+            return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
             return VariableBuilder(tx, source)(obj.__get__(self.value))
 
@@ -77,7 +74,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj)
             elif ConstantVariable.is_literal(obj):
-                return ConstantVariable.create(obj, **options)
+                return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -94,8 +91,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            options["mutable_local"] = MutableLocal()
+            options = {"mutable_local": MutableLocal()}
             subs_as_vars: List[VariableTracker] = list()
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
@@ -113,10 +109,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from ..side_effects import SideEffects
         from .builder import SourcelessBuilder
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if self.value is contextlib.nullcontext:
-            return NullContextVariable(**options)
+            return NullContextVariable()
         elif (
             issubclass(type(self.value), type)
             and hasattr(self.value, "__enter__")
@@ -126,7 +120,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             unwrapped_args = [x.as_python_constant() for x in args]
             return GenericContextWrappingVariable(
-                unwrapped_args, cm_obj=self.value(*unwrapped_args), **options
+                unwrapped_args,
+                cm_obj=self.value(*unwrapped_args),
             )
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
@@ -150,9 +145,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items[fields.index(name)] = value
 
             assert all(x is not None for x in items)
-            return variables.NamedTupleVariable(
-                items, self.value, **VariableTracker.propagate(self, items)
-            )
+            return variables.NamedTupleVariable(items, self.value)
         elif (
             inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
             and SideEffects.cls_supports_mutation_side_effects(self.value)
@@ -164,7 +157,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 variables.UnspecializedNNModuleVariable
                 if issubclass(self.value, torch.nn.Module)
                 else UserDefinedObjectVariable,
-                options,
+                {},
             )
             if (
                 inspect.getattr_static(self.value, "__init__", None)
@@ -180,12 +173,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options["mutable_local"] = MutableLocal()
+            options = {"mutable_local": MutableLocal()}
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
         elif variables.DataClassVariable.is_matching_cls(self.value):
-            options["mutable_local"] = MutableLocal()
+            options = {"mutable_local": MutableLocal()}
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
 
         return super().call_function(tx, args, kwargs)
@@ -248,15 +241,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             UserMethodVariable,
         )
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name not in getattr(self.value, "__dict__", {}):
             try:
                 method = inspect.getattr_static(type(self.value), name)
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable.create(None, **options)
+                return ConstantVariable.create(None)
 
             if method is collections.OrderedDict.keys and self.source:
                 # subclass of OrderedDict
@@ -264,9 +255,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
-                return TupleVariable(
-                    [ConstantVariable.create(k, **options) for k in keys], **options
-                )
+                return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
                 method in (collections.OrderedDict.__contains__, dict.__contains__)
@@ -278,7 +267,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not kwargs
                 install_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
                 return ConstantVariable.create(
-                    args[0].as_python_constant() in self.value, **options
+                    args[0].as_python_constant() in self.value
                 )
 
             if (
@@ -289,15 +278,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not (args or kwargs)
                 items = []
                 keys = self.call_method(tx, "keys", [], {})
-                options = VariableTracker.propagate(self, args, kwargs.values(), keys)
                 for key in keys.unpack_var_sequence(tx):
                     items.append(
                         TupleVariable(
                             [key, self.odict_getitem(tx, key)],
-                            **options,
                         )
                     )
-                return TupleVariable(items, **options)
+                return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
                 assert not kwargs
@@ -311,9 +298,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     else AttrSource(AttrSource(self.source, "__class__"), name)
                 )
                 # TODO(jansel): add a guard to check for monkey patching?
-                return UserMethodVariable(
-                    method, self, source=source, **options
-                ).call_function(tx, args, kwargs)
+                return UserMethodVariable(method, self, source=source).call_function(
+                    tx, args, kwargs
+                )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -374,7 +361,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for v in itertools.chain(self.value.args, self.value.keywords.values())
             )
         ):
-            options = VariableTracker.propagate(self, args, kwargs.values())
             if self.source:
                 install_guard(
                     AttrSource(self.source, "func").make_guard(GuardBuilder.ID_MATCH),
@@ -396,11 +382,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
-                options["source"] = self.source
-                return build_checkpoint_variable(**options).call_function(
+                # TODO(jansel): BUG? passing self.source here is a bit suss, expect None to be better
+                return build_checkpoint_variable(source=self.source).call_function(
                     tx, partial_args, partial_kwargs
                 )
-            return variables.TorchVariable(self.value.func, **options).call_function(
+            return variables.TorchVariable(self.value.func).call_function(
                 tx, partial_args, partial_kwargs
             )
         elif callable(self.value):
@@ -432,7 +418,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import ConstantVariable
         from .builder import VariableBuilder
 
-        options = VariableTracker.propagate(self)
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
@@ -447,28 +432,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = NO_SUCH_SUBOBJ
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
-                    getattr_fn, self, source=source, **options
+                    getattr_fn, self, source=source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
             return variables.UserMethodVariable(
-                subobj.fget, self, source=source, **options
+                subobj.fget, self, source=source
             ).call_function(tx, [], {})
         elif isinstance(subobj, torch.distributions.utils.lazy_property):
-            subobj_var = UserDefinedObjectVariable(subobj, source=source, **options)
+            subobj_var = UserDefinedObjectVariable(subobj, source=source)
             return variables.UserMethodVariable(
-                subobj.__get__.__func__, subobj_var, source=source, **options
+                subobj.__get__.__func__, subobj_var, source=source
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
-                subobj.__get__(self.value), source=source, **options
+                subobj.__get__(self.value), source=source
             )
         elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(
-                subobj.__func__, self, source=source, **options
-            )
+            return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
@@ -493,16 +476,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func = subobj
 
             if inspect.ismethod(dynamic_subobj):
-                return variables.UserMethodVariable(
-                    func, self, source=source, **options
-                )
+                return variables.UserMethodVariable(func, self, source=source)
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
-                    options["source"] = source
-                    return build_checkpoint_variable(**options)
+                    return build_checkpoint_variable(source=source)
                 elif is_allowed(func):
-                    return variables.TorchVariable(func, source=source, **options)
-                return variables.UserFunctionVariable(func, source=source, **options)
+                    return variables.TorchVariable(func, source=source)
+                return variables.UserFunctionVariable(func, source=source)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -518,7 +498,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable.create(subobj, **options)
+                return ConstantVariable.create(subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -539,7 +519,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             return VariableBuilder(tx, source)(subobj)
-        options["source"] = source
+        options = {"source": source}
         if isinstance(
             subobj,
             (
@@ -570,7 +550,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             except KeyError:
                 pass
-        options = VariableTracker.propagate(self)
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
@@ -580,9 +559,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         try:
             self._getattr_static(name)
-            return variables.ConstantVariable.create(True, **options)
+            return variables.ConstantVariable.create(True)
         except AttributeError:
-            return variables.ConstantVariable.create(False, **options)
+            return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder

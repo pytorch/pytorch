@@ -14,11 +14,8 @@ from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
-def wrap_bound_arg(tx, val, options, source=None):
+def wrap_bound_arg(tx, val, source=None):
     # Source propagation is best effort since not every object we encounter has a source to begin with.
-    assert (
-        "source" not in options
-    ), "Source needs to be separate from options due to recursive calls for lists/dicts"
     if isinstance(val, VariableTracker):
         return val
     elif not source:
@@ -31,11 +28,11 @@ def wrap_bound_arg(tx, val, options, source=None):
         return VariableBuilder(tx, source=source)(val)
 
 
-def wrap_args_kwargs(tx, result, options):
+def wrap_args_kwargs(tx, result):
     for k, v in list(result.items()):
         if isinstance(v, (tuple, dict)):
             # args/kwargs
-            result[k] = wrap_bound_arg(tx, v, options)
+            result[k] = wrap_bound_arg(tx, v)
 
 
 def init_cellvars(parent, result, code):
@@ -133,9 +130,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def bind_args(self, parent, args, kwargs):
         assert not self.is_constant
-        options = VariableTracker.propagate([self])
         tx = parent.output.root_tx
-        wrap = functools.partial(wrap_bound_arg, tx=tx, options=options)
+        wrap = functools.partial(wrap_bound_arg, tx=tx)
 
         fn: types.FunctionType = self.fn
         defaults = fn.__defaults__ or []
@@ -171,7 +167,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
 
-        wrap_args_kwargs(tx, result, options)
+        wrap_args_kwargs(tx, result)
         closure_cells = init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
@@ -245,9 +241,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if self.is_constant:
-            options = VariableTracker.propagate(self, args, kwargs.values())
             return invoke_and_store_as_constant(
-                tx, self.fn, self.get_name(), options, args, kwargs
+                tx, self.fn, self.get_name(), args, kwargs
             )
 
         return super().call_function(tx, args, kwargs)
@@ -336,7 +331,7 @@ class WrappedUserFunctionVariable(UserFunctionVariable):
         return result
 
 
-def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
+def invoke_and_store_as_constant(tx, fn, name, args, kwargs):
     def convert(x):
         if isinstance(x, variables.TensorVariable):
             return x.get_real_value()
@@ -349,7 +344,6 @@ def invoke_and_store_as_constant(tx, fn, name, options, args, kwargs):
         res,
         name,
         source=ConstantSource(name),
-        **options,
     )
 
 
@@ -444,7 +438,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
-        wrap_args_kwargs(parent.output.root_tx, result, VariableTracker.propagate(self))
+        wrap_args_kwargs(parent.output.root_tx, result)
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
@@ -615,7 +609,6 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        options = VariableTracker.propagate([self])
         merged_args = self.args + args
         merged_kwargs = {**self.keywords, **kwargs}
         return self.func.call_function(tx, merged_args, merged_kwargs)
@@ -746,7 +739,6 @@ class TritonKernelVariable(VariableTracker):
 
         return variables.ConstantVariable(
             None,
-            **VariableTracker.propagate(self, args, kwargs.values()),
         )
 
     def call_method(
@@ -768,7 +760,6 @@ class TritonKernelVariable(VariableTracker):
                 kernel=self.kernel,
                 kernel_idx=self.kernel_idx,
                 grid=args[0],
-                **VariableTracker.propagate(self),
             )
         elif name == "run":
             if "grid" not in kwargs:

@@ -91,7 +91,6 @@ class NNModuleVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
-        options = VariableTracker.propagate([self])
         if isinstance(base, torch.nn.ModuleDict):
             result = []
             for name, submod in base.items():
@@ -101,7 +100,6 @@ class NNModuleVariable(VariableTracker):
                     self.module_key,
                     name,
                     source=NNModuleSource(GetItemSource(self.source, name)),
-                    **options,
                 )
                 result.append(name_var)
             return result
@@ -118,13 +116,11 @@ class NNModuleVariable(VariableTracker):
                     self.module_key,
                     idx,
                     source=NNModuleSource(GetItemSource(self.source, idx)),
-                    **options,
                 )
             )
         return result
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
-        options = VariableTracker.propagate(self)
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
@@ -132,7 +128,7 @@ class NNModuleVariable(VariableTracker):
                 GuardBuilder.HASATTR
             )
         )
-        return variables.ConstantVariable.create(result, **options)
+        return variables.ConstantVariable.create(result)
 
     def is_training(self, tx):
         mod = tx.output.get_submodule(self.module_key)
@@ -167,11 +163,8 @@ class NNModuleVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from .builder import VariableBuilder
 
-        options = VariableTracker.propagate(self)
-
         if self.source:
             source = AttrSource(self.source, name)
-            options["source"] = source
         else:
             source = None
 
@@ -204,7 +197,7 @@ class NNModuleVariable(VariableTracker):
             except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
                 result = self._custom_getattr_fallback(
-                    base=base, tx=tx, name=name, options=options
+                    base=base, tx=tx, name=name, options={"source": source}
                 )
                 if result is not None:
                     return result
@@ -212,7 +205,7 @@ class NNModuleVariable(VariableTracker):
                 raise
 
         if name == "__class__" and not object_member:
-            return variables.UserDefinedClassVariable(base.__class__, **options)
+            return variables.UserDefinedClassVariable(base.__class__, source=source)
 
         if object_member:
             return VariableBuilder(tx, NNModuleSource(source))(subobj)
@@ -226,19 +219,21 @@ class NNModuleVariable(VariableTracker):
                 return variables.UserMethodVariable(
                     subobj.__func__,
                     variables.UserDefinedObjectVariable(type(base)),
-                    **options,
+                    source=source,
                 )
             elif istype(subobj, staticmethod):
-                return variables.UserFunctionVariable(subobj.__get__(base), **options)
+                return variables.UserFunctionVariable(
+                    subobj.__get__(base), source=source
+                )
             elif istype(subobj, types.FunctionType):
-                return variables.UserMethodVariable(subobj, self, **options)
+                return variables.UserMethodVariable(subobj, self, source=source)
             elif is_safe_constant(subobj) or istensor(subobj):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
                 unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
 
-        return variables.GetAttrVariable(self, name, **options)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_function(
         self,
@@ -246,7 +241,6 @@ class NNModuleVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(self.module_key, self.source, tx, mod):
@@ -275,7 +269,6 @@ class NNModuleVariable(VariableTracker):
                             self.module_key,
                             child_name,
                             source=NNModuleSource(AttrSource(self.source, child_name)),
-                            **options,
                         ),
                         [arg],
                         {},
@@ -312,7 +305,6 @@ class NNModuleVariable(VariableTracker):
                         self.module_key,
                         *proxy_args_kwargs(args, kwargs),
                     ),
-                    **options,
                 )
             else:
                 assert self.source, (
@@ -333,9 +325,8 @@ class NNModuleVariable(VariableTracker):
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
-                options["source"] = fn_source
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, **options),
+                    variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
                 )
@@ -350,7 +341,6 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import ConstantVariable, ListIteratorVariable, TupleVariable
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key
         module = tx.output.get_submodule(key)
 
@@ -377,7 +367,6 @@ class NNModuleVariable(VariableTracker):
                     args=(mod_proxy, *proxy_args),
                     kwargs=proxy_kwargs,
                 ),
-                **options,
             )
 
         if name in ["_call_impl", "_wrapped_call_impl"]:
@@ -395,7 +384,7 @@ class NNModuleVariable(VariableTracker):
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
-            return ConstantVariable.create(True, **options)
+            return ConstantVariable.create(True)
 
         if name == "_get_item_by_idx":
             assert args[1].is_python_constant()
@@ -410,13 +399,12 @@ class NNModuleVariable(VariableTracker):
                 key,
                 key,
                 source=NNModuleSource(GetItemSource(self.source, key)),
-                **options,
             )
 
         if constant:
             fn = getattr(module, name)
             name = f"{module.__class__.__name__}_{name}_result"
-            return invoke_and_store_as_constant(tx, fn, name, options, args, kwargs)
+            return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
 
         def assert_all_args_kwargs_const():
             if not all(
@@ -444,21 +432,19 @@ class NNModuleVariable(VariableTracker):
                         key,
                         name,
                         source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
                     )
                 )
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
 
         def named_embed(name, obj):
             return TupleVariable(
                 [
-                    ConstantVariable.create(name, **options),
+                    ConstantVariable.create(name),
                     tx.output.register_attr_or_module(
                         obj,
                         key,
                         name,
                         source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
                     ),
                 ]
             )
@@ -477,28 +463,28 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.named_children():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_parameters":
             result = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
             ):
                 result.append(named_embed(name, param))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_buffers":
             result = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
             ):
                 result.append(named_embed(name, buffer))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "named_modules":
             result = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
             ):
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "children":
             assert not (args or kwargs)
             return wrap_values(module.named_children())
@@ -512,8 +498,8 @@ class NNModuleVariable(VariableTracker):
             assert not (args or kwargs)
             result = []
             for name in module.keys():
-                result.append(ConstantVariable.create(name, **options))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+                result.append(ConstantVariable.create(name))
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "values":
             assert not (args or kwargs)
             return wrap_values(module.items())
@@ -522,10 +508,10 @@ class NNModuleVariable(VariableTracker):
             result = []
             for name, submod in module.items():
                 result.append(named_embed(name, submod))
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+            return ListIteratorVariable(result, mutable_local=MutableLocal())
         elif name == "__len__":
             assert not (args or kwargs)
-            return ConstantVariable.create(len(module), **options)
+            return ConstantVariable.create(len(module))
         elif (
             name == "__contains__"
             and isinstance(module, (torch.nn.ModuleDict, torch.nn.ParameterDict))
@@ -533,7 +519,7 @@ class NNModuleVariable(VariableTracker):
             and args[0].is_python_constant()
         ):
             return ConstantVariable.create(
-                args[0].as_python_constant() in module._modules, **options
+                args[0].as_python_constant() in module._modules
             )
         elif name == "__getitem__":
             assert not kwargs and len(args) == 1
@@ -555,7 +541,7 @@ class NNModuleVariable(VariableTracker):
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src, **options),
+                    variables.UserFunctionVariable(fn, source=src),
                     [self] + list(args),
                     kwargs,
                 )
@@ -577,7 +563,6 @@ class NNModuleVariable(VariableTracker):
                             submod,
                             key,
                             source=src,
-                            **options,
                         )
                     )
                     submods.append(submod)
@@ -589,7 +574,6 @@ class NNModuleVariable(VariableTracker):
                     source=NNModuleSource(
                         GetItemSource(self.source, args[0].as_python_constant())
                     ),
-                    **options,
                 )
                 return new_module_variable
 
@@ -600,7 +584,6 @@ class NNModuleVariable(VariableTracker):
                 self.module_key,
                 key,
                 source=NNModuleSource(GetItemSource(self.source, key)),
-                **options,
             )
         elif (
             name == "_get_abs_string_index"
@@ -616,9 +599,8 @@ class NNModuleVariable(VariableTracker):
             # Inline the function
             fn = getattr(module, name).__func__
             fn_source = AttrSource(AttrSource(self.source, name), "__func__")
-            options["source"] = fn_source
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, **options),
+                variables.UserFunctionVariable(fn, source=fn_source),
                 [self] + args,
                 kwargs,
             )
@@ -701,7 +683,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
         mod = self.value
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
@@ -721,9 +702,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            return variables.UserFunctionVariable(
-                fn, source=source, **options
-            ).call_function(tx, [self] + list(args), kwargs)
+            return variables.UserFunctionVariable(fn, source=source).call_function(
+                tx, [self] + list(args), kwargs
+            )
 
     def call_method(
         self,
@@ -734,7 +715,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         from .builder import VariableBuilder
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         if name in ["_call_impl", "_wrapped_call_impl"]:
             fn = getattr(self.value_type, name)
             if self.source:
@@ -742,9 +722,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else:
                 source = None
 
-            return variables.UserFunctionVariable(
-                fn, source=source, **options
-            ).call_function(tx, [self] + list(args), kwargs)
+            return variables.UserFunctionVariable(fn, source=source).call_function(
+                tx, [self] + list(args), kwargs
+            )
 
         if name not in getattr(self.value, "__dict__", {}):
             try:
@@ -765,16 +745,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         VariableBuilder(tx, AttrSource(self.source, name))(value)
                     )
                 return variables.ListIteratorVariable(
-                    items, mutable_local=MutableLocal(), **options
+                    items, mutable_local=MutableLocal()
                 )
             elif isinstance(method, staticmethod):
                 source = AttrSource(
                     AttrSource(AttrSource(self.source, "__class__"), name), "__func__"
                 )
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(
-                        method.__func__, source=source, **options
-                    ),
+                    variables.UserFunctionVariable(method.__func__, source=source),
                     args,
                     kwargs,
                 )

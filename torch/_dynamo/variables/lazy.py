@@ -81,7 +81,6 @@ class LazyVariableTracker(VariableTracker):
     apply = VariableTracker.apply
     copy = VariableTracker.copy
     __post_init__ = VariableTracker.__post_init__
-    propagate = VariableTracker.propagate
     __repr__ = VariableTracker.__repr__
 
 
