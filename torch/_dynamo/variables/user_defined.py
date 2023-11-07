@@ -69,15 +69,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 obj.__func__, self, source=source, **options
             )
         elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
-                options
-            )
+            return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
         ):
             if source:
-                return VariableBuilder(tx, source)(obj).add_options(options)
+                return VariableBuilder(tx, source)(obj)
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable.create(obj, **options)
 
@@ -144,9 +142,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(
-                            tx, field_defaults[field_name]
-                        ).add_options(options)
+                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -181,7 +177,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
                 return var
             else:
-                return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.CustomizedDictVariable.create(
@@ -519,7 +516,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
-                return VariableBuilder(tx, source)(subobj).add_options(options)
+                return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj, **options)
 
@@ -541,7 +538,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     name,
                 )
 
-            return VariableBuilder(tx, source)(subobj).add_options(options)
+            return VariableBuilder(tx, source)(subobj)
         options["source"] = source
         if isinstance(
             subobj,
@@ -570,7 +567,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
                 return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
-                ).add_options(self, result)
+                )
             except KeyError:
                 pass
         options = VariableTracker.propagate(self)
@@ -599,9 +596,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return VariableBuilder(
             tx,
             ODictGetItemSource(self.source, index),
-        )(
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(key, self)
+        )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):

@@ -287,7 +287,7 @@ class TorchVariable(VariableTracker):
 
     def call_hasattr(self, tx, name):
         result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result).add_options(self)
+        return variables.ConstantVariable.create(result)
 
     def reconstruct(self, codegen):
         return torch_reconstruct(codegen, self.value)
@@ -344,7 +344,7 @@ class TorchVariable(VariableTracker):
 
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
-            ).add_options(options)
+            )
         elif self.value in config.constant_functions:
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
@@ -595,7 +595,7 @@ class TorchVariable(VariableTracker):
             # guard propagation via options is the best we can do.
             from .builder import SourcelessBuilder
 
-            return SourcelessBuilder()(tx, invocation_result).add_options(options)
+            return SourcelessBuilder()(tx, invocation_result)
         elif is_from_local(self.value):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function

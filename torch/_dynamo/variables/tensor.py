@@ -208,7 +208,7 @@ class TensorVariable(VariableTracker):
 
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
-        return VariableBuilder(tx, attr_source)(real_value).add_options(self)
+        return VariableBuilder(tx, attr_source)(real_value)
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
@@ -575,7 +575,7 @@ class TensorVariable(VariableTracker):
 
             tensor = self.as_proxy().node.meta["example_value"]
             out = tolist(tensor, self.as_proxy())
-            return SourcelessBuilder()(tx, out).add_options(options)
+            return SourcelessBuilder()(tx, out)
         elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:

@@ -29,7 +29,7 @@ _type_to_assert_reason = {
 
 class ConstantVariable(VariableTracker):
     @staticmethod
-    def create(value, **kwargs):
+    def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)
         is_literal = ConstantVariable.is_literal(value)
         if not is_literal:
@@ -197,7 +197,7 @@ class ConstantVariable(VariableTracker):
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         result = hasattr(self.value, name)
-        return variables.ConstantVariable.create(result).add_options(self)
+        return variables.ConstantVariable.create(result)
 
 
 class EnumVariable(VariableTracker):

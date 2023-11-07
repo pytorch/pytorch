@@ -24,11 +24,11 @@ def wrap_bound_arg(tx, val, options, source=None):
     elif not source:
         from torch._dynamo.variables.builder import SourcelessBuilder
 
-        return SourcelessBuilder()(tx, val).add_options(options)
+        return SourcelessBuilder()(tx, val)
     else:
         from torch._dynamo.variables.builder import VariableBuilder
 
-        return VariableBuilder(tx, source=source)(val).add_options(options)
+        return VariableBuilder(tx, source=source)(val)
 
 
 def wrap_args_kwargs(tx, result, options):
@@ -234,9 +234,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 else:
                     from .builder import SourcelessBuilder
 
-                    result[name] = SourcelessBuilder()(
-                        tx, cell.cell_contents
-                    ).add_options(options)
+                    result[name] = SourcelessBuilder()(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -297,7 +295,7 @@ class UserMethodVariable(UserFunctionVariable):
             ):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-                ).add_options(self)
+                )
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
@@ -620,10 +618,7 @@ class FunctoolsPartialVariable(VariableTracker):
         options = VariableTracker.propagate([self])
         merged_args = self.args + args
         merged_kwargs = {**self.keywords, **kwargs}
-
-        return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
-            options
-        )
+        return self.func.call_function(tx, merged_args, merged_kwargs)
 
     def as_python_constant(self):
         if self.original:
