@@ -13,8 +13,6 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import inspect
-import warnings
 from typing import (
     Any,
     Callable,
@@ -31,7 +29,7 @@ from typing import (
 import torch
 
 if torch._running_with_deploy():
-    warnings.warn("C++ pytree utilities do not work with torch::deploy.")
+    raise ImportError("C++ pytree utilities do not work with torch::deploy.")
 
 import optree
 from optree import PyTreeSpec  # direct import for type annotations
@@ -122,6 +120,8 @@ def register_pytree_node(
         unflatten_fn (callable): A function taking two arguments: the auxiliary data that was
             returned by ``flatten_fn`` and stored in the treespec, and the unflattened children.
             The function should return an instance of ``cls``.
+        serialized_type_name (str, optional): A keyword argument used to specify the fully
+            qualified name used when serializing the tree spec.
         to_dumpable_context (callable, optional): An optional keyword argument to custom specify how
             to convert the context of the pytree to a custom json dumpable representation. This is
             used for json serialization, which is being used in :mod:`torch.export` right now.
@@ -129,8 +129,6 @@ def register_pytree_node(
             how to convert the custom json dumpable representation of the context back to the
             original context. This is used for json deserialization, which is being used in
             :mod:`torch.export` right now.
-        serialized_type_name (str, optional): A keyword argument used to specify the fully
-            qualified name used when serializing the tree spec.
         namespace (str, optional): A non-empty string that uniquely identifies the namespace of the
             type registry. This is used to isolate the registry from other modules that might
             register a different custom behavior for the same type. (default: :const:`"torch"`)
@@ -215,6 +213,45 @@ def register_pytree_node(
             )
         )
     """
+    _private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+        namespace=namespace,
+    )
+
+    from . import _pytree as python
+
+    python._private_register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+
+_register_pytree_node = register_pytree_node
+
+
+def _private_register_pytree_node(
+    cls: Type[Any],
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    *,
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+    namespace: str = "torch",
+) -> None:
+    """This is an internal function that is used to register a pytree node type
+    for the C++ pytree only. End-users should use :func:`register_pytree_node`
+    instead.
+    """
     # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
     # PyStructSequence types
     if not optree.is_structseq_class(cls):
@@ -224,23 +261,6 @@ def register_pytree_node(
             _reverse_args(unflatten_fn),
             namespace=namespace,
         )
-
-    from . import _pytree as python
-
-    current_frame = inspect.currentframe()
-    previous_frame = current_frame.f_back if current_frame is not None else None
-    if previous_frame is not None and inspect.getmodule(previous_frame) is not python:
-        python._register_pytree_node(
-            cls,
-            flatten_fn,
-            unflatten_fn,
-            to_dumpable_context=to_dumpable_context,
-            from_dumpable_context=from_dumpable_context,
-            serialized_type_name=serialized_type_name,
-        )
-
-
-_register_pytree_node = register_pytree_node
 
 
 def tree_flatten(
