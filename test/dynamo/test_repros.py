@@ -3637,6 +3637,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         compiled_fn(inp, vec1, vec2, alpha=alpha, beta=beta, out=compile_out)
         self.assertTrue(same(out, compile_out))
 
+    def test_setattr_requires_grad_graph_breaks(self):
+        def fn(x):
+            x.requires_grad = True
+            x += 1
+            return x
+
+        for backend in ["eager", "aot_eager"]:
+            opt_fn = torch.compile(fn, backend=backend)
+
+            eager = torch.zeros(5)
+            compiled = eager.clone()
+
+            fn(eager)
+            opt_fn(compiled)
+
+            self.assertEqual(eager, compiled)
+
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
             for _ in range(1000):
