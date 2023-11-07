@@ -481,6 +481,13 @@ class TestNumPyInterop(TestCase):
                     self.assertFalse(t == a)
                 else:
                     self.assertTrue(t == a)
+    @onlyCPU
+    def test_empty_tensors_interop(self, device):
+        x = torch.empty((8, 0), dtype=torch.float16)
+        y = torch.from_numpy(np.empty((0, 8, 0), dtype=np.float16))
+        # This used to segfault, see https://github.com/pytorch/pytorch/issues/113037
+        z = torch.div(x, y, rounding_mode='floor')
+        self.assertEqual(z.shape, y.shape)
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 

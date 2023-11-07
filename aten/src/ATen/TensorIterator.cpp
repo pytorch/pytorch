@@ -797,6 +797,9 @@ bool TensorIteratorBase::is_contiguous() const {
 bool TensorIteratorBase::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;
   for (const auto i : c10::irange(ndim())) {
+    if (shape_[i] == 0) {
+      return false;
+    }
     if (stride[i] != 0 && shape_[i] != 1) {
       return false;
     }

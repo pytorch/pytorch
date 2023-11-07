@@ -341,15 +341,19 @@ class TestForeach(TestCase):
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0])]]:
+        for tensors in [[torch.randn([0], dtype=dtype, device=device)],
+                        [torch.empty_strided((0, 1), (0, 0), dtype=dtype, device=device)]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
+
+            # Regression test for https://github.com/pytorch/pytorch/issues/113156
+            torch._foreach_mul_(tensors, 1)
 
     @ops(
         filter(lambda op: not op.has_no_out_of_place, foreach_binary_op_db),
