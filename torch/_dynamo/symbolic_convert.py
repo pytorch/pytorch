@@ -674,10 +674,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
         if isinstance(oldvar.mutable_local, side_effects.MutableSideEffects):
             newvar = self.output.side_effects.mutation(oldvar, newvar)
-        elif isinstance(oldvar.mutable_local, side_effects.AttributeMutation):
-            newvar = newvar.clone(mutable_local=oldvar.mutable_local)
         else:
-            assert isinstance(oldvar.mutable_local, variables.base.MutableLocal)
+            assert type(oldvar.mutable_local) is variables.base.MutableLocal
             newvar = newvar.clone(mutable_local=variables.base.MutableLocal())
         self.update_locals_and_stack(oldvar, newvar)
         return newvar
@@ -2586,14 +2584,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             self.push(InlinedClosureVariable(name=inst.argval))
 
-    def check_replace_is_safe(self, oldvar):
+    def _check_replace_is_safe(self, oldvar, newvar):
+        if (
+            isinstance(oldvar, TensorVariable)
+            and isinstance(newvar, TensorVariable)
+            and oldvar.as_proxy().node.meta["example_value"]
+            is newvar.as_proxy().node.meta["example_value"]
+        ):
+            # Mutation is due to in-place op. We just want to propagate
+            return
         if not is_side_effect_safe(oldvar.mutable_local):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
             )
 
     def replace_all(self, oldvar: VariableTracker, newvar: VariableTracker):
-        self.check_replace_is_safe(oldvar)
+        self._check_replace_is_safe(oldvar)
         newvar = super().replace_all(oldvar, newvar)
         # recursively check and update parent's locals and stack in case oldvar is from parent
         translator: InstructionTranslatorBase = self

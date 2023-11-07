@@ -538,11 +538,14 @@ class BuiltinVariable(VariableTracker):
                     ret = wrap_fx_proxy_cls(
                         variables.NumpyNdarrayVariable, tx, proxy, **options
                     )
-                    if (
-                        self.fn in self._self_assigning_ops()
-                        and args[0].mutable_local is not None
-                    ):
-                        ret = tx.replace_all(args[0], ret)
+                    if self.fn in self._self_assigning_ops():
+                        assert isinstance(args[0], TensorVariable)
+                        assert (
+                            args[0].as_proxy().node.meta["example_value"]
+                            is ret.as_proxy().node.meta["example_value"]
+                        )
+                        # The mutation is propagated via the example_value
+                        ret = args[0]
                     return ret
 
                 proxy = tx.output.create_proxy(
@@ -586,11 +589,14 @@ class BuiltinVariable(VariableTracker):
                         args[0] = args[0].convert_to_constant(tx)
                     ret = wrap_fx_proxy(tx, proxy, **options)
 
-                if (
-                    self.fn in self._self_assigning_ops()
-                    and args[0].mutable_local is not None
-                ):
-                    ret = tx.replace_all(args[0], ret)
+                if self.fn in self._self_assigning_ops():
+                    assert isinstance(args[0], TensorVariable)
+                    assert (
+                        args[0].as_proxy().node.meta["example_value"]
+                        is ret.as_proxy().node.meta["example_value"]
+                    )
+                    # The mutation is propagated via the example_value
+                    ret = args[0]
                 return ret
 
             except NotImplementedError:
