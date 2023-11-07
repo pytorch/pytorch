@@ -182,9 +182,9 @@ def _get_input_output_quantized_filter():
             # it is a node in the node.users list of the last node.
             if (
                 len(pattern_node.users) == 1
-                and list(pattern_node.users.keys())[0].op == "output"
+                and next(iter(pattern_node.users.keys())).op == "output"
             ):
-                output_node = list(original_node.users.keys())[0]
+                output_node = next(iter(original_node.users.keys()))
                 if (
                     output_node.target
                     == torch.ops.quantized_decomposed.quantize_per_tensor.default

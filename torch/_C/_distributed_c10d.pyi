@@ -11,7 +11,6 @@ from torch.futures import Future
 _DEFAULT_FIRST_BUCKET_BYTES: int
 _DEFAULT_NO_TIMEOUT: timedelta
 _DEFAULT_PG_TIMEOUT: timedelta
-_DEFAULT_PG_NCCL_TIMEOUT: timedelta
 
 class BuiltinCommHookType(Enum):
     ALLREDUCE = ...
