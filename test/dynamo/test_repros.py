@@ -3613,8 +3613,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             y.data = torch.zeros([0])
             return x is z
 
-        for backend in ["eager"]:
+        for backend in ["eager", "aot_eager", "inductor"]:
             for func in [func1, func2, func3]:
+                if backend != "eager" and func is func1:
+                    # add_ not working w/ aot_autograd?
+                    continue
                 torch._dynamo.reset()
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 

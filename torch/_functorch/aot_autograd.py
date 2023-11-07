@@ -1138,7 +1138,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata=mutates_metadata,
                 mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                 mutates_storage_metadata=mutates_storage_metadata,
-                requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad
+                requires_grad=isinstance(f_arg, torch.Tensor) and f_arg.requires_grad,
             ))
 
         # If a function involves creating a tensor, and returning a view of it, such that its _base is the intermediate,
@@ -3145,7 +3145,10 @@ def create_runtime_wrapper(
                     if trace_joint:
                         assert isinstance(updated_inpt, TensorAlias)
                         updated_inpt = updated_inpt.alias
-                    original_inpt.set_(updated_inpt)
+                    try:
+                        original_inpt.set_(updated_inpt)
+                    except RuntimeError:
+                        original_inpt.data = updated_inpt
                     continue
                 if meta.mutates_metadata and not meta.mutates_data:
                     if trace_joint:
@@ -4306,12 +4309,23 @@ def create_aot_dispatcher_function(
                         return x
                 # TODO: Ensure that this codepath is never exercised from
                 # Dynamo
+
+                def from_fake(x, static_shapes):
+                    ftensor = fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh=False)
+                    # The tensor has changed during initial trace, and is now different
+                    if ftensor.shape != x.shape:
+                        return fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh=True)
+                    return ftensor
+
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
                 ):
-                    return fake_mode.from_tensor(x, static_shapes=True)
-                return fake_mode.from_tensor(x, static_shapes=False)
+
+                    out = from_fake(x, static_shapes=True)
+                    return out
+                out = from_fake(x, static_shapes=False)
+                return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
