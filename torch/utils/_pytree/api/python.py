@@ -288,25 +288,25 @@ def _odict_unflatten(
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_register_pytree_node(
+_private_register_pytree_node(
     dict,
     _dict_flatten,
     _dict_unflatten,
     serialized_type_name="builtins.dict",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     list,
     _list_flatten,
     _list_unflatten,
     serialized_type_name="builtins.list",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     tuple,
     _tuple_flatten,
     _tuple_unflatten,
     serialized_type_name="builtins.tuple",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     namedtuple,
     _namedtuple_flatten,
     _namedtuple_unflatten,
@@ -314,7 +314,7 @@ _register_pytree_node(
     from_dumpable_context=_namedtuple_deserialize,
     serialized_type_name="collections.namedtuple",
 )
-_register_pytree_node(
+_private_register_pytree_node(
     OrderedDict,
     _odict_flatten,
     _odict_unflatten,
