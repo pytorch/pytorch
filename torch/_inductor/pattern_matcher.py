@@ -1353,28 +1353,11 @@ _seen_patterns: Set[str] = set()
 def get_arg_value(
     node: torch.fx.Node, arg_number: int, kwarg_name: Optional[str] = None
 ):
-    # see python_arg_parser.cpp; e.g. kwargs named "dim" also match "axis"
-    numpy_compat = {
-        "dim": ("axis",),
-        "keepdim": ("keepdims",),
-        "input": ("x", "a", "x1"),
-        "other": ("x2",),
-    }
-
-    if len(node.args) > arg_number:
-        return node.args[arg_number]
-
-    val = node.kwargs.get(kwarg_name, None)
-    if val is not None:
-        return val
-
-    if kwarg_name is not None:
-        for alt_name in numpy_compat.get(kwarg_name, ()):
-            val = node.kwargs.get(alt_name, None)
-            if val is not None:
-                return val
-
-    return None
+    return (
+        node.args[arg_number]
+        if len(node.args) > arg_number
+        else node.kwargs.get(kwarg_name)
+    )
 
 
 def filter_nodes(nodes: Iterable[torch.fx.Node], fn) -> List[torch.fx.Node]:

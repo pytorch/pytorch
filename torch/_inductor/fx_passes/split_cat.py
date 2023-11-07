@@ -1,3 +1,4 @@
+import functools
 import itertools
 import logging
 import operator
@@ -97,6 +98,90 @@ def normalize_split_base(
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
     counters["inductor"]["split_cat_norm"] += 1
+
+
+class CallFunctionTorchOp(PatternExpr):
+    op = "call_function"
+
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> Union[Match, FailedMatch]:
+        if not isinstance(node, torch.fx.Node):
+            return FailedMatch("Not an fx node")
+        if node.op != self.op:
+            return FailedMatch(f"Not a {self.op} node")
+        if isinstance(node.target, OpOverload) or isinstance(node.target, OpOverloadPacket):
+            return FailedMatch(f"Is an aten op, not a torch op")
+
+        return Match(self)
+
+
+class NumpyCompatKwargReplacer:
+    """
+    For compatibility with numpy, some kwargs to torch ops have alternative names.
+    For example, any torch op that takes a "dim" kwarg can also accept an "axis" kwarg
+    that has the same behavior/purpose.
+
+    See python_arg_parser.cpp for details.
+    """
+
+    numpy_compat = {
+        "dim": ("axis",),
+        "keepdim": ("keepdims",),
+        "input": ("x", "a", "x1"),
+        "other": ("x2",),
+    }
+
+    def __init__(self):
+        self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
+        self.inverse_mapping = {}
+        for actual_kwarg, numpy_kwargs in self.numpy_compat.items():
+            for numpy_kwarg in numpy_kwargs:
+                assert numpy_kwarg not in self.inverse_mapping
+                self.inverse_mapping[numpy_kwarg] = actual_kwarg
+
+    def __call__(self, match: Match, *args, **kwargs):
+        node = match.nodes[0]
+        graph = match.graph
+
+        if node.target in self.cache:
+            replaceable_kwargs = self.cache[node.target]
+        else:
+            signatures = torch.fx.operator_schemas.get_signature_for_torch_op(node.target)
+            replaceable_kwargs = set()
+            for sig in signatures:
+                for param_name in sig.parameters.keys():
+                    if param_name in self.numpy_compat:
+                        replaceable_kwargs.add(param_name)
+
+            self.cache[node.target] = replaceable_kwargs
+
+        def rename_kwarg(kwarg_name):
+            if kwarg_name in self.replacable_kwargs:
+                return self.inverse_mapping[kwarg_name]
+            return kwarg_name
+
+        new_kwargs = {rename_kwarg(k): v for k, v in kwargs.items()}
+
+        with graph.inserting_after(node):
+            new_node = graph.call_function(
+                node.target,
+                args=args,
+                kwargs=new_kwargs,
+            )
+        node.replace_all_uses_with(new_node)
+        new_node.meta.update(node.meta)
+        graph.erase_node(node)
+        counters["inductor"]["numpy_compat_kwarg_replacer"] += 1
+
+
+
+get_numpy_compat_replacement = NumpyCompatKwargReplacer()
+
+register_graph_pattern(
+    CallFunctionTorchOp(),
+    pass_dict=normalization_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+    prepend=True,  # other normalization passes depend on this
+)(get_numpy_compat_replacement)
 
 
 @register_graph_pattern(
