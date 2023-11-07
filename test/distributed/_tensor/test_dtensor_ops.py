@@ -602,7 +602,7 @@ class TestDTensorOps(DTensorOpTestBase):
                 f"dtensor requires_grad: {dtensor_r.requires_grad}",
             )
 
-            self.assertEqualOnRank(dtensor_r.to_local(), r)
+            self.assertEqualOnRank(dtensor_r, r)
 
     def run_dtensor_crossref(self, func, args, kwargs):
         to_dtensor = DTensorConverter(self.mesh, args, kwargs)
