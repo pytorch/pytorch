@@ -1697,6 +1697,10 @@ def forward(self, x_1):
         for op in [torch.ops.aten.sin.default, torch.ops.aten.sum.dim_IntList]:
             self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
 
+    def test_builtin_torchscript_ops(self):
+        for op in [torch.ops.aten.sub.complex, torch.ops.aten.mul.complex]:
+            self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
+
     def test_autogen_aten_ops_are_pt2_compliant(self):
         for op in [
             torch.ops.aten._foreach_copy.default,
