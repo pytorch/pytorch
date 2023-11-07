@@ -405,7 +405,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     The identity value of the operation is defined as the initial
     value to reduction operation that has a property ``op(op_identity,
     value) == value`` for any value in the domain of the operation.
-    Or put it another way, including or exlucing the identity value in
+    Or put it another way, including or excluding the identity value in
     a list of operands will not change the reduction result.
 
     See https://github.com/pytorch/rfcs/pull/27 for more information.
