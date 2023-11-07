@@ -2511,7 +2511,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             self.push(InlinedClosureVariable(name=inst.argval))
 
-    def check_replace_is_safe(self, oldvar, newvar):
+    def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)"
