@@ -3135,7 +3135,12 @@ class ShapeEnv:
                     if isinstance(q, sympy.Number) and isinstance(p, sympy.Mul) and len(p.args) == 2:
                         c, i0 = p.args
                         # Given Mod(c * i0, q) == 0
-                        if isinstance(c, sympy.Number) and isinstance(i0, sympy.Symbol) and self.is_unbacked_symint(i0) and int(q) % int(c) == 0:
+                        if (
+                            isinstance(c, sympy.Number) and
+                            isinstance(i0, sympy.Symbol) and
+                            self.is_unbacked_symint(i0) and
+                            int(q) % int(c) == 0
+                        ):
                             # We have Mod(i0, q / c) == 0, which means we can
                             # rewrite i0 as (q / c) * i1
                             d = q / c
@@ -3143,8 +3148,12 @@ class ShapeEnv:
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
-                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(self.var_to_range[i0], ValueRanges.wrap(d))
-                            self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(self.runtime_var_to_range[i0], ValueRanges.wrap(d))
+                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.var_to_range[i0], ValueRanges.wrap(d)
+                            )
+                            self.runtime_var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                                self.runtime_var_to_range[i0], ValueRanges.wrap(d)
+                            )
                             self._set_replacement(i0, d * i1)
 
             except NotImplementedError:
