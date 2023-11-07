@@ -1743,6 +1743,7 @@ class TestTags(TestCase):
     @onlyCPU
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_tags(self, device, dtype, op):
+        self.assertTrue(1 == 2)
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
             # TODO: Test tags for ops that return a list of tensors
