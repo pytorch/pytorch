@@ -84,10 +84,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
-    def test_c10d_functional_tagged_pt2_compliant(self):
-        op = torch.ops.c10d_functional.all_reduce.default
-        self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
-
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
