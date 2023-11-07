@@ -142,7 +142,7 @@ class NestedTensor(torch.Tensor):
             "ragged_size": self._size[self._ragged_idx],
         }
         inner_tensors = ["_values", "_offsets"]
-        if self._lengths:
+        if self._lengths is not None:
             inner_tensors.append("_lengths")
         return inner_tensors, ctx
 
@@ -151,7 +151,7 @@ class NestedTensor(torch.Tensor):
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        if "_lengths" in inner_tensors:
+        if "_lengths" in inner_tensors and inner_tensors["_lengths"] is not None:
             lengths = inner_tensors["_lengths"]
         else:
             lengths = None
