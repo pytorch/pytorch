@@ -340,7 +340,7 @@ freezing_discard_parameters: bool = False
 allow_stack_allocation: bool = True
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
-# to maximize performance for use cases that it can accomodate at the expense of
+# to maximize performance for use cases that it can accommodate at the expense of
 # generality. In brief:
 # - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
 #   tensor must be contiguous)

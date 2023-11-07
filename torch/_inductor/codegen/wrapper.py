@@ -1348,9 +1348,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             from ..graph import may_get_constant_buffer_dtype
 
             dtype = may_get_constant_buffer_dtype(input)
-            assert (
-                dtype is not None
-            ), f"Failed to get the dtype of sympy.Expr: {input}"
+            assert dtype is not None, f"Failed to get the dtype of sympy.Expr: {input}"
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 

@@ -107,15 +107,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_dim(
-    AtenTensorHandle tensor,
-    int64_t* ret_dim
-);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dim(AtenTensorHandle tensor, int64_t* ret_dim);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_numel(
-    AtenTensorHandle tensor,
-    int64_t* ret_numel
-);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_numel(AtenTensorHandle tensor, int64_t* ret_numel);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     AtenTensorHandle tensor,
@@ -133,17 +129,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_stride(AtenTensorHandle tensor, int64_t d, int64_t* ret_stride);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_dtype(
-    AtenTensorHandle tensor,
-    int32_t* ret_dtype);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_dtype(AtenTensorHandle tensor, int32_t* ret_dtype);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_device_type(
-    AtenTensorHandle tensor,
-    int32_t* ret_device_type);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_type(AtenTensorHandle tensor, int32_t* ret_device_type);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_device_index(
-    AtenTensorHandle tensor,
-    int32_t* ret_device_index);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_device_index(AtenTensorHandle tensor, int32_t* ret_device_index);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_storage_offset(
     AtenTensorHandle tensor,
