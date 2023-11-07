@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/bucketize_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/searchsorted_native.h>
 #endif
@@ -371,6 +372,24 @@ Tensor searchsorted_mps(const Tensor& sorted_sequence,
                         const c10::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = mps::wrapped_scalar_tensor_mps(self, sorted_sequence.device());
   return searchsorted_mps(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);
+}
+
+Tensor& bucketize_out_mps(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right, Tensor& result) {
+  TORCH_CHECK(boundaries.dim() == 1, "boundaries tensor must be 1 dimension, but got dim(", boundaries.dim(), ")");
+  at::native::searchsorted_out_mps(boundaries, self, out_int32, right, c10::nullopt, c10::nullopt, result);
+  return result;
+}
+
+Tensor bucketize_mps(const Tensor& self, const Tensor& boundaries, bool out_int32, bool right) {
+  ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
+  Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
+  at::native::bucketize_out_mps(self, boundaries, out_int32, right, result);
+  return result;
+}
+
+Tensor bucketize_mps(const Scalar& self, const Tensor& boundaries, bool out_int32, bool right) {
+  return bucketize_mps(mps::wrapped_scalar_tensor_mps(self, boundaries.device()), boundaries, out_int32, right);
 }
 
 } // namespace at::native

@@ -11159,16 +11159,19 @@
   dispatch:
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
+    MPS: bucketize_mps
 
 - func: bucketize.Tensor_out(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: bucketize_out_cpu
     CUDA: bucketize_out_cuda
+    MPS: bucketize_out_mps
 
 - func: bucketize.Scalar(Scalar self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
     CUDA: bucketize_cuda
+    MPS: bucketize_mps
   autogen: bucketize.Scalar_out
 
 - func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
