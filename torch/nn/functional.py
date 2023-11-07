@@ -3371,7 +3371,7 @@ def hinge_embedding_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""Compute the loss given an input tensor x and a labels tensor y (containing 1 or -1).
+    r"""Compute the loss given an input tensor x and a labels tensor y (containing `1` or `-1`).
 
     Usually used for measuring whether two inputs are similar or dissimilar,
     e.g. using the L1 pairwise distance as x,
