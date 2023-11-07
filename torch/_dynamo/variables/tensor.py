@@ -23,6 +23,7 @@ from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     guard_scalar,
     GuardOnDataDependentSymNode,
+    is_symbolic,
     SymTypes,
 )
 
@@ -163,7 +164,11 @@ class TensorVariable(VariableTracker):
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple([int(s) for s in value.size()])
+            props["size"] = tuple(
+                # the non is_symbolic case applies to the jagged layout
+                # NestedTensor case as singleton ints are not symbolic
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
@@ -233,9 +238,9 @@ class TensorVariable(VariableTracker):
         if name == "ndim" and self.ndim is not None:
             result = ConstantVariable.create(self.ndim, **options)
         elif name == "dtype" and self.dtype is not None:
-            result = TorchVariable(self.dtype, **options)
+            result = ConstantVariable.create(self.dtype, **options)
         elif name == "device" and self.device is not None:
-            result = TorchVariable(self.device, **options)
+            result = ConstantVariable.create(self.device, **options)
         elif name == "layout" and self.layout is not None:
             result = TorchVariable(self.layout, **options)
         elif name == "is_cuda" and self.device is not None:
@@ -674,7 +679,8 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "register_hook":
+        elif name in {"register_hook", "register_post_accumulate_grad_hook"}:
+            # Note - do not arbitrarily add hooks here - make sure they match the same contract
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -698,10 +704,8 @@ class TensorVariable(VariableTracker):
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
                 fn = fn_var.as_python_constant()
-                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
-                name = fn_var.fn.__name__
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
@@ -748,7 +752,8 @@ class TensorVariable(VariableTracker):
                 fn = functools.partial(trace_wrapped, fn=fn)
 
                 def _register_hook_trampoline(tensor):
-                    tensor.register_hook(fn)
+                    hook_callable = getattr(tensor, name)
+                    hook_callable(fn)
                     return tensor
 
                 return wrap_fx_proxy(
@@ -762,7 +767,7 @@ class TensorVariable(VariableTracker):
                     **options,
                 )
 
-            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
             return handle_variable
         elif name == "requires_grad_" and self.as_proxy().node.meta[
             "example_value"
