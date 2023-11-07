@@ -3613,28 +3613,36 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             y.data = torch.zeros([0])
             return x is z
 
-        for backend in ["eager", "aot_eager", "inductor"]:
-            torch._dynamo.reset()
+        for backend in ["eager"]:
             for func in [func1, func2, func3]:
-                if func is func1 and backend != "eager":
-                    # NYI - aot_autograd with add_() on data
-                    return
+                torch._dynamo.reset()
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
                 compiled_fn = torch.compile(func, backend=cnt)
+                requires_grad = func is not func1
                 for i in range(0, 5):
                     # Inputs
-                    eager_a = torch.rand([6])
-                    compiled_a = torch.clone(eager_a)
-                    eager_b = torch.rand([6])
-                    compiled_b = torch.clone(eager_b)
+                    eager_a = torch.ones([6], requires_grad=requires_grad)
+                    compiled_a = torch.ones([6], requires_grad=requires_grad)
+
+                    eager_b = torch.ones([6], requires_grad=requires_grad)
+                    compiled_b = torch.ones([6], requires_grad=requires_grad)
 
                     # Eager
-                    func(eager_a, eager_b)
+                    out_eager = func(eager_a, eager_b)
                     # Compiled
-                    compiled_fn(compiled_a, compiled_b)
+                    out_compiled = compiled_fn(compiled_a, compiled_b)
                     self.assertEqual(eager_a, compiled_a)
                     self.assertEqual(eager_b, compiled_b)
+                    self.assertEqual(out_eager, out_compiled)
+
+                    # func1 hits a leaf Variable that requires grad is being used in an in-place operation
+                    if requires_grad:
+                        bwd_inp_eager = torch.randn([6])
+                        bwd_inp_compiled = torch.clone(bwd_inp_eager)
+                        eager_a.backward(bwd_inp_eager)
+                        compiled_a.backward(bwd_inp_compiled)
+                        self.assertEqual(eager_a.grad, compiled_a.grad)
 
                 # Prove guarding works - we run the compiled_fn 5 times
                 # frame_count should stay at 1.

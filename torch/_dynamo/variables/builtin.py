@@ -1177,6 +1177,7 @@ class BuiltinVariable(VariableTracker):
             if isinstance(obj, variables.TensorVariable):
                 from .builder import wrap_fx_proxy
 
+
                 if name_var.as_python_constant() == "data":
                     # Remove the old reference in tracked fakes - if we don't do this
                     # new .data value size and shape differences will cause
@@ -1216,8 +1217,8 @@ class BuiltinVariable(VariableTracker):
                     # This handles options prop, guards and ends with a clone
                     out = val.add_options(self, out, name_var)
                     # Step 4 - replace all reference to the current object with the new one
-                    tx.replace_all(obj, out)
-                    return ConstantVariable.create(None)
+                    return tx.replace_all(obj, out)
+
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
