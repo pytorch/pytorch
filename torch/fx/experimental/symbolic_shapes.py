@@ -60,7 +60,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols",
+    "has_free_symbols", "sym_eq",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.

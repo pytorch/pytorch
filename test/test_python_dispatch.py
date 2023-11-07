@@ -592,7 +592,6 @@ class TestPythonDispatch(TestCase):
 $0: f32[1] = input('x')
 $1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
 $2: f32[1] = input('grad_y')
-True = torch._ops.aten.is_same_size.default($1, $2)
 $3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
 $5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
