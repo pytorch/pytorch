@@ -421,7 +421,7 @@ def fold_weight(
         if prepack_node is node:
             packed_weight = packed_weights[node.name]
             # add a prepacked attribute to root
-            op_node = list(prepack_node.users)[0]
+            op_node = next(iter(prepack_node.users))
             module_path, _ = node_name_to_scope[op_node.name]
             get_new_packed_weight_name = \
                 get_new_attr_name_with_prefix(module_path + '_packed_weight_')
@@ -1035,7 +1035,7 @@ def special_pattern_replacement(model: GraphModule):
         if not (is_call_module or is_call_function or is_call_method):
             continue
         assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
-        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
+        dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else next(iter(ref_node.kwargs.values()))
         assert isinstance(dq_node_or_nodes, (Node, tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
