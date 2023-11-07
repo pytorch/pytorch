@@ -61,7 +61,7 @@ class PixelShuffle(Module):
 
 
 class PixelUnshuffle(Module):
-    r"""Reverse the PixelShuffle operation. 
+    r"""Reverse the PixelShuffle operation.
     
     Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements
     in a tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
