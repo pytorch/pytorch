@@ -615,7 +615,7 @@ _save_config_ignore = {
 }
 
 
-from .._dynamo.config_utils import install_config_module
+from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
