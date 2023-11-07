@@ -1,3 +1,5 @@
+# Older version that tries to reorder FWD/BWD ops: https://gist.github.com/yf225/10a6f559daadc7f1b51cc197d82720cb
+
 import torch
 import itertools
 from typing import Optional, Dict, Callable
@@ -5,6 +7,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from collections import defaultdict, OrderedDict
 import weakref
 import threading
+from torch._inductor.compile_fx import compile_fx_inner
 
 fake_mode = FakeTensorMode()
 
@@ -57,14 +60,23 @@ class AsyncTensor(torch.Tensor):
       return self.async_repr()
 
   # TODO: likely need to define __div__ etc. between Tensor and AsyncTensor
+  # TODO: implement torch.allclose
+  # TODO: define all these Tensor methods: https://www.internalfb.com/code/fbsource/[0edfc6f1cc1db161177cc596f8a6dea83ad3df52]/fbcode/caffe2/torch/csrc/autograd/python_variable.cpp?lines=1515
 
   # def __add__(self, other):
   #   TODO: between Tensor and AsyncTensor
 
+  def __format__(self, format_spec):
+    # NOTE: `print(f"{tensor}")` goes through this
+    AsyncTensor.wait_until_materialized([self])
+    return self._materialized_tensor.__format__(format_spec)
+
   def __getattribute__(self, attr):
+    print(f"getattr: {attr}")
     if attr in dir(torch.Tensor):
       if self._handle is not None:
         AsyncTensor.wait_until_materialized([self])
+        print(f"_materialized_tensor: {self._materialized_tensor}")
         return getattr(self._materialized_tensor, attr)
       else:
         raise Exception(f"Getting {attr} on an AsyncTensor that doesn't have handle is not allowed")
@@ -72,6 +84,7 @@ class AsyncTensor(torch.Tensor):
       return super().__getattribute__(attr)
 
   def __setattr__(self, attr, value):
+    print(f"setattr: {attr} -> {value}")
     if attr in dir(torch.Tensor):
       if self._handle is not None:
         AsyncTensor.wait_until_materialized([self])
@@ -151,13 +164,14 @@ class AsyncFuncHandle:
     print(f"self.args: {self.args}")
     print(f"handle id: {id(self)}, scheduling {gm} ... with id {id(gm)} ... from segment: {self.segment}")
     self._scheduler().add_to_recorded_execution_order(self.segment)
-    self.outs = self.compiled_fn(*self.args)
+    self.outs = self.compiled_fn(list(self.args))
     self.cuda_event.record()
 
   def wait_for_completion(self):
     print("wait_for_completion is called")
     self.cuda_event.synchronize()
     for out, out_async in zip(self.outs, self.outs_async):
+      print(f"out: {out}")
       print("set materialized tensor")
       out_async.set_materialized_tensor(out)
 
@@ -171,26 +185,28 @@ class AsyncFuncHandle:
 
 
 class LazyGraphModule(torch.nn.Module):  # TODO: better name?
-  def __init__(self, gm, scheduler, segment):
+  def __init__(self, scheduler, segment, gm, compiled_fn):
     super().__init__()
-    self.gm = gm
     self.scheduler = scheduler
-    self.compiled_fn = None
     self.segment = segment  # bookkeeping
+    self.gm = gm
+    self.compiled_fn = compiled_fn
 
   def __call__(self, *args):
-    if self.compiled_fn is None:
-      # During compile time, return real tensor, because downstream Inductor compilation needs real tensor
-      self.compiled_fn = torch._inductor.compile(self.gm, args)
-      return self.compiled_fn(*args)
-    else:
+    assert self.compiled_fn is not None
+    # return self.compiled_fn(list(args))
+    # TODO: ok, seems like below causes the output tensor to become not requires_grad???
+    # TODO: let's debug maybe_run step by step
+    # if torch._utils.is_compiling():
+    #   # During compile time, return real tensor, because downstream Inductor compilation needs real tensor
+    #   print("is_compiling is true!")
+    #   return self.compiled_fn(args)
+    # else:
       # breakpoint()
-      print(f"lgm call args will be called")
-      print(f"lgm call args: {args}")
-      print(f"lgm self.gm: {self.gm}")
-      return self.scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
-
-    # return self.gm(*args)
+    print(f"lgm call args will be called")
+    print(f"lgm call args: {args}")
+    print(f"lgm self.gm: {self.gm}")
+    return self.scheduler.maybe_run(self.gm, self.compiled_fn, self.segment, *args)
 
 
 class LazyScheduler:
@@ -215,10 +231,27 @@ class LazyScheduler:
     return recorded_execution_order_for_named_segments == expected_execution_order_for_named_segments, \
       f"{recorded_execution_order_for_named_segments} vs. {expected_execution_order_for_named_segments}"
 
-  def compile(self, gm, example_inputs):
+  # matches compile_fx_inner signature
+  def compile(
+    self,
+    gm: torch.fx.GraphModule,
+    example_inputs,
+    cudagraphs = None,
+    num_fixed = 0,
+    is_backward = False,
+    graph_id = None,
+    cpp_wrapper = False,
+    aot_mode = False,
+    is_inference = False,
+    boxed_forward_device_index = None,
+    user_visible_outputs = frozenset(),
+    layout_opt = None,
+    extern_node_serializer = None,
+  ):
     # breakpoint()
     known_segments = []
     print(f"gm.graph: {gm.graph}")
+    segment = None
     for node in gm.graph.nodes:
       # Look up the NN module method in the segment map
       method = node.meta.get('nn_module_method', None)
@@ -270,29 +303,38 @@ class LazyScheduler:
         print("-")
       print("------")
     for name, sub_gm in gm_after_split.named_children():
-      # Build segment -> GMs mapping
-      node_list = list(sub_gm.graph.nodes)
-      assert node_list[-1].op == "output"
-      # the 2nd last node is guaranteed to not be a placeholder (i.e. input) node,
-      # so its segment tag will actually match what we expect.
-      assert node_list[-2].op != "placeholder"
-      segment = node_list[-2].meta["segment"]
+      assert segment is not None
       # Replace subgraph with the lazy version
-      lazy_sub_gm = LazyGraphModule(sub_gm, self, segment)
+      print(f"is_inference: {is_inference}")
+      compiled_fn = compile_fx_inner(
+        gm,
+        example_inputs,
+        cudagraphs=cudagraphs,
+        num_fixed=num_fixed,
+        is_backward=is_backward,
+        graph_id=graph_id,
+        cpp_wrapper=cpp_wrapper,
+        aot_mode=aot_mode,
+        is_inference=is_inference,
+        boxed_forward_device_index=boxed_forward_device_index,
+        user_visible_outputs=user_visible_outputs,
+        layout_opt=layout_opt,
+        extern_node_serializer=extern_node_serializer,
+      )
+      lazy_sub_gm = LazyGraphModule(
+        self,
+        segment,
+        sub_gm,
+        compiled_fn,
+      )
       setattr(gm_after_split, name, lazy_sub_gm)
+      # Build segment -> GMs mapping
       self._segment_to_gms_map[segment].append(sub_gm)
 
     # breakpoint()
     return gm_after_split
 
-  def record_compiled_fn(self, gm, compiled_fn, segment):
-    pass
-
   def maybe_run(self, gm, compiled_fn, segment, *args):
-    # For now, we just eagerly run it
-    # TODO: implement running based on schedule and returning AsyncTensor
-    # return compiled_fn(*args)
-
     # Create the handle and the async tensors
     args_fake = []
     for arg in args:
@@ -313,6 +355,19 @@ class LazyScheduler:
       self._handle_to_gm_map[cur_handle] = gm
     for out_async in outs_async:
       out_async.set_handle(cur_handle)
+
+    # # # DEBUG ONLY
+    # # return compiled_fn(list(args))
+
+    # # DEBUG ONLY
+    # cur_handle.schedule()
+    # cur_handle.wait_for_completion()
+    # # breakpoint()
+    # # TODO: Problem: when returned value is AsyncTensor, the .grad_fn of it is not populated.
+    # # But maybe we don't need this to implement SDD reordering?
+    # # Basically, to implement SDD reordering, we just need to schedule some SDD op before some FWD/BWD op,
+    # # following a schedule. The order of FWD/BWD ops is actually not changed.
+    # return cur_handle.outs  # works
 
     # First, schedule all graphs from all segments that are before the incoming graph in the schedule.
     all_preceding_graph_handles = []
@@ -345,16 +400,27 @@ class LazyScheduler:
         all_preceding_graph_handles_are_scheduled = False
         break
 
-    # Then, if all preceding graph handles are scheduled, then we schedule the incoming graph; otherwise, we don’t schedule the incoming graph.
-    if all_preceding_graph_handles_are_scheduled:
+    # Then, if all preceding graph handles are scheduled, then we schedule the incoming graph;
+    # otherwise, we don’t schedule the incoming graph.
+    #
+    # NOTE: We can only do lazy scheduling for FWD-only op (e.g. SDD) for now.
+    # Reason is that AsyncTensor output from FWD graph currently doesn't have .grad_fn,
+    # and we need to fix it before we can implement general FWD/BWD op reordering.
+    if is_fwd_only_op(cur_handle):
+      if all_preceding_graph_handles_are_scheduled:
+        print(f"will run current graph: {str(self._handle_to_gm_map[cur_handle].code)}")
+        cur_handle.schedule()
+      assert isinstance(outs_async, tuple)
+      if len(outs_async) == 1:
+        return outs_async[0]
+      else:
+        return outs_async
+    else:
+      assert all_preceding_graph_handles_are_scheduled
       print(f"will run current graph: {str(self._handle_to_gm_map[cur_handle].code)}")
       cur_handle.schedule()
-
-    assert isinstance(outs_async, tuple)
-    if len(outs_async) == 1:
-      return outs_async[0]
-    else:
-      return outs_async
+      cur_handle.wait_for_completion()
+      return cur_handle.outs
 
 
 """

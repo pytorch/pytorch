@@ -1432,8 +1432,6 @@ class SubgraphTracer(fx.Tracer):
                 module = code_context.get_context(f_code)["orig_nnmodule"]
                 method_name = f_code.co_name
                 node.meta['nn_module_method'] = getattr(module, method_name)
-
-        print(f"create_node: node: {node}")
         return node
 
     # Note: we did not override erase_node since

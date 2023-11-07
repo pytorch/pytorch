@@ -1103,6 +1103,13 @@ def compile_fx(
         decompositions if decompositions is not None else select_decomp_table()
     )
 
+    # First node that's not "placeholder" has the correct nn module method info
+    nn_module_method = None
+    for node in model_.graph.nodes:
+        if node.op != "placeholder":
+            nn_module_method = node.meta.get("nn_module_method", None)
+            break
+
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(
         model: torch.fx.GraphModule,
@@ -1166,6 +1173,10 @@ def compile_fx(
                 if isinstance(n, torch.fx.Node)
             }
 
+        if nn_module_method is not None:
+            for node in model.graph.nodes:
+                node.meta["nn_module_method"] = nn_module_method
+
         return inner_compile(
             model,
             example_inputs,
@@ -1201,8 +1212,11 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
-        node_list = list(model.graph.nodes)
-        breakpoint()
+
+        if nn_module_method is not None:
+            for node in model.graph.nodes:
+                node.meta["nn_module_method"] = nn_module_method
+
         return inner_compile(
             model,
             example_inputs,

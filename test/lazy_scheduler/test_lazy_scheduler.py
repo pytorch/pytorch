@@ -1,6 +1,7 @@
 """
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py
 
+pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test1
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_inplace_in_unnamed_NOT_WORKING
 """
@@ -8,6 +9,8 @@ pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_i
 import torch
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch._dynamo import disable
+import functools
+from torch._inductor.compile_fx import compile_fx
 
 
 class TestCase(TorchTestCase):
@@ -21,14 +24,13 @@ class TestCase(TorchTestCase):
 
 
 class TestLazyScheduler(TestCase):
-  def test_simple(self):
+  def test_backward_simple(self):
     class TestModule(torch.nn.Module):
       def __init__(self):
         super().__init__()
-        self.weight = torch.nn.Parameter(torch.randn(4, 4))
 
       def func1(self, x, y):
-        z = x + y + self.weight
+        z = torch.matmul(x, y)
         return z
 
       def forward(self, x, y):
@@ -43,21 +45,49 @@ class TestLazyScheduler(TestCase):
     m = TestModule()
     Segment._func_to_segment_mapping[m.func1] = "func1"
     m = m.to(device)
-    x = torch.randn(4, 4, device=device)
-    y = torch.randn(4, 4, device=device)
+    x = torch.randn(4, 4, requires_grad=True, device=device)
+    y = torch.randn(4, 4, requires_grad=True, device=device)
+
+    actual_e = m(x, y)
+    actual_e.sum().backward()
+    print(f"eager: first iter done")
+    actual_e = m(x, y)
+    actual_e.sum().backward()
+    print(f"eager: second iter done")
+
+    # -----
+
+    # compiled_m = torch.compile(
+    #   m,
+    #   backend="inductor",
+    #   fullgraph=False
+    # )
+
+    # actual_c = compiled_m(x, y)
+    # actual_c.sum().backward()
+    # print(f"compiled: first iter done")
+    # actual_c = compiled_m(x, y)
+    # actual_c.sum().backward()
+    # print(f"compiled: second iter done")
+
+    # -----
 
     schedule = [
       "func1",
     ]
     lazy_scheduler = LazyScheduler(schedule)
-    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
+    compiled_m_ls = torch.compile(
+      m,
+      backend=functools.partial(compile_fx, inner_compile=lazy_scheduler.compile),
+      fullgraph=False
+    )
 
-    actual = compiled_m(x, y)
-    actual.sum().backward()
-    print(f"first iter done")
-    actual = compiled_m(x, y)
-    actual.sum().backward()
-    print(f"second iter done")
+    actual_ls = compiled_m_ls(x, y)
+    actual_ls.sum().backward()
+    print(f"compiled_ls: first iter done")
+    actual_ls = compiled_m_ls(x, y)
+    actual_ls.sum().backward()
+    print(f"compiled_ls: second iter done")
     assert lazy_scheduler.is_expected_execution_order_for_named_segments(schedule)
 
   def test1(self):
@@ -133,7 +163,11 @@ class TestLazyScheduler(TestCase):
       "func2",
     ]
     lazy_scheduler = LazyScheduler(schedule)
-    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
+    compiled_m = torch.compile(
+      m,
+      backend=functools.partial(compile_fx, inner_compile=lazy_scheduler.compile),
+      fullgraph=False
+    )
 
     actual = compiled_m(x, y)
     actual.sum().backward()
@@ -184,7 +218,11 @@ class TestLazyScheduler(TestCase):
       "func2",
     ]
     lazy_scheduler = LazyScheduler(schedule)
-    compiled_m = torch.compile(m, backend=lazy_scheduler.compile, fullgraph=False)
+    compiled_m = torch.compile(
+      m,
+      backend=functools.partial(compile_fx, inner_compile=lazy_scheduler.compile),
+      fullgraph=False
+    )
 
     actual = compiled_m(x, y)
     print(f"first iter done")

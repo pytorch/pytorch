@@ -3812,6 +3812,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 args,
                 disable_amp=disable_amp,
             )
+            print(f"fw_outs: {fw_outs}")
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
@@ -3899,6 +3900,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 fw_outs[num_forward_returns:num_forward],
                 return_new_outs=False
             )
+            print(f"raw_returns: {raw_returns}")
             return tuple(raw_returns)
 
         @staticmethod
@@ -4062,7 +4064,7 @@ Got grad_output types: {str(grad_output_types)}"""
                 # Ensure that the graph is connected, and error if double backward is performed.
                 # See comment for why once_differentiable is not sufficient:
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
-                class CompiledFunctionBackward(torch.autograd.Function):
+                class CompiledFunctionBackward123(torch.autograd.Function):
                     @staticmethod
                     def forward(ctx, *unused_args):
                         outs = call_compiled_backward()
@@ -4077,10 +4079,10 @@ Got grad_output types: {str(grad_output_types)}"""
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
 
-                CompiledFunctionBackward._compiled_autograd_key = CompiledFunction._compiled_autograd_key
+                CompiledFunctionBackward123._compiled_autograd_key = CompiledFunction._compiled_autograd_key
 
                 # Pass args even though they're unused, so that the graph is built
-                out = CompiledFunctionBackward.apply(*all_args)
+                out = CompiledFunctionBackward123.apply(*all_args)
             else:
                 out = call_compiled_backward()
 
