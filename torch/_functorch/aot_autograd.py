@@ -4312,7 +4312,9 @@ def create_aot_dispatcher_function(
 
                 def from_fake(x, static_shapes):
                     ftensor = fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh=False)
-                    # The tensor has changed during initial trace, and is now different
+                    # The tensor has changed during initial trace. If we were to use the
+                    # cached memoized tensor, we would get incorrect data.
+                    # TODO(voz): We should check more than just shape... stride, dtype, etc.
                     if ftensor.shape != x.shape:
                         return fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh=True)
                     return ftensor

@@ -3594,7 +3594,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
 
-
     def test_tensor_set_data(self):
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
@@ -3650,6 +3649,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 # Prove guarding works - we run the compiled_fn 5 times
                 # frame_count should stay at 1.
                 self.assertEqual(cnt.frame_count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

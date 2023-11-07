@@ -1202,7 +1202,6 @@ class BuiltinVariable(VariableTracker):
                                 *proxy_args_kwargs([obj, val], {}),
                             ),
                         )
-                    # obj.as_proxy().node.meta["example_value"].data = val.as_proxy().node.meta["example_value"]
                     # Step 3 - drop the version counter - this is a hack required to get
                     # .data setting to play correctly with the autograd engine.
                     if version > 0:
