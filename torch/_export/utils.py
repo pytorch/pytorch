@@ -25,9 +25,9 @@ def register_dataclass_as_pytree_node(
     flatten_fn: Optional[FlattenFunc] = None,
     unflatten_fn: Optional[UnflattenFunc] = None,
     *,
+    serialized_type_name: Optional[str] = None,
     to_dumpable_context: Optional[ToDumpableContextFn] = None,
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
-    serialized_type_name: Optional[str] = None,
     return_none_fields: bool = False,
 ) -> None:
     assert dataclasses.is_dataclass(
