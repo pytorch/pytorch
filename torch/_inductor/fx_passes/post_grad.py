@@ -679,7 +679,7 @@ def reinplace_scatters(graph):
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
-        if any(view.op == "placeholder" for view in shared_view_nodes):
+        if mutated_arg.op == "placeholder":
             if not (
                 copy_node := copy_args_to_copy_nodes.get((mutated_arg, node), False)
             ):
@@ -692,6 +692,11 @@ def reinplace_scatters(graph):
 
             graph.erase_node(copy_node)
             return True
+        elif any(view.op == "placeholder" for view in shared_view_nodes):
+            # If mutated arg is view of any of the inputs of the graph,
+            # do not allow for inplacing.
+            # This would require more sophisticated algorithm to handle
+            return False
         else:
             return not any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=None
