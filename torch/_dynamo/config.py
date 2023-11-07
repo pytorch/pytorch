@@ -263,13 +263,8 @@ allow_rnn = False
 # [@compile_ignored: runtime_behaviour]
 error_on_recompile = False
 
-# reports why guards fail. Useful to identify the guards failing frequently and
-# causing recompilations.
-# [@compile_ignored: debug]
-report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "1"
-
-# [@compile_ignored: debug] Whether to report all guard failures or just the first one that fails
-report_all_guard_failures = False
+# [@compile_ignored: debug] Whether to report any guard failures (deprecated: does not do anything)
+report_guard_failures = True
 
 # [@compile_ignored: debug] root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
