@@ -1913,7 +1913,7 @@ Fills :attr:`self` tensor with elements drawn from the PDF (probability density 
     f(x) = \lambda e^{-\lambda x}, x > 0
 
 .. note::
-  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`) implying that zero can be sampled from the exponential distribution. However, :func:`torch.Tensor.exponential_` does not sample zero, which means that its actual support is the itnerval (0, :math:`\inf`). 
+  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`) implying that zero can be sampled from the exponential distribution. However, :func:`torch.Tensor.exponential_` does not sample zero, which means that its actual support is the interval (0, :math:`\inf`). 
   
   Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
 """,
