@@ -82,18 +82,6 @@ def only_consist_of(var, types):
     return False
 
 
-def _assert_tensors_nonaliasing(inputs, outputs):
-    input_tensor_ids = {
-        id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
-    }
-    output_tensor_ids = {
-        id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
-    }
-    assert input_tensor_ids.isdisjoint(
-        output_tensor_ids
-    ), "inputs to function body cannot alias outputs"
-
-
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
@@ -631,7 +619,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from .builder import wrap_fx_proxy
 
         if len(kwargs) > 0:
-            unsupported(
+            unimplemented(
                 "torch.ops.higher_order.map: kwargs are not supported in the map operator."
             )
 
@@ -728,14 +716,7 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
         real_sub_args = pytree.tree_map_only(
             torch.fx.Proxy, lambda a: get_real_value(a.node, tx.output), p_args
         )
-
         example_res = lowered_module.original_module(*real_sub_args)
-
-        # NOTE [Guaranteeing the 1-1 correspondence of FakeTensors and real tensors]:
-        # executorch modules promise not to alias inputs and outputs.
-        # Thus, output FakeTensors will correctly not alias input FakeTensors.
-        _assert_tensors_nonaliasing(real_sub_args, example_res)
-
         example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
         p_args = (lowered_node,) + p_args
@@ -1156,9 +1137,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
-            for freevar in body_lifted_freevars.keys():
-                if "saved_tensor_marked" not in freevar.node.meta:
-                    unimplemented("NYI - freevars in autograd function.")
+            unimplemented("NYI - freevars in autograd function.")
 
         if always_restore:
             if post_guards - pre_guards:
@@ -1170,9 +1149,11 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             *(arg.as_proxy() for arg in args),
             *(arg for arg in body_lifted_freevars.keys()),
         )
-        non_single_tensor_return_unsupported("autograd.Function forward", body_r)
-        r = body_r.as_proxy().node.meta["example_value"]
-        example_value = r
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
 
         # Store the invocation as a call
         return wrap_fx_proxy(
