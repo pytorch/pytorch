@@ -6197,8 +6197,14 @@ def fn():
         y = torch.randn([3, 3, 3])
 
         def my_dyn_fn(x):
-            if x.shape[0] == 3:
-                return x.sin()
+            # We can handle dynamic jump on symint but we cannot handle it while in a try/except
+            # Hence we need to guard the resulting graph on the constant value of shape[0]
+            # But this is impossible when shape[0] is a symint
+            try:
+                if x.shape[0] == 3:
+                    return x.sin()
+            finally:
+                pass
             return x.cos()
 
         torch._dynamo.mark_dynamic(y, 0)
@@ -6259,17 +6265,21 @@ def fn():
             z = x * y
 
             torch._dynamo.graph_break()
-            if z.shape[0] == 3:
-                return z.cos()
+            # We can handle dynamic jump on symint but we cannot handle it while in a try/except
+            # Hence we need to guard the resulting graph on the constant value of shape[0]
+            # But this is impossible when shape[0] is a symint
+            try:
+                if z.shape[0] == 3:
+                    return z.cos()
+            finally:
+                pass
 
             return x.cos()
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
         torch._dynamo.mark_dynamic(y, 0)
         torch._dynamo.reset()
-        with self.assertRaisesRegex(
-            Exception,
-        ):
+        with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
 
     def test_raise_guard_partial_constraint_no_graph_break(self):
@@ -6311,7 +6321,7 @@ def fn():
         def my_dyn_fn(x):
             if x.shape[0] == 3:
                 return x
-            print("Running", torch._dynamo.mark_dynamic(x, 0))
+            torch._dynamo.mark_dynamic(x, 0)
             return x * x
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
@@ -6383,7 +6393,9 @@ def fn():
 
         # Run with dynamic 0, not subset
         torch._dynamo.optimize(counter)(my_dyn_fn)(x0)
-        self.assertEqual(counter.frame_count, starting_frame_count + 2)  # dynamic jump = 2 new graphs
+        self.assertEqual(
+            counter.frame_count, starting_frame_count + 2
+        )  # dynamic jump = 2 new graphs
 
         # Run with dynamic 0, 1, 2, not subset
         x012 = torch.randn([3, 3, 3])
@@ -6391,7 +6403,9 @@ def fn():
         torch._dynamo.mark_dynamic(x012, 1)
         torch._dynamo.mark_dynamic(x012, 2)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x012)
-        self.assertEqual(counter.frame_count, starting_frame_count + 4)  # dynamic jump = 2 new graphs
+        self.assertEqual(
+            counter.frame_count, starting_frame_count + 4
+        )  # dynamic jump = 2 new graphs
 
     def test_recompile_on_global_state_change(self):
         last_state = []
