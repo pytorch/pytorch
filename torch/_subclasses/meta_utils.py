@@ -186,7 +186,7 @@ class MetaConverter:
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
-        prior_fake: Optional[torch._subclasses.fake_tensor.FakeTensor] = None,
+        prior_fake: Optional["torch._subclasses.fake_tensor.FakeTensor"] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource

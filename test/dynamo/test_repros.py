@@ -3620,7 +3620,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.reset()
                 cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-                compiled_fn = torch.compile(func, backend=cnt)
+                compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
                 requires_grad = func is not func1
                 for i in range(0, 5):
                     # Inputs
