@@ -293,6 +293,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"_dynamic_axes_{self.dynamic_shapes}"
                 ".sarif"
             )
+
         if export_error is not None:
             raise export_error
 

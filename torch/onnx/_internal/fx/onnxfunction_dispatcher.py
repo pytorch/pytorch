@@ -322,9 +322,7 @@ class OnnxFunctionDispatcher:
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
                     isinstance(node_arg, torch.fx.Node)
-                    and not isinstance(
-                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
-                    )
+                    and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
                     # TODO: reduce number of explicit initializations.
                     # TODO: Log location, stack.
@@ -342,9 +340,6 @@ class OnnxFunctionDispatcher:
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
 
-        import pdb
-
-        pdb.set_trace()
         # Unexpected target, raise error.
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,

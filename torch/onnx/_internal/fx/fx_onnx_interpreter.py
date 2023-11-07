@@ -213,16 +213,14 @@ def _fill_tensor_shape_type(
         onnxscript_graph_building.TorchScriptTensor,
         Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
     ],
-    node: torch.fx.Node,
-):
-    """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
-
-    name: str = node.name
+    name: str,
     expected_values: Union[
         fx_type_utils.META_VALUE_TYPE,
         List[fx_type_utils.META_VALUE_TYPE],
         Tuple[Optional[fx_type_utils.META_VALUE_TYPE], ...],
-    ] = node.meta.get("val", None)
+    ],
+):
+    """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
@@ -585,7 +583,7 @@ class FxOnnxInterpreter:
                 dtype=fake_tensor.dtype,
             )
 
-        elif isinstance(fake_tensor, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+        elif fx_type_utils.is_torch_symbolic_type(fake_tensor):
             output = onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=[],
@@ -664,7 +662,7 @@ class FxOnnxInterpreter:
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
         # Assign type and shape from fx graph.
-        _fill_tensor_shape_type(output, node)
+        _fill_tensor_shape_type(output, node.name, node.meta["val"])
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(
@@ -794,7 +792,7 @@ class FxOnnxInterpreter:
             outputs, (onnxscript_graph_building.TorchScriptTensor, tuple)
         ), f"Unexpected outputs type {type(outputs)} for node {node}."
 
-        _fill_tensor_shape_type(outputs, node)
+        _fill_tensor_shape_type(outputs, node.name, node.meta["val"])
         fx_name_to_onnxscript_value[node.name] = outputs
 
         # Skip op_level_validation for call_module. Subgraph nodes are validated individually.

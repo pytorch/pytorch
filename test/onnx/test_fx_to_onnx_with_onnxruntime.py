@@ -132,7 +132,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "sympy operation tests doesn't need dynamic shape"
+        "sympy operation tests don't need dynamic shape"
     )
     def test_sympy_operatons_return_numeric(self):
         def func(x, y):

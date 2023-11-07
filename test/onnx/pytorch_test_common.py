@@ -211,30 +211,6 @@ def skip_dynamic_fx_test(reason: str):
     return skip_dec
 
 
-def only_dynamic_fx_test(reason: str):
-    """Only keep dynamic exporting test.
-
-    Args:
-        reason: The reason for skipping non-dynamic exporting test.
-
-    Returns:
-        A decorator for skipping non-dynamic exporting test.
-    """
-
-    def skip_dec(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if not self.dynamic_shapes:
-                raise unittest.SkipTest(
-                    f"Skip verify non-dynamic shapes test for FX. {reason}"
-                )
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_dec
-
-
 def skip_load_checkpoint_after_model_creation(reason: str):
     """Skip loading checkpoint right after model initialization.
 
