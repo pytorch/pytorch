@@ -2055,6 +2055,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def force_fp16_for_bf16_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -2131,6 +2135,12 @@ class BenchmarkRunner:
                 )
                 self.args.amp = True
                 self.setup_amp()
+            elif self.args.only in self.force_fp16_for_bf16_models:
+                log.warning(
+                    "Model %s does not support float16, running with bfloat16 instead",
+                    self.args.only,
+                )
+                model, example_inputs = cast_to_fp16(model, example_inputs)
             else:
                 model, example_inputs = cast_to_bf16(model, example_inputs)
 

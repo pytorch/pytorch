@@ -265,6 +265,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "detectron2_fcos_r_50_fpn",
 }
 
+FORCE_FP16_FOR_BF16_MODELS = {"vision_maskrcnn"}
+
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
@@ -318,6 +320,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def force_amp_for_fp16_bf16_models(self):
         return FORCE_AMP_FOR_FP16_BF16_MODELS
+
+    @property
+    def force_fp16_for_bf16_models(self):
+        return FORCE_FP16_FOR_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
