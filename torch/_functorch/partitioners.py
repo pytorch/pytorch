@@ -919,7 +919,7 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: str = None,
+    prog: Union[str, List[str]] = None,
     parse_stack_trace: bool = False,
 ) -> None:
     if clear_meta:
