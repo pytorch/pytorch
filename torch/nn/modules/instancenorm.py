@@ -88,8 +88,10 @@ class _InstanceNorm(_NormBase):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2D (unbatched) or 3D (batched) input
-    as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 2D (unbatched) or 3D (batched) input as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -163,11 +165,11 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm1d` that is inferred
-    from the ``input.size(1)``.
-    The attributes that will be lazily initialized are `weight`, `bias`,
-    `running_mean` and `running_var`.
+    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm1d` is inferred from the ``input.size(1)``.
+
+    The attributes that will be lazily initialized are `weight`, `bias`, `running_mean` and `running_var`.
 
     Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
     on lazy modules and their limitations.
@@ -201,7 +203,10 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
@@ -277,9 +282,10 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm2d` that is inferred
-    from the ``input.size(1)``.
+    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm2d` is inferred from the ``input.size(1)``.
+
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
@@ -315,8 +321,10 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 5D input (a mini-batch of 3D inputs with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -391,9 +399,10 @@ class InstanceNorm3d(_InstanceNorm):
 
 
 class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm3d` that is inferred
-    from the ``input.size(1)``.
+    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm3d` is inferred from the ``input.size(1)``.
+
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 

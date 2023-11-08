@@ -16,7 +16,9 @@ _ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
-    r"""Efficient softmax approximation as described in
+    r"""Efficient softmax approximation.
+
+    As described in
     `Efficient softmax approximation for GPUs by Edouard Grave, Armand Joulin,
     Moustapha Cissé, David Grangier, and Hervé Jégou
     <https://arxiv.org/abs/1609.04309>`__.
@@ -242,9 +244,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return _ASMoutput(output, loss)
 
     def _get_full_log_prob(self, input, head_output):
-        """ Given input tensor, and output of `self.head`,
-        compute the log of the full distribution """
-
+        """Given input tensor, and output of `self.head`, compute the log of the full distribution."""
         out = input.new_empty((head_output.size(0), self.n_classes))
         head_logprob = log_softmax(head_output, dim=1)
 
@@ -260,7 +260,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return out
 
     def log_prob(self, input: Tensor) -> Tensor:
-        r""" Computes log probabilities for all :math:`\texttt{n\_classes}`
+        r"""Compute log probabilities for all :math:`\texttt{n\_classes}`.
 
         Args:
             input (Tensor): a minibatch of examples
@@ -275,13 +275,13 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             - Output: :math:`(N, \texttt{n\_classes})`
 
         """
-
         head_output = self.head(input)
         return self._get_full_log_prob(input, head_output)
 
     def predict(self, input: Tensor) -> Tensor:
-        r""" This is equivalent to `self.log_prob(input).argmax(dim=1)`,
-        but is more efficient in some cases.
+        r"""Return the class with the highest probability for each example in the input minibatch.
+
+        This is equivalent to `self.log_prob(input).argmax(dim=1)`, but is more efficient in some cases.
 
         Args:
             input (Tensor): a minibatch of examples
@@ -293,7 +293,6 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             - Input: :math:`(N, \texttt{in\_features})`
             - Output: :math:`(N)`
         """
-
         head_output = self.head(input)
         output = torch.argmax(head_output, dim=1)
         not_in_shortlist = (output >= self.shortlist_size)

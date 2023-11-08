@@ -12,8 +12,10 @@ from typing import Union, List, Tuple
 __all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
 
 class LocalResponseNorm(Module):
-    r"""Applies local response normalization over an input signal composed
-    of several input planes, where channels occupy the second dimension.
+    r"""Applies local response normalization over an input signal.
+
+    Input signal composed of several input planes, where channels occupy the second dimension.
+
     Applies normalization across channels.
 
     .. math::
@@ -39,6 +41,7 @@ class LocalResponseNorm(Module):
         >>> output_4d = lrn(signal_4d)
 
     """
+
     __constants__ = ['size', 'alpha', 'beta', 'k']
     size: int
     alpha: float
@@ -85,7 +88,9 @@ _shape_t = Union[int, List[int], Size]
 
 
 class LayerNorm(Module):
-    r"""Applies Layer Normalization over a mini-batch of inputs as described in
+    r"""Applies Layer Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
     the paper `Layer Normalization <https://arxiv.org/abs/1607.06450>`__
 
     .. math::
@@ -159,6 +164,7 @@ class LayerNorm(Module):
         :scale: 50 %
 
     """
+
     __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
     normalized_shape: Tuple[int, ...]
     eps: float
@@ -202,7 +208,9 @@ class LayerNorm(Module):
 
 
 class GroupNorm(Module):
-    r"""Applies Group Normalization over a mini-batch of inputs as described in
+    r"""Applies Group Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
     the paper `Group Normalization <https://arxiv.org/abs/1803.08494>`__
 
     .. math::
@@ -244,6 +252,7 @@ class GroupNorm(Module):
         >>> # Activating the module
         >>> output = m(input)
     """
+
     __constants__ = ['num_groups', 'num_channels', 'eps', 'affine']
     num_groups: int
     num_channels: int
