@@ -85,6 +85,11 @@
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
 
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#ifdef USE_CUDA
+#include <ATen/native/transformers/cuda/sdp_utils.h>
+#endif
+
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
@@ -1616,6 +1621,55 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_conv_determine_backend_memory_format",
       at::native::_determine_backend_memory_format);
+
+  ////////////////////////////////////////////////////////////////////////////////
+  // Scaled Dot Product Attention utilities
+  ////////////////////////////////////////////////////////////////////////////////
+  py::class_<sdp::sdp_params>(py_module, "_SDPAParams")
+      .def(py::init([](at::Tensor const& query,
+                       at::Tensor const& key,
+                       at::Tensor const& value,
+                       c10::optional<at::Tensor> attn_mask,
+                       double dropout,
+                       bool is_causal) {
+        return sdp::sdp_params{
+            query, key, value, std::move(attn_mask), dropout, is_causal};
+      }))
+      .def_readonly("query", &sdp::sdp_params::query)
+      .def_readonly("key", &sdp::sdp_params::key)
+      .def_readonly("value", &sdp::sdp_params::value)
+      .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
+      .def_readonly("dropout", &sdp::sdp_params::dropout)
+      .def_readonly("is_causal", &sdp::sdp_params::is_causal);
+
+  py::enum_<sdp::SDPBackend>(
+      py_module,
+      "_SDPBackend",
+      py::arithmetic(),
+      "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
+      .value("ERROR", sdp::SDPBackend::error)
+      .value("MATH", sdp::SDPBackend::math)
+      .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
+
+  py_module.def(
+      "_can_use_flash_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_flash_attention(params, debug);
+#else
+        return false;
+#endif
+      });
+  py_module.def(
+      "_can_use_mem_efficient_attention",
+      [](const sdp::sdp_params& params, bool debug) {
+#ifdef USE_CUDA
+        return sdp::can_use_mem_efficient_attention(params, debug);
+#else
+        return false;
+#endif
+      });
 
   py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
       .value("Default", at::LinalgBackend::Default)
