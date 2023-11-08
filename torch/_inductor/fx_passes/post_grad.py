@@ -45,7 +45,6 @@ from .group_batch_fusion import group_batch_fusion_post_grad_passes
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
-c10d_functional = torch.ops._c10d_functional
 
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
@@ -728,13 +727,24 @@ def reinplace_inplaceable_ops(graph):
         aten._unsafe_index_put.default: InplaceableOp(
             inductor_prims._unsafe_index_put_, [0]
         ),
-        c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default, [0]
-        ),
-        c10d_functional.all_reduce_coalesced.default: InplaceableOp(
-            c10d_functional.all_reduce_coalesced_.default, [0]
-        ),
     }
+
+    try:
+        c10d_functional = torch.ops._c10d_functional
+        inplaceable_collective_ops = {
+            c10d_functional.all_reduce.default: InplaceableOp(
+                c10d_functional.all_reduce_.default, 0
+            ),
+            c10d_functional.all_reduce_coalesced.default: InplaceableOp(
+                c10d_functional.all_reduce_coalesced_.default, 0
+            ),
+        }
+        inplaceable_ops.update(inplaceable_collective_ops)
+    except AttributeError:
+        # _c10d_functional ops are only available when torch
+        # is built with USE_DISTRIBUTED=1.
+        pass
+
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
     def erase_copy_epilogue(mutation_op, mutated_arg):
