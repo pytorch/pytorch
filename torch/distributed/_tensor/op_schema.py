@@ -2,11 +2,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch._ops import OpOverload
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only, TreeSpec
+    from torch.utils._pytree.api.cxx import tree_map_only, TreeSpec
 except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         tree_map_only,
@@ -34,14 +35,14 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     )
 
 
-def _is_inplace_op(op: torch._ops.OpOverload):
+def _is_inplace_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an inplace variant, it might not
     # be entirely correct, but it's good enough for now.
     return op._schema.name[-1] == "_"
 
 
-def _is_out_variant_op(op: torch._ops.OpOverload):
+def _is_out_variant_op(op: OpOverload):
     # simple analysis of function schema to determine
     # if this is an out variant, it might not
     # be entirely correct, but it's good enough for now.
@@ -185,7 +186,7 @@ class OpSchema:
             with its DTensorSpec
     """
 
-    op: torch._ops.OpOverload
+    op: OpOverload
     args_schema: ArgsType
     kwargs_schema: KwargsType
 

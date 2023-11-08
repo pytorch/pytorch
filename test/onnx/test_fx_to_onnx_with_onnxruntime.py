@@ -141,7 +141,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        export_output = torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             func,
             tensor_x,
             8.0,
@@ -150,17 +150,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 dynamic_shapes=self.dynamic_shapes,
             ),
         )
-        onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
-        onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
-        ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
-        ort_outputs = onnx_test_common.run_ort(export_output, onnx_format_args)
+        onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 8.0)
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 8.0))
+        ort_outputs = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
         # test on different non-tensor input - xfail
-        onnx_format_args = export_output.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
-        ref_outputs = export_output.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
-        _ = onnx_test_common.run_ort(export_output, onnx_format_args)
+        onnx_format_args = onnx_program.adapt_torch_inputs_to_onnx(tensor_x, 9.0)
+        ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(func(tensor_x, 9.0))
+        _ = onnx_test_common.run_ort(onnx_program, onnx_format_args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
@@ -688,14 +688,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 export_options.fx_tracer = (
                     fx_symbolic_graph_extractor.FXSymbolicTracer()
                 )
-                export_output = torch.onnx.dynamo_export(
+                onnx_program = torch.onnx.dynamo_export(
                     fake_model,
                     *fake_args,
                     export_options=export_options,
                 )
-                onnx_model = export_output.model_proto
+                onnx_model = onnx_program.model_proto
 
-            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
+            onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
 
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
@@ -709,7 +709,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             onnx_model_location = model_name + "_external_data.onnx"
             onnx_initializer_location = model_name + "_initializers"
             # TODO: We are using the internal `save_model_with_external_data` instead of public
-            # `ExportOutput.save` because we need to rename ONNX initializers before saving.
+            # `ONNXProgram.save` because we need to rename ONNX initializers before saving.
             # This is only needed/allowed because we are using `fx_tracer=FXSymbolicTracer`,
             # which is not an official FX tracer.
             fx_serialization.save_model_with_external_data(
@@ -724,11 +724,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
             # Original outputs.
-            ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+            ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
                 model(*args, **kwargs)
             )
             # ORT outputs.
-            args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+            args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args)
 
             # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
             args_not_none = args_not_none[: len(args) - len(kwargs)]
@@ -826,6 +826,25 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             exported_program, (x,), skip_dynamic_shapes_check=True
         )
 
+    def test_exported_program_as_input_from_file(self):
+        import tempfile
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        x = torch.randn(1, 1, 2, dtype=torch.float)
+        exported_program = torch.export.export(Model(), args=(x,))
+
+        with tempfile.NamedTemporaryFile(suffix=".pte") as f:
+            torch.export.save(exported_program, f.name)
+            del exported_program  # Delete the exported program to ensure that we are loading from file
+            loaded_exported_program = torch.export.load(f.name)
+
+        self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            loaded_exported_program, (x,), skip_dynamic_shapes_check=True
+        )
+
 
 def _parameterized_class_attrs_and_values_with_fake_options():
     input_values = []
@@ -921,7 +940,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
                 if export_within_fake_mode:
-                    export_output = torch.onnx.dynamo_export(
+                    onnx_program = torch.onnx.dynamo_export(
                         fake_model,
                         *fake_args,
                         **fake_kwargs,
@@ -929,14 +948,14 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     )
 
             if not export_within_fake_mode:
-                export_output = torch.onnx.dynamo_export(
+                onnx_program = torch.onnx.dynamo_export(
                     fake_model, *fake_args, **fake_kwargs, export_options=export_options
                 )
 
-            onnx_test_common.assert_dynamic_shapes(export_output, self.dynamic_shapes)
+            onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
-                export_output.save(
+                onnx_program.save(
                     tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
                 )
 
@@ -944,13 +963,11 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 args = create_args()
                 kwargs = create_kwargs()
                 # Original outputs.
-                ref_outputs = export_output.adapt_torch_outputs_to_onnx(
+                ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
                     real_model(*args, **kwargs)
                 )
                 # ORT outputs.
-                args_not_none = export_output.adapt_torch_inputs_to_onnx(
-                    *args, **kwargs
-                )
+                args_not_none = onnx_program.adapt_torch_inputs_to_onnx(*args, **kwargs)
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,

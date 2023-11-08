@@ -21,7 +21,6 @@ import pkg_resources
 
 import torch
 import torch.distributed as dist
-from packaging import version
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
@@ -48,6 +47,7 @@ from tools.stats.import_test_stats import (
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
+    get_prediction_confidences,
     get_test_prioritizations,
 )
 
@@ -1375,9 +1375,7 @@ def get_selected_tests(options) -> List[str]:
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and version.parse(
-        torch.version.cuda
-    ) >= version.parse("11.6"):
+    if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1809,7 +1807,17 @@ def main():
                 test_stats["num_total_tests"] = num_tests
 
                 print_to_stderr("Emiting td_test_failure_stats")
-                emit_metric("td_test_failure_stats", test_stats)
+                emit_metric(
+                    "td_test_failure_stats",
+                    {
+                        **test_stats,
+                        "confidence_ratings": get_prediction_confidences(
+                            selected_tests
+                        ),
+                        "failure": str(test),
+                        "tests": selected_tests,
+                    },
+                )
 
     if len(all_failures):
         for _, err in all_failures:
