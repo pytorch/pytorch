@@ -10,7 +10,7 @@ class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor.
 
-    For use with :class:`~nn.Sequential` see :meth:`torch.flatten` for details.
+    For use with :class:`~nn.Sequential`, see :meth:`torch.flatten` for details.
 
     Shape:
         - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,'
