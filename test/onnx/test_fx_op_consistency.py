@@ -423,6 +423,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        # https://github.com/microsoft/onnxscript/issues/1140
+        "native_batch_norm",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._native_batch_norm_legit_functional"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),
@@ -445,6 +450,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.avg_pool3d",
         dtypes=onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("AveragePool", "int"),
+    ),
+    xfail(
+        # https://github.com/microsoft/onnxscript/issues/1140
+        "nn.functional.batch_norm",
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten._native_batch_norm_legit_functional"),
     ),
     xfail(
         "nn.functional.conv1d",
@@ -556,14 +566,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
-    ),
-    xfail(
-        "native_batch_norm",
-        matcher=lambda sample: sample.args[4]
-        and (
-            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
-        ),  # Edge case with training=True and mean being 1d tensor of single element.
-        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",
