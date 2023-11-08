@@ -11,7 +11,7 @@ import types
 import warnings
 
 from collections import defaultdict
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 np: Optional[types.ModuleType] = None
 try:
@@ -148,19 +148,40 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-# torch_in_graph_functions = set()
-
-
-# We are in progress of refactoring and moving the following functions to test_trace_rules.py.
-# If you made any change to the following functions, please also update there as well.
-# If you are not clear of how to update, please contact @yanboliang.
-@FunctionIdSet
-def _allowed_function_ids() -> Dict[int, str]:
+def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
+    torch_objects = set()
+
+    def heuristic_record_if_in_graph_function(obj, module, name):
+        try:
+            if hasattr(obj, "__wrapped__") and obj is not torch.ops:
+                obj = obj.__wrapped__
+        except Exception:
+            pass
+        if isinstance(
+            obj,
+            (
+                types.FunctionType,
+                types.MethodType,
+                types.BuiltinFunctionType,
+                types.MethodDescriptorType,
+                types.WrapperDescriptorType,
+            ),
+        ):
+            # print(f"\"{module.__name__}.{name}\": TorchInGraphFunctionVariable,")
+            torch_objects.add(obj)
+
+    def heuristic_record_if_ctx_manager(obj, module, name):
+        if (
+            issubclass(type(obj), type)
+            and "__enter__" in obj.__dict__
+            and "__exit__" in obj.__dict__
+        ):
+            torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
         allowed_modules = ("torch", "math")
@@ -190,6 +211,15 @@ def _allowed_function_ids() -> Dict[int, str]:
             "torch.__config__",
             "torch._custom_op",
             "torch._dispatch",
+            "torch._export",
+            "torch._functorch.make_functional",
+            "torch._functorch.compile_utils",
+            "torch._functorch.partitioners",
+            "torch._functorch.aot_autograd",
+            "torch._functorch.compilers",
+            "torch._functorch.fx_minifier",
+            "torch.autograd.profiler_util",
+            "torch.autograd.profiler",
             "torch._jit_internal",
             "torch._library",
             "torch._lobpcg",
@@ -276,20 +306,12 @@ def _allowed_function_ids() -> Dict[int, str]:
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
-                    # torch_in_graph_functions.add(record_heuristic_in_graph_function(obj, name, module))
-                    # try:
-                    #     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-                    #         obj = obj.__wrapped__
-                    # except Exception:
-                    #     pass
+                    heuristic_record_if_in_graph_function(obj, module, name)
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                 elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
-                    # torch_in_graph_functions.add(record_heuristic_in_graph_function(obj, name, module))
-                    # try:
-                    #     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-                    #         obj = obj.__wrapped__
-                    # except Exception:
-                    #     pass
+                    heuristic_record_if_in_graph_function(obj, module, name)
+                    heuristic_record_if_ctx_manager(obj, module, name)
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -323,7 +345,12 @@ def _allowed_function_ids() -> Dict[int, str]:
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids
+    return torch_object_ids, torch_objects
+
+
+@FunctionIdSet
+def _allowed_function_ids() -> Dict[int, str]:
+    return gen_allowed_functions_and_ids()[0]
 
 
 @FunctionIdSet
@@ -426,54 +453,6 @@ def is_allowed(obj) -> bool:
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),
     )
-
-
-# def is_in_graph_function(obj) -> bool:
-#     # print("--->>>  ", len(torch_in_graph_functions))
-#     # s = {item for item in torch_in_graph_functions if item is not None}
-#     # for x in sorted(s):
-#     #     if x is not None:
-#     #         print(x)
-#     if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-#         obj = obj.__wrapped__
-#     if is_user_defined_allowed(obj):
-#         return True
-#     if isinstance(
-#         obj,
-#         (
-#             types.FunctionType,
-#             types.MethodType,
-#             types.BuiltinFunctionType,
-#             types.MethodDescriptorType,
-#             types.WrapperDescriptorType,
-#         ),
-#     ):
-#         return is_allowed(obj)
-#     return isinstance(
-#         obj,
-#         (torch._ops.OpOverloadPacket, torch._ops.OpOverload),
-#     )
-
-
-# def record_heuristic_in_graph_function(obj, name, module):
-#     try:
-#         if hasattr(obj, "__wrapped__") and obj is not torch.ops:
-#             obj = obj.__wrapped__
-#     except Exception:
-#         pass
-#     if isinstance(
-#         obj,
-#         (
-#             types.FunctionType,
-#             types.MethodType,
-#             types.BuiltinFunctionType,
-#             types.MethodDescriptorType,
-#             types.WrapperDescriptorType,
-#         ),
-#     ):
-#         return f"{module.__name__}.{name}"
-#     else:
-#         return None
 
 
 def is_user_defined_allowed(obj) -> bool:
