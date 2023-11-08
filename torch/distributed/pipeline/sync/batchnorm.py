@@ -21,8 +21,15 @@ TModule = TypeVar("TModule", bound=nn.Module)
 
 
 class DeferredBatchNorm(_BatchNorm):
-    """A BatchNorm layer tracks multiple micro-batches to update running
-    statistics per mini-batch.
+    """
+    Track multiple micro-batches to update running statistics per mini-batch.
+
+    Args:
+        num_features (int): Number of features in the input tensor.
+        eps (float): Small value to avoid division by zero (default: 1e-5).
+        momentum (float): Factor for updating running statistics (default: 0.1).
+        affine (bool): If True, apply learnable weights and biases (default: True).
+        chunks (int): Number of micro-batches to track (default: 1).
     """
 
     sum: Tensor
@@ -70,7 +77,7 @@ class DeferredBatchNorm(_BatchNorm):
         return self.tracked == self.chunks
 
     def _commit(self) -> None:
-        """Updates the running statistics of a mini-batch."""
+        """Update the running statistics of a mini-batch."""
         exponential_average_factor = 0.0
         self.num_batches_tracked += 1
         if self.momentum is None:  # use cumulative moving average
@@ -133,7 +140,9 @@ class DeferredBatchNorm(_BatchNorm):
 
     @classmethod
     def convert_deferred_batch_norm(cls, module: TModule, chunks: int = 1) -> TModule:
-        """Converts a :class:`nn.BatchNorm` or underlying
+        """
+        Convert a :class:`nn.BatchNorm` or underlying.
+
         :class:`nn.BatchNorm`s into :class:`DeferredBatchNorm`::
 
             from torchvision.models.resnet import resnet101

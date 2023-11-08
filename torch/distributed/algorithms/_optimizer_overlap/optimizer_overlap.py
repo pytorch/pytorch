@@ -34,21 +34,23 @@ def register_overlapped(optim_cls):
 class OverlappedOptimizer(ABC):
     def __init__(self, optim_cls: Type) -> None:
         """
-        OverlappedOptimizer is a base class that child classes can implement to
+        Base class representing an overlapped optimizer.
+
+        Overlappedoptimizer is a base class that child classes can implement to
         specify how different optimizers will register themselves with DDP.
         """
         self.optim_cls = optim_cls
 
     @abstractmethod
     def register_ddp(self, ddp: DistributedDataParallel) -> None:
-        """Registers the overlapped optimizer with DDP."""
+        """Register the overlapped optimizer with DDP."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped DDP."
         )
 
     @abstractmethod
     def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
-        """Registers the overlapped optimizer with FSDP."""
+        """Register the overlapped optimizer with FSDP."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped FSDP."
         )
@@ -80,7 +82,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
 
 def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
     """
-    Returns a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
+    Return a new ``OverlappedOptimizer`` instance that supports ``optim_cls``.
     """
     for clz in inspect.getmro(optim_cls):
         try:
