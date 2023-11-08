@@ -795,7 +795,7 @@ class TensorVariable(VariableTracker):
                 and isinstance(ret, TensorVariable)
                 and (
                     ret.as_proxy().node.meta["example_value"]
-                    is args[0].as_proxy().node.meta["example_value"]
+                    is self.as_proxy().node.meta["example_value"]
                 )
             ):
                 return self
