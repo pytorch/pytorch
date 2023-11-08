@@ -186,7 +186,6 @@ class MetaConverter:
         source: Optional[Source] = None,
         dynamic_dims: "Optional[DimList[DimDynamic]]" = None,
         constraint_dims: "Optional[DimList[DimConstraint]]" = None,
-        prior_fake: Optional["torch._subclasses.fake_tensor.FakeTensor"] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -235,12 +234,6 @@ class MetaConverter:
             maybe_suppress = shape_env.suppress_guards
 
         def sym_sizes_strides_storage_offset(t, src):
-            if prior_fake is not None:
-                return (
-                    prior_fake._original_sym_shape,
-                    prior_fake._original_sym_stride,
-                    prior_fake._original_sym_storage_offset,
-                )
             if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
@@ -624,17 +617,10 @@ class MetaConverter:
         source=None,
         dynamic_dims=None,
         constraint_dims=None,
-        force_fresh_allocation=False,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
-
-        prior_fake = None
-        if force_fresh_allocation:
-            widt = WeakIdRef(t)
-            if widt in self.tensor_memo:
-                del self.tensor_memo[widt]
 
         if (
             type(t) is torch.Tensor
@@ -684,7 +670,6 @@ class MetaConverter:
                                 source=source,
                                 dynamic_dims=dynamic_dims,
                                 constraint_dims=constraint_dims,
-                                prior_fake=prior_fake,
                             )
                         out = torch._to_functional_tensor(fake_t)
                         torch._mirror_autograd_meta_to(fake_t, out)
@@ -704,7 +689,6 @@ class MetaConverter:
                                 source=source,
                                 dynamic_dims=dynamic_dims,
                                 constraint_dims=constraint_dims,
-                                prior_fake=prior_fake,
                             )
                         return _wrap_functional_tensor(fake_t, current_level())
                 self.miss += 1
@@ -727,7 +711,6 @@ class MetaConverter:
                         source=source,
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
-                        prior_fake=prior_fake,
                     )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor

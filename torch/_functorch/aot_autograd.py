@@ -4311,7 +4311,7 @@ def create_aot_dispatcher_function(
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
                 static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                out = fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh_allocation=True)
+                out = fake_mode.from_tensor(x, static_shapes=static_shapes)
                 return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
