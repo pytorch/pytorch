@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
-import packaging.version
+from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -404,9 +404,6 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
     cuda_str_version = cuda_version.group(1)
     cuda_ver = packaging.version.parse(cuda_str_version)
-    if torch.version.cuda is None:
-        return
-
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
@@ -2348,7 +2345,8 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = packaging.version.parse('11.0')
-        if torch.version.cuda is not None and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+        has_cuda_version = torch.version.cuda is not None
+        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
