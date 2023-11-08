@@ -1617,6 +1617,94 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             func(a)
         with self.assertRaises(TypeError):
             torch.compile(func, backend="eager")(a1)
+    
+    def test_tensor_self_assigning_torch_in_place_ops(self):
+        import operator
+
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        # https://github.com/pytorch/pytorch/issues/113271
+
+        # We cannot cover anything. We just do pointwise ops for now
+        float_ops = [
+            "manual_add_",
+            torch.Tensor.add_,
+            torch.Tensor.sub_,
+            torch.Tensor.atan2_,
+            torch.Tensor.arctan2_,
+        ]
+        float_ops_no_arg = [
+            torch.Tensor.asin_,
+            torch.Tensor.arcsin_,
+            torch.Tensor.atan_,
+            torch.Tensor.arctan_,
+        ]
+        int_ops = [
+            torch.Tensor.bitwise_and_,
+            torch.Tensor.bitwise_or_,
+            torch.Tensor.bitwise_xor_,
+            torch.Tensor.bitwise_left_shift_,
+            torch.Tensor.bitwise_right_shift_,
+        ]
+        int_ops_no_arg = [
+            torch.Tensor.bitwise_not_,
+        ]
+        bool_ops = [
+            torch.Tensor.bitwise_and_,
+            torch.Tensor.bitwise_or_,
+            torch.Tensor.bitwise_xor_,
+        ]
+        bool_ops_no_arg = [
+            torch.Tensor.bitwise_not_,
+        ]
+
+        for oplist, arg_creator, requires_arg in [
+            (float_ops, lambda: torch.rand([6], dtype=float), True),
+            (float_ops_no_arg, lambda: torch.rand([6], dtype=float), False),
+            (int_ops, lambda: torch.randint(0, 10000000, [6], dtype=torch.int64), True),
+            (int_ops_no_arg, lambda: torch.randint(0, 10000000, [6], dtype=torch.int64), False),
+            (bool_ops, lambda: torch.randint(0, 1, [6], dtype=bool), True),
+            (bool_ops_no_arg, lambda: torch.randint(0, 1, [6], dtype=bool), False),
+        ]:
+            for op in oplist:
+                torch._dynamo.reset()
+                op_arg = [arg_creator()] if requires_arg else []
+
+                if op == "manual_add_":
+                    def func(x, y):
+                        x = x.add_(*op_arg)
+                        x.data = y
+                        x = x.add_(*op_arg)
+                        return x
+                else:
+                    def func(x, y):
+                        x = op(x, *op_arg)
+                        x.data = y
+                        x = op(x, *op_arg)
+                        return x
+
+                a = arg_creator()
+                a1 = torch.clone(a)
+                b = arg_creator()
+                b1 = torch.clone(b)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+
+                _ = func(a, b)
+                _ = torch.compile(func, backend=cnt)(a1, b1)
+
+                self.assertEqual(a, a1)
+                self.assertEqual(b, b1)
+                self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+                self.assertEqual(len(counters["graph_break"]), 1)
+                self.assertTrue(
+                    ".data assignment to a tracked tensors can introduce aliasing"
+                    in next(iter(counters["graph_break"].keys()))
+                )
+                counters.clear()
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):

@@ -779,7 +779,10 @@ class TensorVariable(VariableTracker):
             # as Tensor.new acts differently with a Size input versus a tuple input.
             if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
-            return wrap_fx_proxy(
+
+            is_inplace_op = not name.startswith("_") and name.endswith("_")
+
+            ret = wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
                     "call_method",
@@ -788,6 +791,13 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+            if is_inplace_op:
+                assert (
+                    ret.as_proxy().node.meta["example_value"]
+                    is self.as_proxy().node.meta["example_value"]
+                )
+                return self
+            return ret
 
     def rename(self, tx, name):
         self.proxy.node._rename(name)
