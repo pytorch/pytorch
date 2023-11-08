@@ -34,7 +34,8 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
 
 class _MkldnnConvNd(torch.jit.ScriptModule):
-    """Common base of MkldnnConv1d and MkldnnConv2d"""
+    """Common base of MkldnnConv1d and MkldnnConv2d."""
+    
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
     def __init__(self, dense_module):
