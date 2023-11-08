@@ -377,7 +377,7 @@ def _get_model_state_dict(
             state_dict.pop(key)
 
     if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else tuple([0])
+        ranks_only = tuple() if not info.cpu_offload else (0,)
         return _gather_state_dict(
             state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
         )
@@ -477,7 +477,7 @@ def _get_optim_state_dict(
         cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
 
     if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else tuple([0])
+        ranks_only = tuple() if not info.cpu_offload else (0,)
         return _gather_state_dict(
             optim_state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
         )

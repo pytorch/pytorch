@@ -63,7 +63,9 @@ def _iterate_state_dict(
         ret = sharded_tensor_func(iter_object, pg, device)
     elif isinstance(iter_object, DTensor):
         ret = dtensor_func(iter_object, pg, device)
-    elif isinstance(iter_object, (torch.Tensor, int, float, str)) or iter_object is None:
+    elif (
+        isinstance(iter_object, (torch.Tensor, int, float, str)) or iter_object is None
+    ):
         ret = iter_object
     elif isinstance(iter_object, dict):
         ret = {
