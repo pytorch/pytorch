@@ -82,7 +82,6 @@ class AsyncTensor(torch.Tensor):
 
   @staticmethod
   def check_materialized(async_tensors):
-    # breakpoint()
     all_materialized = True
     for t in async_tensors:
       if isinstance(t, AsyncTensor) and t._materialized_tensor is None:
@@ -92,7 +91,6 @@ class AsyncTensor(torch.Tensor):
 
   @staticmethod
   def wait_until_materialized(async_tensors):
-    # breakpoint()
     for async_tensor in async_tensors:
       if not AsyncTensor.check_materialized([async_tensor]):
         # NOTE: recursively schedule the deps first
@@ -126,6 +124,7 @@ class AsyncFuncHandle:
   def wait_for_completion(self):
     self.cuda_event.synchronize()
     for out, out_async in zip(self.outs, self.outs_async):
+      # Set the output AsyncTensor's underlying materialized tensor
       out_async.set_materialized_tensor(out)
 
   def is_completed(self):
@@ -216,8 +215,8 @@ class LazyScheduler:
 
     cur_handle.schedule()
     cur_handle.wait_for_completion()
-    # return cur_handle.outs
-    # The expectation is that when user tries to use the output,
+    # return cur_handle.outs  # works
+    # NOTE: The expectation is that when user tries to use the output,
     # it should either be materialized already, or its materialization will be scheduled immediately.
     # Problem: when returned value is AsyncTensor, the .grad_fn of it is not populated.
     return cur_handle.outs_async  # fails

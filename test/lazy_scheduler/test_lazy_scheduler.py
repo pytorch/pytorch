@@ -1,6 +1,4 @@
 """
-pytest -vs test/lazy_scheduler/test_lazy_scheduler.py
-
 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_backward_simple_no_segment
 """
 
