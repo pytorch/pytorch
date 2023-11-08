@@ -132,7 +132,7 @@ class TestDispatcher(common_utils.TestCase):
                         args=(1, 2),
                         kwargs={},
                     ),
-                    ("aten", "add", None),
+                    ("_operator", "add", None),
                 ),
                 name="get_builtin_op_name",
             ),
