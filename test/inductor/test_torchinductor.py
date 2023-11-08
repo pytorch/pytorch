@@ -7473,6 +7473,30 @@ class CommonTemplate:
             ),
         )
 
+    @config.patch(
+        "triton.autotune_pointwise", True
+    )  # needed to introduce config that exceed max shared memory usage
+    def test_large_block_sizes(self):
+        """
+        Inductor will try triton configs like x = 64 and y = 1024 which will
+        result in out of shared memory if dtype is fp32.
+
+        Currently inductor will skip such bad configs and pick the best one
+        from the remaining configs.
+        """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
+
+        @torch.compile
+        def fn(x, y):
+            return x.t() + y
+
+        # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
+        # CI while still keep the same up-rounded size-hints.
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
+        fn(a, b)
+
 
 @dataclasses.dataclass
 class TestFailure:
