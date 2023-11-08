@@ -644,6 +644,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   virtual void terminateProcess(std::string errMsg);
 
+  // When watchdog timeout, this function will be called and return debug info
+  // for users. For now we only get information from retrieveDesyncReport.
+  // We are working on enabling more useful debug information for watchdog
+  // timeout.
+  virtual std::string getNCCLWatchdogDebugInfo();
+
   static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.

@@ -1197,7 +1197,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             lock, std::chrono::seconds(heartbeatTimeoutInSec_), [&] {
               return terminateHeartbeatMonitorThread_.load();
             })) {
-      // If monitorWakeUpCV_ gets notified, we early return.
+      // For the normal complete or user interception, monitorWakeUpCV_
+      // will get notified, we early return and exit heartbeatMonitor.
       return;
     } else {
       auto heartbeat = heartbeat_;
@@ -1223,17 +1224,19 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       "] NCCL monitor thread timeout. Basically, this could ",
       "be a system error and please file a bug to pytorch.");
 
-  // There might be some cases when we first kill the watchdog thread and get
-  // stuck in abort() method, so we want to wait for some buffer time before
-  // killing the process.
+  // There are two possible cases for the watchdog thread exit:
+  // Case one: desync report runs quickly, and it follows the step:
+  // collective timeout -> desync -> exception handling -> destructors
+  // -> set terminateHeartbeatMonitorThread_ -> notify monitorWakeUpCV_.
+  // So the code either early returns above or will skip the sleep below.
+  // Case two: desync might be slow or get stuck. Or we get stuck in
+  // destructors, we will sleep for some time before calling std::abort() to
+  // kill the whole process.
   if ((terminateProcessGroup_.load() || shutdownMode_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave six mins for desync report generation or process group destroy.
-    std::unique_lock<std::mutex> lock(monitorMutex_);
-    monitorWakeUpCV_.wait_for(
-        lock, std::chrono::seconds(heartbeatTimeoutInSec_ * 3), [] {
-          return false;
-        });
+    std::this_thread::sleep_for(
+        std::chrono::seconds(heartBeatIntervalInSec * 3));
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
@@ -1310,6 +1313,10 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
 }
 
+std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
+  return retrieveDesyncReport(store_, "NCCL", rank_, size_);
+}
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
 
@@ -1343,8 +1350,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
+            // Set shutdown mode, so the heartbeat monitor thread will not abort
+            // process immediately.
             shutdownMode_.store(true);
-            auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+            auto desyncMsg = getNCCLWatchdogDebugInfo();
             LOG(ERROR) << desyncMsg;
           } catch (const std::exception& e) {
             LOG(ERROR) << "Failed to retrieve NCCL_DESYNC_DEBUG report. "

@@ -117,7 +117,8 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
-        set_timedout_error_(false) {}
+        set_timedout_error_(false),
+        watchDogDebugInfoFinished_(false) {}
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       std::vector<at::Device> devices,
@@ -138,8 +139,31 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
     set_timedout_error_ = false;
   }
 
+  bool getWatchDogDebugInfoFinishedFlag() {
+    return watchDogDebugInfoFinished_;
+  }
+
+  // In the constructor of ProcessGroupNCCL. We don't allow the watchdog thread
+  // to run any handling or desync report when the main thread is block wait.
+  // Even if users set handling and turn on desyncDebug flag, they will get
+  // reset. For the ease of unit test, we want the main thread to be block wait,
+  // so we have this hack to manually set the desync debug flag after PG
+  // creation.
+  void forceSetDesyncDebugFlag() {
+    desyncDebug_ = true;
+  }
+
+ protected:
+  std::string getNCCLWatchdogDebugInfo() override {
+    LOG(INFO) << "overridden getNCCLWatchdogDebugInfo called";
+    std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
+    watchDogDebugInfoFinished_ = true;
+    return "";
+  }
+
  private:
   bool set_timedout_error_;
+  bool watchDogDebugInfoFinished_;
 };
 
 class ProcessGroupNCCLNoHeartbeat : public c10d::ProcessGroupNCCL {
@@ -313,6 +337,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeat pg(store_, 0, 1, options);
 
+  // Normal collective case.
   auto work = pg.allreduce(tensors_);
   work->wait();
   EXPECT_TRUE(work->isSuccess());
@@ -330,4 +355,38 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
   }
   work->wait();
   EXPECT_TRUE(work->isSuccess());
+}
+
+TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutDebugInfo) {
+  if (skipTest()) {
+    return;
+  }
+
+  int heartBeatIntervalInSec = 3;
+  std::string timeInterval = std::to_string(heartBeatIntervalInSec);
+  ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
+  ASSERT_TRUE(
+      setenv(c10d::TORCH_NCCL_HEARTBEAT_TIMEOUT_S, timeInterval.c_str(), 1) ==
+      0);
+  ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
+  ASSERT_TRUE(setenv(c10d::NCCL_DESYNC_DEBUG, "1", 1) == 0);
+  // We cannot capture the exception thrown in watchdog thread without making
+  // lots of changes to the code. So we don't let the watchdog throw exception.
+  ASSERT_TRUE(setenv(c10d::NCCL_ASYNC_ERROR_HANDLING, "0", 1) == 0);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  // Set a super short watchdog timeout.
+  options->timeout = std::chrono::milliseconds(100);
+  ProcessGroupNCCLTimedOutErrors pg(store_, 0, 1, options);
+  pg.forceSetDesyncDebugFlag();
+
+  pg.set_timedout_error();
+  auto work = pg.allreduce(tensors_);
+  std::this_thread::sleep_for(std::chrono::seconds(heartBeatIntervalInSec * 2));
+  EXPECT_THROW(work->wait(), std::runtime_error);
+  // The flag is true shows that the heartbeat monitor thread does not kill
+  // the watchdog thread when it is getting debug info such as desync debug
+  // info.
+  EXPECT_TRUE(pg.getWatchDogDebugInfoFinishedFlag());
+
+  // Communicators might be aborted here, further operations would fail.
 }
