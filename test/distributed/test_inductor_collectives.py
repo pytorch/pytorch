@@ -74,7 +74,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             t = torch.randn(4, 4, device="cuda")
             inputs = (
-                t if self.rank == 0 else torch.zeros(4,4, device="cuda"),
+                t if self.rank == 0 else torch.zeros(4, 4, device="cuda"),
                 0
             )
             eager_out = example(*inputs)
