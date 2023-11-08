@@ -8,7 +8,6 @@ import torch.distributed as dist
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor.utils import run_and_get_triton_code
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
     all_gather_tensor,
@@ -18,6 +17,7 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -307,7 +307,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         # Verify correct post-grad re-inplacing
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(

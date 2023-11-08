@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only
+    from torch.utils._pytree.api.cxx import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -97,7 +97,6 @@ RANK_TYPES = Union[
     str,
 ]
 
-
 """
 User facing APIs for functional collectives
 -------------------------------------------
@@ -156,9 +155,8 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
-        tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp, group)
+        group_name, _ = _expand_group_for_for_native_ops(group, tag)
+        tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp, group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
@@ -189,10 +187,8 @@ def all_gather_tensor(
     """
     assert self.is_contiguous()
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
-        group_size = torch._C._distributed_c10d._resolve_process_group(group).size()
-        tensor = torch.ops._c10d_functional.all_gather_into_tensor(self, group_size, group)
+        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        tensor = torch.ops._c10d_functional.all_gather_into_tensor(self, group_size, group_name)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
@@ -225,9 +221,7 @@ def reduce_scatter_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
-        group_size = torch._C._distributed_c10d._resolve_process_group(group).size()
+        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
 
@@ -239,7 +233,7 @@ def reduce_scatter_tensor(
         self = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(self, reduceOp, group_size, group)
+        tensor = torch.ops._c10d_functional.reduce_scatter_tensor(self, reduceOp, group_size, group_name)
     else:
         tensor = torch.ops.c10d_functional.reduce_scatter_tensor(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     res = _maybe_wrap_tensor(tensor)
@@ -291,10 +285,8 @@ def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
-        group_size = torch._C._distributed_c10d._resolve_process_group(group).size()
-        tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(self, group_size, group)  # type: ignore[attr-defined]
+        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
+        tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(self, group_size, group_name)  # type: ignore[attr-defined]
     else:
         tag, rankset, group_size = _expand_group(group, tag)
         tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(self, tag, rankset, group_size)  # type: ignore[attr-defined]
@@ -324,9 +316,7 @@ def reduce_scatter_tensor_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if USE_NATIVE_C10D_FUNCTIONAL:
-        assert isinstance(group, str)
-        assert tag == ""
-        group_size = torch._C._distributed_c10d._resolve_process_group(group).size()
+        group_name, group_size = _expand_group_for_for_native_ops(group, tag)
     else:
         tag, rankset, group_size = _expand_group(group, tag)
 
@@ -340,7 +330,7 @@ def reduce_scatter_tensor_coalesced(
             inputs[idx] = torch.cat(tensor_list)
 
     if USE_NATIVE_C10D_FUNCTIONAL:
-        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(inputs, reduceOp, group_size, group)  # type: ignore[attr-defined]
+        tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(inputs, reduceOp, group_size, group_name)  # type: ignore[attr-defined]
     else:
         tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(inputs, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
 
@@ -547,6 +537,22 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
 
     return (tag, rankset, group_size)
 
+
+def _expand_group_for_for_native_ops(group: RANK_TYPES, tag: str = "") -> Tuple[str, int]:
+    """
+    Given group in RANK_TYPES, return group name and group size.
+    """
+    # TODO: add reference to the discussion to remove rankset as a group type
+    assert isinstance(group, str)
+    assert tag == ""
+    if isinstance(group, dist.ProcessGroup):
+        return group.group_name(), dist.get_world_size(group)
+    elif isinstance(group, str):
+        return group, torch._C._distributed_c10d._resolve_process_group(group).size()
+    else:
+        assert False
+
+
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
@@ -561,17 +567,11 @@ def _are_we_tracing() -> bool:
     return mode.tracer is not None
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
-    if USE_NATIVE_C10D_FUNCTIONAL:
-        if _are_we_tracing():
-            return self
-        res = AsyncCollectiveTensor(self)
-        return cast(torch.Tensor, res)
-    else:
-        if _are_we_tracing():
-            return wait_tensor(self)
-        res = AsyncCollectiveTensor(self)
-        _register_tensor_wrapper(res)
-        return cast(torch.Tensor, res)
+    if _are_we_tracing():
+        return wait_tensor(self)
+    res = AsyncCollectiveTensor(self)
+    _register_tensor_wrapper(res)
+    return cast(torch.Tensor, res)
 
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
     def mk_out_tensor(shard):

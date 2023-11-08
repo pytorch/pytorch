@@ -38,6 +38,16 @@ class GroupRegistry {
     return group;
   }
 
+  void unregister_group(const std::string& group_name) {
+    std::unique_lock write_lock(lock_);
+    registry_.erase(group_name);
+  }
+
+  void unregister_all_groups() {
+    std::unique_lock write_lock(lock_);
+    registry_.clear();
+  }
+
  private:
   std::map<std::string, c10::weak_intrusive_ptr<c10d::ProcessGroup>> registry_;
   std::shared_mutex lock_;
@@ -56,6 +66,14 @@ void register_process_group(
 c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
     const std::string& group_name) {
   return RankLocal<::GroupRegistry>::get().resolve_group(group_name);
+}
+
+void unregister_process_group(const std::string& group_name) {
+  return RankLocal<::GroupRegistry>::get().unregister_group(group_name);
+}
+
+void unregister_all_process_groups() {
+  return RankLocal<::GroupRegistry>::get().unregister_all_groups();
 }
 
 } // namespace c10d

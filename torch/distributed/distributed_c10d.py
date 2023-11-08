@@ -33,7 +33,10 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
-    Work
+    Work,
+    _register_process_group,
+    _unregister_process_group,
+    _unregister_all_process_groups,
 )
 from .constants import default_pg_timeout, default_pg_nccl_timeout
 from .c10d_logger import _exception_logger, _time_logger
@@ -1393,6 +1396,10 @@ def _new_process_group_helper(
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
     pg._set_group_name(group_name)
+    # TODO:
+    # - remove python mapping
+    # - remove tags
+    _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
@@ -1451,6 +1458,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         _world.tags_to_pg.clear()
         _world.pg_coalesce_state.clear()
         _world.pg_default_device.clear()
+        _unregister_all_process_groups()
 
         # when process group doesn't have an explicit name (only WORLD (default)
         # process group can have an explicit name), we use global _world.group_count
@@ -1484,6 +1492,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
                     _world.tags_to_pg[""].remove(pg)
             except Exception:
                 pass
+        _unregister_process_group(pg.group_name())
 
 
 def get_rank(group: Optional[ProcessGroup] = None) -> int:

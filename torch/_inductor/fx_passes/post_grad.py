@@ -737,15 +737,18 @@ def reinplace_inplaceable_ops(graph):
     }
     inplaceable_triton_ops = {triton_kernel_wrapper_functional}
 
+    def erase_copy_epilogue(mutation_op, mutated_arg):
+        copy_node = mutation_to_copy_epilogue.get((node, mutated_arg))
+        if copy_node is not None:
+            graph.erase_node(copy_node)
+
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_args = inplaceable_op.get_flat_mutated_args(node)
             if can_inplace(node, mutated_args):
                 # Erase all copy epilogues incurred by this node
                 for mutated_arg in mutated_args:
-                    copy_epilogue = mutation_to_copy_epilogue.get((node, mutated_arg))
-                    if copy_epilogue is not None:
-                        graph.erase_node(copy_epilogue)
+                    erase_copy_epilogue(node, mutated_arg)
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
@@ -755,7 +758,10 @@ def reinplace_inplaceable_ops(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_inplace(node, node.kwargs["kwargs"][arg]):
+                mutated_arg = node.kwargs["kwargs"][arg]
+                if can_inplace(node, [mutated_arg]):
+                    erase_copy_epilogue(node, mutated_arg)
+                else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone

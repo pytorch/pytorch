@@ -821,6 +821,17 @@ This class does not support ``__members__`` property.)");
       },
       py::arg("group_name"));
 
+  module.def(
+      "_unregister_process_group",
+      [](const std::string& group_name) {
+        return ::c10d::unregister_process_group(group_name);
+      },
+      py::arg("group_name"));
+
+  module.def("_unregister_all_process_groups", []() {
+    return ::c10d::unregister_all_process_groups();
+  });
+
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
