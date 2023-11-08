@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor.utils import run_and_get_triton_code
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -187,6 +188,68 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             output = torch.ops._c10d_functional.wait_tensor(output)
             assert output.eq(self.rank * i).all()
 
+    @skip_if_lt_x_gpu(2)
+    def test_all_reduce__functionalization_and_reinplace(self) -> None:
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            ar0 = torch.ops._c10d_functional.all_reduce_(arg, "avg", "default")
+            return torch.ops._c10d_functional.wait_tensor(ar0)
+
+        arg = torch.tensor(self.ranks, device=self.device)
+
+        # Verify correct functionalization
+        gm = make_fx(torch.func.functionalize(func))(arg)
+        targets = {node.target for node in gm.graph.nodes}
+        assert torch.ops._c10d_functional.all_reduce.default in targets
+        assert torch.ops._c10d_functional.all_reduce_.default not in targets
+        assert torch.ops.aten.copy_.default in targets
+
+        # Verify correct post-grad re-inplacing
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("torch.ops._c10d_functional.all_reduce_.default(arg0_1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(arg0_1")
+            .check("return (arg0_1, )")
+            .run(code)
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_reduce_coalesced__functionalization_and_reinplace(self) -> None:
+        self._init_process_group()
+
+        def func(args: List[torch.Tensor]) -> torch.Tensor:
+            ar0 = torch.ops._c10d_functional.all_reduce_coalesced_(
+                args, "avg", "default"
+            )
+            return [torch.ops._c10d_functional.wait_tensor(tensor) for tensor in ar0]
+
+        args = [torch.tensor(self.ranks, device=self.device) for _ in range(2)]
+
+        # Verify correct functionalization
+        gm = make_fx(torch.func.functionalize(func))(args)
+        targets = {node.target for node in gm.graph.nodes}
+        assert torch.ops._c10d_functional.all_reduce_coalesced.default in targets
+        assert torch.ops._c10d_functional.all_reduce_coalesced_.default not in targets
+        assert torch.ops.aten.copy_.default in targets
+
+        # Verify correct post-grad re-inplacing
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, args)
+        print(code)
+        (
+            FileCheck()
+            .check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default([arg0_1, arg1_1]"
+            )
+            .check("torch.ops._c10d_functional.wait_tensor.default(arg0_1")
+            .check("torch.ops._c10d_functional.wait_tensor.default(arg1_1")
+            .check("return (arg0_1, arg1_1")
+            .run(code)
+        )
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_all_reduce_single(self):
         torch._inductor.config.debug = True
@@ -356,7 +419,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
