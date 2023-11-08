@@ -14,6 +14,12 @@
 #include <utility>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/zeros.h>
+#endif
+
 namespace torch {
 namespace autograd {
 
@@ -101,6 +107,10 @@ void deleteNode(Node* function) {
     gatherFunctions(func.get(), stack);
     // Reference count is decremented on the loop backedge.
   }
+}
+
+at::Tensor TypeAndSize::zeros() {
+  return at::zeros_symint(sym_sizes, options);
 }
 
 } // namespace autograd
