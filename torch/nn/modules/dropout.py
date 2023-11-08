@@ -105,9 +105,9 @@ class Dropout1d(_DropoutNd):
 class Dropout2d(_DropoutNd):
     r"""Randomly zero out entire channels.
 
-    (a channel is a 2D feature map,
+    A channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 2D tensor :math:`\text{input}[i, j]`).
+    batched input is a 2D tensor :math:`\text{input}[i, j]`.
 
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
