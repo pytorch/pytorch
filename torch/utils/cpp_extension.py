@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore[attr-defined]
+import packaging.version
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -208,7 +208,7 @@ ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home()
+CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
@@ -404,6 +404,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
     cuda_str_version = cuda_version.group(1)
     cuda_ver = packaging.version.parse(cuda_str_version)
+    if torch.version.cuda is None:
+        return
+
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
@@ -2345,8 +2348,7 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = packaging.version.parse('11.0')
-        has_cuda_version = torch.version.cuda is not None
-        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+        if torch.version.cuda is not None and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
