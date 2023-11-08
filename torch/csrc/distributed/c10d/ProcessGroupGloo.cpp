@@ -56,6 +56,9 @@
     case ::at::ScalarType::Half:                 \
       func<gloo::float16>(__VA_ARGS__);          \
       break;                                     \
+    case ::at::ScalarType::BFloat16:             \
+      func<c10::BFloat16>(args);                 \
+      break;                                     \
     case ::at::ScalarType::Char:                 \
       func<int8_t>(__VA_ARGS__);                 \
       break;                                     \
@@ -85,6 +88,9 @@
       break;                                     \
     case ::at::ScalarType::Half:                 \
       func<gloo::float16>(args);                 \
+      break;                                     \
+    case ::at::ScalarType::BFloat16:             \
+      func<c10::BFloat16>(args);                 \
       break;                                     \
     case ::at::ScalarType::Char:                 \
       func<int8_t>(args);                        \
