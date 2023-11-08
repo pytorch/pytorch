@@ -253,6 +253,94 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
+        if (
+            self.value.__str__()
+            == "<method 'run_backward' of 'torch._C._EngineBase' objects>"
+            and name == "__call__"
+        ):
+            from torch._dynamo import compiled_autograd
+            from torch.autograd.variable import Variable
+            from .lists import BaseListVariable
+            from .tensor import map_fake_tensor_to_tensor_variable
+
+            assert len(args) == 5
+
+            # This is hack, we need to be able to let actual_backward_call be able to
+            # access to gm passed to `dummy_fn_to_save_fx`.
+            saved_gm = None
+
+            # can't directly wrap gm in a UserFunctionVariable so have to wrap it in a
+            # normal python function
+            def dummy_user_function_to_inline(gm, input, hook, size):
+                # TODO: need to take the output of the gm and assign it back to the input.grad
+                return gm(input, hook, size)
+
+            # We need to inline the graphmodule and let dynamo trace through it with inputs.
+            # inputs are a bunch of fake_tensors since the compiled_autograd is invoked with
+            # a fake tensor(`self.proxy.node.meta.get("example_value")`)
+            def actual_backward_call(input, hook, size):
+                from .base import MutableLocal
+                from .builder import SourcelessBuilder
+                from .lists import BaseListVariable
+
+                user_fn_variable = SourcelessBuilder()(
+                    tx, dummy_user_function_to_inline
+                )
+                # gm_variable is a UserDefinedObjectVariable
+                gm_variable = SourcelessBuilder()(tx, saved_gm)
+                cls = BaseListVariable.cls_for(list)
+                # if backward is run without argument, `aten.ones_like` will
+                # be used to create a defualt tensor arg. That tensor will not have a
+                # TensorVariable assoicatied with it.
+                tensor_variables = [
+                    map_fake_tensor_to_tensor_variable(x) for x in input
+                ]
+                input_list_variable = cls(
+                    tensor_variables,
+                    mutable_local=MutableLocal(),
+                )
+                # assume hook and size to be empty for now
+                hook_variable = cls([], mutable_local=MutableLocal())
+                size_variable = cls([], mutable_local=MutableLocal())
+                # output of the inline, need to find the corresponding inputs
+                res = tx.inline_user_function_return(
+                    user_fn_variable,
+                    (gm_variable, input_list_variable, hook_variable, size_variable),
+                    {},
+                )
+                # TODO: we should avoid running the actual backward
+                return saved_gm(input, hook, size)
+
+            # This is being called in the compiled_autograd's end_capture, it need to return a
+            # python function that can execute the backward.
+            def dummy_fn_to_save_fx(graph):
+                nonlocal saved_gm
+                saved_gm = graph
+                return actual_backward_call
+
+            # now we want to use compiled_auto_grad to get and inline the fx graph
+            tensors_example = tuple(
+                [proxy.node.meta.get("example_value") for proxy in args[0].as_proxy()]
+            )
+            grad_tensors_example = tuple(
+                (proxy.node.meta.get("example_value") for proxy in args[1].as_proxy())
+            )
+            retain_graph = args[2].as_python_constant()
+            create_graph = args[3].as_python_constant()
+            # ignore the inputs for backward for now
+            inputs = ()
+            with compiled_autograd.enable(dummy_fn_to_save_fx):
+                Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+                    tensors_example,
+                    grad_tensors_example,
+                    retain_graph,
+                    create_graph,
+                    inputs,
+                    allow_unreachable=True,
+                    accumulate_grad=True,
+                )
+            return ConstantVariable.create(None, **options)
+
         if name not in getattr(self.value, "__dict__", {}):
             try:
                 method = inspect.getattr_static(type(self.value), name)

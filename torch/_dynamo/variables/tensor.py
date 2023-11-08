@@ -66,6 +66,13 @@ supported_const_comparison_ops = {
 fake_tensor_to_tensor_variable_dict = {}
 
 
+def map_fake_tensor_to_tensor_variable(fake_tensor):
+    if fake_tensor in fake_tensor_to_tensor_variable_dict:
+        return fake_tensor_to_tensor_variable_dict[fake_tensor]
+    else:
+        return None
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -597,62 +604,35 @@ class TensorVariable(VariableTracker):
             from .builder import VariableBuilder
 
             # assert not args
-            assert len(args) == 1
+            assert len(args) <= 1
             assert not kwargs
-            # This is hack, we need to be able to let actual_backward_call be able to
-            # access to gm passed to `dummy_fn_to_save_fx`.
-            saved_gm = None
 
-            # can't directly wrap gm in a UserFunctionVariable so have to wrap it in a
-            # normal python function
-            def dummy_user_function_to_inline(gm, input, hook, size):
-                # TODO: need to take the output of the gm and assign it back to the input.grad
-                return gm(input, hook, size)
-
-            # We need to inline the graphmodule and let dynamo trace through it with inputs.
-            # inputs are a bunch of fake_tensors since the compiled_autograd is invoked with
-            # a fake tensor(`self.proxy.node.meta.get("example_value")`)
-            def actual_backward_call(input, hook, size):
-                from .base import MutableLocal
-                from .builder import SourcelessBuilder
-                from .lists import BaseListVariable
-
-                user_fn_variable = SourcelessBuilder()(
-                    tx, dummy_user_function_to_inline
-                )
-                # gm_variable is a UserDefinedObjectVariable
-                gm_variable = SourcelessBuilder()(tx, saved_gm)
-                cls = BaseListVariable.cls_for(list)
-                input_variable = cls(
-                    [fake_tensor_to_tensor_variable_dict[x] for x in input],
-                    mutable_local=MutableLocal(),
-                )
-                # assume hook and size to be empty for now
-                hook_variable = cls([], mutable_local=MutableLocal())
-                size_variable = cls([], mutable_local=MutableLocal())
-                # output of the inline, need to find the corresponding inputs
-                res = tx.inline_user_function_return(
-                    user_fn_variable,
-                    (gm_variable, input_variable, hook_variable, size_variable),
-                    {},
-                )
-                # TODO: we should avoid running the actual backward
-                return saved_gm(input, hook, size)
-
-            # This is being called in the compiled_autograd's end_capture, it need to return a
-            # python function that can execute the backward.
-            def dummy_fn_to_save_fx(graph):
-                nonlocal saved_gm
-                saved_gm = graph
-                return actual_backward_call
-
-            with compiled_autograd.enable(dummy_fn_to_save_fx):
-                # self.proxy.node.meta.get("example_value").backward()
-                # TODO: defualt `backward` will assume gradident with 1, but dynamo won't create the
-                # TensorVariable for us. We might need to use SourcelessBuilder for that.
-                self.proxy.node.meta.get("example_value").backward(
-                    args[0].proxy.node.meta.get("example_value")
-                )
+            """
+            def backward(
+                tensors: _TensorOrTensors,
+                grad_tensors: Optional[_TensorOrTensors] = None,
+                retain_graph: Optional[bool] = None,
+                create_graph: bool = False,
+                grad_variables: Optional[_TensorOrTensors] = None,
+                inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
+            )
+            """
+            none_variable = ConstantVariable.create(None, **options)
+            grad_tensors = none_variable if len(args) == 0 else args[0]
+            false_variable = ConstantVariable.create(False, **options)
+            backward_variable = TorchVariable(torch.autograd.backward, **options)
+            result = backward_variable.call_function(
+                tx,
+                [
+                    self,
+                    grad_tensors,
+                    none_variable,
+                    false_variable,
+                    none_variable,
+                    none_variable,
+                ],
+                {},
+            )
             return ConstantVariable.create(None, **options)
         elif name in ("backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")

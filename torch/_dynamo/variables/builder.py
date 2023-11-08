@@ -1851,7 +1851,8 @@ class SourcelessBuilder:
             return SourcelessBuilder.wrap_constant_literal(value)
         elif is_builtin_callable(value):
             return BuiltinVariable(value)
-        elif is_allowed(value):
+        # For backward we want to inline it as a UserFunctionVariable
+        elif is_allowed(value) and value is not torch.autograd.backward:
             if is_user_defined_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return TorchVariable(value)

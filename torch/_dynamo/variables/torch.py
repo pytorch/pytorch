@@ -640,6 +640,20 @@ class TorchVariable(VariableTracker):
                 {},
             )
             return ConstantVariable.create(None, **options)
+        elif self.value is torch.autograd.backward:
+            from .builder import SourcelessBuilder
+
+            # inline the backward call directly
+            backward_fn_variable = SourcelessBuilder()(tx, torch.autograd.backward)
+            tx.inline_user_function_return(
+                backward_fn_variable,
+                args,
+                {},
+            )
+            return ConstantVariable.create(None, **options)
+        elif self.value is torch._C._are_functorch_transforms_active:
+            # for now let's assume `_are_functorch_transforms_active` always returns false
+            return ConstantVariable.create(False, **options)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
