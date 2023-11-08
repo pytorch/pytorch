@@ -148,13 +148,22 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
+def dump_allowed_name_rule_map() -> None:
+    m = gen_allowed_functions_and_ids()[2]
+    for k, v in m.items():
+        print(f'"{k}": {v.__name__},')
+
+
 def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
+    from .variables import TorchInGraphFunctionVariable
+
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
     torch_objects = set()
+    torch_name_rule_map = dict()
 
     def heuristic_record_if_in_graph_function(obj, module, name):
         try:
@@ -172,7 +181,9 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
                 types.WrapperDescriptorType,
             ),
         ):
-            # print(f"\"{module.__name__}.{name}\": TorchInGraphFunctionVariable,")
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchInGraphFunctionVariable
             torch_objects.add(obj)
 
     def heuristic_record_if_ctx_manager(obj, module, name):
@@ -181,6 +192,7 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
             and "__enter__" in obj.__dict__
             and "__exit__" in obj.__dict__
         ):
+            # torch_name_rule_map[f"{module.__name__}.{name}"] = TorchCtxManagerClassVariable
             torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
@@ -191,13 +203,13 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
         # AOTAutograd; so we need to graph-break. To ensure this, we inline
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = [
-            "torch.optim.",
-            "torch.nn.modules.rnn.",
-            "torch._dynamo.",
-            "torch._C._dynamo.",
-            "torch._inductor.",
-            "torch._C.inductor.",
-            "torch.fx.",
+            "torch.optim",
+            "torch.nn.modules.rnn",
+            "torch._dynamo",
+            "torch._C._dynamo",
+            "torch._inductor",
+            "torch._C.inductor",
+            "torch.fx",
             "torch._C._autograd",
             "torch._C._cudart",
             "torch._C._distributed_autograd",
@@ -235,10 +247,12 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
             "torch._utils_internal",
             "torch._vmap_internals",
             "torch.ao",
+            "torch.compiler",
             "torch.distributed",
             "torch.export",
             "torch.hub",
             "torch.jit",
+            "torch.library",
             "torch.masked.maskedtensor",
             "torch.nn.init",
             "torch.nn.modules.module",
@@ -345,7 +359,7 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
-    return torch_object_ids, torch_objects
+    return torch_object_ids, torch_objects, torch_name_rule_map
 
 
 @FunctionIdSet
