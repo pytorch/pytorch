@@ -504,8 +504,8 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
-            add_ = l_x_.add_(1.0);  l_x_ = None
-            return (add_,)
+            add_ = l_x_.add_(1.0)
+            return (l_x_,)
 """
         check_count_and_graph(1, 2, 1, expected_graph)
 
