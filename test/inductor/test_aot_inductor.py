@@ -1060,18 +1060,18 @@ class AOTInductorTestsTemplate:
                 x = x.clone()
                 y = y.clone()
                 output = torch.zeros_like(x)
-                if autotuned and num_dims == 2:
+                if autotune and num_dims == 2:
                     x_elements = output.size()[0]
                     y_elements = output.size()[1]
                 else:
                     n_elements = output.numel()
 
                 # Select grid
-                if autotuned and num_dims == 2:
+                if autotune and num_dims == 2:
                     if grid_type == 1:
                         grid = (x_elements, y_elements)
                     elif grid_type == 2:
-                        grid = lambda meta: (
+                        grid = lambda meta: (  # noqa: E731
                             triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
                             triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
                         )
