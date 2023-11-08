@@ -33,8 +33,7 @@ class _WeightedLoss(_Loss):
 
 
 class L1Loss(_Loss):
-    r"""Creates a criterion that measures the mean absolute error (MAE) between each element in
-    the input :math:`x` and target :math:`y`.
+    r"""Creates a mean absolute error (MAE) loss measuring the element-wise difference between input :math:`x` and target :math:`y`.
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -92,6 +91,7 @@ class L1Loss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -102,8 +102,7 @@ class L1Loss(_Loss):
 
 
 class NLLLoss(_WeightedLoss):
-    r"""The negative log likelihood loss. It is useful to train a classification
-    problem with `C` classes.
+    r"""The negative log likelihood loss. It is useful to train a classification problem with `C` classes.
 
     If provided, the optional argument :attr:`weight` should be a 1D Tensor assigning
     weight to each of the classes. This is particularly useful when you have an
@@ -204,6 +203,7 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(conv(data)), target)
         >>> output.backward()
     """
+
     __constants__ = ['ignore_index', 'reduction']
     ignore_index: int
 
@@ -281,6 +281,7 @@ class PoissonNLLLoss(_Loss):
         - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
           the same shape as the input.
     """
+
     __constants__ = ['log_input', 'full', 'eps', 'reduction']
     log_input: bool
     full: bool
@@ -364,6 +365,7 @@ class GaussianNLLLoss(_Loss):
         Conference on Neural Networks (ICNN'94), Orlando, FL, USA, 1994, pp. 55-60
         vol.1, doi: 10.1109/ICNN.1994.374138.
     """
+
     __constants__ = ['full', 'eps', 'reduction']
     full: bool
     eps: float
@@ -460,6 +462,7 @@ class KLDivLoss(_Loss):
         >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', log_target: bool = False) -> None:
@@ -471,8 +474,7 @@ class KLDivLoss(_Loss):
 
 
 class MSELoss(_Loss):
-    r"""Creates a criterion that measures the mean squared error (squared L2 norm) between
-    each element in the input :math:`x` and target :math:`y`.
+    r"""Creates a mean squared (squared L2 norm) error that measures the element-wise squared difference the input :math:`x` and target :math:`y`.
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -526,6 +528,7 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -536,8 +539,7 @@ class MSELoss(_Loss):
 
 
 class BCELoss(_WeightedLoss):
-    r"""Creates a criterion that measures the Binary Cross Entropy between the target and
-    the input probabilities:
+    r"""Creates a criterion that measures the Binary Cross Entropy between the target and the input probabilities:
 
     The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
@@ -609,6 +611,7 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -619,8 +622,9 @@ class BCELoss(_WeightedLoss):
 
 
 class BCEWithLogitsLoss(_Loss):
-    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single
-    class. This version is more numerically stable than using a plain `Sigmoid`
+    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class. 
+    
+    This version is more numerically stable than using a plain `Sigmoid`
     followed by a `BCELoss` as, by combining the operations into one layer,
     we take advantage of the log-sum-exp trick for numerical stability.
 
@@ -713,6 +717,7 @@ class BCEWithLogitsLoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean',
                  pos_weight: Optional[Tensor] = None) -> None:
         super().__init__(size_average, reduce, reduction)
@@ -729,8 +734,8 @@ class BCEWithLogitsLoss(_Loss):
 
 
 class HingeEmbeddingLoss(_Loss):
-    r"""Measures the loss given an input tensor :math:`x` and a labels tensor :math:`y`
-    (containing 1 or -1).
+    r"""Measures the loss given an input tensor :math:`x` and a labels tensor :math:`y` (containing 1 or -1).
+    
     This is usually used for measuring whether two inputs are similar or
     dissimilar, e.g. using the L1 pairwise distance as :math:`x`, and is typically
     used for learning nonlinear embeddings or semi-supervised learning.
@@ -777,6 +782,7 @@ class HingeEmbeddingLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
     """
+    
     __constants__ = ['margin', 'reduction']
     margin: float
 
@@ -789,7 +795,9 @@ class HingeEmbeddingLoss(_Loss):
 
 
 class MultiLabelMarginLoss(_Loss):
-    r"""Creates a criterion that optimizes a multi-class multi-classification
+    r"""Multi-class hinge loss for multi-label classification.
+    
+    Creates a criterion that optimizes a multi-class multi-classification
     hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
     and output :math:`y` (which is a 2D `Tensor` of target class indices).
     For each sample in the mini-batch:
@@ -843,6 +851,7 @@ class MultiLabelMarginLoss(_Loss):
         tensor(0.85...)
 
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -853,8 +862,10 @@ class MultiLabelMarginLoss(_Loss):
 
 
 class SmoothL1Loss(_Loss):
-    r"""Creates a criterion that uses a squared term if the absolute
-    element-wise error falls below beta and an L1 term otherwise.
+    r"""Creates a criterion that combines L1 and L2 losses based on a user-defined threshold beta.
+    
+    Creates a criterion that uses a squared term if the absolute
+    element-wise error falls below a beta and an L1 term otherwise.
     It is less sensitive to outliers than :class:`torch.nn.MSELoss` and in some cases
     prevents exploding gradients (e.g. see the paper `Fast R-CNN`_ by Ross Girshick).
 
@@ -923,6 +934,7 @@ class SmoothL1Loss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', beta: float = 1.0) -> None:
@@ -934,7 +946,9 @@ class SmoothL1Loss(_Loss):
 
 
 class HuberLoss(_Loss):
-    r"""Creates a criterion that uses a squared term if the absolute
+    r"""Piecewise Huber loss function.
+    
+    Creates a criterion that uses a squared term if the absolute
     element-wise error falls below delta and a delta-scaled L1 term otherwise.
     This loss combines advantages of both :class:`L1Loss` and :class:`MSELoss`; the
     delta-scaled L1 region makes the loss less sensitive to outliers than :class:`MSELoss`,
@@ -983,6 +997,7 @@ class HuberLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
+
     __constants__ = ['reduction', 'delta']
 
     def __init__(self, reduction: str = 'mean', delta: float = 1.0) -> None:
@@ -994,9 +1009,7 @@ class HuberLoss(_Loss):
 
 
 class SoftMarginLoss(_Loss):
-    r"""Creates a criterion that optimizes a two-class classification
-    logistic loss between input tensor :math:`x` and target tensor :math:`y`
-    (containing 1 or -1).
+    r"""Creates a two-class logistic loss between input tensor :math:`x` and target tensor :math:`y`(containing 1 or -1).
 
     .. math::
         \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
@@ -1025,6 +1038,7 @@ class SoftMarginLoss(_Loss):
           shape as input.
 
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -1035,8 +1049,7 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion computes the cross entropy loss between input logits
-    and target.
+    r"""This criterion computes the cross entropy loss between input logits and target.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
@@ -1165,6 +1178,7 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+    
     __constants__ = ['ignore_index', 'reduction', 'label_smoothing']
     ignore_index: int
     label_smoothing: float
@@ -1182,9 +1196,10 @@ class CrossEntropyLoss(_WeightedLoss):
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
-    r"""Creates a criterion that optimizes a multi-label one-versus-all
-    loss based on max-entropy, between input :math:`x` and target :math:`y` of size
-    :math:`(N, C)`.
+    r"""Creates a criterion that optimizes a multi-label one-versus-all loss based on max-entropy.
+     
+    The criterion optimizes the loss between input :math:`x` and target :math:`y` of size :math:`(N, C)`.
+    
     For each sample in the minibatch:
 
     .. math::
@@ -1219,6 +1234,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
     """
+
     __constants__ = ['reduction']
 
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
@@ -1229,11 +1245,12 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 
 class CosineEmbeddingLoss(_Loss):
-    r"""Creates a criterion that measures the loss given input tensors
-    :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
-    Use (:math:`y=1`) to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
-    This is typically used for learning nonlinear
-    embeddings or semi-supervised learning.
+    r"""Creates a criterion that measures the cosine similarity loss.
+    
+    It measures the loss given input tensors :math:`x_1`, :math:`x_2` 
+    and a `Tensor` label :math:`y` with values 1 or -1. Use (:math:`y=1`) 
+    to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
+    This is typically used for learning nonlinear embeddings or semi-supervised learning.
 
     The loss function for each sample is:
 
@@ -1279,6 +1296,7 @@ class CosineEmbeddingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
+
     __constants__ = ['margin', 'reduction']
     margin: float
 
@@ -1291,9 +1309,11 @@ class CosineEmbeddingLoss(_Loss):
 
 
 class MarginRankingLoss(_Loss):
-    r"""Creates a criterion that measures the loss given
-    inputs :math:`x1`, :math:`x2`, two 1D mini-batch or 0D `Tensors`,
-    and a label 1D mini-batch or 0D `Tensor` :math:`y` (containing 1 or -1).
+    r"""Creates a criterion that computes the relative distance between inputs.
+    
+    This criterion measures the loss given inputs :math:`x1`, :math:`x2`, 
+    two 1D mini-batch or 0D `Tensors`, and a label 1D mini-batch or 
+    0D `Tensor` :math:`y` (containing 1 or -1).
 
     If :math:`y = 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for :math:`y = -1`.
@@ -1336,6 +1356,7 @@ class MarginRankingLoss(_Loss):
         >>> output = loss(input1, input2, target)
         >>> output.backward()
     """
+
     __constants__ = ['margin', 'reduction']
     margin: float
 
@@ -1348,10 +1369,10 @@ class MarginRankingLoss(_Loss):
 
 
 class MultiMarginLoss(_WeightedLoss):
-    r"""Creates a criterion that optimizes a multi-class classification hinge
-    loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`) and
-    output :math:`y` (which is a 1D tensor of target class indices,
-    :math:`0 \leq y \leq \text{x.size}(1)-1`):
+    r"""Creates a criterion that optimizes a multi-class classification hinge loss (margin-based loss).
+    
+    The loss is computed between input :math:`x` (a 2D mini-batch `Tensor`) and output :math:`y` 
+    (which is a 1D tensor of target class indices, :math:`0 \leq y \leq \text{x.size}(1)-1`):
 
     For each mini-batch sample, the loss in terms of the 1D input :math:`x` and scalar
     output :math:`y` is:
@@ -1407,6 +1428,7 @@ class MultiMarginLoss(_WeightedLoss):
         >>> loss(x, y)
         tensor(0.32...)
     """
+
     __constants__ = ['p', 'margin', 'reduction']
     margin: float
     p: int
@@ -1429,8 +1451,10 @@ class MultiMarginLoss(_WeightedLoss):
 
 
 class TripletMarginLoss(_Loss):
-    r"""Creates a criterion that measures the triplet loss given an input
-    tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater than :math:`0`.
+    r"""Creates a criterion that measures the triplet loss.
+     
+    The loss is computed between a given input tensors :math:`x1`, :math:`x2`, 
+    :math:`x3` and a margin with a value greater than :math:`0`.
     This is used for measuring a relative similarity between samples. A triplet
     is composed by `a`, `p` and `n` (i.e., `anchor`, `positive examples` and `negative
     examples` respectively). The shapes of all input tensors should be
@@ -1497,6 +1521,7 @@ class TripletMarginLoss(_Loss):
     .. _Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
+    
     __constants__ = ['margin', 'p', 'eps', 'swap', 'reduction']
     margin: float
     p: float
@@ -1517,11 +1542,12 @@ class TripletMarginLoss(_Loss):
 
 
 class TripletMarginWithDistanceLoss(_Loss):
-    r"""Creates a criterion that measures the triplet loss given input
-    tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
-    positive, and negative examples, respectively), and a nonnegative,
-    real-valued function ("distance function") used to compute the relationship
-    between the anchor and positive example ("positive distance") and the
+    r"""Creates a criterion that computes the triplet loss with a custom distance function.
+    
+    The criterion measures the triplet loss given input tensors :math:`a`, :math:`p`, 
+    and :math:`n` (representing anchor, positive, and negative examples, respectively), 
+    and a nonnegative, real-valued function ("distance function") used to compute the 
+    relationship between the anchor and positive example ("positive distance") and the
     anchor and negative example ("negative distance").
 
     The unreduced loss (i.e., with :attr:`reduction` set to ``'none'``)
@@ -1614,6 +1640,7 @@ class TripletMarginWithDistanceLoss(_Loss):
         V. Balntas, et al.: Learning shallow convolutional feature descriptors with triplet losses:
         http://www.bmva.org/bmvc/2016/papers/paper119/index.html
     """
+
     __constants__ = ['margin', 'swap', 'reduction']
     margin: float
     swap: bool
@@ -1766,6 +1793,7 @@ class CTCLoss(_Loss):
         True``.
         Please see the notes on :doc:`/notes/randomness` for background.
     """
+
     __constants__ = ['blank', 'reduction']
     blank: int
     zero_infinity: bool
