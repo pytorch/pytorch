@@ -178,39 +178,19 @@ init_command = [
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
-    'torch/_dynamo/allowed_functions.py',
-    'torch/_dynamo/bytecode_analysis.py',
-    'torch/_dynamo/bytecode_transformation.py',
-    'torch/_dynamo/codegen.py',
-    'torch/_dynamo/compiled_autograd.py',
-    'torch/_dynamo/config.py',
-    'torch/_dynamo/eval_frame.py',
-    'torch/_dynamo/exc.py',
-    'torch/_dynamo/funcname_cache.py',
-    'torch/_dynamo/hooks.py',
-    'torch/_dynamo/convert_frame.py',
-    'torch/_dynamo/profiler.py',
-    'torch/_dynamo/replay_record.py',
-    'torch/_dynamo/resume_execution.py',
-    'torch/_dynamo/symbolic_convert.py',
-    'torch/_dynamo/testing.py',
-    'torch/_dynamo/types.py',
-    'torch/_dynamo/test_minifier_common.py',
-    'torch/_dynamo/utils.py',
-    'torch/_dynamo/output_graph.py',
-    'torch/_dynamo/guards.py',
-    'torch/_dynamo/side_effects.py',
-    'torch/_dynamo/optimizations/__init__.py',
-    'torch/_dynamo/optimizations/backends.py',
-    'torch/_dynamo/optimizations/training.py',
-    'torch/_dynamo/debug_utils.py',
-    'torch/_dynamo/repro/**/*.py',
+    'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
     'torch/_C/_dynamo/**/*.py',
     'test/test_utils.py',  # used to by in MYPY but after importing op_db it took 10+ minutes
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/_dynamo/backends/**/*.py',
+    'torch/_dynamo/variables/**/*.py',
+    'torch/_dynamo/comptime.py',
+    'torch/_dynamo/device_interface.py',
+    'torch/_dynamo/polyfill.py',
+    'torch/_dynamo/skipfiles.py',
     'torch/_inductor/fx_passes/serialized_patterns/**',
 ]
 command = [
