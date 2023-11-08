@@ -1039,21 +1039,25 @@ class GraphModule(torch.nn.Module):
                 mode_inverse = modes[(i + 1) % 2]
 
                 def fn(x):
-                    if decorator:
+                    with torch.set_grad_enabled(mode_inverse):
+                        if decorator:
 
-                        @torch.set_grad_enabled(mode)
-                        def inner_func(x):
-                            return x.sin()
+                            @torch.set_grad_enabled(mode)
+                            def inner_func(x):
+                                return x.sin()
 
-                        with torch.set_grad_enabled(mode_inverse):
-                            return inner_func(x)
-                    else:
+                        else:
 
-                        def inner_func(x):
-                            return x.sin()
+                            def inner_func(x):
+                                return x.sin()
 
-                        with torch.set_grad_enabled(mode_inverse):
-                            return torch.set_grad_enabled(mode)(inner_func)(x)
+                            inner_func = torch.set_grad_enabled(mode)(inner_func)
+
+                        # decorator will mutate global state even if the fn is called
+                        assert torch.is_grad_enabled() == mode
+
+                    with torch.set_grad_enabled(mode_inverse):
+                        return inner_func(x)
 
             x = torch.zeros(10, requires_grad=True)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
