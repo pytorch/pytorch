@@ -1693,14 +1693,14 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             x.add_(1)
             return x, y
 
-        a = torch.rand([6])
-        a1 = torch.clone(a)
+            a = torch.rand([6])
+            a1 = torch.clone(a)
 
-        cnt = torch._dynamo.testing.CompileCounter()
+            cnt = torch._dynamo.testing.CompileCounter()
 
-        self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
-        self.assertEqual(a, a1)
-        self.assertEqual(cnt.frame_count, 2)
+            self.assertEqual(func(a), torch.compile(func, backend=cnt)(a1))
+            self.assertEqual(a, a1)
+            self.assertEqual(cnt.frame_count, 2)
 
     def test_setattr_data_tensor_raises(self):
         def func(x):
