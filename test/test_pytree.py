@@ -269,7 +269,7 @@ class TestGenericPytree(TestCase):
             ),
         ],
     )
-    def test_flatten_unflatten_list(self, pytree_impl, gen_expected_fn):
+    def test_flatten_unflatten_deque(self, pytree_impl, gen_expected_fn):
         def run_test(deq):
             expected_spec = gen_expected_fn(deq)
             values, treespec = pytree_impl.tree_flatten(deq)
