@@ -14,7 +14,7 @@ import itertools
 import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import Tuple
+from typing import List, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
