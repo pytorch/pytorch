@@ -252,15 +252,12 @@ def _private_register_pytree_node(
     for the C++ pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
-    # PyStructSequence types
-    if not optree.is_structseq_class(cls):
-        optree.register_pytree_node(
-            cls,
-            flatten_fn,
-            _reverse_args(unflatten_fn),
-            namespace=namespace,
-        )
+    optree.register_pytree_node(
+        cls,
+        flatten_fn,
+        _reverse_args(unflatten_fn),
+        namespace=namespace,
+    )
 
 
 def tree_flatten(

@@ -419,6 +419,32 @@ def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
     return deque(values, maxlen=context)
 
 
+def _structseq_flatten(seq: structseq[Any]) -> Tuple[List[Any], Context]:
+    return list(seq), type(seq)
+
+
+def _structseq_unflatten(values: Iterable[Any], context: Context) -> structseq[Any]:
+    return context(values)
+
+
+def _structseq_serialize(context: Context) -> DumpableContext:
+    json_structseq = {
+        "class_module": context.__module__,
+        "class_name": context.__qualname__,
+    }
+    return json_structseq
+
+
+def _structseq_deserialize(dumpable_context: DumpableContext) -> Context:
+    class_module = dumpable_context["class_module"]
+    class_name = dumpable_context["class_name"]
+    assert isinstance(class_module, str)
+    assert isinstance(class_name, str)
+    module = importlib.import_module(class_module)
+    context = getattr(module, class_name)
+    return context
+
+
 _private_register_pytree_node(
     tuple,
     _tuple_flatten,
@@ -441,9 +467,9 @@ _private_register_pytree_node(
     namedtuple,
     _namedtuple_flatten,
     _namedtuple_unflatten,
+    serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
-    serialized_type_name="collections.namedtuple",
 )
 _private_register_pytree_node(
     OrderedDict,
@@ -465,12 +491,23 @@ _private_register_pytree_node(
     _deque_unflatten,
     serialized_type_name="collections.deque",
 )
+_private_register_pytree_node(
+    structseq,
+    _structseq_flatten,
+    _structseq_unflatten,
+    serialized_type_name="structseq",
+    to_dumpable_context=_structseq_serialize,
+    from_dumpable_context=_structseq_deserialize,
+)
 
 
 def _get_node_type(tree: Any) -> Any:
     node_type = type(tree)
-    if node_type not in SUPPORTED_NODES and is_namedtuple_class(node_type):
-        return namedtuple
+    if node_type not in SUPPORTED_NODES:
+        if is_namedtuple_class(node_type):
+            return namedtuple
+        if is_structseq_class(node_type):
+            return structseq
     return node_type
 
 
