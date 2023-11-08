@@ -263,7 +263,7 @@ def enable_math_sdp(enabled: bool):
 
 
 def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
-    """Check if FlashAttention can be utilized in scaled_dot_product_attention.
+    r"""Check if FlashAttention can be utilized in scaled_dot_product_attention.
 
     Args:
         params: An instance of SDPAParams containing the tensors for query,
@@ -283,7 +283,7 @@ def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
 
 
 def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool:
-    """Check if efficient_attention can be utilized in scaled_dot_product_attention.
+    r"""Check if efficient_attention can be utilized in scaled_dot_product_attention.
 
     Args:
         params: An instance of SDPAParams containing the tensors for query,
