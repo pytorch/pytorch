@@ -1,6 +1,5 @@
 import torch
 import inspect
-import warnings
 
 __all__ = ["pytree_register_structseq"]
 
@@ -8,11 +7,6 @@ __all__ = ["pytree_register_structseq"]
 return_types = torch._C._return_types  # type: ignore[attr-defined]
 
 def pytree_register_structseq(cls):
-    if torch.utils._pytree.is_structseq_class(cls):
-        return
-
-    warnings.warn(f"Class {cls!r} is not a PyStructSequence class.")
-
     def structseq_flatten(structseq):
         return list(structseq), None
 

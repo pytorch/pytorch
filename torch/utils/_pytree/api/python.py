@@ -27,22 +27,16 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
-    Final,
-    Generic,
     Iterable,
     List,
     NamedTuple,
-    NoReturn,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
-
-from typing_extensions import Self  # Python 3.11+
 
 from .typing import (
     Context,
@@ -85,10 +79,6 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
-    "is_namedtuple",
-    "is_namedtuple_class",
-    "is_structseq",
-    "is_structseq_class",
 ]
 
 
@@ -246,77 +236,6 @@ def _private_register_pytree_node(
 register_pytree_node = _register_pytree_node
 
 
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
-def is_namedtuple(obj: Union[object, type]) -> bool:
-    """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
-    cls = obj if isinstance(obj, type) else type(obj)
-    return is_namedtuple_class(cls)
-
-
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
-def is_namedtuple_class(cls: type) -> bool:
-    """Return whether the class is a subclass of namedtuple."""
-    return (
-        isinstance(cls, type)
-        and issubclass(cls, tuple)
-        and isinstance(getattr(cls, "_fields", None), tuple)
-        and all(isinstance(field, str) for field in cls._fields)  # type: ignore[attr-defined]
-    )
-
-
-_T_co = TypeVar("_T_co", covariant=True)
-
-
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
-class structseq(tuple, Generic[_T_co]):  # type: ignore[misc]
-    """A generic type stub for CPython's ``PyStructSequence`` type."""
-
-    n_fields: Final[int]  # type: ignore[misc]
-    n_sequence_fields: Final[int]  # type: ignore[misc]
-    n_unnamed_fields: Final[int]  # type: ignore[misc]
-
-    def __init_subclass__(cls) -> NoReturn:
-        """Prohibit subclassing."""
-        raise TypeError("type 'structseq' is not an acceptable base type")
-
-    # pylint: disable-next=unused-argument,redefined-builtin
-    def __new__(
-        cls: Type[Self],
-        sequence: Iterable[_T_co],
-        dict: Dict[str, Any] = ...,
-    ) -> Self:
-        raise NotImplementedError
-
-
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
-def is_structseq(obj: Union[object, type]) -> bool:
-    """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
-    cls = obj if isinstance(obj, type) else type(obj)
-    return is_structseq_class(cls)
-
-
-# Reference: https://github.com/metaopt/optree/blob/v0.10.0/optree/typing.py
-def is_structseq_class(cls: type) -> bool:
-    """Return whether the class is a class of PyStructSequence."""
-    if (
-        isinstance(cls, type)
-        # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
-        and cls.__base__ is tuple
-        # Check PyStructSequence members
-        and isinstance(getattr(cls, "n_sequence_fields", None), int)
-        and isinstance(getattr(cls, "n_fields", None), int)
-        and isinstance(getattr(cls, "n_unnamed_fields", None), int)
-    ):
-        try:
-            # Check the type does not allow subclassing
-            class SubClass(cls):
-                pass
-
-        except TypeError:
-            return True
-    return False
-
-
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
@@ -420,32 +339,6 @@ def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
     return deque(values, maxlen=context)
 
 
-def _structseq_flatten(seq: structseq[Any]) -> Tuple[List[Any], Context]:
-    return list(seq), type(seq)
-
-
-def _structseq_unflatten(values: Iterable[Any], context: Context) -> structseq[Any]:
-    return context(values)
-
-
-def _structseq_serialize(context: Context) -> DumpableContext:
-    json_structseq = {
-        "class_module": context.__module__,
-        "class_name": context.__qualname__,
-    }
-    return json_structseq
-
-
-def _structseq_deserialize(dumpable_context: DumpableContext) -> Context:
-    class_module = dumpable_context["class_module"]
-    class_name = dumpable_context["class_name"]
-    assert isinstance(class_module, str)
-    assert isinstance(class_name, str)
-    module = importlib.import_module(class_module)
-    context = getattr(module, class_name)
-    return context
-
-
 _private_register_pytree_node(
     tuple,
     _tuple_flatten,
@@ -468,9 +361,9 @@ _private_register_pytree_node(
     namedtuple,
     _namedtuple_flatten,
     _namedtuple_unflatten,
-    serialized_type_name="collections.namedtuple",
     to_dumpable_context=_namedtuple_serialize,
     from_dumpable_context=_namedtuple_deserialize,
+    serialized_type_name="collections.namedtuple",
 )
 _private_register_pytree_node(
     OrderedDict,
@@ -492,24 +385,24 @@ _private_register_pytree_node(
     _deque_unflatten,
     serialized_type_name="collections.deque",
 )
-_private_register_pytree_node(
-    structseq,
-    _structseq_flatten,
-    _structseq_unflatten,
-    serialized_type_name="structseq",
-    to_dumpable_context=_structseq_serialize,
-    from_dumpable_context=_structseq_deserialize,
-)
+
+
+# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+def _is_namedtuple_instance(tree: Any) -> bool:
+    typ = type(tree)
+    bases = typ.__bases__
+    if len(bases) != 1 or bases[0] != tuple:
+        return False
+    fields = getattr(typ, "_fields", None)
+    if not isinstance(fields, tuple):
+        return False
+    return all(type(entry) == str for entry in fields)
 
 
 def _get_node_type(tree: Any) -> Any:
-    node_type = type(tree)
-    if node_type not in SUPPORTED_NODES:
-        if is_namedtuple_class(node_type):
-            return namedtuple
-        if is_structseq_class(node_type):
-            return structseq
-    return node_type
+    if _is_namedtuple_instance(tree):
+        return namedtuple
+    return type(tree)
 
 
 # A leaf is defined as anything that is not a Node.
