@@ -20,6 +20,7 @@ from typing import Any, cast, Callable, Dict, List, Optional, Sequence, Set, Tup
 import torch
 import torch.fx
 import torch.fx.traceback as fx_traceback
+from torch.fx.experimental import _config as config
 
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
@@ -793,17 +794,43 @@ def _lru_cache(fn, maxsize=None):
     constraints we know now (i.e. evaluate_expr)
 
     Use _lru_cache otherwise.
+
+    Also note that this depends on _update_version_counter being called on the
+    shape environment whenever the constraints are updated, otherwise the cache
+    will not be cleared.
     """
     fn_cache = lru_cache(maxsize)(fn)
-    prior_key = None
+    prior_version = 0
 
-    @functools.wraps(fn)
-    def wrapper(self, *args, **kwargs):
-        nonlocal prior_key
-        if prior_key != self._get_key():
-            prior_key = self._get_key()
-            fn_cache.cache_clear()
-        return fn_cache(self, *args, **kwargs)
+    if config.validate_shape_env_verison_key:
+        prior_key = None
+
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            nonlocal prior_version, prior_key
+            if prior_key is None:
+                prior_key = self._get_key()
+
+            if prior_version != self._version_counter:
+                fn_cache.cache_clear()
+                prior_version = self._version_counter
+                prior_key = self._get_key()
+            else:
+                assert prior_key == self._get_key(), \
+                    "ShapeEnv cache key changed without version being updated!"
+
+            return fn_cache(self, *args, **kwargs)
+
+    else:
+
+        @functools.wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            nonlocal prior_version
+            if prior_version != self._version_counter:
+                fn_cache.cache_clear()
+                prior_version = self._version_counter
+
+            return fn_cache(self, *args, **kwargs)
 
     wrapper.cache_clear = fn_cache.cache_clear
     wrapper.cache_info = fn_cache.cache_info  # type: ignore[attr-defined]
@@ -1445,7 +1472,7 @@ class ShapeEnv:
             if should_record_events is not None
             else (
                 self._translation_validation_enabled
-                and not torch._dynamo.config.translation_validation_no_bisect
+                and not config.translation_validation_no_bisect
             )
         )
 
@@ -1453,7 +1480,7 @@ class ShapeEnv:
         #   - It should record events
         #   - The recording check is enabled
         self.check_recorded_events = (
-            self.should_record_events and torch._dynamo.config.check_shape_env_recorded_events
+            self.should_record_events and config.check_shape_env_recorded_events
         )
 
         # This will make sure we only record the top-level function call.
@@ -1571,6 +1598,10 @@ class ShapeEnv:
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
 
+        # Version counter used to invalidate cached values
+        self._prev_cache_key = self._get_key()
+        self._version_counter = 0
+
         # Cache for FX nodes.
         # Maps an already built node a tuple of:
         #   1. node's target
@@ -1621,6 +1652,8 @@ class ShapeEnv:
             "tracked_fakes",
             "events",
             "source_name_to_debug_name",
+            "_prev_cache_key",
+            "_version_counter",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
@@ -1819,6 +1852,17 @@ class ShapeEnv:
         Determines when we need to invalidate our cache
         """
         return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+
+    def _update_version_counter(self):
+        # The shape environment is queried orders of magnitude more often than
+        # it is changed, so we summarise the cache key into a linearly
+        # increasing version counter which is cheaper to check in _lru_cache
+
+        # Only update version counter if the state actually changed
+        cur_key = self._get_key()
+        if self._prev_cache_key != cur_key:
+            self._prev_cache_key = cur_key
+            self._version_counter += 1
 
     def _produce_dyn_sizes(self,
                            ex_size: Sequence[int],
@@ -2957,6 +3001,7 @@ class ShapeEnv:
                 new_divisible.add(k)
 
         self.divisible = new_divisible
+        self._update_version_counter()
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
@@ -3039,7 +3084,7 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = expr`.
         """
-        if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
+        if config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
             # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
@@ -3051,10 +3096,15 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         log.info("set_replacement %s = %s", a, expr)
         self.replacements[a] = expr
+        self._update_version_counter()
 
         # When specializing 'a == expr', the equality should be also conveyed to
         # Z3, in case an expression uses 'a'.
         self._add_target_expr(sympy.Eq(a, expr))
+
+    def _add_divisible(self, expr: "sympy.Expr"):
+        self.divisible.add(expr)
+        self._update_version_counter()
 
     @_lru_cache
     @record_shapeenv_event()
@@ -3105,22 +3155,28 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0], floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    new_var = self._find(r[1])
-                    ok = False
-                    if self.is_unbacked_symint(free[0]):
-                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                        # s0 - i0 - i1.  Arguably this should be OK but the
-                        # runtime assert machinery is very delicate right now
-                        # so this causes things to fail e.g.,
-                        # test_split_unbacked_sizes
-                        ok = len(free_unbacked_symbols(new_var)) <= 1
-                    else:
-                        # Never substitute backed with unbacked
-                        ok = len(free_unbacked_symbols(new_var)) == 0
-                    if ok:
-                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                # short-circuit when no solving is needed
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                    self._set_replacement(lhs, self._find(rhs))
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                    self._set_replacement(rhs, self._find(lhs))
+                else:
+                    r = try_solve(expr, free[0], floordiv_inequality=False)
+                    if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                        new_var = self._find(r[1])
+                        ok = False
+                        if self.is_unbacked_symint(free[0]):
+                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                            # s0 - i0 - i1.  Arguably this should be OK but the
+                            # runtime assert machinery is very delicate right now
+                            # so this causes things to fail e.g.,
+                            # test_split_unbacked_sizes
+                            ok = len(free_unbacked_symbols(new_var)) <= 1
+                        else:
+                            # Never substitute backed with unbacked
+                            ok = len(free_unbacked_symbols(new_var)) == 0
+                        if ok:
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
@@ -3128,7 +3184,7 @@ class ShapeEnv:
             try:
                 r = try_solve(expr, mod_expr, floordiv_inequality=False)
                 if r is not None and r[1] == 0:
-                    self.divisible.add(mod_expr)
+                    self._add_divisible(mod_expr)
             except NotImplementedError:
                 pass
         return
@@ -3305,7 +3361,7 @@ class ShapeEnv:
             self._check_frozen(expr, concrete_val)
 
             if (
-                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
                     and isinstance(hint, bool)
                     and isinstance(expr, (sympy.Eq, sympy.Ne))
             ):
@@ -3407,6 +3463,7 @@ class ShapeEnv:
             cands = sorted([s for s in expr.free_symbols if s.name.startswith("i")], key=lambda s: int(s.name[1:]))
             self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
             self.num_deferred_runtime_asserts += 1
+            self._update_version_counter()
             # TODO: refine ranges
             # Unfortunately, range refinement is probably going to not
             # work most of the time, because we don't support symbols
