@@ -5758,32 +5758,6 @@ class TestMPS(TestCaseMPS):
 
         helper(3, 3)
 
-    def test_topk(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-            for largest_val in [True, False]:
-                if (type(shape) == tuple):
-                    for curr_dim in range(0, len(shape)):
-                        dim_size = shape[curr_dim]
-                        for k in range(1, dim_size + 1):
-                            topk_values, topk_indices = torch.topk(x, k, dim=curr_dim, largest=largest_val)
-                            topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=curr_dim, largest=largest_val)
-                            self.assertEqual(topk_values, topk_values_cpu)
-                            self.assertEqual(topk_indices, topk_indices_cpu)
-                else:
-                    for k in range(1, shape):
-                        topk_values, topk_indices = torch.topk(x, k, dim=0, largest=largest_val)
-                        topk_values_cpu, topk_indices_cpu = torch.topk(cpu_x, k, dim=0, largest=largest_val)
-                        self.assertEqual(topk_values, topk_values_cpu)
-                        self.assertEqual(topk_indices, topk_indices_cpu)
-
-        helper(2)
-        helper((5, 1))
-        helper((1, 5))
-        helper((5, 9, 7, 4))
-        helper((50, 20, 7, 4))
-
     def test_sort(self):
         for SIZE in (4, 2049):
             device = 'mps'
@@ -5940,110 +5914,6 @@ class TestMPS(TestCaseMPS):
         helper([2, 2, 6, 5], [2, 0, 6, 5], [2, 5, 6, 5])
         helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 5, 6, 5])
         helper([2, 0, 6, 5], [2, 3, 6, 5], [2, 0, 6, 5])
-
-    def test_constant_pad(self):
-        m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
-        input_cpu = torch.randn(1, 16, 16, 16)
-        input_mps = input_cpu.detach().clone().to("mps")
-        r_cpu = m(input_cpu)
-        r_mps = m(input_mps)
-        self.assertEqual(r_cpu, r_mps.to("cpu"))
-
-        # Arbitrary input dimensions
-        pad = (1, 1, 0, 0, 0, 0)
-        value = 3.5
-        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
-        input_mps = input_cpu.detach().clone().to("mps")
-        r_cpu = F.pad(input_cpu, pad=pad, value=value)
-        r_mps = F.pad(input_mps, pad=pad, value=value)
-        self.assertEqual(r_cpu, r_mps.to("cpu"))
-
-    def test_circular_pad(self):
-        # https://github.com/pytorch/pytorch/issues/80856
-        k_cpu = torch.ones(3, 3, 9, 9)
-        k_mps = k_cpu.detach().clone().to("mps")
-
-        x_cpu = torch.rand(1, 3, 32, 32)
-        x_mps = x_cpu.detach().clone().to("mps")
-
-        x_pad_cpu = F.pad(x_cpu, (2, 2, 2, 2), mode='circular')
-        x_pad_mps = F.pad(x_mps, (2, 2, 2, 2), mode='circular')
-
-        y_cpu = F.conv2d(x_pad_cpu, k_cpu)
-        y_mps = F.conv2d(x_pad_mps, k_mps)
-
-        self.assertEqual(y_cpu, y_mps.cpu())
-
-    def test_constant_pad_4d_warning(self):
-        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
-        inputMPS = inputCPU.detach().clone().to('mps')
-        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
-        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
-        self.assertEqual(outputCPU, outputMPS)
-
-    def test_pad(self):
-        def helper(shape, padding, op, value=0):
-            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            inputCPU.retain_grad()
-            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
-
-            if (op in [nn.ConstantPad1d, nn.ConstantPad2d, nn.ConstantPad3d]):
-                padCriteria = op(padding, value)
-            else:
-                padCriteria = op(padding)
-            outputCPU = padCriteria(inputCPU)
-            outputMPS = padCriteria(inputMPS)
-            self.assertEqual(outputCPU, outputMPS)
-
-            # backward pass (chose 0.6 just to have the grad_output != 1)
-            outputCPU.backward(gradient=torch.full_like(outputCPU, 0.6))
-            outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
-            self.assertEqual(inputCPU.grad, inputMPS.grad)
-
-        # 1D Padding
-        helper((2, 4, 3), 2, nn.ReflectionPad1d)
-        # verify if a change in shape of input would cause problems with graph caching
-        helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
-        # Replication 1D
-        helper((2, 1, 6), 3, nn.ReplicationPad1d)
-        # Constant Pad 1D
-        helper((2, 3, 4), 2, nn.ConstantPad1d)
-        # Constant Pad 1D with single dimension input
-        helper((16), (1, 2), nn.ConstantPad1d)
-
-        # 2D Padding
-        helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
-        # verify if a change in shape of input would cause problems with graph caching
-        helper((2, 4, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
-        # this should make the padding (2, 2, 2, 2)
-        helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
-        # verify if a change in shape of padding would cause problems with graph caching
-        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
-        # Constant Pad 2D
-        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
-        # input size < pad size
-        helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
-        # pad dims < input dims
-        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
-        # pad dims == input dims
-        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
-        # input.numel() == 0 but output.numel() > 0
-        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
-        # pad dims < input dims - 2
-        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
-
-        # 3D Padding
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
-        # verify if a change in shape of padding would cause problems with graph caching
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
-        # case where input_d == pad_front/back for ReplicationPad3d
-        helper((3, 4, 5, 6, 7), (1, 2, 3, 4, 5, 6), nn.ReplicationPad3d)
-        # Constant Pad 3D
-        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
-        # input size < pad size
-        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
-        # check the workaround for the right padding bug in Monterey
-        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
 
     # Test stack forward
     def test_stack(self):
@@ -8366,8 +8236,112 @@ class TestNNMPS(NNTestCase):
         # self.assertEqual(expect, actual)
 
 
-class TestConstantPadNd(TestCaseMPS):
-    def test_preserves_memory_format(self):
+class TestPad(TestCaseMPS):
+    def test_constant_pad(self):
+        m = torch.nn.ConstantPad2d((-2, -2, -2, -2), 3.5)
+        input_cpu = torch.randn(1, 16, 16, 16)
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = m(input_cpu)
+        r_mps = m(input_mps)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
+        # Arbitrary input dimensions
+        pad = (1, 1, 0, 0, 0, 0)
+        value = 3.5
+        input_cpu = torch.randn((1, 1, 3, 3, 3, 3, 3, 3, 3, 3))
+        input_mps = input_cpu.detach().clone().to("mps")
+        r_cpu = F.pad(input_cpu, pad=pad, value=value)
+        r_mps = F.pad(input_mps, pad=pad, value=value)
+        self.assertEqual(r_cpu, r_mps.to("cpu"))
+
+    def test_circular_pad(self):
+        # https://github.com/pytorch/pytorch/issues/80856
+        k_cpu = torch.ones(3, 3, 9, 9)
+        k_mps = k_cpu.detach().clone().to("mps")
+
+        x_cpu = torch.rand(1, 3, 32, 32)
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        x_pad_cpu = F.pad(x_cpu, (2, 2, 2, 2), mode='circular')
+        x_pad_mps = F.pad(x_mps, (2, 2, 2, 2), mode='circular')
+
+        y_cpu = F.conv2d(x_pad_cpu, k_cpu)
+        y_mps = F.conv2d(x_pad_mps, k_mps)
+
+        self.assertEqual(y_cpu, y_mps.cpu())
+
+    def test_constant_pad_4d_warning(self):
+        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
+        inputMPS = inputCPU.detach().clone().to('mps')
+        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
+        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
+        self.assertEqual(outputCPU, outputMPS)
+
+    def test_pad(self):
+        def helper(shape, padding, op, value=0):
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            inputCPU.retain_grad()
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+
+            if (op in [nn.ConstantPad1d, nn.ConstantPad2d, nn.ConstantPad3d]):
+                padCriteria = op(padding, value)
+            else:
+                padCriteria = op(padding)
+            outputCPU = padCriteria(inputCPU)
+            outputMPS = padCriteria(inputMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass (chose 0.6 just to have the grad_output != 1)
+            outputCPU.backward(gradient=torch.full_like(outputCPU, 0.6))
+            outputMPS.backward(gradient=torch.full_like(outputMPS, 0.6))
+            self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        # 1D Padding
+        helper((2, 4, 3), 2, nn.ReflectionPad1d)
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((2, 4, 4), (1, 3), nn.ReflectionPad1d)
+        # Replication 1D
+        helper((2, 1, 6), 3, nn.ReplicationPad1d)
+        # Constant Pad 1D
+        helper((2, 3, 4), 2, nn.ConstantPad1d)
+        # Constant Pad 1D with single dimension input
+        helper((16), (1, 2), nn.ConstantPad1d)
+
+        # 2D Padding
+        helper((1, 2, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((2, 4, 3, 4), (1, 1, 2, 0), nn.ReflectionPad2d)
+        # this should make the padding (2, 2, 2, 2)
+        helper((2, 1, 6, 8), 2, nn.ReplicationPad2d)
+        # verify if a change in shape of padding would cause problems with graph caching
+        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
+        # Constant Pad 2D
+        helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
+        # input size < pad size
+        helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
+        # pad dims < input dims
+        helper((50, 9, 300), (0, 0, 0, 31), nn.ConstantPad2d)
+        # pad dims == input dims
+        helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
+        # input.numel() == 0 but output.numel() > 0
+        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        # pad dims < input dims - 2
+        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
+
+        # 3D Padding
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
+        # verify if a change in shape of padding would cause problems with graph caching
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
+        # case where input_d == pad_front/back for ReplicationPad3d
+        helper((3, 4, 5, 6, 7), (1, 2, 3, 4, 5, 6), nn.ReplicationPad3d)
+        # Constant Pad 3D
+        helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # input size < pad size
+        helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
+        # check the workaround for the right padding bug in Monterey
+        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
+
+    def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
         nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
         self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
