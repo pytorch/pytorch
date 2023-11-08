@@ -21,7 +21,13 @@ if torch._running_with_deploy():
     raise ImportError("C++ pytree utilities do not work with torch::deploy.")
 
 import optree
-from optree import PyTreeSpec  # direct import for type annotations
+from optree import (
+    is_namedtuple,
+    is_namedtuple_class,
+    is_structseq,
+    is_structseq_class,
+    PyTreeSpec,  # direct import for type annotations
+)
 
 from .typing import (
     Context,
@@ -64,6 +70,10 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_structseq",
+    "is_structseq_class",
 ]
 
 

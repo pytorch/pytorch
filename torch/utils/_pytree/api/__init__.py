@@ -13,6 +13,10 @@ collection support for PyTorch APIs.
 """
 
 from .python import (
+    is_namedtuple,
+    is_namedtuple_class,
+    is_structseq,
+    is_structseq_class,
     LeafSpec,
     register_pytree_node,
     tree_all,
@@ -69,4 +73,8 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_structseq",
+    "is_structseq_class",
 ]

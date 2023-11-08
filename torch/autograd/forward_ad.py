@@ -1,7 +1,6 @@
 import os
-from collections import namedtuple
 
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from .grad_mode import _DecoratorContextManager
@@ -118,16 +117,32 @@ def make_dual(tensor, tangent, *, level=None):
             f"Expected tangent to be floating point or complex, but got: {tangent.dtype}"
         )
 
-    return torch._VF._make_dual(tensor, tangent, level=level)
+    return torch._VF._make_dual(tensor, tangent, level=level)  # type: ignore[attr-defined]
 
 
-_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
-
-
-class UnpackedDualTensor(_UnpackedDualTensor):
+class UnpackedDualTensor(tuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
     See :func:`unpack_dual` for more details."""
-    pass
+
+    def __new__(
+        cls,
+        primal: torch.Tensor,
+        tangent: Optional[torch.Tensor],  # type: ignore[arg-type]
+    ) -> "UnpackedDualTensor":
+        return super().__new__(cls, (primal, tangent))  # type: ignore[arg-type]
+
+    @property
+    def primal(self) -> torch.Tensor:
+        return self[0]
+
+    @property
+    def tangent(self) -> Optional[torch.Tensor]:
+        return self[1]
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(primal={self.primal}, tangent={self.tangent})"
+        )
 
 
 def unpack_dual(tensor, *, level=None):
@@ -156,7 +171,7 @@ def unpack_dual(tensor, *, level=None):
     if level < 0:
         return UnpackedDualTensor(tensor, None)
 
-    primal, dual = torch._VF._unpack_dual(tensor, level=level)
+    primal, dual = torch._VF._unpack_dual(tensor, level=level)  # type: ignore[attr-defined]
 
     return UnpackedDualTensor(primal, dual)
 
