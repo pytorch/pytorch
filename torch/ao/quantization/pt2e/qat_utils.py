@@ -752,14 +752,24 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
     """
     # For quantize_per_tensor, scale and zp are literals and need to be copied
     # For quantize_per_channel, scale and zp are get_attr nodes and should be skipped
-    # TODO: support copying over quantize_per_channel args in a future PR
     assert original_node.target == replacement_node.target
     if original_node.target in (
         torch.ops.quantized_decomposed.quantize_per_tensor.default,
         torch.ops.quantized_decomposed.dequantize_per_tensor.default,
     ):
         # Args: input, [scale, zp, qmin, qmax, dtype]
-        replacement_node.args = replacement_node.args[:1] + original_node.args[1:]
+        start_copy_arg_index = 1
+    elif original_node.target in (
+        torch.ops.quantized_decomposed.quantize_per_channel.default,
+        torch.ops.quantized_decomposed.dequantize_per_channel.default,
+    ):
+        # Args: input, scale, zp, [axis, qmin, qmax, dtype]
+        start_copy_arg_index = 3
+    else:
+        raise ValueError("Expected quantize/dequantize nodes, got '%s'" % original_node.target)
+    replacement_node.args = (
+        replacement_node.args[:start_copy_arg_index] + original_node.args[start_copy_arg_index:]
+    )
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     m = _fold_conv_bn_qat_helper(m, is_cuda=False)

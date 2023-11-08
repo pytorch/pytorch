@@ -74,6 +74,17 @@ class OpName:
     def from_builtin_function(
         cls, builtin_function: types.BuiltinFunctionType
     ) -> OpName:
+        """From a builtin function, e.g. operator.add, math.ceil, etc, get the OpName.
+
+        FX graph uses built-in functions to caculate sympy expression. This function
+        is used to get the OpName from a builtin function.
+
+        Args:
+            builtin_function (types.BuiltinFunctionType): operator.add, math.ceil, etc.
+
+        Returns:
+            OpName: _description_
+        """
         op = builtin_function.__name__  # add, sub, etc.
         module = builtin_function.__module__  # _operators or math
         return cls.from_qualified_name(module + "::" + op)
