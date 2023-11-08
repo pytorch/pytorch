@@ -13,6 +13,8 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
       storage_offset_(other.storage_offset_),
       strides_valid_(other.strides_valid_) {
   std::scoped_lock lock(other.mutables_);
+  // These must be copied under lock, so ignore clang-tidy here!
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   numel_ = other.numel_;
   is_contiguous_ = other.is_contiguous_;
   is_channels_last_contiguous_ = other.is_channels_last_contiguous_;
@@ -21,6 +23,7 @@ SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
   is_channels_last_3d_ = other.is_channels_last_3d_;
   is_non_overlapping_and_dense_ = other.is_non_overlapping_and_dense_;
   available_.store(other.available_.load());
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
 // base, sizes, strides
