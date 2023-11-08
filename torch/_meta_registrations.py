@@ -3676,8 +3676,8 @@ def meta_masked_scatter(self, mask, source):
 
 
 @register_meta(aten.masked_scatter_backward)
-def meta_masked_scatter_backward(self, mask, source):
-    return torch.empty_like(self)
+def meta_masked_scatter_backward(self, mask, sizes):
+    return self.new_empty(sizes)
 
 
 @register_meta(aten.index_put_.default)
