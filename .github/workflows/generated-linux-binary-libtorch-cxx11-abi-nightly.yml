@@ -828,7 +828,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -840,7 +839,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.1
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -854,7 +853,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.5
       - name: Test Pytorch binary
@@ -932,7 +931,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -944,7 +942,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.1
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -958,7 +956,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.5
       - name: Test Pytorch binary
@@ -1036,7 +1034,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1048,7 +1045,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.1
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1062,7 +1059,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.6
       - name: Test Pytorch binary
@@ -1140,7 +1137,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1152,7 +1148,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.1
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1166,7 +1162,7 @@ jobs:
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: pytorch/libtorch-cxx11-builder:rocm5.6
       - name: Test Pytorch binary
