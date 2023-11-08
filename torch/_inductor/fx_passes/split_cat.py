@@ -1314,6 +1314,8 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             for arg in user.args[0]:
                 indices.append(arg.args[1])
                 split_sections_for_unbind.append(split_sections[arg.args[1]])
+            # indices may not be necessarily sorted, we sort them first
+            indices.sort()
             # update the arg of stack user, only keep the first getitem
             user.update_arg(0, user.args[0][0])
             # calculate the fused tensor sizes in the indices
