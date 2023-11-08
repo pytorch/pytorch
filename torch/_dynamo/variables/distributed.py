@@ -213,3 +213,14 @@ class ProcessGroupVariable(DistributedVariable):
         from torch._C._distributed_c10d import ProcessGroup
 
         return istype(value, ProcessGroup)
+
+
+class FakeProcessGroupVariable(ProcessGroupVariable):
+    @staticmethod
+    def is_process_group(value):
+        if not DistributedVariable.is_available():
+            return False
+
+        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+
+        return istype(value, FakeProcessGroup)

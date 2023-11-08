@@ -92,6 +92,7 @@ from .dicts import (
 )
 from .distributed import (
     DeviceMeshVariable,
+    FakeProcessGroupVariable,
     PlacementClassVariable,
     PlacementVariable,
     ProcessGroupVariable,
@@ -656,6 +657,12 @@ class VariableBuilder:
             )
         elif ProcessGroupVariable.is_process_group(value):
             return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif FakeProcessGroupVariable.is_process_group(value):
+            return FakeProcessGroupVariable(
                 value,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.ID_MATCH),
