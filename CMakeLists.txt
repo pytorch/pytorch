@@ -213,9 +213,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_CUSPARSELT "Use cuSPARSELt" ON
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
-    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)

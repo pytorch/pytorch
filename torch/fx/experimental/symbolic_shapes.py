@@ -61,7 +61,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols",
+    "has_free_symbols", "sym_eq",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -101,9 +101,14 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-def hint_int(a):
+def hint_int(a, fallback=None):
+    """
+    Retrieve the hint for an int (based on the underlying real values as observed
+    at runtime).  If no hint is available (e.g., because data dependent shapes),
+    if fallback is not None, use that instead (otherwise raise an error).
+    """
     if isinstance(a, torch.SymInt):
-        return a.node.require_hint()
+        return a.node.require_hint(fallback)
     assert type(a) is int, a
     return a
 
@@ -274,6 +279,20 @@ def parallel_and(*args):
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
+
+def sym_eq(x, y):
+    """
+    Like ==, but when run on list/tuple, it will recursively test equality
+    and use sym_and to join the results together, without guarding.
+    """
+    if (isinstance(x, tuple) and isinstance(y, tuple)) or (isinstance(x, list) and isinstance(y, list)):
+        if len(x) != len(y):
+            return False
+        return functools.reduce(operator.and_, map(sym_eq, x, y), True)
+    elif isinstance(x, (int, torch.SymInt)) and isinstance(y, (int, torch.SymInt)):
+        return x == y
+    else:
+        raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
@@ -3155,22 +3174,28 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0], floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    new_var = self._find(r[1])
-                    ok = False
-                    if self.is_unbacked_symint(free[0]):
-                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                        # s0 - i0 - i1.  Arguably this should be OK but the
-                        # runtime assert machinery is very delicate right now
-                        # so this causes things to fail e.g.,
-                        # test_split_unbacked_sizes
-                        ok = len(free_unbacked_symbols(new_var)) <= 1
-                    else:
-                        # Never substitute backed with unbacked
-                        ok = len(free_unbacked_symbols(new_var)) == 0
-                    if ok:
-                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                # short-circuit when no solving is needed
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                    self._set_replacement(lhs, self._find(rhs))
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                    self._set_replacement(rhs, self._find(lhs))
+                else:
+                    r = try_solve(expr, free[0], floordiv_inequality=False)
+                    if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                        new_var = self._find(r[1])
+                        ok = False
+                        if self.is_unbacked_symint(free[0]):
+                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                            # s0 - i0 - i1.  Arguably this should be OK but the
+                            # runtime assert machinery is very delicate right now
+                            # so this causes things to fail e.g.,
+                            # test_split_unbacked_sizes
+                            ok = len(free_unbacked_symbols(new_var)) <= 1
+                        else:
+                            # Never substitute backed with unbacked
+                            ok = len(free_unbacked_symbols(new_var)) == 0
+                        if ok:
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):
