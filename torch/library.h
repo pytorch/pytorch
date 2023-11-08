@@ -734,7 +734,7 @@ class TORCH_API Library final {
     return *this;
   }
   Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
-    return def(raw_schema.operator const char*());
+    return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
   Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags = {}) & {
@@ -743,7 +743,7 @@ class TORCH_API Library final {
   template <typename Func>
   Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f, const std::vector<at::Tag>& tags = {}) & {
     return def(
-        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f));
+        raw_name_or_schema.operator const char*(), std::forward<Func>(raw_f), tags);
   }
 
   template <typename Func>
