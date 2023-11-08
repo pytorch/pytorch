@@ -193,9 +193,15 @@ def narrow(tensor: Tensor, dim: int, start: Union[int, Tensor], length: Union[in
     r"""
 Constructs a nested tensor (which might be a view) from :attr:`tensor`, a strided tensor. This follows
 similar semantics to torch.Tensor.narrow, where in the :attr:`dim`-th dimension the new nested tensor
-(maybe view) shows only the elements in the interval `[start, start+length]`. As nested representations
+shows only the elements in the interval `[start, start+length)`. As nested representations
 allow for a different `start` and `length` at each 'row' of that dimension, :attr:`start` and :attr:`length`
 can also be tensors of shape `tensor.shape[0]`.
+
+There's some differences depending on the layout you use for the nested tensor. If using strided layout,
+torch.narrow will do a copy of the narrowed data into a contiguous NT with strided layout, while
+jagged layout narrow() will create a non-contiguous view of your original strided tensor. This particular
+representation is really useful for representing kv-caches in Transformer models, as specialized
+SDPA kernels can deal with format easily, resulting in performance improvements.
 
 
 Args:

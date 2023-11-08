@@ -479,15 +479,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
 
     if lengths is None:
-        split_offsets = torch.cat(
-            (
-                offsets,
-                torch.tensor(
-                    [values.shape[0]], device=offsets.device, dtype=offsets.dtype
-                ),
-            )
-        )
-        return torch.split(values, split_offsets.diff().tolist())
+        return torch.split(values, offsets.diff().tolist())
     return [
         values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
     ]

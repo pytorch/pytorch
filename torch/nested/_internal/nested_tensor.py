@@ -89,7 +89,7 @@ class NestedTensor(torch.Tensor):
                 ragged_size = get_tensor_id(offsets, coeff=1)
             else:
                 ragged_size = get_tensor_id(lengths, coeff=1)
-        B = offsets.shape[0]
+        B = offsets.shape[0] - 1
         Ds = values.shape[1:]
         self._size = (B, ragged_size, *Ds)
         stride = values.stride()
@@ -251,6 +251,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
 
 # Not actually a view!
+# NOTE: @jbschlosser is working on making it a view
 class ViewNonContiguousNestedFromBuffer(torch.autograd.Function):
     @staticmethod
     def forward(ctx, values: torch.Tensor, offsets: torch.Tensor, lengths: torch.Tensor):  # type: ignore[override]
@@ -307,9 +308,7 @@ def jagged_from_list(
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),
-                torch.tensor([s[0] for s in sizes[:-1]], device=values.device).cumsum(
-                    dim=0
-                ),
+                torch.tensor([s[0] for s in sizes], device=values.device).cumsum(dim=0),
             ]
         )
 
@@ -329,7 +328,7 @@ def jagged_from_tensor_and_lengths(
     else:
         raise RuntimeError(
             "When constructing a jagged nested tensor using narrow(), "
-            "your start and length must be a Tensor that broadcasts to input.shape[0] x 1"
+            "your start and length must be Tensors that broadcast to input.shape[0]"
         )
 
     # Calculate jagged offsets
@@ -341,7 +340,12 @@ def jagged_from_tensor_and_lengths(
         0, batch_size, dtype=torch.int64, device=tensor.device
     )
     # Jagged layout specifies that offsets are stored as int64 on the same device as values.
-    offsets = start_list + offset_lengths
+    offsets = torch.cat(
+        [
+            start_list + offset_lengths,
+            start_list[-1] + offset_lengths[-1] + length_list[-1],
+        ]
+    )
 
     # Reshape buffer to flatten the 1st and 2nd dimension (view used to enforce non-copy)
     if len(tensor.shape) > 2:
