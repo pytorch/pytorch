@@ -1317,8 +1317,6 @@ def get_tensor_hash(x):
         return tuple(x.shape), tuple(x.stride()), x.dtype
     return x
 
-<<<<<<< HEAD
-=======
 def hash_op(func, args, kwargs):
     flatten = tree_flatten((args, kwargs))[0]
     return func, tuple(get_tensor_hash(x) for x in flatten)
@@ -1359,7 +1357,6 @@ def cache_dispatch(dispatch):
 
 cnt = 0
 
->>>>>>> 472cbe3217d (Add caching for faketensor propagation)
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
         self,
