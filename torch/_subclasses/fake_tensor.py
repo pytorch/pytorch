@@ -1317,10 +1317,10 @@ def get_tensor_hash(x):
         return tuple(x.shape), tuple(x.stride()), x.dtype
     return x
 
-# import optree
 def hash_op(func, args, kwargs):
     flatten = tree_flatten((args, kwargs))[0]
     return func, tuple(get_tensor_hash(x) for x in flatten)
+
 
 cache = {}
 
@@ -1347,13 +1347,11 @@ def cache_dispatch(dispatch):
             return FakeTensor(
                 self,
                 torch.empty_strided(
-                    metadata[0],
-                    metadata[1],
-                    dtype=metadata[2],
-                    device='meta'
+                    metadata[0], metadata[1], dtype=metadata[2], device="meta"
                 ),
                 device=metadata[3],
             )
+
     return _dispatch
 
 
