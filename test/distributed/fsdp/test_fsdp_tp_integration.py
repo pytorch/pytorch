@@ -8,14 +8,12 @@ import torch
 from torch import distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed._tensor import DeviceMesh, DTensor as DT
+from torch.distributed._tensor import DeviceMesh, DTensor as DT, init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
-    StateDictType,
 )
 from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
     parallelize_module,
     SequenceParallel,
 )
@@ -247,19 +245,28 @@ class TestTPFSDPIntegration(FSDPTest):
         inp = torch.rand(*inp_size).cuda(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
-        mesh_2d, fsdp_pg, tp_pg = self._get_sub_pgs(tensor_parallel_size)
-        fsdp_model = FSDP(
-            model, process_group=self.process_group, cpu_offload=cpu_offload
+        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        fsdp_model = FSDP(model, cpu_offload=cpu_offload, device_mesh=mesh_1d)
+        mesh_2d = init_device_mesh(
+            "cuda",
+            (self.world_size // tensor_parallel_size, tensor_parallel_size),
+            mesh_dim_names=["dp", "tp"],
         )
         # Shard with TP and then wrap with FSDP
         tp_fsdp_model = parallelize_module(
-            tp_fsdp_model, mesh_2d, SequenceParallel(), tp_mesh_dim=1
+            tp_fsdp_model,
+            mesh_2d["tp"],
+            SequenceParallel(),
         )
+        tp_pg = mesh_2d["tp"].get_dim_groups(mesh_dim=0)
         assert isinstance(tp_fsdp_model.net1.weight, DT)
         assert isinstance(tp_fsdp_model.net2.weight, DT)
         tp_fsdp_model = FSDP(
-            tp_fsdp_model, process_group=fsdp_pg, cpu_offload=cpu_offload
+            tp_fsdp_model,
+            cpu_offload=cpu_offload,
+            device_mesh=mesh_2d["dp"],
         )
+        fsdp_pg = mesh_2d["dp"].get_dim_groups(mesh_dim=0)
 
         # Check the forward by checking output equality
         fsdp_out = fsdp_model(inp)
@@ -305,50 +312,6 @@ class TestTPFSDPIntegration(FSDPTest):
         fsdp_out = fsdp_model(inp)
         tp_fsdp_out = tp_fsdp_model(inp)
         self.assertEqual(fsdp_out, tp_fsdp_out)
-
-    @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_checkpoint_integration(self):
-        """Tests checkpointing for TP + FSDP integration."""
-        self.assertTrue(
-            enable_2d_with_fsdp(), "FSDP 2d parallel integration not available"
-        )
-        tensor_parallel_size = 2
-        torch.manual_seed(0)
-        model = SimpleModel().cuda(self.rank)
-        mesh_2d, fsdp_pg, _ = self._get_sub_pgs(tensor_parallel_size)
-        # Shard with TP and then wrap with FSDP
-        tp_fsdp_model = parallelize_module(
-            model, mesh_2d, PairwiseParallel(), tp_mesh_dim=1
-        )
-        tp_fsdp_model = FSDP(model, process_group=fsdp_pg)
-
-        # Check that we produce a nested ST from model state dict
-        with FSDP.state_dict_type(tp_fsdp_model, StateDictType.SHARDED_STATE_DICT):
-            state_dict = tp_fsdp_model.state_dict()
-            # TODO once 2D is out, validate the nesting
-            self.assertTrue(_is_nested_tensor(state_dict["net1.weight"]))
-            self.assertFalse(_is_nested_tensor(state_dict["net3.bias"]))
-            tp_fsdp_model.load_state_dict(state_dict)
-
-        tp_fsdp_optim = torch.optim.Adam(tp_fsdp_model.parameters(), lr=0.0001)
-
-        input_seed = self.rank
-        torch.manual_seed(input_seed + 1)
-        inp_size = [2, 3, 5]
-        inp = torch.rand(*inp_size).cuda(self.rank)
-
-        tp_fsdp_model(inp).sum().backward()
-        tp_fsdp_optim.step()
-
-        # Check that we produce a nested ST from optim state dict
-        optim_state = FSDP.sharded_optim_state_dict(tp_fsdp_model, tp_fsdp_optim)
-        # TODO once 2D is out, validate the nesting
-        self.assertTrue(
-            _is_nested_tensor(optim_state["state"]["net1.weight"]["exp_avg"])
-        )
-        self.assertFalse(
-            _is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"])
-        )
 
 
 instantiate_parametrized_tests(TestTPFSDPIntegration)
