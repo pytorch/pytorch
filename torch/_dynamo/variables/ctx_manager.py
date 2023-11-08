@@ -164,7 +164,7 @@ class GradModeVariable(ContextWrappingVariable):
     _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
 
     @staticmethod
-    def create(tx, target_value, initialized=True, **kwargs):
+    def create(tx, target_value, initialized=False, **kwargs):
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],

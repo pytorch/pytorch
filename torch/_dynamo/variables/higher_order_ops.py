@@ -66,10 +66,10 @@ def dynamo_enable_grad(tx):
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, True)
+        GradModeVariable.create(tx, True, initialized=True)
         yield
     finally:
-        GradModeVariable.create(tx, org_value)
+        GradModeVariable.create(tx, org_value, initialized=True)
 
 
 def only_consist_of(var, types):
