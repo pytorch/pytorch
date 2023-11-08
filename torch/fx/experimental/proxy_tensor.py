@@ -7,7 +7,10 @@ import contextlib
 import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
-import torch.utils._pytree as pytree
+try:
+    import torch.utils._cxx_pytree as pytree
+except ImportError:
+    import torch.utils._pytree as pytree  # type: ignore[no-redef]
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
 from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
