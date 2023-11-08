@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
+#include <ATen/native/BinaryOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -54,6 +55,14 @@ c10::optional<T> pointer_to_optional(U* ptr) {
 }
 
 } // namespace
+
+int64_t aoti_torch_div_floor_int64(int64_t a, int64_t b) {
+  return at::native::div_floor_integer(a, b);
+}
+
+double aoti_torch_div_floor_double(double a, double b) {
+  return at::native::div_floor_floating(a, b);
+}
 
 int32_t aoti_torch_device_type_cpu() {
   return (int32_t)c10::DeviceType::CPU;

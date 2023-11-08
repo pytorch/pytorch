@@ -1301,7 +1301,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
 
         if config.aot_inductor.abi_compatible:
-            self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
+            self.header.splice(
+                """
+                #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+                #define div_floor_integer aoti_torch_div_floor_int64
+                #define div_floor_floating aoti_torch_div_floor_double
+                """
+            )
         else:
             self.header.splice(
                 """
@@ -1312,6 +1318,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
+                #define div_floor_integer at::native::div_floor_integer
+                #define div_floor_floating at::native::div_floor_floating
                 """
             )
 
