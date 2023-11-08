@@ -1668,7 +1668,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(y):
             x = torch.tensor([0])
-            x += 1
             x.data = y  # Setattr for untracked tensors is unsupported
             x.add_(1)
             return x
@@ -1687,7 +1686,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_tensor_tracked_setattr_data_to_untracked_graph_breaks(self):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(x):
-            x += 1
             y = torch.tensor([0])
             # If we setattr to untracked tensor, it aliases a new tensor.
             # we need to start tracking y even though it is created in graph
