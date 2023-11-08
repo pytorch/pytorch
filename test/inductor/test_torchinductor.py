@@ -3031,10 +3031,9 @@ class CommonTemplate:
                 torch.var(x, dim=dim, correction=x.shape[dim] + 1),
             )
 
-        self.common(
-            fn,
-            (torch.randn([2, 8]),),
-        )
+        self.common(fn, (torch.randn([2, 8]),))
+        # Unrolled reduction
+        self.common(fn, (torch.randn([2, 4]),))
 
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
