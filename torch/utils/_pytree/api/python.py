@@ -394,20 +394,20 @@ def _defaultdict_unflatten(
 def _defaultdict_serialize(context: Context) -> DumpableContext:
     default_factory, keys = context
     json_defaultdict = {
-        "default_module": default_factory.__module__,
-        "default_name": default_factory.__qualname__,
+        "default_factory_module": default_factory.__module__,
+        "default_factory_name": default_factory.__qualname__,
         "keys": keys,
     }
     return json_defaultdict
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
-    default_module = dumpable_context["default_module"]
-    default_name = dumpable_context["default_name"]
-    assert isinstance(default_module, str)
-    assert isinstance(default_name, str)
-    module = importlib.import_module(default_module)
-    default_factory = getattr(module, default_name)
+    default_factory_module = dumpable_context["default_factory_module"]
+    default_factory_name = dumpable_context["default_factory_name"]
+    assert isinstance(default_factory_module, str)
+    assert isinstance(default_factory_name, str)
+    module = importlib.import_module(default_factory_module)
+    default_factory = getattr(module, default_factory_name)
     keys = dumpable_context["keys"]
     return default_factory, keys
 
