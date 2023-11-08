@@ -42,7 +42,7 @@ from ..allowed_functions import (
     is_user_defined_allowed,
 )
 
-from ..device_interface import device_interfaces
+from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
@@ -610,8 +610,7 @@ class VariableBuilder:
             istype(value, contextlib.nullcontext)
             and inspect.getattr_static(value, "enter_result", None) is None
         ):
-            # TODO(jansel): I think this can be TYPE_MATCH
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return NullContextVariable(source=self.source)
         elif KeyedJaggedTensorVariable.is_matching_object(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -839,12 +838,10 @@ class VariableBuilder:
             )
             for k in ("start", "stop", "step")
         ]
+        self.install_guards(GuardBuilder.TYPE_MATCH)
         if isinstance(value, slice):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
             return SliceVariable(items)
         else:
-            # TODO(jansel): I think this can be TYPE_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
             return RangeVariable(items)
 
     def wrap_module(self, value: torch.nn.Module):
@@ -1497,7 +1494,8 @@ def wrap_fx_proxy_cls(
         inspect.isclass(proxy.node.target)
         and issubclass(proxy.node.target, _StreamBase)
     ) or proxy.node.target in [
-        interface_elem.current_stream for interface_elem in device_interfaces.values()
+        device_interface.current_stream
+        for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
@@ -1506,7 +1504,8 @@ def wrap_fx_proxy_cls(
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
     ) or proxy.node.target in [
-        interface_elem.Event for interface_elem in device_interfaces.values()
+        device_interface.Event
+        for _, device_interface in get_registered_device_interfaces()
     ]:
         proxy.node.meta["example_value"] = example_value
         return EventVariable(proxy, example_value, **options)
