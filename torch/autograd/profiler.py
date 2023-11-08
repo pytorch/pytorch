@@ -554,7 +554,7 @@ class profile:
 
 
 class record_function(_ContextDecorator):
-    """Context manager that adds a label to a code block/function when running autograd profiler.
+    """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
 
     It is useful when tracing the code profile.
 

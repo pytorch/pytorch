@@ -22,7 +22,7 @@ class ProcessException(Exception):
 
 
 class ProcessRaisedException(ProcessException):
-    """Exception raised when a process failed due to a code-induced exception."""
+    """Exception raised when a process failed due to an exception raised by the code."""
 
     def __init__(
         self,
