@@ -3083,7 +3083,10 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
-        or needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
+        or (
+            isinstance(src, TensorBox)
+            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
+        )
         or (
             fn == "aten.scatter_reduce_"
             and reduce == "sum"
