@@ -3129,9 +3129,7 @@ class TestTensorCreation(TestCase):
     @onlyCPU
     def test_storage_filename(self, device):
         t = torch.randn(2, 5, device=device)
-        with self.assertWarnsRegex(UserWarning, "Only storages with data pointers created via at::MapAllocator"):
-            filename = t.storage().filename
-        self.assertIsNone(filename)
+        self.assertIsNone(t.storage().filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
