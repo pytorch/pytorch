@@ -1666,9 +1666,9 @@ class TestSDPA(NNTestCase):
         if type == "nested" \
                 or dropout > 0.0 \
                 or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH.value
         else:
-            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION
+            assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
@@ -2111,9 +2111,9 @@ class TestSDPACudaOnly(NNTestCase):
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
         if PLATFORM_SUPPORTS_FLASH_ATTENTION:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
         else:
-            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
         # Change dtype to float32 so that efficient attention should get chosen
         make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
@@ -2125,7 +2125,7 @@ class TestSDPACudaOnly(NNTestCase):
         value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
         key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
@@ -2137,7 +2137,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=True):
-                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
@@ -3061,13 +3061,15 @@ class TestAttnMasks(NNTestCase):
     )
     @parametrize("compile", [True, False])
     def test_causal_variants(self, causal_variant: CausalVariant, shapes: List[Tuple[int]], compile: bool):
+        def rand_sdpa_tensor(shape, device, dtype, type, requires_grad=False):
+            return torch.rand(shape, device=device, dtype=dtype, requires_grad=requires_grad)
         if compile:
             torch._dynamo.reset()
         # Bsz, num_heads, seq_len, head_dim
         torch.manual_seed(123)
         bsz, num_heads, seq_len_q, seq_len_kv, head_dim = shapes
         if causal_variant == CausalVariant.LOWER_RIGHT and seq_len_q > seq_len_kv:
-            unittest.skip(
+            self.skipTest(
                 "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
             )
         device = torch.device("cuda")

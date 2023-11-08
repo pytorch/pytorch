@@ -26,6 +26,13 @@ def materialize_if_needed(
     return bias
 
 
+def postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int):
+    """Handles the unpad of the last dimension"""
+    if inpt_tensor.size(-1) != og_size:
+        return inpt_tensor[..., :og_size]
+    return inpt_tensor
+
+
 class AttnBias(ABC):
     """Abstract base class for attention biases"""
 
@@ -175,7 +182,7 @@ class CausalBias(AttnBias):
         attn_mask: "CausalBias",
         dropout_p: float,
         is_causal: bool,
-        scale: Optional[float],
+        scale: Optional[float] = None,
     ) -> torch.Tensor:
         if is_causal:
             raise ValueError("CausalBias should not be used with causal=True")
@@ -203,9 +210,9 @@ class CausalBias(AttnBias):
         elif attn_mask.variant == CausalVariant.LOWER_RIGHT:
             sdpa_params = SDPAParams(query, key, value, None, dropout_p, is_causal)
             if can_use_flash_attention(sdpa_params):
-                needs_slicing = query.size(-1) % 8 != 0
+                needs_padding = query.size(-1) % 8 != 0
                 og_head_size = query.size(-1)
-                if needs_slicing:
+                if needs_padding:
                     query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
                     key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
                     value = torch.nn.functional.pad(value, (0, 8 - value.size(-1) % 8))
@@ -218,9 +225,7 @@ class CausalBias(AttnBias):
                     return_debug_mask=False,
                     scale=scale,
                 )[0]
-                if needs_slicing:
-                    out = out[..., :og_head_size]
-                return out
+                return postprocess_flash_output(out, og_head_size)
             if can_use_efficient_attention(sdpa_params):
                 compute_log_sumexp = False
                 if input_requires_grad(query, key, value):
