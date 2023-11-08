@@ -1,9 +1,9 @@
 r"""
-This module introduces CUDA Sanitizer, a tool for detecting synchronization errors
-between kernels ran on different streams. It stores information on accesses to tensors
-to determine if they are synchronized or not. When enabled in a python program and a
-possible data race is detected, a detailed warning will be printed and the program
-will exit.
+This module introduces CUDA Sanitizer, a tool for detecting synchronization errors between kernels ran on different streams.
+
+It stores information on accesses to tensors to determine if they are synchronized 
+or not. When enabled in a python program and a possible data race is detected, a 
+detailed warning will be printed and the program will exit.
 
 It can be enabled either by importing this module and calling
 :func:`enable_cuda_sanitizer()` or by exporting the ``TORCH_CUDA_SANITIZER``
@@ -62,6 +62,7 @@ class Access:
         is_output: Whether the tensor was an output of the kernel.
         stack_trace: the stack summary object captured during access.
     """
+
     type: AccessType
     seq_num: SeqNum
     stream: StreamId
@@ -153,6 +154,7 @@ class TensorInfo:
             the last write.
         write: the last write access to the tensor.
     """
+
     allocation_stack_trace: Optional[traceback.StackSummary]
     reads: List[Access] = field(default_factory=list)
     write: Optional[Access] = None
@@ -606,7 +608,7 @@ class CUDASanitizer:
 
 
 def enable_cuda_sanitizer():
-    """Enables CUDA Sanitizer.
+    """Enable CUDA Sanitizer.
 
     The sanitizer will begin to analyze low-level CUDA calls invoked by torch functions
     for synchronization errors. All data races found will be printed to the standard
