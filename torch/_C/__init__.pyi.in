@@ -1745,8 +1745,16 @@ class _SDPAParams:
     attn_mask: Optional[Tensor]
     dropout: _float
     is_causal: _bool
+    def __init__(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Optional[Tensor],
+        dropout: _float,
+        is_causal: _bool) -> None: ...
 
-class SDPBackend(IntEnum):
+class _SDPBackend(Enum):
     ERROR = -1
     MATH = 0
     FLASH_ATTENTION = 1
