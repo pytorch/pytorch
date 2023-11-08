@@ -24,7 +24,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    copy_tests,
+    HAS_CUDA,
+    requires_cuda,
+    requires_multigpu,
+    TestFailure,
+)
 from torch.utils import _pytree as pytree
 
 if IS_WINDOWS and IS_CI:
@@ -34,26 +40,6 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-try:
-    try:
-        from .test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
-    except ImportError:
-        from test_torchinductor import (
-            copy_tests,
-            requires_cuda,
-            requires_multigpu,
-            TestFailure,
-        )
-except (unittest.SkipTest, ImportError) as e:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 
 class AOTInductorModelRunner:
