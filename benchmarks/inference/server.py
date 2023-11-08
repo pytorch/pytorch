@@ -242,8 +242,6 @@ if __name__ == "__main__":
         frontend.join()
         backend.join()
 
-        # output_str = json.dumps(metrics_dict._getvalue())
-        # print(output_str)
         metrics_dict = {k: [v] for k, v in metrics_dict._getvalue().items()}
         output = pd.DataFrame.from_dict(metrics_dict, orient="columns")
         output_file = "./results/" + args.output_file
