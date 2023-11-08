@@ -2765,6 +2765,8 @@ svd = _make_prim(
 #
 
 
+# TODO: add generator support
+# NOTE: there is currently no way of acquiring the "default" torch generator
 def _normal_meta(
     shape: ShapeType,
     *,
@@ -2773,7 +2775,6 @@ def _normal_meta(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     torch._check(
         std >= 0.0,
@@ -2797,12 +2798,11 @@ def _normal_aten(
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     with torch.no_grad():
         # NOTE: normal_ is incorrectly annotated to expect mean to be a float
-        a.normal_(mean, std, generator=generator)  # type: ignore[arg-type]
+        a.normal_(mean, std)  # type: ignore[arg-type]
     return a
 
 
@@ -2815,7 +2815,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad, Generator? generator=None) -> Tensor"  # noqa: B950
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2831,7 +2831,6 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
@@ -2844,10 +2843,9 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device)
-    a.uniform_(low, high, generator=generator)
+    a.uniform_(low, high)
     return a
 
 
@@ -2858,7 +2856,7 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 _uniform_helper = _make_prim(
     schema=(
-        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device, Generator? generator=None) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,
