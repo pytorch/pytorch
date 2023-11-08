@@ -1,6 +1,6 @@
 import contextlib
 
-from typing import Optional, Union
+from typing import Union
 
 import torch
 
@@ -14,6 +14,7 @@ __all__ = [
     "cufft_plan_cache",
     "matmul",
     "SDPBackend",
+    "SDPAParams",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
