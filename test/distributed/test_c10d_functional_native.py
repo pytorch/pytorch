@@ -419,7 +419,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
