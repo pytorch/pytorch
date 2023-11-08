@@ -247,7 +247,6 @@ if __name__ == "__main__":
         output_file = "./results/" + args.output_file
         is_empty = not os.path.isfile(output_file)
 
-        # Append the new_data DataFrame to the existing CSV file
         with open(output_file, "a+", newline="") as file:
             output.to_csv(file, header=is_empty, index=False)
 
