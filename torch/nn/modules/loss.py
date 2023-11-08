@@ -622,7 +622,7 @@ class BCELoss(_WeightedLoss):
 
 
 class BCEWithLogitsLoss(_Loss):
-    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class. 
+    r"""This loss combines a `Sigmoid` layer and the `BCELoss` in one single class.
     
     This version is more numerically stable than using a plain `Sigmoid`
     followed by a `BCELoss` as, by combining the operations into one layer,
@@ -782,7 +782,7 @@ class HingeEmbeddingLoss(_Loss):
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
     """
-    
+
     __constants__ = ['margin', 'reduction']
     margin: float
 
