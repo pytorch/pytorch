@@ -979,6 +979,7 @@ coverage_ignore_functions = [
     "is_symbolic",
     "parallel_and",
     "parallel_or",
+    "sym_eq",
     "tensor_has_hints",
     # torch.fx.experimental.unification.core
     "reify",
