@@ -7794,7 +7794,7 @@
   dispatch:
     CompositeExplicitAutograd: masked_scatter
 
-- func: masked_scatter_backward(Tensor grad_out, Tensor mask, SymInt[] sizes) -> Tensor
+- func: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
   dispatch:
     CPU: masked_scatter_backward_symint
     CUDA: masked_scatter_backward_symint

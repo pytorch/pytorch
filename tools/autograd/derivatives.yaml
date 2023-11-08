@@ -1069,9 +1069,10 @@
   mask: non_differentiable
   result: self_t.masked_scatter(mask, source_t)
 
-- name: masked_scatter_backward(Tensor grad_out, Tensor mask, SymInt[] sizes) -> Tensor
-  grad_out: zeros_like(grad_out).masked_scatter(mask, grad)
+- name: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
+  grad_output: zeros_like(grad_output).masked_scatter(mask, grad)
   mask: non_differentiable
+  result: masked_scatter_backward(grad_output_t, mask, grad_output_t.sizes())
 
 - name: masked_select(Tensor self, Tensor mask) -> Tensor
   self: masked_select_backward(grad, self, mask)
