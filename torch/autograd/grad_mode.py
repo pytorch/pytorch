@@ -57,7 +57,7 @@ class no_grad(_NoParamDecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
-        >>> @torch.no_grad
+        >>> @torch.no_grad()
         ... def tripler(x):
         ...     return x * 3
         >>> z = tripler(x)
@@ -120,7 +120,7 @@ class enable_grad(_NoParamDecoratorContextManager):
         ...     z = doubler(x)
         >>> z.requires_grad
         True
-        >>> @torch.enable_grad
+        >>> @torch.enable_grad()
         ... def tripler(x):
         ...     return x * 3
         >>> with torch.no_grad():
@@ -238,7 +238,7 @@ class inference_mode(_DecoratorContextManager):
         >>> out = func(x)
         >>> out.requires_grad
         False
-        >>> @torch.inference_mode
+        >>> @torch.inference_mode()
         ... def doubler(x):
         ...     return x * 2
         >>> out = doubler(x)
