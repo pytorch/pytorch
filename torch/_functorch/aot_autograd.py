@@ -29,9 +29,11 @@ from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
-from torch.fx import immutable_collections, Interpreter
+from torch.fx import Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
+from torch.fx.experimental.symbolic_shapes import (
+    ShapeEnv, is_concrete_int, fx_placeholder_vals, definitely_true, definitely_false, sym_eq
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass, transform_subclass
@@ -91,19 +93,6 @@ OutputType = Enum(
         # Instead, we'll treat this output "normally", and trace its backward into the graph.
         "custom_function_view",
     )
-)
-
-pytree._register_pytree_node(
-    immutable_collections.immutable_list,
-    lambda x: (list(x), None),
-    lambda x, c: immutable_collections.immutable_list(x),
-)
-pytree._register_pytree_node(
-    immutable_collections.immutable_dict,
-    lambda x: (list(x.values()), list(x.keys())),
-    lambda x, c: immutable_collections.immutable_dict(
-        dict(zip(c, x))
-    ),
 )
 
 def partial_asdict(obj: Any) -> Any:
@@ -786,10 +775,10 @@ class TensorAlias:
 
 def has_same_metadata(t1, t2):
     return (
-        t1.size() == t2.size()
-        and t1.stride() == t2.stride()
-        and t1.storage_offset() == t2.storage_offset()
-        and t1.storage_offset() == t2.storage_offset()
+        definitely_true(sym_eq(t1.size(), t2.size()))
+        and definitely_true(sym_eq(t1.stride(), t2.stride()))
+        and definitely_true(t1.storage_offset() == t2.storage_offset())
+        and definitely_true(t1.storage_offset() == t2.storage_offset())
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
@@ -1769,8 +1758,11 @@ def create_joint(
                 # A bit sketchy, but fixes e.g. test_aot_autograd_exhaustive_matmul_cpu_float32
                 # The issue is that we are sensitive to decomps that don't accurately maintain
                 # their output's _base.shape compared to eager mode, and this helps mitigate a bit.
+                # The not definitely_false is also sketchy; if unbacked
+                # symints are involved, we're just going to assume that the
+                # decomps setup the base shape correctly
                 needed_outs.append(
-                    out if out.shape == tangent.shape else out.view(tangent.shape)
+                    out if not definitely_false(sym_eq(out.shape, tangent.shape)) else out.view(tangent.shape)
                 )
                 needed_tangents.append(tangent)
 
@@ -3638,7 +3630,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
-            fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
+            fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
             # the user forward might have returned in its own output
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
@@ -3704,7 +3696,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
         _indices_of_inps_to_detach = []
-        bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
+        bw_outs = next(n for n in bw_module.graph.nodes if n.op == "output").args[0]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
@@ -4716,7 +4708,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
-        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+        functional_call, *args, num_params_buffers=num_params_buffers, **kwargs
     )
 
     class AOTModule(nn.Module):

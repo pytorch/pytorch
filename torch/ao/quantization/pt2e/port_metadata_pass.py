@@ -86,7 +86,7 @@ def _port_metadata_for_input_quant_nodes(
         if len(choose_qparam_users) != 2:
             raise InternalError(f"Expecting exactly two user for {choose_qparams_node}")
         scale_node = choose_qparam_users.pop()
-        dynamic_q_node = list(scale_node.users.keys())[0]
+        dynamic_q_node = next(iter(scale_node.users.keys()))
         dynamic_q_node_users = _filter_sym_size_users(dynamic_q_node)
         if len(dynamic_q_node_users) > 1:
             raise InternalError(f"Expecting single user for {dynamic_q_node}")
