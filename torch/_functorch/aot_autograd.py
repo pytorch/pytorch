@@ -1738,7 +1738,8 @@ def fn_prepped_for_autograd(
 
         # Also return a boolean mask specifying which outputs to this function will be used as tangents
         mutated_inputs_grad_mask = [
-            meta.input_info[meta.mutated_inp_indices[i]].mutates_data and meta.input_info[meta.mutated_inp_indices[i]].requires_grad
+            meta.input_info[meta.mutated_inp_runtime_indices[i]].mutates_data and
+            meta.input_info[meta.mutated_inp_runtime_indices[i]].requires_grad
             for (i, x) in enumerate(mutated_inputs_to_return)
         ]
 
@@ -2535,7 +2536,7 @@ def remove_dupe_metadata(
     num_data_mutations = len([x for x in m.input_info if x.mutates_data])
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
-    filtered_inp_traced_tangents = [x for i, x in enumerate(inp_traced_tangents) if keep_arg_mask[m.mutated_inp_indices[i]]]
+    filtered_inp_traced_tangents = [x for i, x in enumerate(inp_traced_tangents) if keep_arg_mask[m.mutated_inp_runtime_indices[i]]]
     traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
 
     return ViewAndMutationMeta(
