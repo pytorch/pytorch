@@ -2622,6 +2622,7 @@ class NoneLayout(IRNode):
     def __init__(self, device):
         self.device = device
         self.size = [0]
+        self.stride = [0]
 
     def storage_size(self):
         return 0
@@ -3777,14 +3778,15 @@ class ExternKernel(InputsKernel):
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
-            if self.kwargs:
-                assert (
-                    self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel is missing"
+            if self.kwargs and not self.ordered_kwargs_for_cpp_kernel:
+                raise AssertionError("ordered_kwargs_for_cpp_kernel is missing")
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                if isinstance(v, sympy.Expr):
+                    kwargs.append(v)
+                else:
+                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -3950,7 +3952,7 @@ class ExternKernelAlloc(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def codegen(self, wrapper):
+    def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -3960,6 +3962,10 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
+        return kernel, configs
+
+    def codegen(self, wrapper):
+        kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
         new_name = wrapper.define_user_defined_triton_kernel(
@@ -3998,7 +4004,6 @@ class UserDefinedTritonKernel(ExternKernel):
                 t = InputsKernel.unwrap_storage_for_input(self.realize_input(v))
                 inputs.append(t)
                 kwargs[k] = t
-                V.graph.mark_buffer_mutated(t.get_name())
             else:
                 constant_args.append(v)
                 kwargs[k] = v
@@ -4017,17 +4022,26 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-    @classmethod
-    def create(cls, *, kernel_idx, grid, kernel_args):
-        packed = UserDefinedTritonKernel(
-            kernel_idx=kernel_idx, grid=grid, kernel_args=kernel_args
+        kernel, _ = self.get_kernel_and_configs()
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+
+        mark_node_as_mutating(
+            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
-        for arg in kernel_args.values():
-            if isinstance(arg, TensorBox):
-                MutationOutput(arg.layout, arg, packed)
 
     def get_alias_names(self):
         return [i.get_name() for i in self.inputs]
+
+
+def mark_node_as_mutating(cur_buffer, *mutated_ops):
+    """
+    Allows ops in mutated_ops to be marked as being mutated as well as
+    indicates to the scheduler that these ops depend on cur_buffer.
+    """
+    for op in mutated_ops:
+        assert isinstance(op, TensorBox)
+        V.graph.mark_buffer_mutated(op.get_name())
+        MutationOutput(op.layout, op, cur_buffer)
 
 
 class MutationOutput(ExternKernel):
@@ -4068,17 +4082,20 @@ class InplaceBernoulliFallback(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     def __init__(self, x, *constant_args):
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([x]),
             constant_args,
         )
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, x)
 
 
 class AccumulateGrad(ExternKernel):
@@ -4096,16 +4113,19 @@ class AccumulateGrad(ExternKernel):
         return False
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     def __init__(self, variable, new_grad):
         super().__init__(
             None,
-            MutationLayout(variable),
+            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage([variable, new_grad]),
         )
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, variable)
 
 
 class ScatterFallback(ExternKernel):
@@ -4152,6 +4172,12 @@ class ScatterFallback(ExternKernel):
             kernel = "at::scatter_reduce_out"
         return kernel
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     def __init__(
         self,
         fn,
@@ -4183,15 +4209,17 @@ class ScatterFallback(ExternKernel):
         else:
             tensors = [self.realize_input(t) for t in [x, index]]
             constant_args = (dim, src)
+
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
         )
         self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.name = V.graph.register_buffer(self)
+        mark_node_as_mutating(self, x)
 
 
 class IndexPutFallback(ExternKernel):
@@ -4216,18 +4244,25 @@ class IndexPutFallback(ExternKernel):
     def should_allocate(self):
         return False
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     def __init__(self, x, indices, values, accumulate):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
         super().__init__(
             None,
-            MutationLayout(x),
+            NoneLayout(x.get_device()),  # type: ignore[arg-type]
             self.unwrap_storage(tensors),
             (accumulate,),
         )
         self.name = V.graph.register_buffer(self)
         self.kernel = "at::index_put_" if V.graph.cpp_wrapper else "aten.index_put_"
+        mark_node_as_mutating(self, x)
 
 
 class DeviceCopy(ExternKernelOut):
@@ -4295,6 +4330,11 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+fbcode_use_proxy_executor = {
+    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+}
+
+
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -4328,41 +4368,43 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if kernel.__module__ == "torch._ops.aten":
-            op_base_name = (
-                kernel.__name__.split(".")[0]
-                if isinstance(kernel, torch._ops.OpOverload)
-                else kernel.__name__
-            )
+        if kernel.namespace == "aten":
+            # Aten Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            op_base_name = kernel.__name__.split(".")[0]
+
             if V.graph.cpp_wrapper:
-                assert isinstance(kernel, torch._ops.OpOverload)
-                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                self.kernel = (
-                    f"at::{op_base_name}"
-                    if kernel._overloadname == "default"
-                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                )
-                schema = kernel._schema
+                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                    self.use_cpp_op_schema = True
+                    self.set_cpp_kernel(kernel)
+                else:
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::{op_base_name}"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+
+                    self.args_default_value = [
+                        {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if not x.kwarg_only
+                    ]
+                    self.ordered_kwargs_for_cpp_kernel = [
+                        x.name for x in schema.arguments if x.kwarg_only
+                    ]
+                    self.kwargs_default_value = {
+                        x.name: {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if x.kwarg_only
+                    }
             else:
                 self.kernel = f"aten.{op_base_name}"
 
-            if schema is not None:
-                self.args_default_value = [
-                    {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if not x.kwarg_only
-                ]
-                self.ordered_kwargs_for_cpp_kernel = [
-                    x.name for x in schema.arguments if x.kwarg_only
-                ]
-                self.kwargs_default_value = {
-                    x.name: {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if x.kwarg_only
-                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
@@ -4371,6 +4413,7 @@ class FallbackKernel(ExternKernelAlloc):
                     "Unable to find HigherOrderOperator kernel name"
                 )
         else:
+            # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
@@ -4528,7 +4571,7 @@ class FallbackKernel(ExternKernelAlloc):
                     ]
                 )
             else:
-                raise RuntimeError("Unsupported return type")
+                raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
         target = self.op_overload
         returns = target._schema.returns
@@ -5174,8 +5217,10 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         )
 
     def get_mutation_names(self):
-        assert isinstance(self.layout, MutationLayout)
-        return (self.layout.target.get_name(),)
+        return [self.inputs[1].get_name()]
+
+    def get_unbacked_symbol_defs(self):
+        return {}
 
     @classmethod
     def create(
@@ -5211,11 +5256,13 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             may_convert_to_optional(unary_scalars),
             unary_algorithm,
         ]
-        return ConvolutionBinaryInplace(
-            kernel_layout=MutationLayout(inputs[1]),
+        packed = ConvolutionBinaryInplace(
+            kernel_layout=NoneLayout(inputs[1].get_device()),  # type: ignore[arg-type]
             inputs=inputs,
             constant_args=constant_args,
         )
+        mark_node_as_mutating(packed, inputs[1])
+        return packed
 
 
 class MKLPackedLinear(ExternKernelAlloc):
@@ -6809,6 +6856,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     @classmethod
     def create(
         cls,
@@ -6819,14 +6869,13 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        layout = MutationLayout(inplace_inputs[0])
-
-        _ = AllReduceCoalesced(
-            layout=layout,
+        packed = AllReduceCoalesced(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
         )
+        mark_node_as_mutating(packed, inplace_inputs[0])
         return inplace_inputs
 
     def codegen_collective(self, wrapper, output_name, input_names):
@@ -6847,19 +6896,22 @@ class AllReduce(InPlaceCollectiveKernel):
     def get_mutation_names(self):
         return [self.inputs[0].get_name()]
 
+    def get_unbacked_symbol_defs(self):
+        return {}
+
     @classmethod
     def create(
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MutationLayout(inplace_inputs[0])
 
-        _ = AllReduce(
-            layout=layout,
+        packed = AllReduce(
+            layout=NoneLayout(inplace_inputs[0].get_device()),  # type: ignore[arg-type]
             inputs=inplace_inputs,
             constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
         )
+        mark_node_as_mutating(packed, inplace_inputs[0])
         return inplace_inputs[0]
 
     def codegen_collective(self, wrapper, output_name, input_names):
