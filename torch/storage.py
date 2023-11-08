@@ -121,22 +121,22 @@ class _StorageBase:
         return super().__sizeof__() + self.size()
 
     def clone(self):
-        """Returns a copy of this storage"""
+        """Returns a copy of this storage."""
         return type(self)(self.nbytes(), device=self.device).copy_(self)
 
     def tolist(self):
-        """Returns a list containing the elements of this storage"""
+        """Returns a list containing the elements of this storage."""
         return list(self)
 
     def cpu(self):
-        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        """Returns a CPU copy of this storage if it's not already on the CPU."""
         if self.device.type != 'cpu':
             return torch.UntypedStorage(self.size()).copy_(self, False)
         else:
             return self
 
     def mps(self):
-        """Returns a MPS copy of this storage if it's not already on the MPS"""
+        """Returns a MPS copy of this storage if it's not already on the MPS."""
         if self.device.type != 'mps':
             return torch.UntypedStorage(self.size(), device="mps").copy_(self, False)
         else:
@@ -151,51 +151,51 @@ class _StorageBase:
         return storage
 
     def double(self):
-        """Casts this storage to double type"""
+        """Casts this storage to double type."""
         return self._to(torch.double)
 
     def float(self):
-        """Casts this storage to float type"""
+        """Casts this storage to float type."""
         return self._to(torch.float)
 
     def half(self):
-        """Casts this storage to half type"""
+        """Casts this storage to half type."""
         return self._to(torch.half)
 
     def long(self):
-        """Casts this storage to long type"""
+        """Casts this storage to long type."""
         return self._to(torch.long)
 
     def int(self):
-        """Casts this storage to int type"""
+        """Casts this storage to int type."""
         return self._to(torch.int)
 
     def short(self):
-        """Casts this storage to short type"""
+        """Casts this storage to short type."""
         return self._to(torch.short)
 
     def char(self):
-        """Casts this storage to char type"""
+        """Casts this storage to char type."""
         return self._to(torch.int8)
 
     def byte(self):
-        """Casts this storage to byte type"""
+        """Casts this storage to byte type."""
         return self._to(torch.uint8)
 
     def bool(self):
-        """Casts this storage to bool type"""
+        """Casts this storage to bool type."""
         return self._to(torch.bool)
 
     def bfloat16(self):
-        """Casts this storage to bfloat16 type"""
+        """Casts this storage to bfloat16 type."""
         return self._to(torch.bfloat16)
 
     def complex_double(self):
-        """Casts this storage to complex double type"""
+        """Casts this storage to complex double type."""
         return self._to(torch.cdouble)
 
     def complex_float(self):
-        """Casts this storage to complex float type"""
+        """Casts this storage to complex float type."""
         return self._to(torch.cfloat)
 
     def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
@@ -251,7 +251,7 @@ class _StorageBase:
 
     @classmethod
     def _new_shared(cls, size, *, device='cpu'):
-        """Creates a new storage in shared memory with the same data type"""
+        """Creates a new storage in shared memory with the same data type."""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
         if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
@@ -265,7 +265,7 @@ class _StorageBase:
         return self
 
     def byteswap(self, dtype):
-        """Swaps bytes in underlying data"""
+        """Swaps bytes in underlying data."""
         elem_size = torch._utils._element_size(dtype)
         # for complex types, don't swap first and second numbers
         if dtype.is_complex:
@@ -606,7 +606,7 @@ class TypedStorage:
         return self._untyped_storage.device.type == 'hpu'
 
     def untyped(self):
-        """Returns the internal :class:`torch.UntypedStorage`"""
+        """Return the internal :class:`torch.UntypedStorage`."""
         _warn_typed_storage_removal()
         return self._untyped_storage
 
@@ -803,17 +803,17 @@ class TypedStorage:
         return super().__sizeof__() + self.nbytes()
 
     def clone(self):
-        """Returns a copy of this storage"""
+        """Return a copy of this storage"""
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.clone())
 
     def tolist(self):
-        """Returns a list containing the elements of this storage"""
+        """Return a list containing the elements of this storage"""
         _warn_typed_storage_removal()
         return list(self)
 
     def cpu(self):
-        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        """Return a CPU copy of this storage if it's not already on the CPU"""
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
@@ -830,7 +830,7 @@ class TypedStorage:
         return self._untyped_storage.is_pinned(device)
 
     def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
-        r"""Copies the CPU TypedStorage to pinned memory, if it's not already pinned.
+        r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
             device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
@@ -842,7 +842,7 @@ class TypedStorage:
         return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
 
     def share_memory_(self):
-        """Moves the storage to shared memory.
+        """Move the storage to shared memory.
 
         This is a no-op for storages already in shared memory and for CUDA
         storages, which do not need to be moved for sharing across processes.
@@ -859,7 +859,7 @@ class TypedStorage:
         return self
 
     def _new_shared(self, size, *, device=None):
-        """Creates a new storage in shared memory with the same data type"""
+        """Create a new storage in shared memory with the same data type."""
         if device is None:
             device = 'cpu'
         device = torch.device(device)
@@ -968,69 +968,69 @@ class TypedStorage:
         return storage
 
     def double(self):
-        """Casts this storage to double type"""
+        """Casts this storage to double type."""
         _warn_typed_storage_removal()
         return self._to(torch.double)
 
     def float(self):
-        """Casts this storage to float type"""
+        """Casts this storage to float type."""
         _warn_typed_storage_removal()
         return self._to(torch.float)
 
     def half(self):
-        """Casts this storage to half type"""
+        """Casts this storage to half type."""
         _warn_typed_storage_removal()
         return self._to(torch.half)
 
     def long(self):
-        """Casts this storage to long type"""
+        """Casts this storage to long type."""
         _warn_typed_storage_removal()
         return self._to(torch.long)
 
     def int(self):
-        """Casts this storage to int type"""
+        """Casts this storage to int type."""
         _warn_typed_storage_removal()
         return self._to(torch.int)
 
     def short(self):
-        """Casts this storage to short type"""
+        """Casts this storage to short type."""
         _warn_typed_storage_removal()
         return self._to(torch.short)
 
     def char(self):
-        """Casts this storage to char type"""
+        """Casts this storage to char type."""
         _warn_typed_storage_removal()
         return self._to(torch.int8)
 
     def byte(self):
-        """Casts this storage to byte type"""
+        """Casts this storage to byte type."""
         _warn_typed_storage_removal()
         return self._to(torch.uint8)
 
     def bool(self):
-        """Casts this storage to bool type"""
+        """Casts this storage to bool type."""
         _warn_typed_storage_removal()
         return self._to(torch.bool)
 
     def bfloat16(self):
-        """Casts this storage to bfloat16 type"""
+        """Casts this storage to bfloat16 type."""
         _warn_typed_storage_removal()
         return self._to(torch.bfloat16)
 
     def complex_double(self):
-        """Casts this storage to complex double type"""
+        """Casts this storage to complex double type."""
         _warn_typed_storage_removal()
         return self._to(torch.cdouble)
 
     def complex_float(self):
-        """Casts this storage to complex float type"""
+        """Casts this storage to complex float type."""
         _warn_typed_storage_removal()
         return self._to(torch.cfloat)
 
     @classmethod
     def from_file(cls, filename, shared, size):
         """
-        from_file(filename, shared=False, size=0) -> Storage
+        from_file(filename, shared=False, size=0) -> Storage.
 
         If `shared` is `True`, then memory is shared between all processes.
         All changes are written to the file. If `shared` is `False`, then the changes on
@@ -1135,7 +1135,7 @@ class _LegacyStorageMeta(type):
 class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
     def _new_shared(cls, size):
-        """Creates a new storage in shared memory with the same data type"""
+        """Create a new storage in shared memory with the same data type."""
         untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)
 
