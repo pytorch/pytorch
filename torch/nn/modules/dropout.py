@@ -62,7 +62,7 @@ class Dropout1d(_DropoutNd):
 
     A channel is a 1D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 1D tensor :math:`\text{input}[i, j]`).
+    batched input is a 1D tensor :math:`\text{input}[i, j]`.
 
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
