@@ -47,7 +47,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       build_environment: linux-binary-conda
@@ -65,7 +65,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
       build_environment: linux-binary-conda
@@ -83,7 +83,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cpu
     secrets:
@@ -105,7 +105,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_8
       build_environment: linux-binary-conda
@@ -124,7 +124,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_8
       build_environment: linux-binary-conda
@@ -143,7 +143,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda11_8
     secrets:
@@ -165,7 +165,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda12_1
       build_environment: linux-binary-conda
@@ -184,7 +184,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda12_1
       build_environment: linux-binary-conda
@@ -203,7 +203,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.8"
       build_name: conda-py3_8-cuda12_1
     secrets:
@@ -224,7 +224,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
@@ -242,7 +242,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
       build_environment: linux-binary-conda
@@ -260,7 +260,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
     secrets:
@@ -282,7 +282,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
@@ -301,7 +301,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
       build_environment: linux-binary-conda
@@ -320,7 +320,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda11_8
     secrets:
@@ -342,7 +342,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
@@ -361,7 +361,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
       build_environment: linux-binary-conda
@@ -380,7 +380,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cuda12_1
     secrets:
@@ -401,7 +401,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
@@ -419,7 +419,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
       build_environment: linux-binary-conda
@@ -437,7 +437,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cpu
     secrets:
@@ -459,7 +459,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
@@ -478,7 +478,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
       build_environment: linux-binary-conda
@@ -497,7 +497,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda11_8
     secrets:
@@ -519,7 +519,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
@@ -538,7 +538,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
       build_environment: linux-binary-conda
@@ -557,7 +557,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.10"
       build_name: conda-py3_10-cuda12_1
     secrets:
@@ -578,7 +578,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
@@ -596,7 +596,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
       build_environment: linux-binary-conda
@@ -614,7 +614,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/conda-builder:cpu-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
     secrets:
@@ -636,7 +636,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
@@ -655,7 +655,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
       build_environment: linux-binary-conda
@@ -674,7 +674,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/conda-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda11_8
     secrets:
@@ -696,7 +696,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
@@ -715,7 +715,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
       build_environment: linux-binary-conda
@@ -734,7 +734,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/conda-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cuda12_1
     secrets:

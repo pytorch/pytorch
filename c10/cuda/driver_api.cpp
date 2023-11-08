@@ -10,7 +10,7 @@ namespace {
 DriverAPI create_driver_api() {
 #define OPEN_LIBRARIES(name, n)               \
   void* handle_##n = dlopen(name, RTLD_LAZY); \
-  TORCH_INTERNAL_ASSERT(handle_##n);
+  TORCH_INTERNAL_ASSERT(handle_##n, "Can't open ", #name, ": ", dlerror());
 
   C10_FORALL_DRIVER_LIBRARIES(OPEN_LIBRARIES)
 #undef OPEN_LIBRARIES
@@ -18,7 +18,7 @@ DriverAPI create_driver_api() {
 
 #define LOOKUP_ENTRY(name, n)                              \
   r.name##_ = ((decltype(&name))dlsym(handle_##n, #name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_)
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name, ": ", dlerror())
   C10_FORALL_DRIVER_API(LOOKUP_ENTRY)
 #undef LOOKUP_ENTRY
   return r;

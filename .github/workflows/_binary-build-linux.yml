@@ -140,6 +140,7 @@ jobs:
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
+        continue-on-error: true
         with:
           github-secret: ${{ secrets.github-token }}
 

@@ -47,7 +47,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -66,7 +66,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -85,7 +85,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
@@ -107,7 +107,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-without-deps-cxx11-abi
@@ -126,7 +126,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-without-deps-cxx11-abi
@@ -145,7 +145,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-shared-without-deps-cxx11-abi
@@ -167,7 +167,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -186,7 +186,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -205,7 +205,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-with-deps-cxx11-abi
@@ -227,7 +227,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-without-deps-cxx11-abi
@@ -246,7 +246,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-without-deps-cxx11-abi
@@ -265,7 +265,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cpu-static-without-deps-cxx11-abi
@@ -288,7 +288,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
@@ -308,7 +308,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
@@ -328,7 +328,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
@@ -351,7 +351,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-without-deps-cxx11-abi
@@ -371,7 +371,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-without-deps-cxx11-abi
@@ -391,7 +391,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-shared-without-deps-cxx11-abi
@@ -414,7 +414,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-with-deps-cxx11-abi
@@ -434,7 +434,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-with-deps-cxx11-abi
@@ -454,7 +454,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-with-deps-cxx11-abi
@@ -477,7 +477,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-without-deps-cxx11-abi
@@ -497,7 +497,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-without-deps-cxx11-abi
@@ -517,7 +517,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda11.8-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda11_8-static-without-deps-cxx11-abi
@@ -540,7 +540,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
@@ -560,7 +560,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
@@ -580,7 +580,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
@@ -603,7 +603,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-without-deps-cxx11-abi
@@ -623,7 +623,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-without-deps-cxx11-abi
@@ -643,7 +643,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-shared-without-deps-cxx11-abi
@@ -666,7 +666,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-with-deps-cxx11-abi
@@ -686,7 +686,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-with-deps-cxx11-abi
@@ -706,7 +706,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-with-deps-cxx11-abi
@@ -729,7 +729,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-without-deps-cxx11-abi
@@ -749,7 +749,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-without-deps-cxx11-abi
@@ -769,7 +769,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-2.1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-cuda12_1-static-without-deps-cxx11-abi
@@ -792,7 +792,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_5-shared-with-deps-cxx11-abi
@@ -814,7 +814,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -855,7 +855,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.5
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -872,7 +872,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_5-shared-with-deps-cxx11-abi
@@ -895,7 +895,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_5-static-with-deps-cxx11-abi
@@ -917,7 +917,7 @@ jobs:
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -958,7 +958,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.5
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -975,7 +975,7 @@ jobs:
       DESIRED_CUDA: rocm5.5
       GPU_ARCH_VERSION: 5.5
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.5-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_5-static-with-deps-cxx11-abi
@@ -998,7 +998,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_6-shared-with-deps-cxx11-abi
@@ -1020,7 +1020,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1061,7 +1061,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.6
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1078,7 +1078,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_6-shared-with-deps-cxx11-abi
@@ -1101,7 +1101,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_6-static-with-deps-cxx11-abi
@@ -1123,7 +1123,7 @@ jobs:
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
@@ -1164,7 +1164,7 @@ jobs:
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
-          docker-image: pytorch/libtorch-cxx11-builder:rocm5.6
+          docker-image: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
@@ -1181,7 +1181,7 @@ jobs:
       DESIRED_CUDA: rocm5.6
       GPU_ARCH_VERSION: 5.6
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:rocm5.6-2.1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
       build_name: libtorch-rocm5_6-static-with-deps-cxx11-abi

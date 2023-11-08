@@ -43,7 +43,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
@@ -62,7 +62,7 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-2.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda11_8
       build_environment: linux-binary-manywheel
@@ -82,7 +82,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda12_1-with-pypi-cudnn
       build_environment: linux-binary-manywheel
@@ -102,7 +102,7 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.1-2.1
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda12_1-with-pypi-cudnn
       build_environment: linux-binary-manywheel
