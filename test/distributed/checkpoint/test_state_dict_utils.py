@@ -51,7 +51,7 @@ class TestStateDictUtils(DTensorTestBase):
         state_dict = {"dtensor": dist_tensor}
 
         gathered_state_dict = _gather_state_dict(
-            state_dict, cpu_offload=True, ranks_only=tuple((0, 2))
+            state_dict, cpu_offload=True, ranks_only=(0, 2)
         )
         expected_gathered_dtensor = funcol.all_gather_tensor(
             dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
@@ -71,9 +71,7 @@ class TestStateDictUtils(DTensorTestBase):
             "tensor2": torch.ones(10, device=device),
         }
 
-        cpu_state_dict = _offload_state_dict_to_cpu(
-            state_dict, ranks_only=tuple((0, 2))
-        )
+        cpu_state_dict = _offload_state_dict_to_cpu(state_dict, ranks_only=(0, 2))
         if dist.get_rank() in (0, 2):
             for v in cpu_state_dict.values():
                 self.assertFalse(v.is_cuda)
