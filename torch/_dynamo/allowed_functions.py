@@ -148,23 +148,27 @@ def _disallowed_function_ids() -> Set[int]:
     return {id(x) for x in remove}
 
 
-def dump_allowed_name_rule_map() -> None:
-    m = gen_allowed_functions_and_ids()[2]
+# Helper function to dump the torch name rule map generated based on
+# heuristic defined in gen_allowed_objs_and_ids.
+def dump_allowed_torch_name_rule_map() -> None:
+    m = gen_allowed_objs_and_ids()[2]
     for k, v in m.items():
         print(f'"{k}": {v.__name__},')
 
 
-def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
+def gen_allowed_objs_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
     """
     Walk torch.* and get the ids of all the stuff in it
     """
-    from .variables import TorchInGraphFunctionVariable
+    from .variables import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 
     warnings.filterwarnings("ignore", category=UserWarning, module="torch.distributed")
     torch_object_ids = dict()
     torch_objects = set()
     torch_name_rule_map = dict()
 
+    # Add obj to torch_objects set if it's a torch function or method.
+    # This is used to generate the in graph function list based on heuristic.
     def heuristic_record_if_in_graph_function(obj, module, name):
         try:
             if hasattr(obj, "__wrapped__") and obj is not torch.ops:
@@ -186,13 +190,17 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
             ] = TorchInGraphFunctionVariable
             torch_objects.add(obj)
 
+    # Add obj to torch_objects set if it's a torch context manager class.
+    # This is used to generate the ctx manager class list based on heuristic.
     def heuristic_record_if_ctx_manager(obj, module, name):
         if (
             issubclass(type(obj), type)
             and "__enter__" in obj.__dict__
             and "__exit__" in obj.__dict__
         ):
-            # torch_name_rule_map[f"{module.__name__}.{name}"] = TorchCtxManagerClassVariable
+            torch_name_rule_map[
+                f"{module.__name__}.{name}"
+            ] = TorchCtxManagerClassVariable
             torch_objects.add(obj)
 
     def _is_allowed_module_prefix(obj):
@@ -364,7 +372,7 @@ def gen_allowed_functions_and_ids() -> Tuple[Dict[int, str], Set[Any]]:
 
 @FunctionIdSet
 def _allowed_function_ids() -> Dict[int, str]:
-    return gen_allowed_functions_and_ids()[0]
+    return gen_allowed_objs_and_ids()[0]
 
 
 @FunctionIdSet
