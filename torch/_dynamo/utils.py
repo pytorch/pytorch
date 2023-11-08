@@ -47,6 +47,7 @@ from typing import (
     ValuesView,
 )
 
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -945,7 +946,7 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
-def iter_contains(items, search, tx, options, check_tensor_identity=False):
+def iter_contains(items, search, tx, check_tensor_identity=False):
     from .variables import (
         BuiltinVariable,
         ConstantVariable,
@@ -959,7 +960,7 @@ def iter_contains(items, search, tx, options, check_tensor_identity=False):
             and x.as_python_constant() == search.as_python_constant()
             for x in items
         )
-        return ConstantVariable.create(found_const, **options)
+        return ConstantVariable.create(found_const)
 
     must_check_tensor_id = False
     if check_tensor_identity and isinstance(search, TensorVariable):
@@ -1314,13 +1315,12 @@ class CompileProfiler:
                 self.op_count += 1
         return gm.forward
 
+    # no-op __enter__ and __exit__ to preserve BC
     def __enter__(self):
-        self.old_report_guard_failure = config.report_guard_failures
-        config.report_guard_failures = True
         return self
 
     def __exit__(self, typ, val, traceback):
-        config.report_guard_failures = self.old_report_guard_failure
+        pass
 
     def get_metrics(self):
         return {"guard_failures": guard_failures}
@@ -2254,10 +2254,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
 
 
 def is_guard_failure_reporting_enabled():
-    return (
-        config.report_guard_failures
-        or torch._logging._internal.log_state.is_artifact_enabled("recompiles")
-    )
+    return torch._logging._internal.log_state.is_artifact_enabled("recompiles")
 
 
 def get_static_address_type(t):
