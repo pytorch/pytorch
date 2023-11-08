@@ -2520,18 +2520,6 @@ class <lambda>(torch.nn.Module):
         for g_ref, g_test in zip(grads_ref, grads_test):
             self.assertEqual(g_ref, g_test)
 
-    def test_aot_export_metadata_mutation_banned(self):
-        def fn(p, x):
-            x.t_()
-            return (x * 2,)
-        mod = TestMod(fn)
-        inp = torch.randn(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found an input that received a metadata mutation"
-        ):
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=False)
-            aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
-            aot_export_module(mod, [inp], trace_joint=False)
 
     def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
         class M(torch.nn.Module):

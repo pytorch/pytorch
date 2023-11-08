@@ -2738,6 +2738,7 @@ def aot_wrapper_dedupe(
     args_set = set()
     ok = True
 
+    # breakpoint()
     for i, a in enumerate(flat_args):
         if not isinstance(a, torch.Tensor):
             leaf_flat_args.append(a)
@@ -4319,8 +4320,9 @@ def create_aot_dispatcher_function(
                         return x
                 # TODO: Ensure that this codepath is never exercised from
                 # Dynamo
-                dynamic_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                return fake_mode.from_tensor(x, static_shapes=not dynamic_shapes, allocate_fresh_if_metadata_mutated=True)
+                static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
+                out = fake_mode.from_tensor(x, static_shapes=static_shapes, allocate_fresh_if_metadata_mutated=True)
+                return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
@@ -4771,7 +4773,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
     compiled_f = aot_function(
-        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+        functional_call, *args, num_params_buffers=num_params_buffers, **kwargs
     )
 
     class AOTModule(nn.Module):
