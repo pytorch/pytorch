@@ -57,15 +57,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x
 
         with torch.no_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
+            torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)  # coalesced noop
+            torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)  # coalesced noop
             torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
+            torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)  # coalesced noop
+            torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)  # coalesced noop
 
     def test_grad_mode_guard(self):
         def fn(a, b):
@@ -164,7 +164,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
 
@@ -194,7 +194,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x, s)
-        self.assertTrue(same(ref, res))
+        self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 18)
 
