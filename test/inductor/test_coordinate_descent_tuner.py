@@ -6,9 +6,9 @@ from unittest import mock
 
 import torch
 
-from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch._dynamo.test_case import TestCase
+from torch._inductor import config
+from torch._inductor.coordinate_descent_tuner import CoordescTuner
 
 try:
     import triton
@@ -17,8 +17,6 @@ except ImportError:
         sys.exit(0)
     raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
-from torch._inductor import config
-from torch._inductor.coordinate_descent_tuner import CoordescTuner
 
 config.benchmark_kernel = True
 config.coordinate_descent_tuning = True
@@ -100,5 +98,6 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()

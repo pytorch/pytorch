@@ -4,19 +4,8 @@ from typing import NamedTuple
 import torch
 from torch._dynamo.testing import load_test_module
 from torch._inductor import config
-from torch.testing._internal.common_utils import (
-    IS_MACOS,
-    slowTest,
-    TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
-)
-from torch.testing._internal.inductor_utils import (
-    HAS_CPU,
-    HAS_CUDA,
-    run_and_get_cpp_code,
-    TestFailure,
-)
+from torch.testing._internal.common_utils import slowTest, TestCase as TorchTestCase
+from torch.testing._internal.inductor_utils import run_and_get_cpp_code, TestFailure
 
 test_cpu_repro = load_test_module(__file__, "inductor.test_cpu_repro")
 test_foreach = load_test_module(__file__, "inductor.test_foreach")
@@ -29,10 +18,6 @@ test_torchinductor = load_test_module(__file__, "inductor.test_torchinductor")
 test_torchinductor_dynamic_shapes = load_test_module(
     __file__, "inductor.test_torchinductor_dynamic_shapes"
 )
-
-
-RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM
 
 
 class CppWrapperTemplate:
@@ -379,8 +364,8 @@ if RUN_CUDA:
         test_failures_cuda_wrapper,
     )
 
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
 
-    if RUN_CPU or RUN_CUDA:
-        run_tests(needs="filelock")
+if __name__ == "__main__":
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(skip_asan=True, skip_rocm=True, skip_mac=True)

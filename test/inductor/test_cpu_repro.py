@@ -34,7 +34,7 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS, slowTest
+from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     check_model,
     run_and_get_cpp_code,
@@ -2574,8 +2574,6 @@ class CPUReproTests(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-    from torch.testing._internal.inductor_utils import HAS_CPU
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if HAS_CPU and not IS_MACOS:
-        run_tests(needs="filelock")
+    run_inductor_tests()

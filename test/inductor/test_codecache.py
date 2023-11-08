@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import (
@@ -482,4 +482,6 @@ class TestFxGraphCacheHashing(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests()

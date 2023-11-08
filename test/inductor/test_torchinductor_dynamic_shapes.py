@@ -435,8 +435,7 @@ class TestInductorDynamic(TestCase):
 instantiate_device_type_tests(TestInductorDynamic, globals())
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
-        run_tests(needs="filelock")
+    run_inductor_tests(skip_asan=True)

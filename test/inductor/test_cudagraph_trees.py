@@ -2,8 +2,6 @@
 import contextlib
 import functools
 import gc
-import importlib
-import sys
 import unittest
 import warnings
 
@@ -18,28 +16,13 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
 from torch.testing._internal.common_utils import (
-    IS_CI,
     IS_LINUX,
-    IS_WINDOWS,
     skipIfRocm,
-    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
-
-if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
-    )
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("requires sympy/functorch/filelock")
-
-importlib.import_module("functorch")
-importlib.import_module("filelock")
-
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
@@ -1289,12 +1272,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch.testing._internal.inductor_utils import run_inductor_tests
 
-    if not TEST_CUDA_GRAPH:
-        if __name__ == "__main__":
-            sys.exit(0)
-        raise unittest.SkipTest("cuda graph test is skipped")
-
-    if HAS_CPU or HAS_CUDA:
-        run_tests(needs="filelock")
+    run_inductor_tests(cudagraphs=True)

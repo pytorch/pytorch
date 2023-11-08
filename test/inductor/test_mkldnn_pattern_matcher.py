@@ -6,7 +6,7 @@ import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
@@ -22,8 +22,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
+from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.inductor_utils import _check_has_dynamic_shape
 
 
 # The dict value is match_nodes(computation_op+unary_op)
@@ -1462,5 +1462,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
-        run_tests()
+    from torch.testing._internal.inductor_utils import run_inductor_tests
+
+    run_inductor_tests(mkl=True)
