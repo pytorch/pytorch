@@ -54,6 +54,8 @@ from .api.python import (  # used by internals and/or third-party packages
     _namedtuple_unflatten,
     _odict_flatten,
     _odict_unflatten,
+    _ordereddict_flatten,
+    _ordereddict_unflatten,
     _register_pytree_node,
     _tuple_flatten,
     _tuple_unflatten,
