@@ -850,7 +850,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -903,7 +903,7 @@ def forward(self, primals_1):
         out_ref = f1(inp_ref)
         out_test = f1_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -923,7 +923,7 @@ def forward(self, primals_1):
         out_ref = f2(inp_ref)
         out_test = f2_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -946,7 +946,7 @@ def forward(self, primals_1):
         out_ref = f3(inp_ref)
         out_test = f3_compiled(inp)
         # Assert that we get CompiledFunctionBackward in the backward graph,
-        # and not AsStridedBackward. No view-regeneration necesssary for this mult-output view case.
+        # and not AsStridedBackward. No view-regeneration necessary for this mult-output view case.
         # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
         self.assertTrue(all('CompiledFunctionBackward' in str(o.grad_fn) for o in out_test))
 
@@ -3482,17 +3482,13 @@ symbolic_aot_autograd_failures = {
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
@@ -3507,11 +3503,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
-    xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList

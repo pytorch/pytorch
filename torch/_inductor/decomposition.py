@@ -1,6 +1,7 @@
 import functools
 import logging
 import math
+import sys
 import typing
 from typing import Optional
 
@@ -437,6 +438,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -466,6 +469,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -488,7 +493,10 @@ def dequantize_per_tensor_tensor_decomp_impl(
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
         x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
-        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        if sys.byteorder == "little":
+            return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        else:
+            return ((x << 24) + (y << 16) + (z << 8) + w).view(torch.float32)[..., None]
 
     scales = bitcast_u8_to_f32(packed[..., -8:-4])
     offsets = bitcast_u8_to_f32(packed[..., -4:])
