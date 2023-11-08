@@ -60,7 +60,7 @@ class Dropout(_DropoutNd):
 class Dropout1d(_DropoutNd):
     r"""Randomly zero out entire channels.
 
-    (a channel is a 1D feature map,
+    A channel is a 1D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
     batched input is a 1D tensor :math:`\text{input}[i, j]`).
 
