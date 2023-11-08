@@ -1,6 +1,6 @@
 #include <c10/util/Float8_e4m3fnuz.h>
-#include <iostream>
 #include <array>
+#include <iostream>
 
 namespace c10 {
 
@@ -102,7 +102,7 @@ C10_HOST_DEVICE float fp8e4m3fnuz_to_fp32_value(uint8_t input) {
 } // namespace detail
 
 static_assert(
-    std::is_standard_layout<Float8_e4m3fnuz>::value,
+    std::is_standard_layout_v<Float8_e4m3fnuz>,
     "c10::Float8_e4m3fnuz must be standard layout.");
 
 std::ostream& operator<<(std::ostream& out, const Float8_e4m3fnuz& value) {
