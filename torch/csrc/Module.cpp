@@ -1645,7 +1645,6 @@ Call this whenever a new thread is created in order to propagate values from
   py::enum_<sdp::SDPBackend>(
       py_module,
       "_SDPBackend",
-      py::arithmetic(),
       "Enum class for the scaled dot product attention backends\n\n... warning:: This class is in beta and subject to change.")
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
