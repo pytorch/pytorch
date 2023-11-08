@@ -1,6 +1,7 @@
 import os
+from collections import namedtuple
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from .grad_mode import _DecoratorContextManager
@@ -120,20 +121,13 @@ def make_dual(tensor, tangent, *, level=None):
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-class UnpackedDualTensor(tuple):
+_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
+
+
+class UnpackedDualTensor(_UnpackedDualTensor):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
     See :func:`unpack_dual` for more details."""
-
-    def __new__(cls, primal: torch.Tensor, tangent: Optional[torch.Tensor]) -> 'UnpackedDualTensor':
-        return super().__new__(cls, (primal, tangent))
-
-    @property
-    def primal(self) -> torch.Tensor:
-        return self[0]
-
-    @property
-    def tangent(self) -> Optional[torch.Tensor]:
-        return self[1]
+    pass
 
 
 def unpack_dual(tensor, *, level=None):
