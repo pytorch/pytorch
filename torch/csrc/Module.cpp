@@ -145,11 +145,11 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
-  if (torch::get_cpp_stacktraces_enabled()) {
+  if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
       LOG(WARNING)
-          << "symbolizing C++ stack trace for exception, this may take a while..."
+          << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
           << std::endl;
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
