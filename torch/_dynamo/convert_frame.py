@@ -26,7 +26,7 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_allowed
+from .allowed_functions import is_allowed, is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -178,7 +178,11 @@ def has_tensor_in_frame(frame):
     # Check if there is global import of torch.*
     for co_name in frame.f_code.co_names:
         if co_name in frame.f_globals:
-            if is_allowed(frame.f_globals[co_name]):
+            obj = frame.f_globals[co_name]
+            if is_allowed(obj):
+                return True
+            # ... or a global import of numpy.*
+            if np and config.trace_numpy and (obj is np or is_numpy(obj)):
                 return True
 
     seen_ids: Dict[int, bool] = dict()
