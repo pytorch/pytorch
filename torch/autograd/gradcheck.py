@@ -256,7 +256,7 @@ def _iter_tensor(x_tensor):
 def _get_numerical_jacobian(
     fn, inputs, outputs=None, target=None, eps=1e-3, is_forward_ad=False
 ) -> List[Tuple[torch.Tensor, ...]]:
-    """Compute the numerical Jacobian of `fn(inputs)` with respect to `target`, returning M * N Jacobians.
+    """Calculate numerical Jacobian.
 
     Computes the numerical Jacobian of `fn(inputs)` with respect to `target`. If
     not specified, targets are the input. Returns M * N Jacobians where N is the
