@@ -1,4 +1,5 @@
 import functools
+import math
 
 import torch
 
@@ -246,7 +247,7 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.is_non_overlapping_and_dense.default:
@@ -259,6 +260,8 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return len(args[0]._size)
 
     if func == torch.ops.aten.sym_numel.default:
+        if args[0]._lengths is not None:
+            return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
 
     if func == torch.ops.aten.sym_stride.default:
@@ -298,13 +301,7 @@ def is_contiguous_general(func, *args, **kwargs):
         orig_dim = inp.values().shape[0] / inp.lengths().shape[0]
         if torch.any(inp.lengths()[1:-1].ne(orig_dim)):
             return False
-        if torch.any(
-            inp.offsets()[1:-1]
-            - torch.arange(
-                1, inp.lengths().shape[0], device=inp.device, dtype=torch.int64
-            )
-            * orig_dim
-        ):
+        if torch.any(inp.offsets()[1:-2].diff().ne(orig_dim)):
             return False
         if inp.offsets()[0] + inp.lengths()[0] != orig_dim:
             return False
