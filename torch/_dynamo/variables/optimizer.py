@@ -4,7 +4,7 @@ from typing import Dict, List
 import torch
 from ..decorators import mark_static_address
 
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name
 
@@ -126,13 +126,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # state guards take a long time to generate
         # so we manually generate them here
-        guards = set()
         state_source = AttrSource(self.source, "state")
-        guards.add(state_source.make_guard(GuardBuilder.DICT_KEYS))
+        install_guard(state_source.make_guard(GuardBuilder.DICT_KEYS))
         for p, value in self.value.state.items():
             tx.store_global_weakref(global_key_name(p), p)
             p_state_source = GetItemSource(state_source, self.tensor_to_source[p])
-            guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
+            install_guard(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
                 if (
                     isinstance(v, torch.Tensor)
@@ -141,7 +140,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 ):
                     self.tensor_to_source[v] = GetItemSource(p_state_source, k)
                 elif v is None or isinstance(v, (bool, int, float, str)):
-                    guards.add(
+                    install_guard(
                         GetItemSource(p_state_source, k).make_guard(
                             GuardBuilder.CONSTANT_MATCH
                         )
@@ -149,12 +148,10 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 else:
                     raise GuardInstallException()
 
-        tx.output.guards.update(guards)
-
-        group_guards = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+        # this next line has the side effect of installing guards
+        VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
             self.value.param_groups
-        )
-        tx.output.guards.update(group_guards.guards)
+        ).recursive_realize()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""
