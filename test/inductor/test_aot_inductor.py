@@ -932,6 +932,26 @@ class AOTInductorTestsTemplate:
             torch.float32, self.device == "cuda"
         )
 
+    def test_consecutive_compiles(self):
+        """Test that compilation behaves correctly with cache hits"""
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        mod = TestModule()
+        inp = torch.rand(1)
+        mod(inp)
+        mod2 = torch.fx.symbolic_trace(mod, concrete_args=[inp])
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+        # compile the 2nd time with cache hit
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+
     def test_normal_functional(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1011,6 +1031,18 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_repeat_output(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.sin(x)
+                return y, y
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 class AOTInductorTestABICompatibleCpu(TestCase):
     device = "cpu"
@@ -1036,6 +1068,8 @@ copy_tests(
         "test_freezing": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_normal_functional": TestFailure(("abi_compatible_cpu",)),
         "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cpu",), is_skip=True),
         "test_sdpa": TestFailure(("abi_compatible_cpu",)),
         "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
         "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
@@ -1058,6 +1092,8 @@ copy_tests(
     {
         "test_dup_unbacked_sym_decl": TestFailure(("abi_compatible_cuda",)),
         "test_normal_functional": TestFailure(("abi_compatible_cuda",)),
+        # There is a double-free issue which will be fixed in another PR
+        "test_repeat_output": TestFailure(("abi_compatible_cuda",), is_skip=True),
     },
 )
 
