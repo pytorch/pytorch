@@ -6,18 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import (
-    Any,
-    cast,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Union, Sequence, Tuple, cast
 
 import torch
 import torch.autograd
@@ -82,9 +71,7 @@ def _verify_splitting(
     module: nn.Sequential, partitions: List[nn.Sequential], devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
-    num_child_parameters = sum(
-        len(list(child.parameters())) for child in module.children()
-    )
+    num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
     if num_parameters == num_child_parameters:
         return
 
@@ -97,9 +84,7 @@ def _verify_splitting(
             for p in parti.parameters():
                 for q in partj.parameters():
                     if p is q:
-                        raise ValueError(
-                            "module with duplicate parameters on distinct devices is not supported"
-                        )
+                        raise ValueError("module with duplicate parameters on distinct devices is not supported")
 
 
 class BalanceError(ValueError):
@@ -125,9 +110,8 @@ def _retrieve_device(module: nn.Module) -> torch.device:
             device = parameter.device
         elif device != parameter.device:
             raise ValueError(
-                f"nn.Module: {module}, should have all parameters on a single device,"
-                " please use .to() to place the module on a single device"
-            )
+                f'nn.Module: {module}, should have all parameters on a single device,'
+                ' please use .to() to place the module on a single device')
 
     return device if device is not None else torch.device("cpu")
 
@@ -200,9 +184,7 @@ def _assemble_partition(modules: List[nn.Module]):
     return PipeSequential(*modules_list)
 
 
-def _split_module(
-    modules: nn.Sequential,
-) -> Tuple[List[nn.Sequential], List[torch.device]]:
+def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
 
@@ -216,9 +198,7 @@ def _split_module(
             module.to(device)
         else:
             device = _retrieve_device(module)
-        if current_device is not None and (
-            current_device != device or device.type == "cpu"
-        ):
+        if current_device is not None and (current_device != device or device.type == "cpu"):
             partitions.append(_assemble_partition(current_partition))
             devices.append(current_device)
             current_partition = []
@@ -234,9 +214,7 @@ def _split_module(
     return partitions, devices
 
 
-MOVING_DENIED = TypeError(
-    "denied to move parameters and buffers, because Pipe should manage device placement"
-)
+MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
 
 
 class Pipe(Module):
@@ -335,9 +313,8 @@ class Pipe(Module):
         # Check if RPC framework is initialized.
         if not torch.distributed.rpc._is_current_rpc_agent_set():
             raise RuntimeError(
-                "Please initialize RPC framework for Pipe using "
-                "torch.distributed.rpc.init_rpc"
-            )
+                'Please initialize RPC framework for Pipe using '
+                'torch.distributed.rpc.init_rpc')
 
         chunks = int(chunks)
         checkpoint = str(checkpoint)

@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Any, Callable, cast, List, Sequence, Union
+from typing import Any, Callable, List, Union, cast, Sequence
 
 import torch
 import torch.cuda.comm
@@ -184,9 +184,7 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
 
             # Validate number of chunks equal across all inputs.
             if num_chunks != -1 and num_chunks != len(tensors):
-                raise RuntimeError(
-                    f"Found different number of chunks produced for inputs: {num_chunks} and {len(tensors)}"
-                )
+                raise RuntimeError(f'Found different number of chunks produced for inputs: {num_chunks} and {len(tensors)}')
             num_chunks = len(tensors)
 
             for i, tensor in enumerate(tensors):
@@ -220,9 +218,7 @@ def gather(outputs: List[Batch]):
             current_outputs = []
             for batch in outputs:
                 if output_type != type(batch[i]):
-                    raise TypeError(
-                        f"Types for microbatch outputs do not match, found: {output_type} and {type(batch[i])}"
-                    )
+                    raise TypeError(f'Types for microbatch outputs do not match, found: {output_type} and {type(batch[i])}')
                 current_outputs.append(batch[i])
 
             if torch.is_tensor(outputs[0][i]):
