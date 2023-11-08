@@ -139,6 +139,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
                     int64_t,
+                    bool,
                     int64_t)>();
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
@@ -148,6 +149,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
         opts.rootTensor,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 
@@ -335,12 +337,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const std::vector<std::vector<at::Tensor>>&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     int64_t,
+                    bool,
                     int64_t)>();
     return std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.rootRank,
+        opts.asyncOp,
         opts.timeout.count()));
   }
 

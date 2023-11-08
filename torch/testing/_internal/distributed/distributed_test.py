@@ -4875,7 +4875,7 @@ class DistributedTest:
                     if optimize_subset:
                         self.assertNotEqual(
                             opt_hook_init_params[0],
-                            list(ddp_model_with_optimizer_hook.parameters())[0],
+                            next(iter(ddp_model_with_optimizer_hook.parameters())),
                         )
                         # Untouched params should be equal
                         self.assertEqual(
@@ -7057,7 +7057,7 @@ class DistributedTest:
                     # zero gradient. If we kept dividing by static initial world
                     # size as processes leave, the grad would be smaller.
                     expected_grad = torch.ones(dim, dim, device=self.rank) * grad_scale
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grads so that it's the same every iteration
                     net.zero_grad()
@@ -7077,7 +7077,7 @@ class DistributedTest:
                         * grad_scale
                         * effective_ws
                     ) / dist.get_world_size()
-                    param = list(net.parameters())[0]
+                    param = next(iter(net.parameters()))
                     self.assertEqual(expected_grad, param.grad)
                     # Avoid accumulating grad so that it's the same every iteration.
                     net.zero_grad()
@@ -7758,11 +7758,11 @@ class DistributedTest:
                 )
                 proxy_params = list(model.fc2.parameters())
                 proxy_buffers = list(model.fc2.buffers())
-                model_fc2_name = [
+                model_fc2_name = next(
                     module_name
                     for module_name, module in model.named_modules()
                     if module is model.fc2
-                ][0]
+                )
                 proxy_param_names = [
                     f"{model_fc2_name}.{param_name}"
                     for param_name, _ in model.fc2.named_parameters()
