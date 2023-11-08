@@ -237,6 +237,7 @@ class TestGenericPytree(TestCase):
 
             unflattened = pytree_impl.tree_unflatten(values, treespec)
             self.assertEqual(unflattened, ddct)
+            self.assertEqual(unflattened.default_factory, ddct.default_factory)
             self.assertTrue(isinstance(unflattened, defaultdict))
 
         run_test(defaultdict(list, {}))
