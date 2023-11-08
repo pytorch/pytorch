@@ -21,13 +21,7 @@ if torch._running_with_deploy():
     raise ImportError("C++ pytree utilities do not work with torch::deploy.")
 
 import optree
-from optree import (
-    is_namedtuple,
-    is_namedtuple_class,
-    is_structseq,
-    is_structseq_class,
-    PyTreeSpec,  # direct import for type annotations
-)
+from optree import PyTreeSpec  # direct import for type annotations
 
 from .typing import (
     Context,
@@ -70,10 +64,6 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
-    "is_namedtuple",
-    "is_namedtuple_class",
-    "is_structseq",
-    "is_structseq_class",
 ]
 
 
@@ -252,12 +242,15 @@ def _private_register_pytree_node(
     for the C++ pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    optree.register_pytree_node(
-        cls,
-        flatten_fn,
-        _reverse_args(unflatten_fn),
-        namespace=namespace,
-    )
+    # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
+    # PyStructSequence types
+    if not optree.is_structseq_class(cls):
+        optree.register_pytree_node(
+            cls,
+            flatten_fn,
+            _reverse_args(unflatten_fn),
+            namespace=namespace,
+        )
 
 
 def tree_flatten(

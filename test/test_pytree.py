@@ -1,7 +1,7 @@
 # Owner(s): ["module: pytree"]
 
 import unittest
-from collections import namedtuple, OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 
 import torch
 import torch.utils._pytree.api.cxx as cxx_pytree
@@ -54,40 +54,6 @@ class TestGenericPytree(TestCase):
             subtest(
                 (
                     py_pytree,
-                    lambda lst: py_pytree.TreeSpec(
-                        list, None, [py_pytree.LeafSpec() for _ in lst]
-                    ),
-                ),
-                name="py",
-            ),
-            subtest(
-                (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
-                name="cxx",
-            ),
-        ],
-    )
-    def test_flatten_unflatten_list(self, pytree_impl, gen_expected_fn):
-        def run_test(lst):
-            expected_spec = gen_expected_fn(lst)
-            values, treespec = pytree_impl.tree_flatten(lst)
-            self.assertTrue(isinstance(values, list))
-            self.assertEqual(values, lst)
-            self.assertEqual(treespec, expected_spec)
-
-            unflattened = pytree_impl.tree_unflatten(values, treespec)
-            self.assertEqual(unflattened, lst)
-            self.assertTrue(isinstance(unflattened, list))
-
-        run_test([])
-        run_test([1.0, 2])
-        run_test([torch.tensor([1.0, 2]), 2, 10, 9, 11])
-
-    @parametrize(
-        "pytree_impl,gen_expected_fn",
-        [
-            subtest(
-                (
-                    py_pytree,
                     lambda tup: py_pytree.TreeSpec(
                         tuple, None, [py_pytree.LeafSpec() for _ in tup]
                     ),
@@ -116,6 +82,40 @@ class TestGenericPytree(TestCase):
         run_test((1.0,))
         run_test((1.0, 2))
         run_test((torch.tensor([1.0, 2]), 2, 10, 9, 11))
+
+    @parametrize(
+        "pytree_impl,gen_expected_fn",
+        [
+            subtest(
+                (
+                    py_pytree,
+                    lambda lst: py_pytree.TreeSpec(
+                        list, None, [py_pytree.LeafSpec() for _ in lst]
+                    ),
+                ),
+                name="py",
+            ),
+            subtest(
+                (cxx_pytree, lambda lst: cxx_pytree.tree_structure([0] * len(lst))),
+                name="cxx",
+            ),
+        ],
+    )
+    def test_flatten_unflatten_list(self, pytree_impl, gen_expected_fn):
+        def run_test(lst):
+            expected_spec = gen_expected_fn(lst)
+            values, treespec = pytree_impl.tree_flatten(lst)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, lst)
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = pytree_impl.tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, lst)
+            self.assertTrue(isinstance(unflattened, list))
+
+        run_test([])
+        run_test([1.0, 2])
+        run_test([torch.tensor([1.0, 2]), 2, 10, 9, 11])
 
     @parametrize(
         "pytree_impl,gen_expected_fn",
@@ -183,7 +183,7 @@ class TestGenericPytree(TestCase):
             ),
         ],
     )
-    def test_flatten_unflatten_odict(self, pytree_impl, gen_expected_fn):
+    def test_flatten_unflatten_ordereddict(self, pytree_impl, gen_expected_fn):
         def run_test(odict):
             expected_spec = gen_expected_fn(odict)
             values, treespec = pytree_impl.tree_flatten(odict)
@@ -201,6 +201,49 @@ class TestGenericPytree(TestCase):
         od["b"] = 1
         od["a"] = torch.tensor(3.14)
         run_test(od)
+
+    @parametrize(
+        "pytree_impl,gen_expected_fn",
+        [
+            subtest(
+                (
+                    py_pytree,
+                    lambda ddct: py_pytree.TreeSpec(
+                        defaultdict,
+                        (ddct.default_factory, list(ddct.keys())),
+                        [py_pytree.LeafSpec() for _ in ddct.values()],
+                    ),
+                ),
+                name="py",
+            ),
+            subtest(
+                (
+                    cxx_pytree,
+                    lambda ddct: cxx_pytree.tree_structure(
+                        defaultdict(ddct.default_factory, dict.fromkeys(ddct, 0))
+                    ),
+                ),
+                name="cxx",
+            ),
+        ],
+    )
+    def test_flatten_unflatten_defaultdict(self, pytree_impl, gen_expected_fn):
+        def run_test(ddct):
+            expected_spec = gen_expected_fn(ddct)
+            values, treespec = pytree_impl.tree_flatten(ddct)
+            self.assertTrue(isinstance(values, list))
+            self.assertEqual(values, list(ddct.values()))
+            self.assertEqual(treespec, expected_spec)
+
+            unflattened = pytree_impl.tree_unflatten(values, treespec)
+            self.assertEqual(unflattened, ddct)
+            self.assertTrue(isinstance(unflattened, defaultdict))
+
+        run_test(defaultdict(list, {}))
+        run_test(defaultdict(int, {"a": 1}))
+        run_test(defaultdict(int, {"abcdefg": torch.randn(2, 3)}))
+        run_test(defaultdict(int, {1: torch.randn(2, 3)}))
+        run_test(defaultdict(int, {"a": 1, "b": 2, "c": torch.randn(2, 3)}))
 
     @parametrize(
         "pytree_impl",
