@@ -14,6 +14,8 @@ namespace at::native {
 struct NestedTensorImpl;
 inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt);
 int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor);
+at::Tensor construct_nested_strides(const at::Tensor& nested_size);
+at::Tensor construct_offsets(const at::Tensor& nested_size);
 
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(
