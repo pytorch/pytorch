@@ -4082,258 +4082,6 @@ class TestMPS(TestCaseMPS):
             out = checkpoint(fn, a, use_reentrant=use_reentrant)
             out.backward()
 
-class TestLogical(TestCaseMPS):
-    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
-        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    def test_logical_not(self):
-        def helper(x):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            result = torch.logical_not(x)
-            result_cpu = torch.logical_not(cpu_x)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]))
-        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
-        helper(self._wrap_tensor([True, True, False, False]))
-        helper(self._wrap_tensor(1))
-        helper(self._wrap_tensor(0))
-        helper(self._wrap_tensor(True))
-        helper(self._wrap_tensor(False))
-
-    def test_logical_and(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_and(x, other)
-            result_cpu = torch.logical_and(cpu_x, cpu_other)
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_or(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_or(x, other)
-            result_cpu = torch.logical_or(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_logical_xor(self):
-        def helper(x, other):
-            cpu_x = x
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_other = other
-            other = cpu_other.detach().clone().to('mps')
-
-            result = torch.logical_xor(x, other)
-            result_cpu = torch.logical_xor(cpu_x, cpu_other)
-
-            self.assertEqual(result, result_cpu)
-
-        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
-        helper(
-            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
-            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
-        )
-        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
-        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
-
-    def test_min_max(self):
-        def helper(dtype):
-            for _ in range(10):
-                if dtype == torch.float32 or dtype == torch.float16:
-                    x = torch.randn((30, 15), device='mps', dtype=dtype)
-                else:
-                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
-                x_cpu = x.to("cpu")
-
-                y = x.max()
-                y_cpu = x_cpu.max()
-                self.assertEqual(y, y_cpu)
-
-                z = x.min()
-                z_cpu = x_cpu.min()
-                self.assertEqual(z, z_cpu)
-
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
-
-class TestSmoothL1Loss(TestCaseMPS):
-
-    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
-        # CPU
-        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
-        target_cpu = torch.randn(4, 7)
-
-        # MPS
-        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
-        target_mps = target_cpu.detach().clone().to('mps')
-
-        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
-        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
-
-        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
-
-        if requires_grad:
-            smooth_l1_loss_cpu.backward()
-            smooth_l1_loss_mps.backward()
-            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
-
-        return smooth_l1_loss_cpu, smooth_l1_loss_mps
-
-    def test_smooth_l1_loss_reduction_none(self):
-        self._smooth_l1_loss_helper(reduction="none")
-
-    def test_smooth_l1_loss_reduction_mean(self):
-        self._smooth_l1_loss_helper(reduction="mean")
-
-    def test_smooth_l1_loss_reduction_sum(self):
-        self._smooth_l1_loss_helper(reduction="sum")
-
-    def test_smooth_l1_loss_reduction_mean_backward(self):
-        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
-
-    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
-        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
-
-
-class TestNLLLoss(TestCaseMPS):
-    def test_nll_loss_mismatched_batch(self, device='mps'):
-        x = torch.randn((10, 3), requires_grad=True, device=device)
-        # t should have size (10,)
-        t = torch.zeros((3,), dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
-            F.nll_loss(x, t)
-
-    def test_nll_loss_out_of_bounds_ignore_index(self):
-
-        def test_nll_loss_out_of_bounds_ignore_index_helper(device):
-            output = []
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t1 = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
-            t2 = torch.tensor([0, 1, 1, 0, -100, 2], dtype=torch.int64, device=device)
-            for reduction in ['mean', 'none']:
-                # out of bound ignore_index
-                output.append(F.nll_loss(x, t1, ignore_index=255, reduction=reduction))
-                # default ignore_index
-                output.append(F.nll_loss(x, t2, reduction=reduction))
-            return output
-
-        output_cpu = test_nll_loss_out_of_bounds_ignore_index_helper(device='cpu')
-        output_mps = test_nll_loss_out_of_bounds_ignore_index_helper(device='mps')
-
-        for cpu, mps in zip(output_cpu, output_mps):
-            self.assertEqual(cpu, mps)
-
-    def test_nll_loss_invalid_target_dim(self):
-
-        def _test_nll_loss_invalid_target_dim(device):
-            output = []
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.zeros((6, 2), dtype=torch.int64, device=device)
-            with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
-                F.nll_loss(x, t)
-
-        _test_nll_loss_invalid_target_dim(device='cpu')
-        _test_nll_loss_invalid_target_dim(device='mps')
-
-    def test_nll_loss_invalid_weights(self):
-
-        def _test_nll_loss_invalid_weights(device):
-            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
-                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 2, 1, 1, 2], dtype=torch.int64, device=device)
-            invalid_weights = [
-                torch.zeros(4, device=device),
-                torch.zeros((1, 3), device=device),
-            ]
-            msg = "weight tensor should be defined either for all 3 classes or no classes"
-            for weight in invalid_weights:
-                with self.assertRaisesRegex(RuntimeError, msg):
-                    F.nll_loss(x, t, weight=weight)
-
-        _test_nll_loss_invalid_weights(device='cpu')
-        _test_nll_loss_invalid_weights(device='mps')
-
-    def _nll_loss_helper(self, input_size, reduction, expected):
-
-        # CPU
-        input = torch.rand(input_size, requires_grad=True, device='cpu')
-        num_channels = input_size[1]
-        target_size = (input_size[0], ) + tuple(input_size[2:])
-        target = torch.randint(num_channels, target_size, device='cpu')
-        weights = torch.randn(num_channels)
-
-        # MPS
-        input_mps = input.detach().clone().to('mps').requires_grad_()
-        target_mps = target.detach().clone().to('mps')
-        weights_mps = weights.to("mps")
-
-        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
-        self.assertEqual(output_cpu, output_mps.to('cpu'))
-
-        output_cpu.sum().backward()
-        output_mps.sum().backward()
-        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
-
-    def _nll_loss_1d_helper(self, input_size, reduction):
-
-        # CPU
-        input = torch.rand(input_size, requires_grad=True, device='cpu')
-        num_channels = input_size[0]
-        target = torch.randint(num_channels, [], device='cpu')
-
-        # MPS
-        input_mps = input.detach().clone().to('mps').requires_grad_()
-        target_mps = target.detach().clone().to('mps')
-
-        output_cpu = F.nll_loss(input, target, reduction=reduction)
-        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
-        self.assertEqual(output_cpu, output_mps.to('cpu'))
-
-        output_cpu.sum().backward()
-        output_mps.sum().backward()
-        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
-
     def test_as_strided(self):
         values = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
         values_1 = [[1.0, 1.0], [1.0, 1.0]]
@@ -4524,64 +4272,6 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         helper(3, 3)
-
-    def test_nll_loss_1d(self, device='cpu'):
-        self._nll_loss_1d_helper([10], "none")
-        self._nll_loss_1d_helper([10], "mean")
-        self._nll_loss_1d_helper([10], "sum")
-
-    def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
-        self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
-        self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
-        self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
-        self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
-        self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
-
-    def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
-        nan = torch.tensor(float('nan'), device=device)
-        self._nll_loss_helper([1, 3], "mean", nan)
-        self._nll_loss_helper([1, 3, 5, 7], "mean", nan)
-        self._nll_loss_helper([2, 3, 1, 7], "mean", nan)
-        self._nll_loss_helper([2, 3, 5, 1], "mean", nan)
-        self._nll_loss_helper([2, 3, 5, 7, 1], "mean", nan)
-
-    def test_nll_loss_empty_tensor_reduction_sum(self, device='cpu'):
-        zero = torch.tensor(0, device=device)
-        self._nll_loss_helper([1, 3], "sum", zero)
-        self._nll_loss_helper([1, 3, 5, 7], "sum", zero)
-        self._nll_loss_helper([2, 3, 1, 7], "sum", zero)
-        self._nll_loss_helper([2, 3, 5, 1], "sum", zero)
-        self._nll_loss_helper([2, 3, 5, 7, 1], "sum", zero)
-
-    def test_nll_loss_byte_target_matches_long(self, device='cpu'):
-        N, C = 10, 4
-        input = torch.randn(N, C, device=device, requires_grad=True)
-        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
-
-        def compute_result_and_gradient(reduction, target_dtype):
-            result, grad = {}, {}
-            for dev in ['cpu', 'mps']:
-                input_dev = input.to(dev)
-                input_ = input_dev.detach()
-                input_.requires_grad_()
-
-                target_dev = target.to(dev)
-
-                prob = F.log_softmax(input_, dim=-1)
-                loss = nn.NLLLoss(reduction=reduction)
-                result[dev] = loss(prob, target_dev.to(target_dtype))
-                result[dev].sum().backward()
-                grad[dev] = input_.grad
-
-            return result, grad
-
-        for reduction in ["none", "mean", "sum"]:
-            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
-            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
-
-            self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
-            self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
-
     # L1 loss
     def test_l1_loss(self):
         def helper(shape, reduction):
@@ -8048,6 +7738,313 @@ class TestNLLLoss(TestCaseMPS):
         self.assertRaises(IndexError, lambda: x.cumprod(2))
         self.assertRaises(IndexError, lambda: x.cumprod(-3))
 
+class TestLogical(TestCaseMPS):
+    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
+        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def test_logical_not(self):
+        def helper(x):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.logical_not(x)
+            result_cpu = torch.logical_not(cpu_x)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]))
+        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
+        helper(self._wrap_tensor([True, True, False, False]))
+        helper(self._wrap_tensor(1))
+        helper(self._wrap_tensor(0))
+        helper(self._wrap_tensor(True))
+        helper(self._wrap_tensor(False))
+
+    def test_logical_and(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_and(x, other)
+            result_cpu = torch.logical_and(cpu_x, cpu_other)
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_or(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_or(x, other)
+            result_cpu = torch.logical_or(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_xor(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_xor(x, other)
+            result_cpu = torch.logical_xor(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor([1, 0, 0, 1]))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_min_max(self):
+        def helper(dtype):
+            for _ in range(10):
+                if dtype == torch.float32 or dtype == torch.float16:
+                    x = torch.randn((30, 15), device='mps', dtype=dtype)
+                else:
+                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+                x_cpu = x.to("cpu")
+
+                y = x.max()
+                y_cpu = x_cpu.max()
+                self.assertEqual(y, y_cpu)
+
+                z = x.min()
+                z_cpu = x_cpu.min()
+                self.assertEqual(z, z_cpu)
+
+        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
+
+class TestSmoothL1Loss(TestCaseMPS):
+
+    def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
+        # CPU
+        input_cpu = torch.randn(4, 7, requires_grad=requires_grad)
+        target_cpu = torch.randn(4, 7)
+
+        # MPS
+        input_mps = input_cpu.detach().clone().to('mps').requires_grad_()
+        target_mps = target_cpu.detach().clone().to('mps')
+
+        smooth_l1_loss_cpu = F.smooth_l1_loss(input_cpu, target_cpu, beta=1.0, reduction=reduction)
+        smooth_l1_loss_mps = F.smooth_l1_loss(input_mps, target_mps, beta=1.0, reduction=reduction)
+
+        self.assertEqual(smooth_l1_loss_cpu, smooth_l1_loss_mps)
+
+        if requires_grad:
+            smooth_l1_loss_cpu.backward()
+            smooth_l1_loss_mps.backward()
+            self.assertEqual(input_cpu.grad, input_mps.grad.to("cpu"))
+
+        return smooth_l1_loss_cpu, smooth_l1_loss_mps
+
+    def test_smooth_l1_loss_reduction_none(self):
+        self._smooth_l1_loss_helper(reduction="none")
+
+    def test_smooth_l1_loss_reduction_mean(self):
+        self._smooth_l1_loss_helper(reduction="mean")
+
+    def test_smooth_l1_loss_reduction_sum(self):
+        self._smooth_l1_loss_helper(reduction="sum")
+
+    def test_smooth_l1_loss_reduction_mean_backward(self):
+        self._smooth_l1_loss_helper(reduction="mean", requires_grad=True)
+
+    def test_smooth_l1_loss_reduction_mean_sum_backward(self):
+        self._smooth_l1_loss_helper(reduction="sum", requires_grad=True)
+
+class TestNLLLoss(TestCaseMPS):
+    def test_nll_loss_mismatched_batch(self, device='mps'):
+        x = torch.randn((10, 3), requires_grad=True, device=device)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
+
+    def test_nll_loss_out_of_bounds_ignore_index(self):
+
+        def test_nll_loss_out_of_bounds_ignore_index_helper(device):
+            output = []
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t1 = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t2 = torch.tensor([0, 1, 1, 0, -100, 2], dtype=torch.int64, device=device)
+            for reduction in ['mean', 'none']:
+                # out of bound ignore_index
+                output.append(F.nll_loss(x, t1, ignore_index=255, reduction=reduction))
+                # default ignore_index
+                output.append(F.nll_loss(x, t2, reduction=reduction))
+            return output
+
+        output_cpu = test_nll_loss_out_of_bounds_ignore_index_helper(device='cpu')
+        output_mps = test_nll_loss_out_of_bounds_ignore_index_helper(device='mps')
+
+        for cpu, mps in zip(output_cpu, output_mps):
+            self.assertEqual(cpu, mps)
+
+    def test_nll_loss_invalid_target_dim(self):
+
+        def _test_nll_loss_invalid_target_dim(device):
+            output = []
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t = torch.zeros((6, 2), dtype=torch.int64, device=device)
+            with self.assertRaisesRegex(RuntimeError, "1D target tensor expected"):
+                F.nll_loss(x, t)
+
+        _test_nll_loss_invalid_target_dim(device='cpu')
+        _test_nll_loss_invalid_target_dim(device='mps')
+
+    def test_nll_loss_invalid_weights(self):
+
+        def _test_nll_loss_invalid_weights(device):
+            x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
+                             0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
+            t = torch.tensor([0, 1, 2, 1, 1, 2], dtype=torch.int64, device=device)
+            invalid_weights = [
+                torch.zeros(4, device=device),
+                torch.zeros((1, 3), device=device),
+            ]
+            msg = "weight tensor should be defined either for all 3 classes or no classes"
+            for weight in invalid_weights:
+                with self.assertRaisesRegex(RuntimeError, msg):
+                    F.nll_loss(x, t, weight=weight)
+
+        _test_nll_loss_invalid_weights(device='cpu')
+        _test_nll_loss_invalid_weights(device='mps')
+
+    def _nll_loss_helper(self, input_size, reduction, expected):
+
+        # CPU
+        input = torch.rand(input_size, requires_grad=True, device='cpu')
+        num_channels = input_size[1]
+        target_size = (input_size[0], ) + tuple(input_size[2:])
+        target = torch.randint(num_channels, target_size, device='cpu')
+        weights = torch.randn(num_channels)
+
+        # MPS
+        input_mps = input.detach().clone().to('mps').requires_grad_()
+        target_mps = target.detach().clone().to('mps')
+        weights_mps = weights.to("mps")
+
+        output_cpu = F.nll_loss(input, target, weight=weights, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, weight=weights_mps, reduction=reduction)
+        self.assertEqual(output_cpu, output_mps.to('cpu'))
+
+        output_cpu.sum().backward()
+        output_mps.sum().backward()
+        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
+
+    def _nll_loss_1d_helper(self, input_size, reduction):
+
+        # CPU
+        input = torch.rand(input_size, requires_grad=True, device='cpu')
+        num_channels = input_size[0]
+        target = torch.randint(num_channels, [], device='cpu')
+
+        # MPS
+        input_mps = input.detach().clone().to('mps').requires_grad_()
+        target_mps = target.detach().clone().to('mps')
+
+        output_cpu = F.nll_loss(input, target, reduction=reduction)
+        output_mps = F.nll_loss(input_mps, target_mps, reduction=reduction)
+        self.assertEqual(output_cpu, output_mps.to('cpu'))
+
+        output_cpu.sum().backward()
+        output_mps.sum().backward()
+        self.assertEqual(input.grad, input_mps.grad.to('cpu'))
+
+    def test_nll_loss_1d(self, device='cpu'):
+        self._nll_loss_1d_helper([10], "none")
+        self._nll_loss_1d_helper([10], "mean")
+        self._nll_loss_1d_helper([10], "sum")
+
+    def test_nll_loss_empty_tensor_reduction_none(self, device='cpu'):
+        self._nll_loss_helper([1, 3], "none", torch.empty([0], device=device))
+        self._nll_loss_helper([3, 5, 7], "none", torch.empty([5, 7], device=device))
+        self._nll_loss_helper([2, 3, 1, 7], "none", torch.empty([2, 1, 7], device=device))
+        self._nll_loss_helper([2, 3, 5, 1], "none", torch.empty([2, 5, 1], device=device))
+        self._nll_loss_helper([2, 3, 5, 7, 1], "none", torch.empty([2, 5, 7, 1], device=device))
+
+    def test_nll_loss_empty_tensor_reduction_mean(self, device='cpu'):
+        nan = torch.tensor(float('nan'), device=device)
+        self._nll_loss_helper([1, 3], "mean", nan)
+        self._nll_loss_helper([1, 3, 5, 7], "mean", nan)
+        self._nll_loss_helper([2, 3, 1, 7], "mean", nan)
+        self._nll_loss_helper([2, 3, 5, 1], "mean", nan)
+        self._nll_loss_helper([2, 3, 5, 7, 1], "mean", nan)
+
+    def test_nll_loss_empty_tensor_reduction_sum(self, device='cpu'):
+        zero = torch.tensor(0, device=device)
+        self._nll_loss_helper([1, 3], "sum", zero)
+        self._nll_loss_helper([1, 3, 5, 7], "sum", zero)
+        self._nll_loss_helper([2, 3, 1, 7], "sum", zero)
+        self._nll_loss_helper([2, 3, 5, 1], "sum", zero)
+        self._nll_loss_helper([2, 3, 5, 7, 1], "sum", zero)
+
+    def test_nll_loss_byte_target_matches_long(self, device='cpu'):
+        N, C = 10, 4
+        input = torch.randn(N, C, device=device, requires_grad=True)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
+
+        def compute_result_and_gradient(reduction, target_dtype):
+            result, grad = {}, {}
+            for dev in ['cpu', 'mps']:
+                input_dev = input.to(dev)
+                input_ = input_dev.detach()
+                input_.requires_grad_()
+
+                target_dev = target.to(dev)
+
+                prob = F.log_softmax(input_, dim=-1)
+                loss = nn.NLLLoss(reduction=reduction)
+                result[dev] = loss(prob, target_dev.to(target_dtype))
+                result[dev].sum().backward()
+                grad[dev] = input_.grad
+
+            return result, grad
+
+        for reduction in ["none", "mean", "sum"]:
+            result_long, grad_long = compute_result_and_gradient(reduction, torch.long)
+            result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
+
+            self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
+            self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):
