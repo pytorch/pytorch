@@ -2870,7 +2870,7 @@ class TritonScheduling(BaseScheduling):
             n.last_usage = set()
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):  # type: ignore[attr-defined]
+        with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")

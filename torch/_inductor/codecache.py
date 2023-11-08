@@ -576,7 +576,7 @@ class FxGraphHashDetails:
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()  # type: ignore[attr-defined]
+        self.inductor_config = config.save_config()
         self.inductor_code_hash = get_inductor_code_hash()
 
     def debug_str(self) -> str:
