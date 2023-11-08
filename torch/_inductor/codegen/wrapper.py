@@ -1612,7 +1612,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
         if not config.split_const_graph:
-            self.prefix.writeline("}")
+            self.prefix.writeline("}\n")
             return
 
         with self.prefix.indent():
@@ -1646,7 +1646,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if V.graph.aot_mode and not V.graph.is_const_graph:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
-        self.codegen_const_run_driver()
+            self.codegen_const_run_driver()
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
