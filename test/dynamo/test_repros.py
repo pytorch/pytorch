@@ -1617,10 +1617,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             func(a)
         with self.assertRaises(TypeError):
             torch.compile(func, backend="eager")(a1)
-    
-    def test_tensor_self_assigning_torch_in_place_ops(self):
-        import operator
 
+    def test_tensor_self_assigning_torch_in_place_ops(self):
         from torch._dynamo.utils import counters
 
         counters.clear()
@@ -1664,7 +1662,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             (float_ops, lambda: torch.rand([6], dtype=float), True),
             (float_ops_no_arg, lambda: torch.rand([6], dtype=float), False),
             (int_ops, lambda: torch.randint(0, 10000000, [6], dtype=torch.int64), True),
-            (int_ops_no_arg, lambda: torch.randint(0, 10000000, [6], dtype=torch.int64), False),
+            (
+                int_ops_no_arg,
+                lambda: torch.randint(0, 10000000, [6], dtype=torch.int64),
+                False,
+            ),
             (bool_ops, lambda: torch.randint(0, 1, [6], dtype=bool), True),
             (bool_ops_no_arg, lambda: torch.randint(0, 1, [6], dtype=bool), False),
         ]:
@@ -1673,12 +1675,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 op_arg = [arg_creator()] if requires_arg else []
 
                 if op == "manual_add_":
+
                     def func(x, y):
                         x = x.add_(*op_arg)
                         x.data = y
                         x = x.add_(*op_arg)
                         return x
+
                 else:
+
                     def func(x, y):
                         x = op(x, *op_arg)
                         x.data = y
