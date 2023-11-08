@@ -2176,15 +2176,15 @@ class Scheduler:
             if node.is_template():
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)
-                self.check_scheduled_args_and_flush(device)
+                self.check_scheduled_num_args_and_flush(device)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)
-                self.check_scheduled_args_and_flush(device)
+                self.check_scheduled_num_args_and_flush(device)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
-                self.check_scheduled_args_and_flush(device)
+                self.check_scheduled_num_args_and_flush(device)
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2199,7 +2199,7 @@ class Scheduler:
 
         self.flush()
 
-    def check_scheduled_args_and_flush(self, device):
+    def check_scheduled_num_args_and_flush(self, device):
         args_num = self.get_backend(device).get_num_args()
         if args_num > Scheduler.MAX_FUSED_KERNEL_ARGS_NUM:
             self.flush()
