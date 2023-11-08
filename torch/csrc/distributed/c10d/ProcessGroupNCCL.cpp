@@ -1236,7 +1236,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave six mins for desync report generation or process group destroy.
     std::this_thread::sleep_for(
-        std::chrono::seconds(heartBeatIntervalInSec * 3));
+        std::chrono::seconds(heartbeatTimeoutInSec_ * 3));
   }
 
   if (!terminateHeartbeatMonitorThread_.load()) {
