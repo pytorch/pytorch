@@ -15,7 +15,6 @@ class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal.
 
     Input signal composed of several input planes, where channels occupy the second dimension.
-
     Applies normalization across channels.
 
     .. math::
