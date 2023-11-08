@@ -80,10 +80,10 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time by function
-compilation_time_metrics = collections.OrderedDict()
+compilation_time_metrics = {}
 
 # profiling compilation time by frame phase
-frame_phase_timing = collections.OrderedDict()
+frame_phase_timing = {}
 
 timer_counter = itertools.count()
 
