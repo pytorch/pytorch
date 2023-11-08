@@ -3035,6 +3035,28 @@ class TestNestedTensorSubclass(NestedTestCase):
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
     @torch._dynamo.config.patch(suppress_errors=True)
+    def test_split(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        nt, _ = jagged_from_list([a, b, c], None)
+        out = torch.split(nt, 2, -1)
+        self.assertEqual(len(out), 2)
+        self.assertEqual(
+            out[0], jagged_from_list([a[:, 0:2], b[:, 0:2], c[:, 0:2]], None)[0]
+        )
+        self.assertEqual(
+            out[1], jagged_from_list([a[:, 2:], b[:, 2:], c[:, 2:]], None)[0]
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"split\(\): not supported for NestedTensor on dim=0 or dim=1",
+        ):
+            torch.split(nt, 2, 1)
+
+    @torch._dynamo.config.patch(suppress_errors=True)
     def test_split_with_sizes(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -3051,7 +3073,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): only supported for NestedTensor on dim = -1 for now",
+            r"split_with_sizes\(\): not supported for NestedTensor on dim=0 or dim=1",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -3130,6 +3152,7 @@ class TestNestedTensorSubclass(NestedTestCase):
         out_ref = torch.sum(nt.values(), dim=(0,))
         self.assertNotIsInstance(out, NestedTensor)
         self.assertTrue(torch.allclose(out, out_ref))
+
 
 
     @dtypes(torch.float, torch.double, torch.half)
@@ -3278,6 +3301,29 @@ class TestNestedTensorSubclass(NestedTestCase):
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
+
+    @torch._dynamo.config.patch(suppress_errors=True)
+    def test_layer_norm_2(self, device):
+        test_tensor_list = self._get_list_for_jagged_tensor(
+            ((2, 3, 4), 3), device=device, requires_grad=True
+        )
+        bias = torch.randn(3, requires_grad=False, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, bias):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = torch.nn.functional.layer_norm(nt, (nt.shape[-1],), bias=bias)
+            return buffer_from_jagged(out)
+
+        gradcheck(
+            grad_test_func, inputs=(*test_tensor_list, bias), check_batched_grad=False
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"layer_norm\(\): normalizing over ragged dim not supported for nested tensors",
+        ):
+            nt, _ = jagged_from_list(test_tensor_list, None)
+            _ = torch.nn.functional.layer_norm(nt, (nt.shape[-2], nt.shape[-1]))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
