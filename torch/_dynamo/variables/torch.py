@@ -686,6 +686,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+            if (
+                isinstance(tensor_variable, TensorVariable)
+                and "requires_grad" in kwargs
+                and kwargs["requires_grad"].as_python_constant()
+            ):
+                unimplemented(
+                    """factory functions that return tensors that require grad are not supported.
+Either create the tensor outside the compiled region, or do not set the tensor to require_grad"""
+                )
+
             if "out" in kwargs and not (
                 isinstance(kwargs["out"], variables.ConstantVariable)
                 and kwargs["out"].as_python_constant() is None
