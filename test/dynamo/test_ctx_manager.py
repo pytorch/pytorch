@@ -976,13 +976,13 @@ class GraphModule(torch.nn.Module):
         check_graph(actual, expected)
 
     def test_context_wrapping_grad_mode_decorator(self):
-        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
         for call in [True, False]:
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper = ctx_wrappers[i]
-                ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
                     def inner_func(x):
@@ -990,8 +990,15 @@ class GraphModule(torch.nn.Module):
 
                     with ctx_wrapper_inverse():
                         if call:
-                            return ctx_wrapper()(inner_func)(x)
-                        return ctx_wrapper(inner_func)(x)
+                            inner_func = ctx_wrapper()(inner_func)
+                        else:
+                            inner_func = ctx_wrapper(inner_func)
+
+                        # Calling no_grad or enabled_grad should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
+
+                    with ctx_wrapper_inverse():
+                        return inner_func(x)
 
                 x = torch.zeros(10, requires_grad=True)
                 opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -999,27 +1006,31 @@ class GraphModule(torch.nn.Module):
                 self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
 
     def test_context_wrapping_grad_mode_nested_function_decorator(self):
-        ctx_wrappers = [torch.enable_grad, torch.no_grad]
+        ctx_wrappers = [(torch.enable_grad, True), (torch.no_grad, False)]
 
         for call in [True, False]:
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper = ctx_wrappers[i]
-                ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
-                    if call:
+                    with ctx_wrapper_inverse():
+                        if call:
 
-                        @ctx_wrapper()
-                        def inner_func(x):
-                            return x.sin()
+                            @ctx_wrapper()
+                            def inner_func(x):
+                                return x.sin()
 
-                    else:
+                        else:
 
-                        @ctx_wrapper
-                        def inner_func(x):
-                            return x.sin()
+                            @ctx_wrapper
+                            def inner_func(x):
+                                return x.sin()
+
+                        # Calling no_grad or enabled_grad should not mutate global state
+                        assert torch.is_grad_enabled() == mode_inverse
 
                     with ctx_wrapper_inverse():
                         return inner_func(x)
@@ -1053,7 +1064,9 @@ class GraphModule(torch.nn.Module):
 
                             inner_func = torch.set_grad_enabled(mode)(inner_func)
 
-                        # decorator will mutate global state even if the fn is called
+                        # decorator will mutate global state even if it wraps a function
+                        # This behaviour is not desirable and may change in the future
+                        # https://github.com/pytorch/pytorch/issues/113298
                         assert torch.is_grad_enabled() == mode
 
                     with torch.set_grad_enabled(mode_inverse):
