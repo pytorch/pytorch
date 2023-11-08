@@ -132,6 +132,8 @@ SKIP_TRAIN = {
     "llama",
     "llama_v2_7b_16h",
     "simple_gpt",
+    # doesnt fit in memory
+    "phi_1_5",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
