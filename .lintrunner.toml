@@ -182,6 +182,7 @@ include_patterns = [
     'torch/_dynamo/bytecode_transformation.py',
     'torch/_dynamo/codegen.py',
     'torch/_dynamo/compiled_autograd.py',
+    'torch/_dynamo/config.py',
     'torch/_dynamo/eval_frame.py',
     'torch/_dynamo/exc.py',
     'torch/_dynamo/funcname_cache.py',
