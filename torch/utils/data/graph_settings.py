@@ -49,6 +49,7 @@ def apply_sharding(datapipe: DataPipe,
                    sharding_group=SHARDING_PRIORITIES.DEFAULT) -> DataPipe:
     r"""
     Apply dynamic sharding over the ``sharding_filter`` DataPipe that has a method ``apply_sharding``.
+
     RuntimeError will be raised when multiple ``sharding_filter`` are presented in the same branch.
     """
     graph = traverse_dps(datapipe)
@@ -86,8 +87,10 @@ def _is_shuffle_datapipe(datapipe: DataPipe) -> bool:
 
 def apply_shuffle_settings(datapipe: DataPipe, shuffle: Optional[bool] = None) -> DataPipe:
     r"""
-    Traverse the graph of ``DataPipes`` to find and set shuffle attribute
-    to each `DataPipe` that has APIs of ``set_shuffle`` and ``set_seed``.
+    Traverse the graph of ``DataPipes`` to find and set shuffle attribute.
+
+    Apply the method to each `DataPipe` that has APIs of ``set_shuffle``
+    and ``set_seed``.
 
     Args:
         datapipe: DataPipe that needs to set shuffle attribute
@@ -129,8 +132,9 @@ def _is_random_datapipe(datapipe: DataPipe) -> bool:
 
 def apply_random_seed(datapipe: DataPipe, rng: torch.Generator) -> DataPipe:
     r"""
-    Traverse the graph of ``DataPipes`` to find random ``DataPipe`` with an API of
-    ``set_seed`` then set the random seed based on the provided RNG.
+    Traverse the graph of ``DataPipes`` to find random ``DataPipe`` with an API of ``set_seed``.
+
+    Then set the random seed based on the provided RNG to those ``DataPipe``.
 
     Args:
         datapipe: DataPipe that needs to set randomness
