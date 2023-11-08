@@ -35,10 +35,6 @@ class GraphOutputEntry:
     index: int
     variable: VariableTracker
 
-    def merge(self, other: VariableTracker):
-        # merge in any extra guards
-        self.variable = self.variable.add_options(other)
-
 
 class PyCodegen:
     """
@@ -75,8 +71,6 @@ class PyCodegen:
             self._output.extend(value.reconstruct(self))
             self.clear_tos()
             return
-
-        self.tx.output.guards.update(value.guards)
 
         assert isinstance(value, VariableTracker)
         output = self._output
@@ -161,9 +155,6 @@ class PyCodegen:
             self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
                 len(self.graph_outputs), value
             )
-        else:
-            self.graph_outputs[graph_outputs_key].merge(value)
-
         return graph_outputs_key
 
     def load_graph_output(self, index):
@@ -240,7 +231,7 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
-    def create_load_attr(self, name) -> List[Instruction]:
+    def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)

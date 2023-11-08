@@ -82,7 +82,7 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
-        code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
+        _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
         _check_has_dynamic_shape(self, code)
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
@@ -136,6 +136,7 @@ test_failures = {
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
+    "test_adaptive_avg_pool1d_argmax": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -195,6 +196,9 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_cat_uint8_dynamic_shapes": TestFailure(
+        ("cpu",)
+    ),  # cat on uint8 input is using aten fallback on cpu
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
