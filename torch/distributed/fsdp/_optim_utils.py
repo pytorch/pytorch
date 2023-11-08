@@ -1721,7 +1721,15 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info[fqn]
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            if fsdp_param_info is None:
+                # This can happen if the not all FSDP instances have all the
+                # parameters. This can happen with FSDP + some MPMD style
+                # parallelism.
+
+                # TODO: it is unclear if we need to do the same check with
+                # non-FSDP managed keys.
+                continue
             state = {} if param_key is None else optim_state_dict[param_key]
             if id(fsdp_param_info) not in all_states:
                 all_states[id(fsdp_param_info)] = {}
