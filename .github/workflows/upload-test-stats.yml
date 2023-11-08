@@ -37,7 +37,7 @@ jobs:
         run: echo "${TRIGGERING_WORKFLOW}"
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
 
       - uses: actions/setup-python@v4
         with:
