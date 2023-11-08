@@ -16,13 +16,16 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import importlib
 import json
 import warnings
-from collections import deque, namedtuple, OrderedDict
+from collections import defaultdict, deque, namedtuple, OrderedDict
 from typing import (
     Any,
     Callable,
     cast,
+    DefaultDict,
+    Deque,
     Dict,
     Iterable,
     List,
@@ -280,22 +283,67 @@ def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
     return context
 
 
-def _odict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
+def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 
-def _odict_unflatten(
+def _ordereddict_unflatten(
     values: Iterable[Any],
     context: Context,
 ) -> GenericOrderedDict[Any, Any]:
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
+_odict_flatten = _ordereddict_flatten
+_odict_unflatten = _ordereddict_unflatten
+
+
+def _defaultdict_flatten(d: DefaultDict[Any, Any]) -> Tuple[List[Any], Context]:
+    values, keys = _dict_flatten(d)
+    return values, (d.default_factory, keys)
+
+
+def _defaultdict_unflatten(
+    values: Iterable[Any], context: Context
+) -> DefaultDict[Any, Any]:
+    default_factory, keys = context
+    return defaultdict(default_factory, zip(keys, values))
+
+
+def _defaultdict_serialize(context: Context) -> DumpableContext:
+    default_factory, keys = context
+    json_defaultdict = {
+        "default_factory_module": default_factory.__module__,
+        "default_factory_name": default_factory.__qualname__,
+        "keys": keys,
+    }
+    return json_defaultdict
+
+
+def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
+    default_factory_module = dumpable_context["default_factory_module"]
+    default_factory_name = dumpable_context["default_factory_name"]
+    assert isinstance(default_factory_module, str)
+    assert isinstance(default_factory_name, str)
+    module = importlib.import_module(default_factory_module)
+    default_factory = getattr(module, default_factory_name)
+    keys = dumpable_context["keys"]
+    return default_factory, keys
+
+
+def _deque_flatten(deq: Deque[Any]) -> Tuple[List[Any], Context]:
+    return list(deq), deq.maxlen
+
+
+def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
+    return deque(values, maxlen=context)
+
+
 _private_register_pytree_node(
-    dict,
-    _dict_flatten,
-    _dict_unflatten,
-    serialized_type_name="builtins.dict",
+    tuple,
+    _tuple_flatten,
+    _tuple_unflatten,
+    serialized_type_name="builtins.tuple",
 )
 _private_register_pytree_node(
     list,
@@ -304,10 +352,10 @@ _private_register_pytree_node(
     serialized_type_name="builtins.list",
 )
 _private_register_pytree_node(
-    tuple,
-    _tuple_flatten,
-    _tuple_unflatten,
-    serialized_type_name="builtins.tuple",
+    dict,
+    _dict_flatten,
+    _dict_unflatten,
+    serialized_type_name="builtins.dict",
 )
 _private_register_pytree_node(
     namedtuple,
@@ -319,9 +367,23 @@ _private_register_pytree_node(
 )
 _private_register_pytree_node(
     OrderedDict,
-    _odict_flatten,
-    _odict_unflatten,
+    _ordereddict_flatten,
+    _ordereddict_unflatten,
     serialized_type_name="collections.OrderedDict",
+)
+_private_register_pytree_node(
+    defaultdict,
+    _defaultdict_flatten,
+    _defaultdict_unflatten,
+    serialized_type_name="collections.defaultdict",
+    to_dumpable_context=_defaultdict_serialize,
+    from_dumpable_context=_defaultdict_deserialize,
+)
+_private_register_pytree_node(
+    deque,
+    _deque_flatten,
+    _deque_unflatten,
+    serialized_type_name="collections.deque",
 )
 
 
