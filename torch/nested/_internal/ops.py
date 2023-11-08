@@ -268,14 +268,14 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return 0
 
 
-@register_jagged_func(torch.ops.prim.layout.default, "self: jt")
+@register_jagged_func(torch.ops.prim.layout.default, "self: jt_all")
 def prim_layout_default(func, *args, **kwargs):
     return torch.jagged
 
 
 @register_jagged_func(
     [torch.ops.aten.size.default],
-    "self: jt",
+    "self: jt_all",
 )
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
