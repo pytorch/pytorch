@@ -238,7 +238,6 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         # Verify correct post-grad re-inplacing
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
