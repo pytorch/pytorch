@@ -1159,22 +1159,34 @@ class TestProfiler(TestCase):
             nn.ReLU(),
         )
         inputs = torch.randn(40, 16, 18, 260)
-        with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
+        nested_tensor = torch.nested.nested_tensor(
+            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
+        )
+        with _profile(
+            record_shapes=True, with_flops=True, use_kineto=kineto_available()
+        ) as prof:
             model(inputs)
-        profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
+            # test that nested tensor won't cause exception during flop compute
+            nested_tensor = nested_tensor + nested_tensor
+        profiler_output = prof.key_averages(group_by_input_shape=True).table(
+            sort_by="cpu_time_total", row_limit=10
+        )
         self.assertIn("Total MFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
-        with profile(activities=[
+        with profile(
+            activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA],
-                record_shapes=True,
-                with_flops=True,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            record_shapes=True,
+            with_flops=True,
         ) as kineto_profiler:
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1)
+            sort_by="self_cuda_time_total", row_limit=-1
+        )
         self.assertIn("Total MFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
@@ -1428,6 +1440,34 @@ class TestProfiler(TestCase):
         self._test_profiler_tracing(False)
         if kineto_available():
             self._test_profiler_tracing(True)
+
+    def test_profiler_op_event_args(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        with _profile(record_shapes=True) as prof:
+            a = torch.ones((64, 32), dtype=torch.float32)
+            c = torch.cat([a, a]).sin()
+        with TemporaryFileName(mode="w+") as fname:
+
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                events = j["traceEvents"]
+                for e in events:
+                    if e["name"] == "aten::ones":
+                        args = e["args"]
+                        self.assertEqual(
+                            args["Input type"],
+                            ["ScalarList", "Scalar", "", "", "Scalar"],
+                        )
+                        self.assertEqual(
+                            args["Concrete Inputs"], ["[64, 32]", "6", "", "", "False"]
+                        )
+
+                    if e["name"] == "aten::cat":
+                        args = e["args"]
+                        self.assertEqual(args["Input Dims"], [[[64, 32], [64, 32]], []])
+                        self.assertEqual(args["Input type"], ["TensorList", "Scalar"])
+
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:

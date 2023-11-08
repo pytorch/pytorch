@@ -16,42 +16,6 @@ GENERATED_LAZY_TS_CPP = [
     "lazy/generated/RegisterLazy.cpp",
 ]
 
-# NVFuser runtime library
-libtorch_nvfuser_runtime_sources = [
-    "third_party/nvfuser/runtime/array.cu",
-    "third_party/nvfuser/runtime/array_rocm.cu",
-    "third_party/nvfuser/runtime/bf16_support.cu",
-    "third_party/nvfuser/runtime/bf16_support_rocm.cu",
-    "third_party/nvfuser/runtime/block_reduction.cu",
-    "third_party/nvfuser/runtime/block_sync_atomic.cu",
-    "third_party/nvfuser/runtime/block_sync_default.cu",
-    "third_party/nvfuser/runtime/block_sync_default_rocm.cu",
-    "third_party/nvfuser/runtime/broadcast.cu",
-    "third_party/nvfuser/runtime/fp16_support.cu",
-    "third_party/nvfuser/runtime/fused_reduction.cu",
-    "third_party/nvfuser/runtime/fused_welford_helper.cu",
-    "third_party/nvfuser/runtime/fused_welford_impl.cu",
-    "third_party/nvfuser/runtime/grid_broadcast.cu",
-    "third_party/nvfuser/runtime/grid_reduction.cu",
-    "third_party/nvfuser/runtime/grid_sync.cu",
-    "third_party/nvfuser/runtime/helpers.cu",
-    "third_party/nvfuser/runtime/index_utils.cu",
-    "third_party/nvfuser/runtime/memory.cu",
-    "third_party/nvfuser/runtime/random_numbers.cu",
-    "third_party/nvfuser/runtime/swizzle.cu",
-    "third_party/nvfuser/runtime/tensor.cu",
-    "third_party/nvfuser/runtime/tensorcore.cu",
-    "third_party/nvfuser/runtime/tuple.cu",
-    "third_party/nvfuser/runtime/type_traits.cu",
-    "third_party/nvfuser/runtime/warp.cu",
-    "third_party/nvfuser/runtime/warp_rocm.cu",
-    "third_party/nvfuser/runtime/welford.cu",
-    "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
-    "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
-]
-
-libtorch_nvfuser_generated_headers = ["{}.h".format(name.split("/")[-1].split(".")[0]) for name in libtorch_nvfuser_runtime_sources]
-
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "torch/csrc/autograd/generated/Functions.cpp",
@@ -71,7 +35,6 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
-    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -256,7 +219,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
-    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
@@ -404,6 +366,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
     "torch/csrc/profiler/unwind/unwind.cpp",
+    "torch/csrc/profiler/unwind/unwind_fb.cpp",
     "torch/csrc/profiler/combined_traceback.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
@@ -483,7 +446,6 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
-    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
     "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
@@ -501,6 +463,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_model_runner.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -520,7 +483,9 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/Backend.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
+    "torch/csrc/distributed/c10d/Functional.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/GroupRegistry.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
@@ -686,6 +651,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
+    "torch/csrc/inductor/aoti_model_runner_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -968,6 +934,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
     "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/detail/MTIAHooksInterface.cpp",
+    "aten/src/ATen/detail/IPUHooksInterface.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
@@ -983,6 +950,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/PrivateUse1HooksInterface.h",
     "aten/src/ATen/detail/XPUHooksInterface.h",
     "aten/src/ATen/detail/MTIAHooksInterface.h",
+    "aten/src/ATen/detail/IPUHooksInterface.h",
 ]
 
 aten_cpu_source_non_codegen_list = [

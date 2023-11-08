@@ -67,12 +67,8 @@ def mps_ops_grad_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
 
-        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-        'addr': [torch.float16],
-
         # Unimplemented ops
         '__getitem__': [torch.float16],
-        'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
@@ -83,7 +79,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
-        'aminmax': [torch.float32],
+        'aminmax': [torch.float32, torch.float16],
         'polar': [torch.float32],
 
         # Correctness issues
@@ -93,6 +89,8 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
+        # derivative for aten::nextafter is not implemented on CPU
+        'nextafter': None,
         # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
@@ -147,9 +145,9 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
-        'masked.softmin': [torch.float32],
-        'masked.softmax': [torch.float32],
-        'masked.log_softmax': [torch.float32],
+        'masked.softmin': [torch.float32, torch.float16],
+        'masked.softmax': [torch.float32, torch.float16],
+        'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
         'grid_sampler_2d': [torch.float32],
@@ -166,11 +164,23 @@ def mps_ops_grad_modifier(ops):
         '__rpow__': [torch.float32],
 
         # See https://github.com/pytorch/pytorch/issues/106112 for more information
-        'cumprod': [torch.float32],
+        'cumprod': [torch.float32, torch.float16],
+        # See https://github.com/pytorch/pytorch/issues/109166 for more information
+        'masked.cumprod': [torch.float16],
     }
 
-    XPASSLIST_GRAD = {
+    SKIPLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.conv1d': [torch.float16],
+        'nn.functional.conv2d': [torch.float16],
+        'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
+        # Segfaults
+        'all': [torch.float16, torch.float32],
+        'any': [torch.float16, torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -192,10 +202,10 @@ def mps_ops_grad_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=XFAILLIST_GRAD[key]))
 
-        if key in XPASSLIST_GRAD:
+        if key in SKIPLIST_GRAD:
             addDecorator(op, DecorateInfo(
                          unittest.skip,
-                         dtypes=XPASSLIST_GRAD[key]))
+                         dtypes=SKIPLIST_GRAD[key]))
 
         if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
@@ -229,6 +239,7 @@ def mps_ops_modifier(ops):
         'empty_strided',
         'eye',
         'flatten',
+        'fill',
         'full',
         'imag',
         'isfinite',
@@ -380,6 +391,9 @@ def mps_ops_modifier(ops):
 
         # cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -403,7 +417,7 @@ def mps_ops_modifier(ops):
         'cdist': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # test blow pass on macOS 12 as it falls back to cpu
         # Argsort case using duplicate indices (undefined behaviour):
@@ -427,6 +441,8 @@ def mps_ops_modifier(ops):
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        # inconsistency errors between cpu and mps, max seen atol is 2
+        'nn.functional.interpolatebilinear': [torch.uint8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -556,7 +572,6 @@ def mps_ops_modifier(ops):
         'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
-        'nextafter': None,
         'normnuc': None,
         'nn.functional.fractional_max_pool2d': None,
         'nn.functional.fractional_max_pool3d': None,
@@ -583,7 +598,6 @@ def mps_ops_modifier(ops):
         'nn.functional.multilabel_margin_loss': None,
         'nn.functional.pdist': None,
         'nn.functional.rrelu': None,
-        'nn.functional.softshrink': None,
         'nn.functional.norm': None,
         'ormqr': None,
         'pca_lowrank': None,
@@ -688,6 +702,7 @@ def mps_ops_modifier(ops):
 
         # Unsupported dtypes
         'dot': [torch.int64],
+        'histc': [torch.float16],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
@@ -710,6 +725,7 @@ def mps_ops_modifier(ops):
         'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'unravel_index': [torch.int32, torch.int64],
 
         # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
         # the MPS framework doesn't support float64
@@ -734,22 +750,23 @@ def mps_ops_modifier(ops):
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'multinomial': [torch.float32],  # random results
+        'multinomial': [torch.float16, torch.float32],  # random results
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'randn_like': [torch.float16, torch.float32],
-        'bernoulli': [torch.float32],
+        'bernoulli': [torch.float16, torch.float32],
         'exponential': [torch.float16, torch.float32],
-        'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float16, torch.float32],
         'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
         'normalin_place': [torch.float16, torch.float32],
         'normalnumber_mean': [torch.float16, torch.float32],
-        'nn.functional.alpha_dropout': [torch.float32],
-        'nn.functional.dropout': [torch.float32],
-        'nn.functional.dropout2d': [torch.float32],
-        'nn.functional.dropout3d': [torch.float32],
-        'nn.functional.multi_head_attention_forward': [torch.float32],
+        'nn.functional.alpha_dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout': [torch.float16, torch.float32],
+        'nn.functional.dropout2d': [torch.float16, torch.float32],
+        'nn.functional.dropout3d': [torch.float16, torch.float32],
+        # See https://github.com/pytorch/pytorch/issues/111479
+        'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -775,10 +792,12 @@ def mps_ops_modifier(ops):
         # Mismatched elements: 56 / 96 (58.3%)
         # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
         # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
-        'nn.functional.scaled_dot_product_attention': [torch.float32],
+        'nn.functional.scaled_dot_product_attention': [torch.float32, torch.float16],
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
+        # float output for float16 input on MPS
+        'logit': [torch.float16],
     }
 
     EMPTY_OPS_SKIPLIST = {
@@ -799,6 +818,11 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
+    SKIPLIST = {
+        'all': None,
+        'any': None,
+    }
+
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
@@ -809,6 +833,8 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.skip("Skipping empty ops."),
                          dtypes=EMPTY_OPS_SKIPLIST[key]))
+        if key in SKIPLIST:
+            addDecorator(op, DecorateInfo(unittest.skip("Skipped!"), dtypes=SKIPLIST[key]))
         for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
@@ -837,6 +863,7 @@ def mps_ops_modifier(ops):
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS:
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
+
         yield op
 
 def mps_ops_error_inputs_modifier(ops):
@@ -1382,19 +1409,18 @@ class TestMPS(TestCaseMPS):
 
     def test_fill(self):
 
-        def helper(val, shape):
-            tensor = torch.zeros(shape, device='mps')
+        def helper(val, shape, dtype):
+            tensor = torch.zeros(shape, device='mps', dtype=dtype)
             tensor_mps = tensor.fill_(val)
-            tensor_mps = torch.tanh(tensor_mps)
 
-            tensor_0 = torch.zeros(shape, device='cpu')
+            tensor_0 = torch.zeros(shape, device='cpu', dtype=dtype)
             tensor_cpu = tensor_0.fill_(val)
-            tensor_cpu = torch.tanh(tensor_cpu)
 
             self.assertEqual(tensor_mps, tensor_cpu)
 
-        helper(0, [1024])
-        helper(0.2, [2, 3])
+        helper(0, [1024], torch.float32)
+        helper(0.2, [2, 3], torch.float32)
+        helper(0.2 + 0.5j, [2, 3], torch.complex64)
 
     def test_fill_storage_offset(self):
         shape = [2, 10]
@@ -3830,6 +3856,9 @@ class TestMPS(TestCaseMPS):
         x_mps[2:4] = update_mps  # implicit type casting and copy
         self.assertEqual(x_cpu, x_mps)
 
+        x_cpu[2:4] = update_mps  # implicit device moving and copy
+        self.assertEqual(x_cpu, x_mps)
+
     def test_copy_broadcasting(self):
         def helper(src_shape, dst_shape, src_dtype, dst_dtype):
             cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
@@ -4218,20 +4247,24 @@ class TestNLLLoss(TestCaseMPS):
 
     def test_nll_loss_out_of_bounds_ignore_index(self):
 
-        def _test_nll_loss_out_of_bounds_ignore_index(device):
+        def test_nll_loss_out_of_bounds_ignore_index_helper(device):
             output = []
             x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
                              0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t1 = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t2 = torch.tensor([0, 1, 1, 0, -100, 2], dtype=torch.int64, device=device)
             for reduction in ['mean', 'none']:
-                output.append(F.nll_loss(x, t, ignore_index=255, reduction=reduction))
+                # out of bound ignore_index
+                output.append(F.nll_loss(x, t1, ignore_index=255, reduction=reduction))
+                # default ignore_index
+                output.append(F.nll_loss(x, t2, reduction=reduction))
             return output
 
-        output_cpu = _test_nll_loss_out_of_bounds_ignore_index(device='cpu')
-        output_mps = _test_nll_loss_out_of_bounds_ignore_index(device='mps')
+        output_cpu = test_nll_loss_out_of_bounds_ignore_index_helper(device='cpu')
+        output_mps = test_nll_loss_out_of_bounds_ignore_index_helper(device='mps')
 
         for cpu, mps in zip(output_cpu, output_mps):
-            self.assertEqual(cpu, mps.to('cpu'))
+            self.assertEqual(cpu, mps)
 
     def test_nll_loss_invalid_target_dim(self):
 
@@ -10882,7 +10915,7 @@ class TestConsistency(TestCaseMPS):
     # You most likely do NOT want to modify this manually
 
     FP16_LOW_PRECISION_LIST = {
-        'add', 'sub', 'div',
+        'add', 'sub', 'div', 'addcdiv',
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
@@ -10903,6 +10936,17 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.glu',
         '_native_batch_norm_legit',
         'native_batch_norm',
+        'softmax',
+        '_softmax_backward_data',
+        'log_softmax',
+        'masked.softmax',
+        'masked.log_softmax',
+        'masked.softmin',
+        'nn.functional.kl_div',
+        'nn.functional.softmin',
+        'cross', 'linalg.cross',
+        'prod', 'masked.prod',
+        'nextafter',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10960,6 +11004,13 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif op.name == "masked.mean":
                 atol = 7e-4
                 rtol = 2e-3
@@ -10969,6 +11020,12 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ["pow", "__rpow__"]:
                 atol = 1e-6
                 rtol = 4e-6
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
+            elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
+                atol = 1.0
+                rtol = 0.0
             else:
                 atol = None
                 rtol = None
@@ -11010,6 +11067,13 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif (op.name == "masked.mean"):
                 atol = 7e-4
                 rtol = 2e-3
@@ -11021,6 +11085,9 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1.5e-3
             elif op.name == "unique" and cpu_kwargs["sorted"] is False:
                 continue
+            elif op.name == "nn.functional.interpolate":
+                atol = 1e-3
+                rtol = 1e-4
             else:
                 atol = None
                 rtol = None
@@ -11043,8 +11110,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
@@ -11132,7 +11199,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES:
+        if dtype not in MPS_DTYPES + [torch.complex64]:
             with self.assertRaises(TypeError):
                 ones(device)
         else:

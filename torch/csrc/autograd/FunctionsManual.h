@@ -242,6 +242,11 @@ at::Tensor logcumsumexp_jvp(
     const at::Tensor& self_t,
     int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
+at::Tensor unbind_backward_nested(
+    const variable_list& grads,
+    const Tensor& nt_sizes,
+    int64_t dim,
+    const at::TensorOptions& options);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
     const at::Tensor& self,
@@ -432,7 +437,8 @@ at::Tensor _nested_split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
     c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    const Tensor& self);
+    const Tensor& nt_sizes,
+    const at::TensorOptions& options);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
     const c10::SymInt& split_size,
@@ -961,12 +967,12 @@ Tensor convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups);
+    const c10::SymInt& groups);
 
 Tensor _convolution_jvp(
     const Tensor& input_p,
@@ -975,12 +981,12 @@ Tensor _convolution_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    IntArrayRef stride,
+    at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
-    IntArrayRef dilation,
+    at::SymIntArrayRef dilation,
     bool transposed,
     at::SymIntArrayRef output_padding,
-    int64_t groups,
+    const c10::SymInt& groups,
     bool benchmark,
     bool deterministic,
     bool cudnn_enabled,
@@ -1013,12 +1019,12 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor& self,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    at::IntArrayRef padding,
-    at::IntArrayRef output_padding,
-    at::IntArrayRef stride,
-    at::IntArrayRef dilation,
+    at::SymIntArrayRef padding,
+    at::SymIntArrayRef output_padding,
+    at::SymIntArrayRef stride,
+    at::SymIntArrayRef dilation,
     bool transposed,
-    int64_t groups,
+    c10::SymInt groups,
     ::std::array<bool, 2> output_mask);
 
 Tensor scatter_reduce_jvp(

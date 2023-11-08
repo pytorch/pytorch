@@ -98,6 +98,19 @@ def _port_metadata_for_input_quant_nodes(
         q_node, dq_node = _find_q_dq_node_for_user(input_node, node)
         if q_node is None or dq_node is None:
             return
+        # add metadata for all the node between q_node and get_attr node
+        # if the q_node can be traced back to get_attr node
+        q_to_get_attr_nodes = [q_node]
+        q_node_input = q_node.args[0]
+        while isinstance(q_node_input, torch.fx.Node) and q_node_input.op not in [
+            "placeholder",
+            "get_attr",
+        ]:
+            q_to_get_attr_nodes.append(q_node_input)
+            q_node_input = q_node_input.args[0]
+        if isinstance(q_node_input, torch.fx.Node) and q_node_input.op == "get_attr":
+            for n in q_to_get_attr_nodes:
+                _add_metadata(n, q_node_input)
         _add_metadata(dq_node, node)
 
 
@@ -156,7 +169,7 @@ class PortNodeMetaForQDQ(_ExportPassBase):
           - [Q-> [DQ -> Conv -> Q] -> DQ -> [AvgPool] -> Q -> [DQ -> Linear -> Q] -> DQ]
           - Note DQ and Q nodes around AvgPool do not inherit metadata from AvgPool because
             AvgPool was not supposed to be quantized. Metadata porting relies on quantization_annotation
-            on the nodes (in this case AvgPool node) to conclude if the the node or patter was
+            on the nodes (in this case AvgPool node) to conclude if the node or patter was
             supposed to be quantized. And subsequntly decide if the preceding Q, if any, should
             inherit metadata from AvgPool.
       - Dynamically quantized patterns:

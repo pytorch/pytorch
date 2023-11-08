@@ -231,6 +231,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)
@@ -238,6 +241,7 @@ class TestLazyOpInfo(TestCase):
             r_exp = op(*copy_args, **kwargs)
             r_actual = op(*args, **kwargs)
 
+            torch._lazy.mark_step()
             assert_allclose_rec((r_actual, r_exp))
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
@@ -263,6 +267,9 @@ class TestLazyOpInfo(TestCase):
 
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         for sample in samples:
+            # Need to run mark step so that all random ops are computed in the right order
+            torch._lazy.mark_step()
+
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             copy_args = clone_to_device(args, test_device)
@@ -310,6 +317,16 @@ class TestLazyDynamicOps(TestCase):
         x2_eager = x2_lazy.cpu()
         self.assertEqual(tuple(x2_eager.size()), (3, 2))
 
+    def test_adaptiveavgpool3d_dynamic(self):
+        # Test that adaptive_avg_pool3d gives correct shapes with lazy backend
+        img_cpu = torch.zeros([2, 3, 4, 5, 6], device="cpu")
+        out_cpu = torch.nn.AdaptiveAvgPool3d(2).to(device="cpu")(img_cpu)
+
+        test_device = get_test_device()
+        img_lazy = torch.zeros([2, 3, 4, 5, 6], device=test_device)
+        out_lazy = torch.nn.AdaptiveAvgPool3d(2).to(test_device)(img_lazy)
+
+        self.assertEqual(out_cpu.shape, out_lazy.shape)
 
 if __name__ == '__main__':
     run_tests()
