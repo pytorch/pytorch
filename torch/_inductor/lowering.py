@@ -5067,9 +5067,7 @@ def accumulate_grad_(variable, new_grad):
 
 @register_lowering(triton_kernel_wrapper_mutation)
 def triton_kernel_wrap_(*, kernel_idx, grid, kwargs):
-    ir.UserDefinedTritonKernel.create(
-        kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs
-    )
+    ir.UserDefinedTritonKernel(kernel_idx=kernel_idx, grid=grid, kernel_args=kwargs)
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
 

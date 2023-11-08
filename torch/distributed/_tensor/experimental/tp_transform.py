@@ -3,6 +3,7 @@ import operator
 from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.op_schema import (
     DTensorSpec,
@@ -26,6 +27,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import Node
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.utils import _pytree as pytree
 
 
 aten = torch.ops.aten
@@ -208,10 +210,20 @@ def _mark_sharding(
                 op_schema = _get_op_schema(node, placement_strategies)
 
                 # get DTensor specs for inputs and outputs
-                output_sharding = DTensor._propagator.propagate_op_sharding(
-                    op_schema,
-                )
-
+                if (
+                    op_schema.op not in DTensor._propagator.op_strategy_funcs
+                    and op_schema.op not in DTensor._propagator.op_to_rules
+                ):
+                    # Mark all as replicated
+                    output_sharding = _generate_default_output_sharding(
+                        node,
+                        mesh,
+                        op_schema,
+                    )
+                else:
+                    output_sharding = DTensor._propagator.propagate_op_sharding(
+                        op_schema,
+                    )
                 placement_strategies[node] = PlacementStrategy(
                     output_spec=_get_output_spec_from_output_sharding(output_sharding),
                     input_specs=output_sharding.schema_suggestions[0].args_spec
@@ -237,9 +249,8 @@ def _get_output_spec_from_output_sharding(
     else:
         # For ops that return multiple outputs, the outputs should have the same output spec
         assert isinstance(output_sharding.output_spec, Sequence)
-        output_spec_set = set(output_sharding.output_spec)
-        assert len(output_spec_set) == 1
         assert output_sharding.output_spec[0] is not None
+        output_sharding.output_spec[0].tensor_meta = None
         return output_sharding.output_spec[0]
 
 
@@ -283,6 +294,51 @@ def _populate_tensor_meta(node: Node, output_spec: OutputSpecType) -> None:
             stride=node.meta["val"].stride(),
             dtype=node.meta["val"].dtype,
         )
+
+
+def _generate_default_output_sharding(
+    node: Node,
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+) -> OutputSharding:
+    """
+    Util function to create a default output sharding that suggests Replicate placement for both args and outputs.
+    """
+
+    def update_arg_spec(arg_spec: DTensorSpec) -> DTensorSpec:
+        return DTensorSpec(
+            mesh=arg_spec.mesh,
+            placements=(Replicate(),),
+            tensor_meta=arg_spec.tensor_meta,
+        )
+
+    new_op_schema = OpSchema(
+        op=op_schema.op,
+        args_schema=pytree.tree_map_only(
+            DTensorSpec, update_arg_spec, op_schema.args_schema
+        ),
+        kwargs_schema=op_schema.kwargs_schema,
+    )
+
+    def create_output_spec(tensor: FakeTensor) -> DTensorSpec:
+        return DTensorSpec(
+            mesh=mesh,
+            placements=(Replicate(),),
+            tensor_meta=TensorMeta(
+                shape=tensor.shape,
+                stride=tensor.stride(),
+                dtype=tensor.dtype,
+            ),
+        )
+
+    return OutputSharding(
+        output_spec=pytree.tree_map_only(
+            FakeTensor, create_output_spec, node.meta["val"]
+        ),
+        schema_suggestions=[new_op_schema],
+        failed_reason=f"{node.op} does not have sharding strategy registered",
+        needs_redistribute=True,
+    )
 
 
 def _partitioner(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
@@ -434,21 +490,13 @@ def _get_op_schema(
     """
     Util function to construct the operator schema of a node.
     """
-    args_schema_list: List[object] = []
-    for arg in node.args:
-        if isinstance(arg, Node):
-            assert (
-                arg in placement_strategies
-            ), f"{arg} does not have output_spec populated."
-            args_schema_list.append(placement_strategies[arg].output_spec)
-        else:
-            # Appending the arg as it is for non-tensor arguments. E.g.: int/float/tuple
-            args_schema_list.append(arg)
-
+    args_schema_list = pytree.tree_map_only(
+        Node, lambda arg: placement_strategies[arg].output_spec, node.args
+    )
     op_schema = OpSchema(
         op=cast(torch._ops.OpOverload, node.target),
         args_schema=tuple(args_schema_list),
-        kwargs_schema={},
+        kwargs_schema=cast(Dict[str, object], node.kwargs),
     )
     return op_schema
 
