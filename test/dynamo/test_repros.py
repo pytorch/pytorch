@@ -1575,6 +1575,106 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             )
             counters.clear()
 
+    def test_tensor_self_assigning_in_place_ops(self):
+        from torch._dynamo.utils import counters
+        import operator
+
+        counters.clear()
+
+        # https://github.com/pytorch/pytorch/issues/113160
+        float_ops = [
+            operator.ipow,
+            operator.imul,
+            operator.ifloordiv,
+            operator.itruediv,
+            operator.imod,
+            operator.iadd,
+            operator.isub,
+        ]
+        int_ops = [
+            operator.ilshift,
+            operator.irshift,
+        ]
+        bool_ops = [
+            operator.iand,
+            operator.ixor,
+            operator.ior,
+        ]
+
+        for oplist, arg_creator in [
+            (float_ops, lambda: torch.rand([6], dtype=float)),
+            (int_ops, lambda: torch.randint(0, 10000000, [6], dtype=torch.int64)),
+            (bool_ops, lambda: torch.randint(0, 1, [6], dtype=bool)),
+        ]:
+            for op in oplist:
+                torch._dynamo.reset()
+                op_arg = arg_creator()
+                def func(x, y):
+                    op(x, op_arg)
+                    x.data = y
+                    op(x, op_arg)
+                    return x
+
+                a = arg_creator()
+                a1 = torch.clone(a)
+                b = arg_creator()
+                b1 = torch.clone(b)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+
+                _ = func(a, b)
+                _ = torch.compile(func, backend=cnt)(a1, b1)
+
+                self.assertEqual(a, a1)
+                self.assertEqual(b, b1)
+                self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+                self.assertEqual(len(counters["graph_break"]), 1)
+                self.assertTrue(
+                    ".data assignment to a tracked tensors can introduce aliasing"
+                    in next(iter(counters["graph_break"].keys()))
+                )
+                counters.clear()
+
+        
+    def test_tensor_self_assigning_non_in_place_ops(self):
+        from torch._dynamo.utils import counters
+        import operator
+
+        counters.clear()
+
+        # https://github.com/pytorch/pytorch/issues/113160
+
+        op_arg = torch.rand([6])
+        def func(x, y):
+            # this will replace the original reference to x, and create a new tensor.
+            x @= op_arg
+            # setattr untracked tensor will result in graph break
+            x.data = y
+            x.add_(1)
+            return x
+
+        a = torch.rand([6])
+        a1 = torch.clone(a)
+        b = torch.rand([6])
+        b1 = torch.clone(b)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        _ = func(a, b)
+        _ = torch.compile(func, backend=cnt)(a1, b1)
+
+        self.assertEqual(a, a1)
+        self.assertEqual(b, b1)
+        self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertTrue(
+            "call_function BuiltinVariable(setattr)"
+            in next(iter(counters["graph_break"].keys()))
+        )
+        counters.clear()
+
     def test_tensor_untracked_setattr_data_graph_breaks(self):
         # https://github.com/pytorch/pytorch/issues/113030
         def func(y):

@@ -168,7 +168,7 @@ class BuiltinVariable(VariableTracker):
         fns = {
             operator.ipow,
             operator.imul,
-            operator.imatmul,
+            # operator.imatmul,  # not in-place op, creates new tensor
             operator.ifloordiv,
             operator.itruediv,
             operator.imod,
