@@ -35,6 +35,8 @@ namespace c10d {
 
 TORCH_API std::string parse_env(const char* env_var_name);
 
+TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
+
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(
     const std::vector<at::Tensor>& tensors);

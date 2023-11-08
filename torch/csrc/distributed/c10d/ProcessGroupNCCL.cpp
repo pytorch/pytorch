@@ -805,6 +805,13 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
       static_cast<int>(devices_.size())); // worldSize
   synchronizeInternal(timeout);
   // Always return true, because abort API is not implemented.
+  if (parseEnvVarFlag(TORCH_NCCL_COLLECTIVE_HASH_DEBUG)) {
+    auto hashValue = hashTensors(*outputs_);
+		LOG(ERROR) << "[RANK" << rank_
+				<< "] : Collective hash of " << opTypeToString(opType_)
+        << " after wait from NCCL, "
+				<< "hash: " << hashValue;
+  }
   return true;
 }
 
@@ -874,6 +881,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(parseEnvVarFlag(TORCH_NCCL_ENABLE_MONITORING));
+  enableCollecticeHashDebug_ = parseEnvVarFlag(TORCH_NCCL_COLLECTIVE_HASH_DEBUG);
   heartbeatTimeoutInSec_ =
       parseEnvVarIntDefault(TORCH_NCCL_HEARTBEAT_TIMEOUT_S, 60 * 2 /*2 Mins*/);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -2134,6 +2142,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       comms_.push_back((void*)ncclComms[stream_comm_i]->getNcclComm());
     }
   }
+
+  if (enableCollecticeHashDebug_.load()) {
+    auto hashValue = hashTensors(inputs);
+		LOG(ERROR) << "[RANK" << rank_
+				<< "] : Collective hash of " << opTypeToString(opType)
+        << " before calling into NCCL, "
+				<< "hash: " << hashValue;
+	}
 
   {
     torch::cuda::nccl::AutoNcclGroup nccl_group_guard(
