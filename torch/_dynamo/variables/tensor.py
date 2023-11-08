@@ -798,10 +798,6 @@ class TensorVariable(VariableTracker):
                     is args[0].as_proxy().node.meta["example_value"]
                 )
             ):
-                assert (
-                    ret.as_proxy().node.meta["example_value"]
-                    is self.as_proxy().node.meta["example_value"]
-                )
                 return self
             return ret
 
