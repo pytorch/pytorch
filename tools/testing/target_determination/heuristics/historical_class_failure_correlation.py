@@ -93,4 +93,3 @@ def _rank_correlated_tests(
     ratings = _get_ratings_for_tests(tests_to_run)
     prioritize = sorted(ratings, key=lambda x: -ratings[x])
     return prioritize
-
