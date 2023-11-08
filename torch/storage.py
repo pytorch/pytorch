@@ -121,22 +121,22 @@ class _StorageBase:
         return super().__sizeof__() + self.size()
 
     def clone(self):
-        """Returns a copy of this storage."""
+        """Return a copy of this storage."""
         return type(self)(self.nbytes(), device=self.device).copy_(self)
 
     def tolist(self):
-        """Returns a list containing the elements of this storage."""
+        """Return a list containing the elements of this storage."""
         return list(self)
 
     def cpu(self):
-        """Returns a CPU copy of this storage if it's not already on the CPU."""
+        """Return a CPU copy of this storage if it's not already on the CPU."""
         if self.device.type != 'cpu':
             return torch.UntypedStorage(self.size()).copy_(self, False)
         else:
             return self
 
     def mps(self):
-        """Returns a MPS copy of this storage if it's not already on the MPS."""
+        """Return a MPS copy of this storage if it's not already on the MPS."""
         if self.device.type != 'mps':
             return torch.UntypedStorage(self.size(), device="mps").copy_(self, False)
         else:
@@ -211,7 +211,7 @@ class _StorageBase:
             cast(Storage, self)).is_pinned(device)
 
     def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
-        r"""Copies the CPU storage to pinned memory, if it's not already pinned.
+        r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
             device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
@@ -227,7 +227,7 @@ class _StorageBase:
         return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
-        """Moves the storage to shared memory.
+        """Move the storage to shared memory.
 
         This is a no-op for storages already in shared memory and for CUDA
         storages, which do not need to be moved for sharing across processes.
@@ -251,7 +251,7 @@ class _StorageBase:
 
     @classmethod
     def _new_shared(cls, size, *, device='cpu'):
-        """Creates a new storage in shared memory with the same data type."""
+        """Create a new storage in shared memory with the same data type."""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
         if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
@@ -265,7 +265,7 @@ class _StorageBase:
         return self
 
     def byteswap(self, dtype):
-        """Swaps bytes in underlying data."""
+        """Swap bytes in underlying data."""
         elem_size = torch._utils._element_size(dtype)
         # for complex types, don't swap first and second numbers
         if dtype.is_complex:
@@ -803,17 +803,17 @@ class TypedStorage:
         return super().__sizeof__() + self.nbytes()
 
     def clone(self):
-        """Return a copy of this storage"""
+        """Return a copy of this storage."""
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.clone())
 
     def tolist(self):
-        """Return a list containing the elements of this storage"""
+        """Return a list containing the elements of this storage."""
         _warn_typed_storage_removal()
         return list(self)
 
     def cpu(self):
-        """Return a CPU copy of this storage if it's not already on the CPU"""
+        """Return a CPU copy of this storage if it's not already on the CPU."""
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
