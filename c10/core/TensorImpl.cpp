@@ -917,7 +917,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     case MemoryFormat::Contiguous: {
       // TODO: figure out if the non-symint version can also devirtualize;
       // the last time we tried it was probably a narrowing problem
-      const auto dim_ = static_cast<int64_t>(sym_shape_meta.sizes_.size());
+      const auto dim_ = sym_shape_meta.dim();
       sym_shape_meta.strides_.resize(dim_);
       if (dim_ > 0) {
         const auto last_idx = dim_ - 1;
@@ -958,20 +958,20 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   // TODO: avoid chundering into the guards for computing these
   switch (memory_format) {
     case MemoryFormat::Contiguous: {
-      sym_shape_meta.is_contiguous_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_contiguous();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     case MemoryFormat::ChannelsLast: {
-      sym_shape_meta.is_channels_last_contiguous_ = true;
-      sym_shape_meta.is_channels_last_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_channels_last_contiguous();
+      sym_shape_meta.assume_channels_last();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
-      sym_shape_meta.is_channels_last_3d_contiguous_ = true;
-      sym_shape_meta.is_channels_last_3d_ = true;
-      sym_shape_meta.is_non_overlapping_and_dense_ = true;
+      sym_shape_meta.assume_channels_last_3d_contiguous();
+      sym_shape_meta.assume_channels_last_3d();
+      sym_shape_meta.assume_non_overlapping_and_dense();
       break;
     }
     default:
