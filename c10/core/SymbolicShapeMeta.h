@@ -118,27 +118,27 @@ class C10_API SymbolicShapeMeta {
 
   // Assumptions so we can short-circuit computation
   // NOTE: Don't need to lock mutables_ since these aren't const
-  void assume_contiguous(SymBool val=true) {
+  void assume_contiguous(SymBool val = true) {
     is_contiguous_ = std::move(val);
     available_.fetch_or(is_contiguous_avail);
   }
-  void assume_channels_last_contiguous(SymBool val=true) {
+  void assume_channels_last_contiguous(SymBool val = true) {
     is_contiguous_ = std::move(val);
     available_.fetch_or(is_channels_last_contiguous_avail);
   }
-  void assume_channels_last_3d_contiguous(SymBool val=true) {
+  void assume_channels_last_3d_contiguous(SymBool val = true) {
     is_channels_last_3d_contiguous_ = std::move(val);
     available_.fetch_or(is_channels_last_3d_contiguous_avail);
   }
-  void assume_channels_last(SymBool val=true) {
+  void assume_channels_last(SymBool val = true) {
     is_channels_last_ = std::move(val);
     available_.fetch_or(is_channels_last_avail);
   }
-  void assume_channels_last_3d(SymBool val=true) {
+  void assume_channels_last_3d(SymBool val = true) {
     is_channels_last_3d_ = std::move(val);
     available_.fetch_or(is_channels_last_3d_avail);
   }
-  void assume_non_overlapping_and_dense(SymBool val=true) {
+  void assume_non_overlapping_and_dense(SymBool val = true) {
     is_non_overlapping_and_dense_ = std::move(val);
     available_.fetch_or(is_non_overlapping_and_dense_avail);
   }

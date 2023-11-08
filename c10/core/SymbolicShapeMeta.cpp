@@ -5,12 +5,14 @@
 
 namespace c10 {
 
-SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other) {
-  std::scoped_lock lock{other.mutables_};
-  sizes_ = other.sizes_;
-  strides_ = other.strides_;
-  storage_offset_ = other.storage_offset_;
-  strides_valid_ = other.strides_valid_;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+SymbolicShapeMeta::SymbolicShapeMeta(const SymbolicShapeMeta& other)
+    // Non-mutables can be accessed outside the mutex
+    : size_(other.sizes_),
+      strides_(other.strides_),
+      storage_offset_(other.storage_offset_),
+      strides_valid_(other.strides_valid_) {
+  std::scoped_lock lock(other.mutables_);
   numel_ = other.numel_;
   is_contiguous_ = other.is_contiguous_;
   is_channels_last_contiguous_ = other.is_channels_last_contiguous_;
@@ -187,8 +189,9 @@ SymBool SymbolicShapeMeta::compute_is_non_overlapping_and_dense_anydim() const {
   return is_contiguous() | compute_non_overlapping_and_dense();
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 void SymbolicShapeMeta::set_numel(SymInt val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_numel()) {
     return;
   }
@@ -196,7 +199,7 @@ void SymbolicShapeMeta::set_numel(SymInt val) const {
   available_.fetch_or(numel_avail);
 }
 void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_contiguous()) {
     return;
   }
@@ -204,7 +207,7 @@ void SymbolicShapeMeta::set_is_contiguous(SymBool val) const {
   available_.fetch_or(is_contiguous_avail);
 }
 void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_channels_last_contiguous()) {
     return;
   }
@@ -212,7 +215,7 @@ void SymbolicShapeMeta::set_is_channels_last_contiguous(SymBool val) const {
   available_.fetch_or(is_channels_last_contiguous_avail);
 }
 void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d_contiguous()) {
     return;
   }
@@ -220,7 +223,7 @@ void SymbolicShapeMeta::set_is_channels_last_3d_contiguous(SymBool val) const {
   available_.fetch_or(is_channels_last_3d_contiguous_avail);
 }
 void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_channels_last()) {
     return;
   }
@@ -228,7 +231,7 @@ void SymbolicShapeMeta::set_is_channels_last(SymBool val) const {
   available_.fetch_or(is_channels_last_avail);
 }
 void SymbolicShapeMeta::set_is_channels_last_3d(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_channels_last_3d()) {
     return;
   }
@@ -237,7 +240,7 @@ void SymbolicShapeMeta::set_is_channels_last_3d(SymBool val) const {
 }
 
 void SymbolicShapeMeta::set_is_non_overlapping_and_dense(SymBool val) const {
-  std::scoped_lock lock{mutables_};
+  std::scoped_lock lock(mutables_);
   if (has_is_non_overlapping_and_dense()) {
     return;
   }
