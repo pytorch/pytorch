@@ -476,16 +476,15 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
     grid.z = 1;
     dim3 block { 64 * 4, 1, 1 };
 
-    //PICKKUYP
-    // if(q_dtype == at::kHalf)
-    //   {
+     if(q_dtype == at::kHalf)
+       {
 	if (is_causal)
 	  {
 	    constexpr int				STAGE = 3;
-	    oort::attn_fwd<STAGE,128,16,64,true>	fwd_opt;
+	    oort::attn_fwd<STAGE,128,64,64,true>	fwd_opt;
 	    auto					err   = fwd_opt(grid, block,
-							        (half*)(q.data_ptr()), (half*)(k.data_ptr()), (half*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), out.data_ptr(),
+							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
 								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
 								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
 								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
@@ -495,46 +494,46 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 	else
 	  {
 	    constexpr int			                STAGE = 1;
-	    oort::attn_fwd<1,128,16,64,true>                fwd_opt;
+	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
 	    auto				                err   = fwd_opt(grid, block,
-							        (half*)(q.data_ptr()), (half*)(k.data_ptr()), (half*)(v.data_ptr()),
-								softmax_scale, (float*)M.data_ptr(), out.data_ptr(),
+							        (__fp16*)(q.data_ptr()), (__fp16*)(k.data_ptr()), (__fp16*)(v.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__fp16*)out.data_ptr(),
 								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
 								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
 								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
 								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
 								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
 	  }
-    //   }
-    // else if (q_dtype == at::kBFloat16)
-    //   {
-    // 	if (is_causal)
-    // 	  {
-    // 	    constexpr int				STAGE = 3;
-    // 	    oort::attn_fwd<STAGE,128,16,64,true>	fwd_opt;
-    // 	    auto					err   = fwd_opt(grid, block,
-    // 							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
-    // 								softmax_scale, (float*)M.data_ptr(), out.data_ptr(),
-    // 								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-    // 								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-    // 								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-    // 								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-    // 								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
-    // 	  }
-    // 	else
-    // 	  {
-    // 	    constexpr int			                STAGE = 1;
-    // 	    oort::attn_fwd<1,128,16,64,true>                fwd_opt;
-    // 	    auto				                err   = fwd_opt(grid, block,
-    // 							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
-    // 								softmax_scale, (float*)M.data_ptr(), out.data_ptr(),
-    // 								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-    // 								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
-    // 								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
-    // 								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
-    // 								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
-    // 	  }
-    //   }
+       }
+     else if (q_dtype == at::kBFloat16)
+       {
+     	if (is_causal)
+     	  {
+     	    constexpr int				STAGE = 3;
+     	    oort::attn_fwd<STAGE,128,64,64,true>	fwd_opt;
+     	    auto					err   = fwd_opt(grid, block,
+     							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
+     								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+     								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+     								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+     								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
+     								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+     	  }
+     	else
+     	  {
+     	    constexpr int			                STAGE = 1;
+     	    oort::attn_fwd<STAGE,128,64,64,true>                fwd_opt;
+     	    auto				                err   = fwd_opt(grid, block,
+     							        (__bf16*)(q.data_ptr()), (__bf16*)(k.data_ptr()), (__bf16*)(v.data_ptr()),
+								softmax_scale, (float*)M.data_ptr(), (__bf16*)out.data_ptr(),
+     								q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+     								k.stride(0), k.stride(1), k.stride(2), k.stride(3),
+     								v.stride(0), v.stride(1), v.stride(2), v.stride(3),
+     								out.stride(0), out.stride(1), out.stride(2), out.stride(3),
+     								q.sizes()[0], q.sizes()[1], seqlen_q, seqlen_k, stream);
+     	  }
+       }
     
 
 
