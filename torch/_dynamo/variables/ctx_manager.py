@@ -181,6 +181,13 @@ class GradModeVariable(ContextWrappingVariable):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        self.initialized = False
+        return super().call_function(tx, args, kwargs)
+
     def _call_func(self, tx, values):
         assert len(values) == 1
         value = values[0]

@@ -977,60 +977,83 @@ class GraphModule(torch.nn.Module):
 
     def test_context_wrapping_grad_mode_decorator(self):
         ctx_wrappers = [torch.enable_grad, torch.no_grad]
-        for i in range(2):
-            torch._dynamo.reset()
+        for call in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
 
-            ctx_wrapper = ctx_wrappers[i]
-            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+                ctx_wrapper = ctx_wrappers[i]
+                ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
 
-            def fn(x):
-                def inner_func(x):
-                    return x.sin()
+                def fn(x):
+                    def inner_func(x):
+                        return x.sin()
 
-                with ctx_wrapper_inverse():
-                    return ctx_wrapper(inner_func)(x)
+                    with ctx_wrapper_inverse():
+                        if call:
+                            return ctx_wrapper()(inner_func)(x)
+                        return ctx_wrapper(inner_func)(x)
 
-            x = torch.zeros(10, requires_grad=True)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(x), opt_fn(x))
-            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+                x = torch.zeros(10, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+                self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
 
     def test_context_wrapping_grad_mode_nested_function_decorator(self):
         ctx_wrappers = [torch.enable_grad, torch.no_grad]
-        for i in range(2):
-            torch._dynamo.reset()
 
-            ctx_wrapper = ctx_wrappers[i]
-            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+        for call in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
 
-            def fn(x):
-                @ctx_wrapper
-                def inner_func(x):
-                    return x.sin()
+                ctx_wrapper = ctx_wrappers[i]
+                ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
 
-                with ctx_wrapper_inverse():
-                    return inner_func(x)
+                def fn(x):
+                    if call:
 
-            x = torch.zeros(10, requires_grad=True)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(fn(x), opt_fn(x))
-            self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+                        @ctx_wrapper()
+                        def inner_func(x):
+                            return x.sin()
 
-    def test_context_wrapping_grad_mode_nested_function_decorator_called(self):
-        ctx_wrappers = [torch.enable_grad, torch.no_grad]
-        for i in range(2):
-            torch._dynamo.reset()
+                    else:
 
-            ctx_wrapper = ctx_wrappers[i]
-            ctx_wrapper_inverse = ctx_wrappers[(i + 1) % 2]
+                        @ctx_wrapper
+                        def inner_func(x):
+                            return x.sin()
 
-            def fn(x):
-                @ctx_wrapper()
-                def inner_func(x):
-                    return x.sin()
+                    with ctx_wrapper_inverse():
+                        return inner_func(x)
 
-                with ctx_wrapper_inverse():
-                    return inner_func(x)
+                x = torch.zeros(10, requires_grad=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+                self.assertEqual(fn(x).requires_grad, opt_fn(x).requires_grad)
+
+    def test_context_wrapping_set_grad_enabled_nested_function(self):
+        modes = [True, False]
+        for decorator in [True, False]:
+            for i in range(2):
+                torch._dynamo.reset()
+
+                mode = modes[i]
+                mode_inverse = modes[(i + 1) % 2]
+
+                def fn(x):
+                    if decorator:
+
+                        @torch.set_grad_enabled(mode)
+                        def inner_func(x):
+                            return x.sin()
+
+                        with torch.set_grad_enabled(mode_inverse):
+                            return inner_func(x)
+                    else:
+
+                        def inner_func(x):
+                            return x.sin()
+
+                        with torch.set_grad_enabled(mode_inverse):
+                            return torch.set_grad_enabled(mode)(inner_func)(x)
 
             x = torch.zeros(10, requires_grad=True)
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
