@@ -89,17 +89,11 @@ class NestedTensor(torch.Tensor):
         stride = values.stride()
         self._strides = (ragged_size * stride[0], *stride)
         self._ragged_idx = 1
-
-        if values.requires_grad:
-            raise ValueError(
-                "NestedTensor values cannot require grad, please "
-                "detach before passing to NestedTensor constructor"
-            )
         self._values = values
         self._offsets = offsets
 
     def values(self):
-        return self._values
+        return DifferentiableValues.apply(self)
 
     def offsets(self):
         return self._offsets
@@ -205,31 +199,20 @@ class NestedTensor(torch.Tensor):
             return func(*args, **kwargs)
 
 
-# Not actually a view!
-class ViewBufferFromNested(torch.autograd.Function):
+# Returns nt.values() in a differentiable way
+class DifferentiableValues(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
         ctx.save_for_backward(x.offsets())
         ctx.kwargs = {
             "ragged_size": x._size[x._ragged_idx],
         }
-        return x.values()
+        return x._values
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
         (offsets,) = ctx.saved_tensors
         return NestedTensor(gO, offsets=offsets, **ctx.kwargs)
-
-
-# Not actually a view!
-class ViewNestedFromBuffer(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, values: torch.Tensor, offsets: torch.Tensor):  # type: ignore[override]
-        return NestedTensor(values.detach(), offsets=offsets)
-
-    @staticmethod
-    def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values(), None, None
 
 
 # Need to make it obvious that users should be passing in offsets
@@ -282,8 +265,24 @@ def jagged_from_list(
             ]
         )
 
-    return ViewNestedFromBuffer.apply(values, offsets), offsets  # type: ignore[call-overload]
+    return (
+        torch._nested_view_from_values_offsets(values, offsets),
+        offsets,
+    )  # type: ignore[return-value]
 
 
-def buffer_from_jagged(jagged):
-    return ViewBufferFromNested.apply(jagged)
+# Register python impl for jagged layout view op
+from torch.library import Library
+
+aten_lib = Library("aten", "IMPL")
+
+
+def _nested_view_from_values_offsets_impl(values: torch.Tensor, offsets: torch.Tensor):
+    return NestedTensor(values, offsets)
+
+
+aten_lib.impl(
+    "_nested_view_from_values_offsets",
+    _nested_view_from_values_offsets_impl,
+    "CompositeExplicitAutograd",
+)

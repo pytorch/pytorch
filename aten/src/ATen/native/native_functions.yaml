@@ -6091,6 +6091,20 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
+- func: _nested_view_from_values_offsets(Tensor(a) self, Tensor offsets) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: _nested_view_from_values_offsets
+
+- func: _nested_view_from_values_offsets_copy(Tensor self, Tensor offsets) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_values_offsets_copy
+  autogen: _nested_view_from_values_offsets_copy.out
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze

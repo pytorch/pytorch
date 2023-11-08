@@ -2765,6 +2765,10 @@
   nested_size: non_differentiable
   nested_strides: non_differentiable
 
+- name:  _nested_view_from_values_offsets(Tensor(a) self, Tensor offsets) -> Tensor(a)
+  self: grad.values()
+  offsets: non_differentiable
+
 # Transformers
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   output_differentiability: [True, False, False, False]

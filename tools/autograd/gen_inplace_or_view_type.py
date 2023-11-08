@@ -60,6 +60,7 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
     "_conj",
     "_neg_view",
     "_nested_view_from_buffer",
+    "_nested_view_from_values_offsets",
 ]
 
 VIEW_FUNCTIONS = {
