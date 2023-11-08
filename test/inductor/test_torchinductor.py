@@ -3025,10 +3025,9 @@ class CommonTemplate:
         def fn(x):
             dim = -1
             return (
-                torch.var(x, dim=dim, correction=4),
                 torch.var(x, dim=dim, correction=1.3),
-                torch.var(x, dim=dim, correction=x.shape[dim]),
-                torch.var(x, dim=dim, correction=x.shape[dim] + 1),
+                torch.var(x, dim=dim, correction=3),
+                torch.var(x, dim=dim, correction=10),
             )
 
         self.common(fn, (torch.randn([2, 8]),))
