@@ -882,37 +882,18 @@ static void registerSDPAUtilities(PyObject* module) {
   // Add _SDPAParams and helper methods class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<sdp::sdp_params>(m, "_SDPAParams")
-      // .def(py::init<const at::Tensor, const at::Tensor, const at::Tensor,
-      // const c10::optional<at::Tensor>, double, bool>())
-      .def(py::init([](py::object query,
-                       py::object key,
-                       py::object value,
-                       py::object attn_mask,
+      .def(py::init([](at::Tensor const& query,
+                       at::Tensor const& key,
+                       at::Tensor const& value,
+                       c10::optional<at::Tensor> attn_mask,
                        double dropout,
                        bool is_causal) {
-        // TODO: how do we handle these with more grace than seg fault
-        // TODO: (Other way ?)Check if pyobj attn_mask is none if not cast
-        if (attn_mask.ptr() == Py_None) {
-          return sdp::sdp_params{
-              THPVariable_Unpack(query.ptr()),
-              THPVariable_Unpack(key.ptr()),
-              THPVariable_Unpack(value.ptr()),
-              c10::nullopt,
-              dropout,
-              is_causal};
-        }
         return sdp::sdp_params{
-            THPVariable_Unpack(query.ptr()),
-            THPVariable_Unpack(key.ptr()),
-            THPVariable_Unpack(value.ptr()),
-            THPVariable_Unpack(attn_mask.ptr()),
-            dropout,
-            is_causal};
+            query, key, value, std::move(attn_mask), dropout, is_causal};
       }))
-      // TODO Add nice repr
-      // .def_readonly("query", &sdp::sdp_params::query)
-      // .def_readonly("key", &sdp::sdp_params::key)
-      // .def_readonly("value", &sdp::sdp_params::value)
+      .def_readonly("query", &sdp::sdp_params::query)
+      .def_readonly("key", &sdp::sdp_params::key)
+      .def_readonly("value", &sdp::sdp_params::value)
       .def_readonly("attn_mask", &sdp::sdp_params::attn_mask)
       .def_readonly("dropout", &sdp::sdp_params::dropout)
       .def_readonly("is_causal", &sdp::sdp_params::is_causal);
