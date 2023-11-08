@@ -31,15 +31,13 @@ WARMUP_CYCLES = 5
 
 
 class HybridModel(torch.nn.Module):
-    r"""
-   The model consists of a sparse part and a dense part. The dense part is an
-   nn.Linear module that is replicated across all trainers using
-   DistributedDataParallel. The sparse part has nn.EmbeddingBags stored on multiple
-   parameter servers.
+    """
+    The model consists of a sparse part and a dense part.
 
-   The model holds a Remote Reference to the embedding tables on the parameter
-   servers.
-   """
+    The dense part is an nn.Linear module that is replicated across all trainers using DistributedDataParallel.
+    The sparse part has nn.EmbeddingBags stored on multiple parameter servers.
+    The model holds a Remote Reference to the embedding tables on the parameter servers.
+    """
 
     def __init__(self, emb_rref_list, device):
         super().__init__()
@@ -116,14 +114,16 @@ def _run_printable(cmd):
 
 
 def _run_trainer(emb_rref_list, rank):
-    r"""
-   Each trainer runs a forward pass which involves an embedding lookup on the
-   8 parameter servers and running nn.Linear locally. During the backward pass,
-   DDP is responsible for aggregating the gradients for the dense part
-   (nn.Linear) and distributed autograd ensures gradients updates are
-   propagated to the parameter servers.
-   """
+    """
+    Perform training iterations for a model using Distributed Data Parallelism and Remote Procedure Calls.
 
+    Args:
+        emb_rref_list (list): List of RRefs to embedding tables on parameter servers.
+        rank (int): Rank of the current trainer.
+
+    Returns:
+        tuple: A tuple containing rank, time measurements, and total batch size.
+    """
     # Setup the model.
     model = HybridModel(emb_rref_list, rank)
 
@@ -198,11 +198,15 @@ def _run_trainer(emb_rref_list, rank):
 
 
 def run_worker(rank, world_size):
-    r"""
-   A wrapper function that initializes RPC, calls the function, and shuts down
-   RPC.
-   """
+    """
+    Initialize RPC, call the function, and shut down RPC.
 
+    Args:
+        rank (int): The rank of the worker.
+        world_size (int): The total number of processes in the distributed setup.
+    Returns:
+        None
+    """
     # Using different port numbers in TCP init_method for init_rpc and
     # init_process_group to avoid port conflicts.
     rpc_backend_options = TensorPipeRpcBackendOptions()

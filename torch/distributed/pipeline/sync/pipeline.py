@@ -61,7 +61,7 @@ def _wait(batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream
 
 
 def _clock_cycles(m: int, n: int) -> Iterable[List[Tuple[int, int]]]:
-    """Generates schedules for each clock cycle."""
+    """Generate schedules for each clock cycle."""
     # m: number of micro-batches
     # n: number of partitions
     # i: index of micro-batch
@@ -98,7 +98,7 @@ class Pipeline:
         (self.in_queues, self.out_queues) = create_workers(devices)
 
     def run(self, batches: List[Batch]) -> None:
-        """Runs pipeline parallelism.
+        """Run pipeline parallelism.
 
         It modifies the given batches in place.
 
@@ -119,8 +119,8 @@ class Pipeline:
     def fence(
         self, batches: List[Batch], schedule: List[Tuple[int, int]], skip_trackers: List[SkipTrackerThroughPotals],
     ) -> None:
-        """Copies micro-batches after computation for the previous
-        micro-batches.
+        """
+        Copy micro-batches after computation for the previous micro-batches.
         """
         copy_streams = self.copy_streams
         skip_layout = self.skip_layout
@@ -144,7 +144,7 @@ class Pipeline:
     def compute(
         self, batches: List[Batch], schedule: List[Tuple[int, int]], skip_trackers: List[SkipTrackerThroughPotals],
     ) -> None:
-        """Runs tasks with synchronization to copy streams."""
+        """Run tasks with synchronization to copy streams."""
         partitions = self.partitions
         devices = self.devices
         copy_streams = self.copy_streams
