@@ -2034,7 +2034,7 @@ def _get_param_to_fqn(
     """
     Construct a mapping from parameters to their parameter names.
 
-    ``model`` should not contain any :class:`FullyShardedDataParallel` instances, which
+    The ``model`` should not contain any :class:`FullyShardedDataParallel` instances, which
     means that none of the parameters should be ``FlatParameter`` s. As a
     result, compared to :meth:`_get_param_to_fqns`, the mapped
     values may be flattened from singleton :class:`list` s to the contained
