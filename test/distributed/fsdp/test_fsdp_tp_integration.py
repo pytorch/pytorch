@@ -221,9 +221,6 @@ class TestTPFSDPIntegration(FSDPTest):
         Tests training for TP + FSDP integration by comparing an FSDP-only
         model with a TP + FSDP model.
         """
-        self.assertTrue(
-            enable_2d_with_fsdp(), "FSDP 2d parallel integration not available"
-        )
         LR = 3e-5
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
