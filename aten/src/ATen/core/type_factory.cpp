@@ -28,7 +28,6 @@ namespace c10 {
   _(complex, ComplexType)           \
   _(str, StringType)                \
   _(Device, DeviceObjType)          \
-  _(Generator, GeneratorType)       \
   _(Stream, StreamObjType)          \
   _(number, NumberType)             \
   _(None, NoneType)                 \

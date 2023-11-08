@@ -12,7 +12,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch._custom_ops import impl_abstract
 
 try:
-    from torch.utils._cxx_pytree import tree_map_only
+    from torch.utils._pytree.api.cxx import tree_map_only
 except ImportError:
     from torch.utils._pytree import tree_map_only  # type: ignore[no-redef]
 
@@ -605,7 +605,7 @@ def _register_ops():
         op_name = op_def[0:op_def.index('(')]
         backend_impl = getattr(fun_col_impl, f"_{op_name}")
         meta_impl = getattr(my_module, f"_{op_name}_meta")
-        c10_lib.define(op_def)
+        c10_lib.define(op_def, tags=torch.Tag.pt2_compliant_tag)
         c10_lib_impl.impl(op_name, backend_impl, "CompositeExplicitAutograd")
         impl_abstract(f"c10d_functional::{op_name}")(meta_impl)
 
