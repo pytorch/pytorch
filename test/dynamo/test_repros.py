@@ -3378,6 +3378,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_sizes_aot_autograd(self):
+        def fn(result, split_sizes):
+            rs = torch.ops.aten.split_with_sizes(result, split_sizes.tolist())
+            return rs
+
+        example_inputs = (
+            torch.randn(32, requires_grad=True),
+            torch.tensor((7, 16, 9)),
+        )
+        actual = torch.compile(fn, fullgraph=True, backend="aot_eager")(*example_inputs)
+        expected = fn(*example_inputs)
+        self.assertEqual(actual, expected)
+
     def test_unspecialized_nn_module_with_torch_variable_attribute(self):
         """
         In this case self.fn = something that should be a TorchVariable.

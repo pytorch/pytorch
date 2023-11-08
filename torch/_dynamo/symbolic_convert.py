@@ -622,9 +622,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # reads = reads | {"__class__"}
         # output variables?
         reads = reads | set(self.cell_and_freevars())
-        self.symbolic_locals = collections.OrderedDict(
-            [(k, v) for k, v in self.symbolic_locals.items() if k in reads]
-        )
+        self.symbolic_locals = {
+            k: v for k, v in self.symbolic_locals.items() if k in reads
+        }
         self.output.side_effects.prune_dead_object_new(self)
 
     def call_function(
@@ -1865,7 +1865,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """Create a checkpoint of the current state by copying everything"""
         return InstructionTranslatorGraphState(
             self.output.copy_graphstate(),
-            collections.OrderedDict(self.symbolic_locals),
+            dict(self.symbolic_locals),
             list(self.stack),
             list(self.block_stack),
             self.instruction_pointer,
@@ -2073,9 +2073,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_globals=f_globals,
             f_builtins=f_builtins,
             code_options=code_options,
-            symbolic_locals=collections.OrderedDict(),  # set below
+            symbolic_locals={},  # set below
             # A global var is inserted only after a STORE_GLOBAL happens to it
-            symbolic_globals=collections.OrderedDict(),
+            symbolic_globals={},
             f_code=f_code,
             export=export,
             inline_depth=0,

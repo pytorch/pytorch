@@ -61,7 +61,7 @@ __all__ = [
     "guard_int", "guard_float", "guard_scalar",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
     "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
-    "has_free_symbols",
+    "has_free_symbols", "sym_eq",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -101,9 +101,14 @@ def create_contiguous(shape):
         strides.append(dim * strides[-1])
     return list(reversed(strides))
 
-def hint_int(a):
+def hint_int(a, fallback=None):
+    """
+    Retrieve the hint for an int (based on the underlying real values as observed
+    at runtime).  If no hint is available (e.g., because data dependent shapes),
+    if fallback is not None, use that instead (otherwise raise an error).
+    """
     if isinstance(a, torch.SymInt):
-        return a.node.require_hint()
+        return a.node.require_hint(fallback)
     assert type(a) is int, a
     return a
 
@@ -274,6 +279,20 @@ def parallel_and(*args):
     if any(definitely_false(a) for a in args):
         return False
     return all(args)
+
+def sym_eq(x, y):
+    """
+    Like ==, but when run on list/tuple, it will recursively test equality
+    and use sym_and to join the results together, without guarding.
+    """
+    if (isinstance(x, tuple) and isinstance(y, tuple)) or (isinstance(x, list) and isinstance(y, list)):
+        if len(x) != len(y):
+            return False
+        return functools.reduce(operator.and_, map(sym_eq, x, y), True)
+    elif isinstance(x, (int, torch.SymInt)) and isinstance(y, (int, torch.SymInt)):
+        return x == y
+    else:
+        raise AssertionError(f"unexpected sym_eq between {type(x)} {type(y)}")
 
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
@@ -1611,6 +1630,8 @@ class ShapeEnv:
         self.fx_node_cache: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
+        self.source_to_symint_node_cache : Dict[TensorPropertySource, SymInt] = {}
+
         from torch.fx.experimental.validator import translation_validation_enabled
         self._translation_validation_enabled = translation_validation_enabled()
 
@@ -2069,6 +2090,8 @@ class ShapeEnv:
             hint: Optional[int],
             source: Optional[Source] = None,
     ):
+        if source and source in self.source_to_symint_node_cache:
+            return self.source_to_symint_node_cache[source]
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source)
@@ -2082,11 +2105,16 @@ class ShapeEnv:
         else:
             fx_node = None
 
+        out = None
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
-            return int(sym)
-        return SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            out = int(sym)
+        else:
+            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+        if source:
+            self.source_to_symint_node_cache[source] = out
+        return out
 
     @record_shapeenv_event()
     def create_unspecified_symint_and_symbol(self, value, source, dynamic_dim):
@@ -2425,6 +2453,7 @@ class ShapeEnv:
 
         symbol_to_source = collections.defaultdict(list)
         symbol_to_constraints = collections.defaultdict(set)
+
         constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
 
         def record_constraint_violation(warn_only, debug_name, msg, hint=None):
