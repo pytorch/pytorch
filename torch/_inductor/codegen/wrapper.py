@@ -1945,8 +1945,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
 
     def make_allocation(
-        self, name, device, dtype, shape, orig_stride, buffer_if_can_stack_allocate=None
+        self, name, device, dtype, shape, stride, buffer_if_can_stack_allocate=None
     ):
+        orig_stride = stride
         device = self.codegen_device(device)
         dtype_code = self.codegen_dtype(dtype)
         size = self.codegen_shape_tuple(shape)
