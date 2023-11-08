@@ -3866,6 +3866,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+        kernel, _ = self.get_kernel_and_configs()
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
