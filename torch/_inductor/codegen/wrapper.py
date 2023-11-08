@@ -1356,6 +1356,19 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     """
                 )
             else:
+                if not config.split_const_graph:
+                    # If we do not split the constant graph, we'll just create
+                    # an empty implementation when wrapping the main module.
+                    self.prefix.splice(
+                        """
+                        void AOTInductorModel::_const_run_impl(
+                            std::vector<AtenTensorHandle>& output_handles,
+                            DeviceStreamType stream,
+                            AOTIProxyExecutorHandle proxy_executor
+                        ) {}
+
+                        """
+                    )
                 self.prefix.splice(
                     """
                     void AOTInductorModel::run_impl(
@@ -1598,6 +1611,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ) {
             """
         )
+        if not config.split_const_graph:
+            self.prefix.writeline("}")
+            return
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
@@ -1630,7 +1646,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if V.graph.aot_mode and not V.graph.is_const_graph:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
-            self.codegen_const_run_driver()
+        self.codegen_const_run_driver()
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
