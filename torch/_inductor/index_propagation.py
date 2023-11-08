@@ -28,6 +28,7 @@ import sympy
 from typing_extensions import TypeAlias
 
 import torch
+from torch._inductor import config
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
 
@@ -255,8 +256,13 @@ class IndexPropagation:
         #     for SymPy expressions, so we don't want to repeat idx too much
 
         # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
-        if isinstance(index, IndexPropVar) and index.is_symbolic:
+        if (
+            # We need to fallback if we want to check OOB for indirect indexing
+            not (check and config.assert_indirect_indexing)
+            and isinstance(index, IndexPropVar)
+            and index.is_symbolic
+        ):
             # If we are turning a indirect indexing into direct, we need to wrap it.
-            index = index.value.expr
-            return index + Where(index >= 0, 0, size)
+            idx = index.value.expr
+            return idx + Where(idx >= 0, 0, size)
         return self.fallback("indirect_indexing", (index, size, check), {}).value

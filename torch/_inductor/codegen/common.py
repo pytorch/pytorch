@@ -778,6 +778,7 @@ class CSE:
         bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
+        ignore_old_bound=False,
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -788,7 +789,10 @@ class CSE:
             # If the expressions were always created with all the information, we could
             # assert expr.bounds == bounds, but sometimes the expression is created
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
-            expr.bounds = expr.bounds.tighten(bounds)
+            if ignore_old_bound:
+                expr.bounds = bounds
+            else:
+                expr.bounds = expr.bounds.tighten(bounds)
             return expr
         cache_key = expr
         var = self.cache.get(cache_key, None)
@@ -1023,7 +1027,15 @@ class Kernel(CodeGen):
                     if var.bounds.upper >= 0:
                         lt = ops.lt(var, "0")
                         stm = ops.where(lt, stm, var)
-                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+                    new_var = self.cse.generate(
+                        self.compute,
+                        stm,
+                        bounds=new_bounds,
+                        # Old and new bounds may be non-intersecting
+                        # Just use the new bounds if it is known
+                        ignore_old_bound=new_bounds != ValueRanges.unknown(),
+                    )
 
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var

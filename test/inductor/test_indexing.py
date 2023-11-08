@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import subprocess
+
 import sympy
 
 from torch._inductor.codegen.cpp import cexpr
@@ -8,6 +10,84 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.sizevars import SizeVarAllocator
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+
+
+class TestIndirectIndexing(TorchTestCase):
+    def test_indirect_indexing_oob_crashes(self):
+        fn1 = """
+@torch.compile
+def fn(x):
+    b = torch.arange(3)
+    return x[b]
+
+fn(torch.zeros(2))
+"""
+
+        fn2 = """
+@torch.compile
+def fn(x):
+    b = torch.tensor([-3])
+    return x[b]
+
+fn(torch.zeros(2))
+"""
+        fn3 = """
+@torch.compile
+def fn(x):
+    b = torch.tensor([3])
+    return x[b]
+
+fn(torch.zeros(2))
+"""
+        fn4 = """
+@torch.compile
+def fn(x):
+    b = torch.tensor([0])
+    return x[b + 3]
+
+fn(torch.zeros(2))
+"""
+        for fn in [fn1, fn2, fn3, fn4]:
+            with self.assertRaises(
+                subprocess.CalledProcessError,
+            ):
+                try:
+                    # Run the deserialized function in a subprocess
+                    result = subprocess.run(
+                        [
+                            "python",
+                            "-c",
+                            f"import torch\n{fn}",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                except subprocess.CalledProcessError as e:
+                    self.assertEqual(e.returncode, -6)
+                    self.assertTrue("index out of bounds" in e.stderr)
+                    raise
+
+    def test_indirect_indexing_negative_index_in_bounds(self):
+        fn1 = """
+@torch.compile
+def fn(x):
+    b = torch.tensor([-2])
+    return x[b]
+
+fn(torch.zeros(2))
+"""
+        subprocess.run(
+            [
+                "python",
+                "-c",
+                f"import torch\n{fn1}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
 
 
 class TestIndexingSimplification(TorchTestCase):
