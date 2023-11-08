@@ -244,9 +244,9 @@ class AlphaDropout(_DropoutNd):
 class FeatureAlphaDropout(_DropoutNd):
     r"""Randomly masks out entire channels.
 
-    (a channel is a feature map,
+    A channel is a feature map,
     e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    is a tensor :math:`\text{input}[i, j]` of the input tensor). Instead of
     setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function. More details
     can be found in the paper `Self-Normalizing Neural Networks`_ .
