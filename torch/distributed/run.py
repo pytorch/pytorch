@@ -713,6 +713,8 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
 
+    log_line_prefix_template = os.getenv("TORCHELASTIC_LOG_LINE_PREFIX_TEMPLATE")
+
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
 
     if args.rdzv_backend == "static":
@@ -735,6 +737,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
         log_dir=args.log_dir,
+        log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
     )
 
