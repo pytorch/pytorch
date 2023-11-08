@@ -45,7 +45,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
-from torch.utils._pytree import PyTree, tree_flatten, tree_map
+from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count, count_label
 from torch.utils.weak import WeakIdRef
 
@@ -1311,7 +1311,6 @@ class FakeTensor(torch.Tensor):
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
-
 
 
 class FakeTensorMode(TorchDispatchMode):
