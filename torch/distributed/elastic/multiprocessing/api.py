@@ -575,6 +575,9 @@ class SubprocessHandler:
         self.proc: subprocess.Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
+        kwargs = {}
+        if not IS_WINDOWS:
+            kwargs['start_new_session'] = True
         return subprocess.Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
@@ -583,12 +586,16 @@ class SubprocessHandler:
             env=env,
             stdout=self._stdout,
             stderr=self._stderr,
+            **kwargs
         )
 
     def close(self, death_sig: Optional[signal.Signals] = None) -> None:
         if not death_sig:
             death_sig = _get_default_signal()
-        self.proc.send_signal(death_sig)
+        if IS_WINDOWS:
+            self.proc.send_signal(death_sig)
+        else:
+            os.killpg(self.proc.pid, death_sig)
         if self._stdout:
             self._stdout.close()
         if self._stderr:
