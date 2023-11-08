@@ -1,12 +1,12 @@
 import collections
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List
 
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import dict_values, identity, istype, odict_values
+from ..utils import identity, istype
 
 
 class MutableLocalSource(Enum):
@@ -115,15 +115,26 @@ def is_side_effect_safe(m: MutableLocalBase):
     return m.scope == scope_id
 
 
-# metaclass to call post_init
-class HasPostInit(type):
+class VariableTrackerMeta(type):
     def __call__(cls, *args, **kwargs):
+        """Call __post_init__"""
         obj = type.__call__(cls, *args, **kwargs)
         obj.__post_init__(*args, **kwargs)
         return obj
 
+    def __instancecheck__(cls, instance) -> bool:
+        """Make isinstance work with LazyVariableTracker"""
+        if type.__instancecheck__(
+            variables.LazyVariableTracker, instance
+        ) and cls not in (
+            VariableTracker,
+            variables.LazyVariableTracker,
+        ):
+            instance = instance.realize()
+        return type.__instancecheck__(cls, instance)
 
-class VariableTracker(metaclass=HasPostInit):
+
+class VariableTracker(metaclass=VariableTrackerMeta):
     """
     Base class for tracked locals and stack values
 
@@ -140,24 +151,6 @@ class VariableTracker(metaclass=HasPostInit):
         "parents_tracker",
         "user_code_variable_name",
     }
-
-    @staticmethod
-    def propagate(*vars: List[List["VariableTracker"]]):
-        """Combine the guards from many VariableTracker into **kwargs for a new instance"""
-        guards = set()
-
-        def visit(var):
-            if type(var) in (list, tuple, dict_values, odict_values):
-                for i in var:
-                    visit(i)
-            else:
-                assert isinstance(var, VariableTracker), typestr(var)
-                guards.update(var.guards)
-
-        visit(vars)
-        return {
-            "guards": guards,
-        }
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""
@@ -191,16 +184,30 @@ class VariableTracker(metaclass=HasPostInit):
 
         if isinstance(value, VariableTracker):
             if not skip_fn(value):
-                updated_dict = dict(value.__dict__)
-                for key in updated_dict.keys():
-                    if key not in value._nonvar_fields:
-                        updated_dict[key] = cls.apply(
-                            fn, updated_dict[key], cache, skip_fn
-                        )
-                result = fn(value.clone(**updated_dict))
+
+                def update_object_dict(v):
+                    changed = False
+                    rv = dict(v.__dict__)
+                    for key in rv.keys():
+                        if key not in v._nonvar_fields:
+                            prior = rv[key]
+                            rv[key] = cls.apply(fn, prior, cache, skip_fn)
+                            changed = changed or prior is not rv[key]
+                    if changed:
+                        return v.clone(**rv)
+                    return v
+
+                value = value.unwrap()
+                was_realized = value.is_realized()
+                result = fn(update_object_dict(value))
+                if not was_realized and value.is_realized():
+                    # running fn() resulted in value getting realized,
+                    # which means we missed updating the contents of result
+                    result = update_object_dict(result.unwrap())
             else:
                 result = fn(value)
-
+                if result is not None:
+                    result = result.unwrap()
         elif istype(value, list):
             result = [cls.apply(fn, v, cache, skip_fn) for v in value]
         elif istype(value, tuple):
@@ -220,23 +227,6 @@ class VariableTracker(metaclass=HasPostInit):
         # save `value` to keep it alive and ensure id() isn't reused
         cache[idx] = (result, value)
         return result
-
-    def add_guard(self, guard):
-        return self.clone(guards=set.union(self.guards, {guard}))
-
-    def add_guards(self, guards):
-        if guards is None:
-            return self
-        assert isinstance(guards, set)
-        return self.clone(guards=set.union(self.guards, guards))
-
-    def add_options(self, options, *more):
-        if more:
-            return self.add_options(options).add_options(*more)
-        if isinstance(options, VariableTracker):
-            return self.add_guards(options.guards)
-        assert isinstance(options, dict)
-        return self.add_guards(options.get("guards", set()))
 
     def __str__(self):
         return f"{self.__class__.__name__}()"
@@ -258,23 +248,10 @@ class VariableTracker(metaclass=HasPostInit):
         except NotImplementedError:
             return False
 
-    def can_make_guard(self):
-        try:
-            self.make_guard(None)
-            return True
-        except NotImplementedError:
-            return False
-
     def make_guard(self, fn):
         if self.source:
             return self.source.make_guard(fn)
         raise NotImplementedError()
-
-    def replace_guards(self, guards, *fns):
-        name = self.source.name()
-        new_guards = {g for g in (guards or []) if g.name != name}
-        new_guards.update(self.source.make_guard(fn) for fn in fns)
-        return new_guards
 
     def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
@@ -282,14 +259,13 @@ class VariableTracker(metaclass=HasPostInit):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
-        options = VariableTracker.propagate(self)
-
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
+        source = None
         if self.source:
-            options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable.create(value, **options)
+            source = AttrSource(self.source, name)
+        return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
         try:
@@ -334,18 +310,14 @@ class VariableTracker(metaclass=HasPostInit):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable.create(
-                len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
-            )
+            return variables.ConstantVariable.create(len(self.unpack_var_sequence(tx)))
         elif (
             name == "__getattr__"
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
         ):
-            return self.var_getattr(tx, args[0].as_python_constant()).add_options(
-                self, args[0]
-            )
+            return self.var_getattr(tx, args[0].as_python_constant())
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def rename(self, tx, name):
@@ -357,17 +329,31 @@ class VariableTracker(metaclass=HasPostInit):
         new_vt = self.clone(user_code_variable_name=new_name)
         return tx.replace_all(self, new_vt)
 
+    def realize(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to build the real VariableTracker"""
+        return self
+
+    def recursive_realize(self):
+        """Realize all objects under this"""
+        return VariableTracker.apply(lambda x: x.realize(), self)
+
+    def unwrap(self) -> "VariableTracker":
+        """Used by LazyVariableTracker to return the real VariableTracker if it already exists"""
+        return self
+
+    def is_realized(self):
+        """Used by LazyVariableTracker to indicate an unrealized node"""
+        return True
+
     def __init__(
         self,
         *,
-        guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
         user_code_variable_name: str = None,
         parents_tracker: ParentsTracker = None,
     ):
         super().__init__()
-        self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local
         self.user_code_variable_name = user_code_variable_name
