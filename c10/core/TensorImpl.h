@@ -2071,8 +2071,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         /*dest_impl=*/this,
         /*version_counter=*/version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
-    refresh_numel();
-    refresh_contiguous();
   }
 
   // Inference tensor doesn't have version counter,

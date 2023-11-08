@@ -5,7 +5,7 @@ import functools
 import inspect
 import os
 import re
-from itertools import count
+from itertools import chain, count
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import sympy
@@ -49,6 +49,10 @@ def buffer_reuse_key(node: ir.Buffer):
 
 
 def is_int(s: str):
+    # Cpp code gen adds L at the end of ints
+    # Lets remove it for checking whether we have an int or not
+    if s and s[-1] == "L":
+        s = s[:-1]
     try:
         int(s)
     except ValueError:
@@ -882,13 +886,15 @@ class WrapperCodeGen(CodeGen):
             else:
                 signature.append(SizeArg(key, arg))
         index_dtype = "tl.int32"
+        inductor_meta = {
+            "kernel_name": name,
+        }
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": constants,
             "configs": [config_of(signature)],
-            "kernel_name": name,
         }
         configs = [
             {
@@ -902,6 +908,7 @@ class WrapperCodeGen(CodeGen):
             f"""
             @user_autotune(
                 configs={configs!r},
+                inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
                 filename=__file__
             )
@@ -1478,7 +1485,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in self.src_to_kernel.values():
+        for kernel in chain(
+            self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+        ):
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1745,8 +1754,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.writeline(self.wrap_kernel_call(kernel, args))
 
     def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
-        raise AssertionError(
-            "User defined triton kernels are not supported in CPP mode"
+        if len(grid) != 1:
+            raise NotImplementedError("triton.autotune not yet supported")
+        grid = grid[0]
+        self.generate_kernel_call(
+            kernel_name,
+            args,
+            grid=grid,
+            device_index=V.graph.scheduler.current_device.index,
+            cuda=True,
+            triton=True,
         )
 
     def generate_scatter_fallback(
@@ -2443,7 +2460,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
     def generate(self, is_inference):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
-            for kernel in self.src_to_kernel.values():
+            for kernel in chain(
+                self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+            ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
         return super().generate(is_inference)
@@ -2475,6 +2494,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 arg,
                 (
                     sympy.Integer,
+                    sympy.Expr,
                     sympy.Symbol,
                     SymbolicCallArg,
                 ),
