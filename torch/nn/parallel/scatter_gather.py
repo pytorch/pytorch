@@ -33,11 +33,7 @@ def scatter(inputs: T, target_gpus: Sequence[Union[int, torch.device]], dim: int
     ...
 
 def scatter(inputs, target_gpus, dim=0):
-    r"""
-    Slices tensors into approximately equal chunks and
-    distributes them across given GPUs. Duplicates
-    references to objects that are not tensors.
-    """
+    r"""Slices tensors into approximately equal chunks and distributes them across given GPUs. Duplicates references to objects that are not tensors."""
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
@@ -69,7 +65,7 @@ def scatter_kwargs(
     target_gpus: Sequence[Union[int, torch.device]],
     dim: int = 0,
 ) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
-    r"""Scatter with support for kwargs dictionary"""
+    r"""Scatter with support for kwargs dictionary."""
     scattered_inputs = scatter(inputs, target_gpus, dim) if inputs else []
     scattered_kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
     if len(scattered_inputs) < len(scattered_kwargs):
@@ -80,10 +76,7 @@ def scatter_kwargs(
 
 
 def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
-    r"""
-    Gathers tensors from different GPUs on a specified device.
-    Use 'cpu' for CPU to avoid a deprecation warning.
-    """
+    r"""Gather tensors from different GPUs on a specified device. Use 'cpu' for CPU to avoid a deprecation warning."""
     def gather_map(outputs):
         out = outputs[0]
         if isinstance(out, torch.Tensor):
