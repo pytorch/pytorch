@@ -1,6 +1,6 @@
 import os
 
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from .grad_mode import _DecoratorContextManager
@@ -124,7 +124,7 @@ class UnpackedDualTensor(tuple):
     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
     See :func:`unpack_dual` for more details."""
 
-    def __new__(cls, primal: torch.Tensor, tangent: torch.Tensor) -> 'UnpackedDualTensor':
+    def __new__(cls, primal: torch.Tensor, tangent: Optional[torch.Tensor]) -> 'UnpackedDualTensor':
         return super().__new__(cls, (primal, tangent))
 
     @property
@@ -132,7 +132,7 @@ class UnpackedDualTensor(tuple):
         return self[0]
 
     @property
-    def tangent(self) -> torch.Tensor:
+    def tangent(self) -> Optional[torch.Tensor]:
         return self[1]
 
 
