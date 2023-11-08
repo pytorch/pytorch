@@ -1070,7 +1070,7 @@
   result: self_t.masked_scatter(mask, source_t)
 
 - name: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
-  grad_output: zeros_like(grad_output).masked_scatter(mask, grad)
+  grad_output: zeros_like(grad_output).masked_scatter_(mask, grad)
   mask: non_differentiable
   result: masked_scatter_backward(grad_output_t, mask, grad_output_t.sizes())
 

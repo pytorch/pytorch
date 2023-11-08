@@ -7796,8 +7796,7 @@
 
 - func: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
   dispatch:
-    CPU: masked_scatter_backward_symint
-    CUDA: masked_scatter_backward_symint
+    CompositeExplicitAutograd: masked_scatter_backward_symint
 
 - func: _masked_softmax(Tensor self, Tensor mask, int? dim=None, int? mask_type=None) -> Tensor
   dispatch:
