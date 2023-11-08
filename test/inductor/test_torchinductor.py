@@ -6369,9 +6369,9 @@ class CommonTemplate:
 
     def test_unfold_zero_dimension_tensor(self):
         def forward(x):
-            return torch.unfold_copy(dimension=1, input=x,size=0,step=7)
+            return torch.unfold_copy(dimension=1, input=x, size=0, step=7)
 
-        x = torch.rand([1,0], dtype=torch.float32)
+        x = torch.rand([1, 0], dtype=torch.float32)
 
         y = forward(x)
         compiled_y = torch.compile(forward, fullgraph=True)(x)
