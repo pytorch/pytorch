@@ -117,8 +117,9 @@ class Freezer:
 
     def write_bytecode(self, install_root):
         """
-        Write the `.c` files containing the frozen bytecode. Shard frozen
-        modules evenly across the files.
+        Write the `.c` files containing the frozen bytecode.
+        
+        Shared frozen modules evenly across the files.
         """
         bytecode_file_names = [
             f"bytecode_{i}.c" for i in range(NUM_BYTECODE_FILES)
@@ -132,10 +133,7 @@ class Freezer:
             f.close()
 
     def write_main(self, install_root, oss, symbol_name):
-        """
-        Write the `main.c` file containing a table enumerating all the
-        frozen modules.
-        """
+        """Write the `main.c` file containing a table enumerating all the frozen modules."""
         with open(os.path.join(install_root, "main.c"), "w") as outfp:
             outfp.write(MAIN_INCLUDES)
             for m in self.frozen_modules:
@@ -150,9 +148,7 @@ class Freezer:
                 outfp.write(MAIN_SUFFIX)
 
     def write_frozen(self, m: FrozenModule, outfp):
-        """
-        Write a single frozen module's bytecode out to a C variable.
-        """
+        """Write a single frozen module's bytecode out to a C variable."""
         outfp.write(f"unsigned char {m.c_name}[] = {{")
         for i in range(0, len(m.bytecode), 16):
             outfp.write("\n\t")
@@ -161,7 +157,7 @@ class Freezer:
         outfp.write("\n};\n")
 
     def compile_path(self, path: Path, top_package_path: Path):
-        """Generic entry point for compiling a Path object."""
+        """Entry point for compiling a Path object."""
         if path.is_dir():
             self.compile_package(path, top_package_path)
         else:
@@ -220,8 +216,9 @@ class Freezer:
     @indent_msg
     def compile_file(self, path: Path, top_package_path: Path):
         """
-        Compile a Python source file to frozen bytecode. Append the result to
-        `self.frozen_modules`.
+        Compile a Python source file to frozen bytecode.
+        
+        Append the result to `self.frozen_modules`.
         """
         assert path.is_file()
         if path.suffix != ".py":
