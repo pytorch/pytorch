@@ -145,6 +145,7 @@ static PyObject* THPModule_initExtension(
     PyObject* _unused,
     PyObject* shm_manager_path) {
   HANDLE_TH_ERRORS
+#if !defined(FBCODE_CAFFE2)
   if (torch::get_cpp_stacktraces_enabled() && !torch::get_disable_addr2line()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
@@ -156,6 +157,13 @@ static PyObject* THPModule_initExtension(
       oss << "C++ CapturedTraceback:" << std::endl;
       const auto& s_tb = s_tbs.tracebacks.at(0);
       for (auto idx : c10::irange(s_tb.size())) {
+        // Skip the first few frames:
+        //  #1 torch::CapturedTraceback::gather(bool, bool, bool)
+        //  #2 THPModule_initExtension
+        //  #3 THPModule_initExtension(_object*, _object*)::{lambda()#1}
+        if (idx <= 3) {
+          continue;
+        }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
         oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
@@ -164,6 +172,7 @@ static PyObject* THPModule_initExtension(
       return oss.str();
     });
   }
+#endif
   if (!THPUtils_checkString(shm_manager_path)) {
     THPUtils_setError(
         "initialization error - expected bytes/string object as shm_manager_path!");
