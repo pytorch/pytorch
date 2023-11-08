@@ -14,10 +14,10 @@ def pytree_register_structseq(cls):
         warnings.warn(f"Class {cls!r} is not a PyStructSequence class.")
 
     def structseq_flatten(structseq):
-        return list(structseq), None
+        return list(structseq), type(structseq)
 
     def structseq_unflatten(values, context):
-        return cls(values)
+        return context(values)
 
     torch.utils._pytree._register_pytree_node(
         cls,
