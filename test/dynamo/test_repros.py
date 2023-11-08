@@ -1576,8 +1576,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             counters.clear()
 
     def test_tensor_self_assigning_in_place_ops(self):
-        from torch._dynamo.utils import counters
         import operator
+
+        from torch._dynamo.utils import counters
 
         counters.clear()
 
@@ -1609,6 +1610,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for op in oplist:
                 torch._dynamo.reset()
                 op_arg = arg_creator()
+
                 def func(x, y):
                     op(x, op_arg)
                     x.data = y
@@ -1636,44 +1638,44 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 )
                 counters.clear()
 
-        
     def test_tensor_self_assigning_non_in_place_ops(self):
         from torch._dynamo.utils import counters
-        import operator
 
         counters.clear()
 
         # https://github.com/pytorch/pytorch/issues/113160
 
-        op_arg = torch.rand([6])
-        def func(x, y):
-            # this will replace the original reference to x, and create a new tensor.
-            x @= op_arg
-            # setattr untracked tensor will result in graph break
-            x.data = y
-            x.add_(1)
-            return x
+        for size in [[6], [6, 6]]:
+            op_arg = torch.rand(size)
 
-        a = torch.rand([6])
-        a1 = torch.clone(a)
-        b = torch.rand([6])
-        b1 = torch.clone(b)
+            def func(x, y):
+                # this will replace the original reference to x, and create a new tensor.
+                x @= op_arg
+                # setattr untracked tensor will result in graph break
+                x.data = y
+                x.add_(1)
+                return x
 
-        cnt = torch._dynamo.testing.CompileCounter()
+            a = torch.rand(size)
+            a1 = torch.clone(a)
+            b = torch.rand(size)
+            b1 = torch.clone(b)
 
-        _ = func(a, b)
-        _ = torch.compile(func, backend=cnt)(a1, b1)
+            cnt = torch._dynamo.testing.CompileCounter()
 
-        self.assertEqual(a, a1)
-        self.assertEqual(b, b1)
-        self.assertEqual(cnt.frame_count, 2)  # graph breaks
+            _ = func(a, b)
+            _ = torch.compile(func, backend=cnt)(a1, b1)
 
-        self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertTrue(
-            "call_function BuiltinVariable(setattr)"
-            in next(iter(counters["graph_break"].keys()))
-        )
-        counters.clear()
+            self.assertEqual(a, a1)
+            self.assertEqual(b, b1)
+            self.assertEqual(cnt.frame_count, 2)  # graph breaks
+
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertTrue(
+                "call_function BuiltinVariable(setattr)"
+                in next(iter(counters["graph_break"].keys()))
+            )
+            counters.clear()
 
     def test_tensor_untracked_setattr_data_graph_breaks(self):
         # https://github.com/pytorch/pytorch/issues/113030
