@@ -227,19 +227,7 @@ class _StorageBase:
         return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
-        """Move the storage to shared memory.
-
-        This is a no-op for storages already in shared memory and for CUDA
-        storages, which do not need to be moved for sharing across processes.
-        Storages in shared memory cannot be resized.
-
-        Note that to mitigate issues like https://github.com/pytorch/pytorch/issues/95606
-        it is thread safe to call this function from multiple threads on the same object.
-        It is NOT thread safe though to call any other function on self without proper
-        synchronization. Please see :doc:`/notes/multiprocessing` for more details.
-
-        Returns: self
-        """
+        """See :meth:`torch.UntypedStorage.share_memory_`"""
         from torch.multiprocessing import get_sharing_strategy
         if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
             pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
