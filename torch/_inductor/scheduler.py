@@ -2138,6 +2138,7 @@ class Scheduler:
 
     @dynamo_timed
     def codegen(self):
+        device = None
         for node in self.nodes:
             try:
                 log.debug(
@@ -2176,15 +2177,12 @@ class Scheduler:
             if node.is_template():
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)
-                self.check_scheduled_num_args_and_flush(device)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)
-                self.check_scheduled_num_args_and_flush(device)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
-                self.check_scheduled_num_args_and_flush(device)
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2197,12 +2195,12 @@ class Scheduler:
 
             self.available_buffer_names.update(node.get_names())
 
-        self.flush()
+            if device is not None:
+                args_num = self.get_backend(device).get_num_args()
+                if args_num > Scheduler.MAX_FUSED_KERNEL_ARGS_NUM:
+                    self.flush()
 
-    def check_scheduled_num_args_and_flush(self, device):
-        args_num = self.get_backend(device).get_num_args()
-        if args_num > Scheduler.MAX_FUSED_KERNEL_ARGS_NUM:
-            self.flush()
+        self.flush()
 
     def is_unaligned_buffer(self, buf_name):
         if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
