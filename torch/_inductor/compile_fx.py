@@ -173,6 +173,65 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
+def split_const_gm(
+    gm: torch.fx.GraphModule,
+) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
+    """
+    This function takes an GraphModule input "gm".
+    The gm will be split into 2 components,
+      1) const_gm, which consists the subgraph of gm that can be constant folded.
+      2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    const_output_index is a mapping of corresponding node name from gm to the
+    output index of const_gm.
+    Returns (const_gm, const_output_index)
+    """
+    from torch._inductor.constant_folding import (
+        CONST_MODULE_TAG,
+        constant_graph_tag,
+        MODULE_TAG,
+        replace_node_with_constant,
+    )
+    from torch.fx.passes.split_utils import split_by_tags
+
+    constant_graph_tag(gm)
+    split_gm = split_by_tags(gm, [CONST_MODULE_TAG, MODULE_TAG], return_tuple=True)
+    const_gm = getattr(split_gm, CONST_MODULE_TAG)
+    const_result = const_gm()
+
+    const_names = {
+        x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
+    }
+
+    to_erase_node = []
+    to_replace_node = []
+    const_output_index = {}
+    for node in gm.graph.nodes:
+        if node.name in const_names:
+            to_replace_node.append(node)
+        elif node.tag == CONST_MODULE_TAG:
+            to_erase_node.append(node)
+
+    for node in to_replace_node:
+        new_const_name = "_FOLDED_CONST_" + node.name
+        replace_node_with_constant(
+            gm,
+            node,
+            const_result[const_names[node.name]],
+            new_const_name,
+        )
+        const_output_index[new_const_name] = const_names[node.name]
+    for node in to_erase_node[::-1]:
+        if node.users:
+            for n in node.users:
+                assert n.tag == MODULE_TAG, f"node: {node} user not empty."
+        else:
+            gm.graph.erase_node(node)
+    gm.recompile()
+
+    return const_gm, const_output_index
+
+
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
     tf32_ops = {
@@ -249,10 +308,14 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                 # clone_graph(gm) makes sure no graph modification from the first pass will
                 # leak to the second pass. It does increase memory pressure, but the problem
                 # can be alleviated once we have parameters as FakeTensor.
+                cloned_gm = clone_graph(gm)
 
-                compiled = inner_compile(
-                    clone_graph(gm), example_inputs, **kwargs_patched
-                )
+                if config.split_const_graph:
+                    # Do a split to make sure we do not commingle nodes for tuning.
+                    const_gm, _ = split_const_gm(cloned_gm)
+                    inner_compile(const_gm, [], **kwargs_patched)([])
+
+                compiled = inner_compile(cloned_gm, example_inputs, **kwargs_patched)
 
                 def materialize(x):
                     if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -584,7 +647,41 @@ def fx_codegen_and_compile(
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.info("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
 
+    if aot_mode and cpp_wrapper and config.split_const_graph:
+        split_const_graph = True
+    else:
+        split_const_graph = False
+        original_constants = None
+        const_code = None
+        const_kernels = None
+        const_output_index = None
+
     with V.set_fake_mode(fake_mode):
+        if split_const_graph:
+            const_gm, const_output_index = split_const_gm(gm)
+
+            const_names = {
+                x.name: idx
+                for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
+            }
+
+            const_graph = GraphLowering(
+                const_gm,
+                shape_env=shape_env,
+                num_static_inputs=num_fixed,
+                graph_id=graph_id,
+                cpp_wrapper=cpp_wrapper,
+                aot_mode=aot_mode,
+                user_visible_outputs=user_visible_outputs,
+                extern_node_serializer=extern_node_serializer,
+                is_inference=is_inference,
+            )
+            with V.set_graph_handler(const_graph), V.set_const_graph_generation(True):
+                const_graph.run()
+                const_code, _ = const_graph.codegen()
+                original_constants = const_graph.constants
+                const_kernels = set(const_graph.wrapper_code.src_to_kernel.values())  # type: ignore[union-attr]
+
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -595,8 +692,12 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
             is_inference=is_inference,
+            original_constants=original_constants,
+            const_output_index=const_output_index,
+            const_kernels=const_kernels,
+            const_code=const_code,
         )
-        with V.set_graph_handler(graph):
+        with V.set_graph_handler(graph), V.set_const_graph_generation(False):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[int, ...]]] = []
             if graph.graph_outputs is not None:

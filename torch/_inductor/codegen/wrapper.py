@@ -346,8 +346,9 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count = 0
         self.unbacked_symbol_decls = set()
 
-        self.write_header()
-        self.write_prefix()
+        if not V.const_graph_generation:
+            self.write_header()
+            self.write_prefix()
 
         if not V.graph.aot_mode:
             for name, hashed in V.graph.constant_reprs.items():
@@ -1341,21 +1342,35 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
         if V.graph.aot_mode:
-            self.prefix.splice(
-                """
-                void AOTInductorModel::run_impl(
-                    AtenTensorHandle*
-                        input_handles, // array of input AtenTensorHandle; handles
-                                        // are stolen; the array itself is borrowed
-                    AtenTensorHandle*
-                        output_handles, // array for writing output AtenTensorHandle; handles
-                                        // will be stolen by the caller; the array itself is
-                                        // borrowed
-                    DeviceStreamType stream,
-                    AOTIProxyExecutorHandle proxy_executor
-                ) {
-                """
-            )
+            if V.graph.const_code:
+                self.prefix.splice(V.graph.const_code)
+
+            if V.const_graph_generation:
+                self.prefix.splice(
+                    """
+                    void AOTInductorModel::_const_run_impl(
+                        std::vector<AtenTensorHandle>& output_handles,
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                )
+            else:
+                self.prefix.splice(
+                    """
+                    void AOTInductorModel::run_impl(
+                        AtenTensorHandle*
+                            input_handles, // array of input AtenTensorHandle; handles
+                                            // are stolen; the array itself is borrowed
+                        AtenTensorHandle*
+                            output_handles, // array for writing output AtenTensorHandle; handles
+                                            // will be stolen by the caller; the array itself is
+                                            // borrowed
+                        DeviceStreamType stream,
+                        AOTIProxyExecutorHandle proxy_executor
+                    ) {
+                    """
+                )
         else:
             self.prefix.splice(
                 f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& inputs) {{"""
@@ -1363,19 +1378,20 @@ class CppWrapperCodeGen(WrapperCodeGen):
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if V.graph.aot_mode:
-                if config.aot_inductor.abi_compatible:
-                    self.prefix.splice(
-                        """
-                            auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
-                        """
-                    )
-                else:
-                    # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
-                    self.prefix.splice(
-                        """
-                            auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
-                        """
-                    )
+                if not V.const_graph_generation:
+                    if config.aot_inductor.abi_compatible:
+                        self.prefix.splice(
+                            """
+                                auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
+                            """
+                        )
+                    else:
+                        # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
+                        self.prefix.splice(
+                            """
+                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
+                            """
+                        )
             else:
                 self.prefix.splice(
                     """
@@ -1413,6 +1429,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
+                    if constants_key not in V.graph.used_constants:
+                        continue
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
@@ -1434,7 +1452,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                self.prefix.writeline("inputs.clear();")
+                if not V.const_graph_generation:
+                    self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = *dynamic_cast<AOTInductorModelKernels*>(this->kernels_.get());"
                 )
@@ -1463,7 +1482,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        for kernel in self.src_to_kernel.values():
+        declare_kernel = set(self.src_to_kernel.values())
+        declare_kernel.update(V.graph.const_kernels)
+        for kernel in declare_kernel:
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
@@ -1556,10 +1577,60 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.prefix.writeline("}")
 
+    def codegen_const_run_driver(self):
+        """
+        // Generated code example
+        void AOTInductorModel::const_run_impl(
+            DeviceStreamType stream,
+            AOTIProxyExecutorHandle proxy_executor
+        ) {
+            std::vector<AtenTensorHandle> output_handles;
+            // build up output_handles over here.
+            _const_run_impl(output_handles, stream, proxy_executor);
+        }
+        """
+
+        self.prefix.splice(
+            """
+            void AOTInductorModel::const_run_impl(
+                DeviceStreamType stream,
+                AOTIProxyExecutorHandle proxy_executor
+            ) {
+            """
+        )
+
+        with self.prefix.indent():
+            # This is a mapping to the index of constant folding graph's output
+            const_index_mapping = [None] * len(V.graph.const_output_index)
+            for idx, (name, _) in enumerate(V.graph.constants.items()):
+                if name not in V.graph.const_output_index:
+                    continue
+                else:
+                    const_index_mapping[V.graph.const_output_index[name]] = idx  # type: ignore[call-overload]
+            assert (
+                None not in const_index_mapping
+            ), "Not all constant gets mapped for constant folding graph."
+
+            self.prefix.writeline(
+                f"std::vector<AtenTensorHandle> output_handles({len(const_index_mapping)});"
+            )
+
+            for output_idx, const_idx in enumerate(const_index_mapping):
+                self.prefix.writeline(
+                    f"output_handles[{output_idx}] = constants_.at({const_idx});"
+                )
+
+            self.prefix.writeline(
+                "_const_run_impl(output_handles, stream, proxy_executor);"
+            )
+
+        self.prefix.writeline("}")
+
     def generate(self, is_inference):
-        if V.graph.aot_mode:
+        if V.graph.aot_mode and not V.const_graph_generation:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
+            self.codegen_const_run_driver()
         self.write_wrapper_decl()
         return super().generate(is_inference)
 
@@ -1613,9 +1684,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_end(self, result):
         if V.graph.aot_mode:
-            result.writeline("} // AOTInductorModel::run_impl")
-            result.writeline("} // namespace aot_inductor")
-            result.writeline("} // namespace torch")
+            if V.const_graph_generation:
+                result.writeline("} // AOTInductorModel::const_run_impl")
+            else:
+                result.writeline("} // AOTInductorModel::run_impl")
+                result.writeline("} // namespace aot_inductor")
+                result.writeline("} // namespace torch")
             return
 
         result.writeline("'''\n)")

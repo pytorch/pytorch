@@ -6,22 +6,27 @@ import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
 
+MODULE_TAG = "_MAIN_MODULE"
+CONST_MODULE_TAG = "_CONST_MODULE"
 
-def replace_node_with_constant(gm, node, constant):
+
+def replace_node_with_constant(gm, node, constant, name=None):
     g = gm.graph
 
-    if not hasattr(gm, "_frozen_param_count"):
-        gm._frozen_param_count = 0
+    if name:
+        qualname = name
+    else:
+        if not hasattr(gm, "_frozen_param_count"):
+            gm._frozen_param_count = 0
+        i = gm._frozen_param_count
 
-    i = gm._frozen_param_count
+        while True:
+            qualname = f"_frozen_param{i}"
+            if not hasattr(gm, qualname):
+                break
+            i += 1
 
-    while True:
-        qualname = f"_frozen_param{i}"
-        if not hasattr(gm, qualname):
-            break
-        i += 1
-
-    gm._frozen_param_count = i + 1
+        gm._frozen_param_count = i + 1
 
     with g.inserting_before(node):
         new_input_node = g.create_node("get_attr", qualname, (), {})
@@ -187,3 +192,19 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
+
+
+@torch.utils._python_dispatch._disable_current_modes()
+def constant_graph_tag(gm):
+    cf = ConstantFolder(gm, skip_constructors=True)
+    cf.run()
+
+    for node in gm.graph.nodes:
+        if (
+            node.op == "get_attr"
+            or node in cf.node_replacements
+            or node in cf.replaced_uses
+        ):
+            node.tag = CONST_MODULE_TAG
+        else:
+            node.tag = MODULE_TAG

@@ -346,6 +346,9 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
+# flag to decide whether to create a submodule for constant graph.
+split_const_graph: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:

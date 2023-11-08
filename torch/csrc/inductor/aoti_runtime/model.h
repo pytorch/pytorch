@@ -352,6 +352,15 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
   AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
 
+  void const_run_impl(
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
+
+  void _const_run_impl(
+      std::vector<AtenTensorHandle>& output_handles,
+      DeviceStreamType stream,
+      AOTIProxyExecutorHandle proxy_executor);
+
   void run_impl(
       AtenTensorHandle*
           input_handles, // array of input AtenTensorHandle; handles

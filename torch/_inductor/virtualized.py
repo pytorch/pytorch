@@ -188,6 +188,7 @@ _kernel = Virtualized("kernel", NullKernelHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
 _aot_compilation = Virtualized("aot_compilation", NullHandler)
+_const_graph_generation = Virtualized("const_graph_generation", NullHandler)
 _current_node = Virtualized("current_node", NullHandler)
 
 
@@ -297,6 +298,10 @@ class _V:
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
     set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
+    set_const_graph_generation: Callable[
+        [Any], Any
+    ] = _const_graph_generation._set_handler
+    get_const_graph_generation: Callable[[], Any] = _const_graph_generation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
 
@@ -336,6 +341,10 @@ class _V:
     @property
     def aot_compilation(self):
         return _aot_compilation._get_handler()
+
+    @property
+    def const_graph_generation(self):
+        return _const_graph_generation._get_handler()
 
     @property
     def current_node(self):
