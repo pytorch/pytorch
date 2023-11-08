@@ -1372,7 +1372,6 @@ class TestOperators(TestCase):
         xfail('normal', ''),
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
-        xfail('masked_scatter', ''),  # NYI: forward-AD for masked_scatter
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
@@ -1541,7 +1540,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
-        xfail('masked_scatter'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
