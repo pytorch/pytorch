@@ -509,13 +509,13 @@ class BuiltinVariable(VariableTracker):
             try:
                 fn = self.fn
 
-                if self.fn is operator.iadd and isinstance(
+                if fn is operator.iadd and isinstance(
                     args[0], variables.ConstantVariable
                 ):
                     # Work around weird bug in hf_T5
                     fn, args = operator.add, [args[1], args[0]]
 
-                if self.fn is operator.getitem and isinstance(args[1], SymNodeVariable):
+                if fn is operator.getitem and isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will
                     # trace fine
@@ -537,14 +537,13 @@ class BuiltinVariable(VariableTracker):
                     )
 
                     ret = wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
-                    if self.fn in self._self_assigning_ops() and isinstance(
+                    if fn in self._self_assigning_ops() and isinstance(
                         args[0], variables.TensorVariable
                     ):
                         assert (
                             args[0].as_proxy().node.meta["example_value"]
                             is ret.as_proxy().node.meta["example_value"]
                         )
-                        # The mutation is propagated via the example_value
                         ret = args[0]
                     return ret
 
@@ -561,7 +560,7 @@ class BuiltinVariable(VariableTracker):
                     )
                 elif self.unspec_python_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
-                    raw_value = self.fn(*_args, **_kwargs)
+                    raw_value = fn(*_args, **_kwargs)
 
                     need_unwrap = any(
                         x.need_unwrap
@@ -581,7 +580,7 @@ class BuiltinVariable(VariableTracker):
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
-                    if self.fn is operator.truediv and isinstance(
+                    if fn is operator.truediv and isinstance(
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
@@ -590,14 +589,13 @@ class BuiltinVariable(VariableTracker):
                 # TODO: does this also apply to SymNodeVariable? A: Yes if:
                 # 1. (legal) SymNodeVariable mutations are propagated via `example_value`
                 # 2. (required) SymNodeVariable can have attribute mutations
-                if self.fn in self._self_assigning_ops() and isinstance(
+                if fn in self._self_assigning_ops() and isinstance(
                     args[0], variables.TensorVariable
                 ):
                     assert (
                         args[0].as_proxy().node.meta["example_value"]
                         is ret.as_proxy().node.meta["example_value"]
                     )
-                    # The mutation is propagated via the example_value
                     ret = args[0]
                 return ret
 
