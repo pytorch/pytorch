@@ -5,7 +5,7 @@ import unittest
 
 import torch
 import torch._dynamo.test_case
-from torch._dynamo.allowed_functions import gen_allowed_functions_and_ids
+from torch._dynamo.allowed_functions import gen_allowed_objs_and_ids
 from torch._dynamo.skipfiles import (
     FUNC_INLINELIST,
     LEGACY_MOD_INLINELIST,
@@ -74,8 +74,12 @@ def gen_get_func_inlinelist(dummy_func_inlinelist):
     return get_func_inlinelist
 
 
-def generate_allow_list():
-    return gen_allowed_functions_and_ids()[1]
+# Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
+# allowed objects include:
+# - Torch context manager classes.
+# - Torch in graph functions.
+def generate_allowed_object_set():
+    return gen_allowed_objs_and_ids()[1]
 
 
 class TraceRuleTests(torch._dynamo.test_case.TestCase):
@@ -97,11 +101,11 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     def test_torch_name_rule_map(self):
-        additional_torch_obj_rule_set = {
+        manual_torch_obj_rule_set = {
             load_object(x) for x in manual_torch_name_rule_map.keys()
         }
         generated_torch_name_rule_set = (
-            generate_allow_list() | additional_torch_obj_rule_set
+            generate_allowed_object_set() | manual_torch_obj_rule_set
         )
         ignored_torch_obj_rule_set = {
             load_object(x) for x in ignored_torch_name_rule_set
@@ -111,7 +115,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
         )
         x = generated_torch_name_rule_set - used_torch_name_rule_set
         y = used_torch_name_rule_set - generated_torch_name_rule_set
-        # breakpoint()
         msg1 = (
             f"New torch objects: {x} "
             "were not added to trace_rules.torch_name_rule_map or test_trace_rules.ignored_torch_name_rule_set. "

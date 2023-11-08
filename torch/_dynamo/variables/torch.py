@@ -247,7 +247,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
-    """Points to a function that should be put as a FX graph node"""
+    """Points to a torch function/method that should be put in FX graph"""
 
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
@@ -697,7 +697,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
 
 class TorchVariable(BaseTorchVariable):
-    """Points to a module or method in torch.*"""
+    """Points to a module, classes or functions in torch.*"""
 
     def __init__(self, value, **kwargs):
         if (
