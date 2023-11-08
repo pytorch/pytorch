@@ -460,6 +460,10 @@ class CachingAutotuner(KernelInterface):
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
+            # User defined triton kernels will have arbitrary kwarg names
+            # This might also add XBLOCK, YBLOCK, ZBLOCK but that is since
+            # no one will read it.
+            **launcher.config.kwargs,
         }
         CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
