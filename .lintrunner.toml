@@ -188,7 +188,6 @@ exclude_patterns = [
     'torch/_dynamo/backends/**/*.py',
     'torch/_dynamo/variables/**/*.py',
     'torch/_dynamo/comptime.py',
-    'torch/_dynamo/device_interface.py',
     'torch/_dynamo/polyfill.py',
     'torch/_dynamo/skipfiles.py',
     'torch/_inductor/fx_passes/serialized_patterns/**',
