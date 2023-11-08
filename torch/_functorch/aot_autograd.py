@@ -4318,10 +4318,8 @@ def create_aot_dispatcher_function(
                     if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                         assert all(getattr(x, attr).fake_mode is fake_mode for attr in attrs)
                         return x
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
                 static_shapes = idx < aot_config.num_params_buffers and config.static_weight_shapes
-                out = fake_mode.from_tensor(x, static_shapes=static_shapes, allocate_fresh_if_metadata_mutated=True)
+                out = fake_mode.from_tensor(x, static_shapes=static_shapes, force_fresh_allocation=True)
                 return out
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
