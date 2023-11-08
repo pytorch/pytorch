@@ -5,6 +5,7 @@ import importlib
 import inspect
 import itertools
 import random
+import sys
 import threading
 import types
 from typing import Dict, List
@@ -580,12 +581,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
-        try:
-            from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
-        except (ImportError, AttributeError):
-            return False
-        else:
-            return type(obj) is KeyedJaggedTensor
+        mod = sys.modules.get("torchrec.sparse.jagged_tensor")
+        return mod is not None and type(obj) is mod.KeyedJaggedTensor
 
     def __init__(self, value, **kwargs):
         from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
