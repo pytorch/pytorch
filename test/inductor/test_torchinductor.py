@@ -3111,6 +3111,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
+    @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -7481,9 +7482,11 @@ class CommonTemplate:
         Inductor will try triton configs like x = 64 and y = 1024 which will
         result in out of shared memory if dtype is fp32.
 
-        Currnelty inductor will skip such bad configs and pick the best one
+        Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
         def fn(x, y):
@@ -7491,11 +7494,8 @@ class CommonTemplate:
 
         # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
         # CI while still keep the same up-rounded size-hints.
-        try:
-            a = torch.randn(2**24, 65, device=self.device)
-            b = torch.randn(65, 2**24, device=self.device)
-        except RuntimeError:
-            return  # skip testing if OOM
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
 

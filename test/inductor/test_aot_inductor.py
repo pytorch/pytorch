@@ -928,6 +928,26 @@ class AOTInductorTestsTemplate:
             torch.float32, self.device == "cuda"
         )
 
+    def test_consecutive_compiles(self):
+        """Test that compilation behaves correctly with cache hits"""
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        mod = TestModule()
+        inp = torch.rand(1)
+        mod(inp)
+        mod2 = torch.fx.symbolic_trace(mod, concrete_args=[inp])
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+        # compile the 2nd time with cache hit
+        so = torch._export.aot_compile(mod2, (inp,))
+        assert so is not None
+
     def test_normal_functional(self):
         class Model(torch.nn.Module):
             def __init__(self):

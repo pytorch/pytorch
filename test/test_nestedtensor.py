@@ -96,15 +96,34 @@ def noncontiguous_to_padded_tensor(input, shape=None):
 # Helper function to generate a random nested tensor
 
 
-def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided):
+def random_nt(device, dtype, num_tensors, max_dims, min_dims=None, layout=torch.strided, require_non_empty=True):
     if min_dims is None:
         min_dims = tuple([0] * len(max_dims))
+
+    assert len(max_dims) == len(min_dims)
+    for min_dim, max_dim in zip(min_dims, max_dims):
+        assert max_dim > min_dim, "random_nt: max_dim must be greater than min_dim"
+        assert min_dim >= 0, "random_nt: min_dim must be non-negative"
+        if require_non_empty:
+            assert not (min_dim == 0 and max_dim == 1), (
+                "random_nt: zero cannot be the only possible value if require_non_empty is True"
+            )
+
+    if require_non_empty:
+        # Select a random idx that will be required to be non-empty
+        non_zero_idx = torch.randint(low=0, high=num_tensors, size=(1,)).item()
+
     ts1 = []
-    for _ in range(num_tensors):
-        tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
-                            for (min_dim, max_dim) in zip(min_dims, max_dims)])
+    for i, _ in enumerate(range(num_tensors)):
+        tensor_dims = []
+        for min_dim, max_dim in zip(min_dims, max_dims):
+            new_min_dim = min_dim
+            if require_non_empty and i == non_zero_idx and min_dim == 0:
+                new_min_dim = 1
+            tensor_dims.append(torch.randint(low=new_min_dim, high=max_dim, size=(1,)).item())
         t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
         ts1.append(t1)
+
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype, layout=layout)
 
 
@@ -145,16 +164,23 @@ def random_nt_from_similar(other, dims=None):
     ], device=other.device)
 
 
-class TestNestedTensor(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
+class NestedTestCase(TestCase):
+    # Suppress errors is enabled by default in the test suite. We disable
+    # suppress errors in particular for NestedTensors to ensure that dynamo
+    # graph breaks cleanly.
     def setUp(self):
+        super().setUp()
         self._exit_stack = contextlib.ExitStack()
         self._exit_stack.enter_context(
             unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
         )
 
+    def tearDown(self):
+        self._exit_stack.close()
+        super().tearDown()
+
+
+class TestNestedTensor(NestedTestCase):
     @torch._dynamo.config.patch(suppress_errors=True)
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
@@ -660,16 +686,7 @@ class TestNestedTensor(TestCase):
             torch.cat([x, y], dim=-1)
 
 
-class TestNestedTensorDeviceType(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorDeviceType(NestedTestCase):
     # Helper function to generate a pair of random nested tensors
     # the 2 nested tensors have same shapes
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
@@ -1337,7 +1354,7 @@ class TestNestedTensorDeviceType(TestCase):
         params = ((2, (1, 1)), ((4), (4, 4)), (10, (3, 5, 7)))
 
         def test_sum(device, dtype, ntensors, max_sizes, dim, keepdim=True):
-            nt = random_nt(device, dtype, ntensors, max_sizes)
+            nt = random_nt(device, dtype, ntensors, max_sizes, require_non_empty=False)
             nt2 = nt.clone()
             ub2 = nt2.unbind()
             nt.requires_grad_(True)
@@ -1901,6 +1918,16 @@ class TestNestedTensorDeviceType(TestCase):
         )
 
     @dtypes(torch.float, torch.float16, torch.double)
+    def test_to_padded_tensor_zero_numel_errors(self, device, dtype):
+        ts = [torch.ones(1, 0), torch.ones(0, 0)]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype, layout=torch.strided)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"at least one constituent tensor should have non-zero numel",
+            lambda: torch.nested.to_padded_tensor(nt, 0.0)
+        )
+
+    @dtypes(torch.float, torch.float16, torch.double)
     def test_transpose(self, device, dtype):
         nt = random_nt(device, dtype, 4, (4, 4))
         # error case: transpose nested dimension
@@ -2263,16 +2290,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_cont, memory_format=torch.channels_last_3d))
         self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
-class TestNestedTensorAutograd(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorAutograd(NestedTestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
     # includes the default parameters used for testing ops with gradcheck. However nested tensor
     # does not support the stack op therefore we turn it off for these tests
@@ -2891,16 +2909,7 @@ class TestNestedTensorAutograd(TestCase):
 
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
-class TestNestedTensorSubclass(TestCase):
-    def tearDown(self):
-        self._exit_stack.close()
-
-    def setUp(self):
-        self._exit_stack = contextlib.ExitStack()
-        self._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
-        )
-
+class TestNestedTensorSubclass(NestedTestCase):
     # TODO: consolidate with the below
     def _get_list_for_jagged_tensor(self, nested_size, device, requires_grad=True):
         Ds = nested_size[1:]
