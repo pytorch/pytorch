@@ -2606,6 +2606,20 @@ class CPUReproTests(TestCase):
         y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
         self.common(fn, (x, y))
 
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
