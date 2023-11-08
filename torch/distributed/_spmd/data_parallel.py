@@ -41,7 +41,8 @@ _spmd_lib_impl.impl("tag_grad", lambda x: x, "CompositeExplicitAutograd")
 
 
 class DataParallelStyle(Enum):
-    """
+    """This enum represents the style of the data-parallel operation.
+
     We have three types of Data Parallel style:
     1. DEFAULT: the default data parallel style, which is to represent a mixed
                 replicate and fully shard behavior. For each parameter that is able
@@ -64,8 +65,8 @@ class DataParallelStyle(Enum):
 
 
 class NodeType(Enum):
-    """
-    NodeType is a enum that records the type of the tensors in the graph.
+    """NodeType is an enum that records the type of the tensors in the graph.
+
     This is used to determine the data parallel strategy.
     """
 
@@ -77,9 +78,7 @@ class NodeType(Enum):
 
 
 class DataParallelStrategy(OpStrategy):
-    """
-    DataParallelStrategy is a special case of OpStrategy that only records
-    the "data parallel style" placement strategy for each fx Node.
+    """DataParallelStrategy is a special case of OpStrategy that only records the "data parallel style" placement strategy for each fx Node.
 
     It takes a list of PlacementStrategy, where each PlacementStrategy describes
     one way to distribute the tensor and computation. In the DataParallel case,
@@ -113,13 +112,10 @@ class DataParallelStrategy(OpStrategy):
 
 @contextmanager
 def gradients_tagging(params: Dict[str, torch.Tensor]):
-    """
-    This is a helper function that tags the gradient of the parameters
-    with a special tag, so that we can identify them during SPMD expansion.
+    """Tag the gradient of the parameters with a special tag, so that we can identify them during SPMD expansion.
 
     It's safe to trace those hooks and we would remove those nodes later.
     """
-
     tagging_hooks = []
     try:
         for p in params.values():
@@ -135,9 +131,7 @@ def gradients_tagging(params: Dict[str, torch.Tensor]):
 def _gen_shard_strategy(
     mesh: DeviceMesh, shard_dim: int, input_specs: Optional[List[DTensorSpec]] = None
 ) -> PlacementStrategy:
-    """
-    util function to generate a shard strategy on shard_dim
-    """
+    """Util function to generate a shard strategy on shard_dim."""
     return PlacementStrategy(
         output_spec=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
         input_specs=input_specs,
@@ -147,9 +141,7 @@ def _gen_shard_strategy(
 def _gen_replicate_strategy(
     mesh: DeviceMesh, input_specs: Optional[List[DTensorSpec]] = None
 ) -> PlacementStrategy:
-    """
-    util function to generate a replicate strategy
-    """
+    """Util function to generate a replicate strategy."""
     return PlacementStrategy(
         output_spec=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
         input_specs=input_specs,
@@ -157,9 +149,7 @@ def _gen_replicate_strategy(
 
 
 def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
-    """
-    util function to generate a partial strategy
-    """
+    """Util function to generate a partial strategy."""
     # NOTE: we use AVG by default, avg reduction is needed depending on
     # the loss function, for most loss function it should do
     # gradient averaging. There might be certain cases it should
@@ -180,10 +170,7 @@ def build_data_parallel_strategies(
     mesh: DeviceMesh,
     batch_dim: int = 0,
 ) -> Dict[fx.Node, StrategyType]:
-    """
-    This function loop through the train step graph and build the
-    data parallel strategy for each fx Node
-    """
+    """Loop through the train step graph and build the data parallel strategy for each fx Node."""
     activation_idx = num_params + num_states
     non_compute_ops = [
         aten.clone.default,
@@ -518,9 +505,7 @@ def mark_data_parallel_shardings(
     dp_strategy_map: Dict[fx.Node, StrategyType],
     parallel_mode: DataParallelStyle = DataParallelStyle.FULLY_SHARD,
 ) -> None:
-    """
-    This function marks the sharding for the nodes in the train_step_graph
-    """
+    """Mark the sharding for the nodes in the train_step_graph."""
     activation_idx = num_parameters + num_states
     placeholder_idx = 0
     for node in train_step_graph.graph.nodes:
@@ -601,9 +586,7 @@ def mark_data_parallel_shardings(
 
 
 def _partition_val(val: Any, spec: DTensorSpec) -> Any:
-    """
-    util function to convert a full tensor val to its local component
-    """
+    """Util function to convert a full tensor val to its local component."""
     if isinstance(val, torch.Tensor):
         local_shard = val
         if val.ndim == 0:
@@ -629,10 +612,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
 
 
 def partitioner(graph: GraphModule) -> GraphModule:
-    """
-    Graph partitioner that partitions the single device graph
-    to distributed graph
-    """
+    """Graph partitioner that partitions the single device graph to distributed graph."""
     shape_adjustment_ops = {
         aten._unsafe_view.default: 1,
         aten.expand.default: 1,
@@ -761,10 +741,9 @@ def partition_data_parallel(
     parallel_style: DataParallelStyle,
     input_batch_dim: int,
 ) -> GraphModule:
-    """
-    The entry point function to partition the graph to data parallel
-    graph, it also shard/replicate the model parameters and optimizer
-    states to DTensors.
+    """Partition the graph to into a data parallel graph.
+
+    This function also shards/replicates the model parameters and optimizer states to DTensors.
     """
     num_params_buffers = len(params_buffers)
     flattened_states = pytree.tree_leaves(named_states)
