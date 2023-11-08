@@ -2831,6 +2831,9 @@ class CppScheduling(BaseScheduling):
         print("codegen_nodes --> args_num", args_num)
 
         kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
+        
+    def get_args_num(self):
+        return self.kernel_group.get_args_num()
 
     def codegen_sync(self):
         pass
@@ -2858,6 +2861,11 @@ class KernelGroup:
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
+        
+    def get_args_num(self):
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        args_num = len(arg_defs)
+        return args_num
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
@@ -2872,8 +2880,7 @@ class KernelGroup:
         kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         
-        args_num = len(arg_defs)
-        print("{},args_num:{}".format(kernel_name, args_num))        
+        print("{},args_num:{}".format(kernel_name, self.get_args_num()))
         
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)
