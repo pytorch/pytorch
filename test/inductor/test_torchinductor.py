@@ -7649,6 +7649,16 @@ class CommonTemplate:
         b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
+    def test_adaptive_avg_pool1d_argmax(self):
+        # https://github.com/pytorch/pytorch/issues/113013
+        def fn(x):
+            x = torch.adaptive_avg_pool1d(input=x, output_size=2)
+            x = torch.argmax(input=x)
+            return x
+
+        x = torch.rand([3, 3, 3], dtype=torch.float64)
+        self.common(fn, (x,))
+
 
 @dataclasses.dataclass
 class TestFailure:
