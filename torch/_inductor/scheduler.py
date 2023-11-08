@@ -1170,6 +1170,8 @@ class Scheduler:
         # fx graph node to the position it appears in the graph
         # for debug attribution
         self.origin_to_index = {}
+        
+        self.MAX_FUSED_KERNEL_ARGS_NUM = 500
 
         log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
 
@@ -2004,7 +2006,7 @@ class Scheduler:
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
                 args_num = self.get_backend(device).get_args_num()
-                if args_num > 500 :
+                if args_num > self.MAX_FUSED_KERNEL_ARGS_NUM :
                     self.flush()
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
