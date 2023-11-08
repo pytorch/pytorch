@@ -738,7 +738,12 @@ def reinplace_inplaceable_ops(graph):
             tensors_to_clone = []
             for arg in node.kwargs["tensors_to_clone"]:
                 assert arg in node.kwargs["kwargs"]
-                if not can_inplace(node, node.kwargs["kwargs"][arg]):
+                mutated_arg = node.kwargs["kwargs"][arg]
+                if can_inplace(node, mutated_arg):
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                    if copy_node is not None:
+                        graph.erase_node(copy_node)
+                else:
                     tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
