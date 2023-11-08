@@ -19,7 +19,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
@@ -34,6 +34,7 @@ from ..utils import (
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
+    tensortype_to_dtype,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
@@ -338,7 +339,6 @@ class BuiltinVariable(VariableTracker):
                 a,
                 ListVariable(
                     list(a.items) + list(b.unpack_var_sequence(tx)),
-                    regen_guards=False,
                     **options,
                 ),
             )
@@ -460,10 +460,11 @@ class BuiltinVariable(VariableTracker):
         from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
+        args = [v.realize() for v in args]
+        kwargs = {k: v.realize() for k, v in kwargs.items()}
         constant_args = check_constant_args(args, kwargs)
         tensor_args = self.tensor_args(*args, **kwargs)
         unspec_python_args = self.unspec_python_args(*args, **kwargs)
-        options = VariableTracker.propagate(self, args, kwargs.values())
         has_constant_handler = self.can_constant_fold_through() and (
             constant_args or unspec_python_args
         )
@@ -514,9 +515,7 @@ class BuiltinVariable(VariableTracker):
                         *proxy_args_kwargs(args, kwargs),
                     )
 
-                    return wrap_fx_proxy_cls(
-                        variables.NumpyNdarrayVariable, tx, proxy, **options
-                    )
+                    return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -528,7 +527,6 @@ class BuiltinVariable(VariableTracker):
                         FakeItemVariable,
                         tx,
                         proxy,
-                        **options,
                     )
                 elif self.unspec_python_args(*args, **kwargs):
                     _args, _kwargs = self.unwrap_unspec_args_kwargs(args, kwargs)
@@ -546,10 +544,9 @@ class BuiltinVariable(VariableTracker):
                         proxy,
                         raw_value=raw_value,
                         need_unwrap=need_unwrap,
-                        **options,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
-                    return SymNodeVariable.create(tx, proxy, None, **options)
+                    return SymNodeVariable.create(tx, proxy, None)
                 else:
                     # Work around for vision_maskrcnn due to precision difference
                     # specialize the dividend when float divide by tensor
@@ -557,7 +554,7 @@ class BuiltinVariable(VariableTracker):
                         args[0], variables.UnspecializedPythonVariable
                     ):
                         args[0] = args[0].convert_to_constant(tx)
-                    return wrap_fx_proxy(tx, proxy, **options)
+                    return wrap_fx_proxy(tx, proxy)
 
             except NotImplementedError:
                 unimplemented(f"partial tensor op: {self} {args} {kwargs}")
@@ -580,7 +577,6 @@ class BuiltinVariable(VariableTracker):
                     (item.as_proxy(),),
                     {},
                 ),
-                **options,
             )
             return out
 
@@ -596,7 +592,7 @@ class BuiltinVariable(VariableTracker):
                 self.fn, args[0], args[1]
             )
             if binop_handler:
-                res = binop_handler(tx, args[0], args[1], options)
+                res = binop_handler(tx, args[0], args[1], {})
                 if res is not None:
                     return res
 
@@ -617,7 +613,7 @@ class BuiltinVariable(VariableTracker):
             try:
                 result = handler(tx, *args, **kwargs)
                 if result is not None:
-                    return result.add_options(options)
+                    return result
             except Unsupported as exc:
                 if not has_constant_handler:
                     raise
@@ -631,7 +627,6 @@ class BuiltinVariable(VariableTracker):
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
-                **options,
             )
 
         if self.fn is round:
@@ -683,7 +678,6 @@ class BuiltinVariable(VariableTracker):
                         self.fn,
                         *proxy_args_kwargs([a, b], {}),
                     ),
-                    **VariableTracker.propagate(self, [a, b]),
                 )
 
             # convert min/max to torch ops
@@ -788,13 +782,11 @@ class BuiltinVariable(VariableTracker):
     def _dyn_proxy(self, tx, *args, **kwargs):
         from .builder import wrap_fx_proxy
 
-        options = VariableTracker.propagate(self, args, kwargs.values())
         return wrap_fx_proxy(
             tx,
             tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs(args, kwargs)
             ),
-            **options,
         )
 
     def _call_iter_tuple_list(self, tx, obj=None, *args, **kwargs):
@@ -823,24 +815,23 @@ class BuiltinVariable(VariableTracker):
                     mutable_local=MutableLocal(),
                 )
         elif obj.has_unpack_var_sequence(tx):
-            guards = set()
             if obj.source and not is_constant_source(obj.source):
                 if isinstance(obj, TupleIteratorVariable):
-                    guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
+                    install_guard(
+                        obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
+                    )
                 else:
-                    guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
             if cls is SetVariable:
                 return cls(
                     list(obj.unpack_var_sequence(tx)),
                     mutable_local=MutableLocal(),
-                    guards=guards,
-                ).add_options(self, obj)
+                )
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
-                guards=guards,
-            ).add_options(self, obj)
+            )
 
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
@@ -853,7 +844,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
-            return variables.ConstantVariable.create(True).add_options(arg)
+            return variables.ConstantVariable.create(True)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -896,16 +887,14 @@ class BuiltinVariable(VariableTracker):
         unimplemented(f"dict(): {args} {kwargs}")
 
     def call_zip(self, tx, *args):
-        options = VariableTracker.propagate(self, args)
         if all(x.has_unpack_var_sequence(tx) for x in args):
             items = [
-                variables.TupleVariable(list(item), **options)
+                variables.TupleVariable(list(item))
                 for item in zip(*[arg.unpack_var_sequence(tx) for arg in args])
             ]
-            return variables.TupleVariable(items, **options)
+            return variables.TupleVariable(items)
 
     def call_enumerate(self, tx, *args):
-        options = VariableTracker.propagate(self, args)
         if len(args) == 1:
             start = 0
         else:
@@ -915,12 +904,11 @@ class BuiltinVariable(VariableTracker):
         if args[0].has_unpack_var_sequence(tx):
             items = [
                 variables.TupleVariable(
-                    [variables.ConstantVariable.create(idx, **options), var],
-                    **options,
+                    [variables.ConstantVariable.create(idx), var],
                 )
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
             ]
-            return variables.TupleVariable(items, **options)
+            return variables.TupleVariable(items)
 
     def call_len(self, tx, *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
@@ -934,8 +922,22 @@ class BuiltinVariable(VariableTracker):
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
+
+            def _tensor_isinstance(tensor_var, tensor_type):
+                def check_type(ty):
+                    if ty not in tensortype_to_dtype:
+                        return issubclass(arg.python_type(), ty)
+
+                    dtypes = tensortype_to_dtype[ty]
+                    return arg.dtype in dtypes
+
+                if type(tensor_type) is tuple:
+                    return any(check_type(ty) for ty in tensor_type)
+                else:
+                    return check_type(tensor_type)
+
             return variables.ConstantVariable.create(
-                arg.call_isinstance(isinstance_type)
+                _tensor_isinstance(arg, isinstance_type)
             )
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
@@ -977,17 +979,17 @@ class BuiltinVariable(VariableTracker):
             val, next_iter = arg.next_variables(tx)
             return val
         elif isinstance(arg, variables.BaseListVariable):
-            return arg.items[0].add_options(self, arg)
+            return arg.items[0]
 
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
             name = attr.as_python_constant()
-            return obj.call_hasattr(tx, name).add_options(self, obj, attr)
+            return obj.call_hasattr(tx, name)
 
     def call_map(self, tx, fn, seq):
         if seq.has_unpack_var_sequence(tx):
             items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
-            return variables.TupleVariable(items).add_options(self, fn, seq)
+            return variables.TupleVariable(items)
 
     def call_sum(self, tx, seq, **kwargs):
         # Special case for sum on tuple of floats and ints
@@ -1013,7 +1015,7 @@ class BuiltinVariable(VariableTracker):
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable.create(0).add_options(self, seq),
+                    variables.ConstantVariable.create(0),
                 ],
                 {},
             )
@@ -1042,8 +1044,6 @@ class BuiltinVariable(VariableTracker):
         )
         from .builder import SourcelessBuilder, VariableBuilder
 
-        options = VariableTracker.propagate(self, obj, name_var)
-        guards = options["guards"]
         name = name_var.as_python_constant()
 
         if not name_var.is_python_constant():
@@ -1052,17 +1052,17 @@ class BuiltinVariable(VariableTracker):
         if tx.output.side_effects.is_attribute_mutation(obj):
             try:
                 # re-read a pending side effect?
-                return tx.output.side_effects.load_attr(obj, name).add_options(options)
+                return tx.output.side_effects.load_attr(obj, name)
             except KeyError:
                 pass
 
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
-            guards.update(hasattr_var.guards)
             assert hasattr_var.as_python_constant() in (True, False)
             if not hasattr_var.as_python_constant():
-                return default.add_guards(guards)
+                return default
 
+        options = {}
         if obj.source:
             source = AttrSource(obj.source, name)
             options["source"] = source
@@ -1091,7 +1091,7 @@ class BuiltinVariable(VariableTracker):
                 pass
 
         if isinstance(obj, variables.NNModuleVariable):
-            return obj.var_getattr(tx, name).add_options(options)
+            return obj.var_getattr(tx, name)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
             if source:
                 # We are going to be raising this tensor as grapharg. So, ensure
@@ -1101,9 +1101,7 @@ class BuiltinVariable(VariableTracker):
                 for grapharg in tx.output.graphargs:
                     if grapharg.source == source.base:
                         example_value = grapharg.example.grad
-                        return VariableBuilder(tx, source)(example_value).add_options(
-                            options
-                        )
+                        return VariableBuilder(tx, source)(example_value)
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
@@ -1118,9 +1116,7 @@ class BuiltinVariable(VariableTracker):
             ),
         ):
             try:
-                return (
-                    obj.var_getattr(tx, name).clone(source=source).add_options(options)
-                )
+                return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
@@ -1135,23 +1131,19 @@ class BuiltinVariable(VariableTracker):
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable.create(member, **options)
             else:
-                return VariableBuilder(tx, source)(member).add_guards(guards)
+                return VariableBuilder(tx, source)(member)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]
 
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            return VariableBuilder(tx, source)(member).add_guards(guards)
+            return VariableBuilder(tx, source)(member)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
-            return ConstantVariable.create(
-                getattr(obj.fn, name), **VariableTracker.propagate(obj)
-            )
+            return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
-                return (
-                    obj.var_getattr(tx, name).clone(source=source).add_options(options)
-                )
+                return obj.var_getattr(tx, name).clone(source=source)
             except NotImplementedError:
                 return GetAttrVariable(obj, name, **options)
 
@@ -1185,7 +1177,7 @@ class BuiltinVariable(VariableTracker):
                     "to continue to trace the graph"
                 )
             tx.output.side_effects.store_attr(obj, name, val)
-            return val.add_options(self, obj, name_var)
+            return val
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
@@ -1244,12 +1236,10 @@ class BuiltinVariable(VariableTracker):
             py_type = None
 
         if istype(obj, variables.TupleVariable):
-            return BuiltinVariable(py_type).add_options(self, obj)
+            return BuiltinVariable(py_type)
 
         if py_type is not None and obj.source:
-            return VariableBuilder(tx, TypeSource(obj.source))(py_type).add_options(
-                self, obj
-            )
+            return VariableBuilder(tx, TypeSource(obj.source))(py_type)
 
         if py_type is not None:
             return ConstantVariable.create(py_type)
@@ -1264,9 +1254,7 @@ class BuiltinVariable(VariableTracker):
     def call_reversed(self, tx, obj: VariableTracker):
         if obj.has_unpack_var_sequence(tx):
             items = list(reversed(obj.unpack_var_sequence(tx)))
-            return variables.TupleVariable(
-                items, **VariableTracker.propagate(self, obj)
-            )
+            return variables.TupleVariable(items)
 
     def call_sorted(self, tx, obj: VariableTracker, **kwargs):
         if (
@@ -1293,16 +1281,14 @@ class BuiltinVariable(VariableTracker):
                     key=lambda x: x.as_python_constant(),
                     reverse=reverse,
                 )
-            return variables.ListVariable(items, **VariableTracker.propagate(self, obj))
+            return variables.ListVariable(items)
 
     def call_chain(self, tx, *args):
         if all(obj.has_unpack_var_sequence(tx) for obj in args):
             items = []
             for obj in args:
                 items.extend(obj.unpack_var_sequence(tx))
-            return variables.TupleVariable(
-                items, **VariableTracker.propagate(self, *args)
-            )
+            return variables.TupleVariable(items)
 
     def call_islice(self, tx, iterable, *args):
         if iterable.has_unpack_var_sequence(tx) and all(
@@ -1311,9 +1297,7 @@ class BuiltinVariable(VariableTracker):
             const_args = [x.as_python_constant() for x in args]
             items = iterable.unpack_var_sequence(tx)
             items = list(itertools.islice(items, *const_args))
-            return variables.TupleVariable(
-                items, **VariableTracker.propagate(self, iterable, *args)
-            )
+            return variables.TupleVariable(items)
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx, a):
@@ -1509,7 +1493,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(a, ListVariable):
-            return ConstantVariable.create(len(a.items) == 0).add_options(self, a)
+            return ConstantVariable.create(len(a.items) == 0)
 
         return None
 

@@ -4,6 +4,7 @@ import traceback
 import torch
 import weakref
 import functools
+import inspect
 import re
 
 __all__ = [
@@ -20,6 +21,7 @@ __all__ = [
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
 _impls: Set[str] = set()
+_defs: Set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
@@ -59,6 +61,7 @@ class Library:
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(kind, ns, dispatch_key, filename, lineno)
         self.ns = ns
+        self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
         self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
         self.kind = kind
@@ -67,7 +70,7 @@ class Library:
         # Python __del__ can lead to weird things (globals and locals may already
         # be gone when __del__ actually gets called!). finalizers help the
         # situation because it lets us capture references and keeps them alive
-        weakref.finalize(self, _del_library, _impls, self._op_impls, self._registration_handles)
+        weakref.finalize(self, _del_library, _impls, self._op_impls, _defs, self._op_defs, self._registration_handles)
 
     def __repr__(self):
         return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
@@ -99,7 +102,11 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
-        return self.m.define(schema, alias_analysis, tuple(tags))
+        result = self.m.define(schema, alias_analysis, tuple(tags))
+        qualname = self.ns + "::" + schema.split("(")[0]
+        self._op_defs.add(qualname)
+        _defs.add(qualname)
+        return result
 
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
@@ -169,8 +176,9 @@ class Library:
         self._registration_handles.clear()
 
 
-def _del_library(captured_impls, op_impls, registration_handles):
+def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
     captured_impls -= op_impls
+    captured_defs -= op_defs
     for handle in registration_handles:
         handle.destroy()
 
@@ -409,12 +417,26 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     return torch.tensor(res, device=x.device)
 
     """
-
     source = torch._library.utils.get_source(_stacklevel + 1)
+    frame = inspect.stack()[_stacklevel]
+    caller_module = inspect.getmodule(frame[0])
+    # Can be none if you call impl_abstract from somewhere there isn't a module
+    # (e.g. __main__)
+    caller_module_name = None if caller_module is None else caller_module.__name__
+
+    # TODO(rzou): We're gonna need to stage this change with torchvision,
+    # since torchvision is github first.
+    if caller_module_name is not None and caller_module_name.startswith("torchvision."):
+        caller_module_name = None
 
     def inner(func):
         entry = torch._library.simple_registry.singleton.find(qualname)
-        handle = entry.abstract_impl.register(func, source)
+        if caller_module_name is not None:
+            func_to_register = _check_pystubs_once(func, qualname, caller_module_name)
+        else:
+            func_to_register = func
+
+        handle = entry.abstract_impl.register(func_to_register, source)
         if lib is not None:
             lib._registration_handles.append(handle)
         return func
@@ -422,6 +444,45 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     if func is None:
         return inner
     return inner(func)
+
+
+# If the op was defined in C++, then we want to make sure there was an
+# m.impl_abstract_pystub(module, ...) call and that the module is the
+# same as the module that called torch.library.impl_abstract.
+def _check_pystubs_once(func, qualname, actual_module_name):
+    checked = False
+
+    def inner(*args, **kwargs):
+        nonlocal checked
+        if checked:
+            return func(*args, **kwargs)
+
+        op = torch._library.utils.lookup_op(qualname)
+        if op._defined_in_python:
+            checked = True
+            return func(*args, **kwargs)
+
+        maybe_pystub = torch._C._dispatch_pystub(
+            op._schema.name,
+            op._schema.overload_name)
+        if not maybe_pystub:
+            raise RuntimeError(
+                f"Operator '{qualname}' was defined in C++ and has a Python "
+                f"abstract impl. In this situation, it is required to have a "
+                f"C++ `m.impl_abstract_pystub` call, but we could not find one."
+                f"Please add a call to `m.impl_abstract_pystub(\"{actual_module_name}\");` "
+                f"to the C++ TORCH_LIBRARY block the operator was "
+                f"defined in.")
+        pystub_module = maybe_pystub[0]
+        if actual_module_name != pystub_module:
+            raise RuntimeError(
+                f"Operator '{qualname}' specified that its python abstract impl "
+                f"is in the Python module '{pystub_module}' but it was actually found "
+                f"in '{actual_module_name}'. Please either move the abstract impl "
+                f"or correct the m.impl_abstract_pystub call.")
+        checked = True
+        return func(*args, **kwargs)
+    return inner
 
 
 # NOTE [ctx inside the fake implementation]
