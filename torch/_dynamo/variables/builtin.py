@@ -1133,9 +1133,7 @@ class BuiltinVariable(VariableTracker):
                                 )
                             else:
                                 grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(
-                            grapharg.example.grad
-                        ).add_options(options)
+                        return VariableBuilder(tx, source)(grapharg.example.grad)
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
