@@ -186,6 +186,9 @@ class ProcessGroupNCCLNoHeartbeat : public c10d::ProcessGroupNCCL {
   }
 
  protected:
+  // Override the heartbeat monitor function to make sure that we capture
+  // the exception in the monitor thread because we cannot try-catch it in
+  // the main thread and we set a flag for the main thread to check.
   void heartbeatMonitor() override {
     try {
       c10d::ProcessGroupNCCL::heartbeatMonitor();
@@ -195,7 +198,8 @@ class ProcessGroupNCCLNoHeartbeat : public c10d::ProcessGroupNCCL {
   }
 
   // It's really hard to unit test std::abort. So we override it instead.
-  // Commented this override, we do see process aborted with core dump.
+  // Commented this override, we do see process aborted with core dump without
+  // this override.
   void terminateProcess(std::string errMsg) override {
     throw std::runtime_error(errMsg);
   }
@@ -220,6 +224,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
+    // Enable LOG(INFO) messages.
     c10::initLogging();
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
@@ -334,6 +339,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
       0);
   ASSERT_TRUE(setenv(c10d::TORCH_NCCL_ENABLE_MONITORING, "1", 1) == 0);
   auto options = c10d::ProcessGroupNCCL::Options::create();
+  // Set a long watchdog timeout, so that we have enough time to lock the
+  // watchdog and let the heartbeat monitor thread to kick in.
   options->timeout = std::chrono::milliseconds(30000);
   ProcessGroupNCCLNoHeartbeat pg(store_, 0, 1, options);
 
@@ -347,7 +354,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNoHeartbeat) {
     // Now run all reduce with errors.
     std::lock_guard<std::mutex> lock(pg.getWatchdogMutex());
     LOG(INFO) << "Lock watchdog thread.";
-    // Wait for a while before monitor thread throws exceptions.
+    // Wait long enough before monitor thread throws exceptions.
     std::this_thread::sleep_for(
         std::chrono::seconds(heartBeatIntervalInSec * 3));
     // Check the monitoring thread launched and exception thrown.

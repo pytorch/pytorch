@@ -642,6 +642,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // we can dump the debugging information and abort the process.
   virtual void heartbeatMonitor();
 
+  // Function that directly trigger std::abort so that the whole process
+  // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
   // When watchdog timeout, this function will be called and return debug info
@@ -715,8 +717,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Heartbeat of watchdog thread.
   uint64_t heartbeat_;
 
+  // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
+  // We gate the heartbeat monitor thread so that we can roll it out gradually.
   std::atomic<bool> monitorThreadEnabled_;
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
