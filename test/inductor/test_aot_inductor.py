@@ -31,7 +31,11 @@ from torch.utils import _pytree as pytree
 
 if HAS_CUDA:
     import triton
-    from torch.testing._internal.triton_utils import add_kernel
+    from torch.testing._internal.triton_utils import (
+        add_kernel,
+        add_kernel_2d_autotuned,
+        add_kernel_autotuned,
+    )
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -1042,7 +1046,8 @@ class AOTInductorTestsTemplate:
     @common_utils.parametrize("grid_type", [1, 2, 3])
     @common_utils.parametrize("num_dims", [1, 2])
     @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_basic(self, grid_type, num_dims, dynamic):
+    @common_utils.parametrize("autotune", [False, True])
+    def test_triton_kernel(self, grid_type, num_dims, dynamic, autotune):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
 
@@ -1055,21 +1060,54 @@ class AOTInductorTestsTemplate:
                 x = x.clone()
                 y = y.clone()
                 output = torch.zeros_like(x)
-                n_elements = output.numel()
-
-                def grid_fn(meta):
-                    return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-
-                if grid_type == 1:
-                    grid = (n_elements,)
-                elif grid_type == 2:
-                    grid = lambda meta: (  # noqa: E731
-                        triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
-                    )
+                if autotuned and num_dims == 2:
+                    x_elements = output.size()[0]
+                    y_elements = output.size()[1]
                 else:
-                    grid = grid_fn
+                    n_elements = output.numel()
 
-                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+                # Select grid
+                if autotuned and num_dims == 2:
+                    if grid_type == 1:
+                        grid = (x_elements, y_elements)
+                    elif grid_type == 2:
+                        grid = lambda meta: (
+                            triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                            triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                        )
+                    else:
+
+                        def grid_fn_2d(meta):
+                            return (
+                                triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
+                                triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
+                            )
+
+                        grid = grid_fn
+                else:
+                    if grid_type == 1:
+                        grid = (n_elements,)
+                    elif grid_type == 2:
+                        grid = lambda meta: (  # noqa: E731
+                            triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+                        )
+                    else:
+
+                        def grid_fn(meta):
+                            return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+                        grid = grid_fn
+
+                # Select kernel
+                if autotune:
+                    if num_dims == 1:
+                        add_kernel_autotuned[grid](x, y, output, n_elements)
+                    else:
+                        add_kernel_2d_autotuned[grid](
+                            x, y, output, x_elements, y_elements
+                        )
+                else:
+                    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
                 return output
 
         dims = [10] * num_dims
