@@ -1077,7 +1077,7 @@ class AOTInductorTestsTemplate:
                         )
                     else:
 
-                        def grid_fn_2d(meta):
+                        def grid_fn(meta):
                             return (
                                 triton.cdiv(x_elements, meta["BLOCK_SIZE_X"]),
                                 triton.cdiv(y_elements, meta["BLOCK_SIZE_Y"]),
