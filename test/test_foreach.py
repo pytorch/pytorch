@@ -345,7 +345,7 @@ class TestForeach(TestCase):
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
         # TODO: enable empty list case
-        for tensors in [[torch.randn([0])]]:
+        for tensors in [[torch.randn([0], device=device, dtype=dtype)]]:
             res = torch._foreach_add(tensors, 1)
             self.assertEqual(res, tensors)
 
