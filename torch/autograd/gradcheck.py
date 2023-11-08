@@ -488,11 +488,14 @@ def get_numerical_jacobian_wrt_specific_input(
 def _get_analytical_jacobian_forward_ad(
     fn, inputs, outputs, *, check_grad_dtypes=False, all_u=None
 ) -> Tuple[Tuple[torch.Tensor, ...], ...]:
-    """Calculate analytical Jacobian using forward mode AD for `fn(inputs)` w.r.t. `target`, with N * M Jacobians.
+    """Calculate analytical Jacobian using forward mode AD.
 
-    Compute the analytical Jacobian using forward mode AD of `fn(inputs)` with respect to `target`, 
-    returning N * M Jacobians, with N as target tensors requiring grad and M as non-integral outputs. 
-    Note: This function requires "inputs" to be used directly by the function.
+    Computes the analytical Jacobian using forward mode AD of `fn(inputs)` using forward mode AD with respect
+    to `target`. Returns N * M Jacobians where N is the number of tensors in target that require grad and
+    M is the number of non-integral outputs.
+    Contrary to other functions here, this function requires "inputs" to actually be used by the function.
+    The computed value is expected to be wrong if the function captures the inputs by side effect instead of
+    using the passed ones (many torch.nn tests do this).
 
     Args:
         fn: the function to compute the jacobian for
@@ -2134,16 +2137,16 @@ def gradgradcheck(
     fast_mode: bool = False,
     masked: bool = False,
 ) -> bool:
-    r"""Verify gradient of gradients using :func:`~torch.allclose` for correct backpropagation.
+    r"""Verify gradient of gradients.
 
     Check gradients of gradients computed via small finite differences
     against analytical gradients wrt tensors in :attr:`inputs` and
     :attr:`grad_outputs` that are of floating point or complex type and with
     ``requires_grad=True``.
-    
+
     This function checks that backpropagating through the gradients computed
     to the given :attr:`grad_outputs` are correct.
-    
+
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
     .. note::
