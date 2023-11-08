@@ -3,7 +3,11 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Tuple
 
 import torch
-import torch.utils._pytree as pytree
+
+try:
+    import torch.utils._cxx_pytree as pytree
+except ImportError:
+    import torch.utils._pytree as pytree  # type: ignore[no-redef]
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
@@ -379,9 +383,6 @@ def dispatch_functionalize(func):
     def inner(*args, **kwargs):
         func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
         func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-
-        flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
-        flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
 
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
