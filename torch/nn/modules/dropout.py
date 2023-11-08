@@ -22,8 +22,10 @@ class _DropoutNd(Module):
 
 
 class Dropout(_DropoutNd):
-    r"""During training, randomly zeroes some of the elements of the input tensor with probability :attr:`p` using samples from a Bernoulli distribution.
-    
+    r"""During training, randomly zeroes some of the elements of the input tensor with probability :attr:`p`.
+
+    The zeroed elements are chosen independently for each forward call and are sampled from a Bernoulli distribution.
+
     Each channel will be zeroed out independently on every forward call.
 
     This has proven to be an effective technique for regularization and
