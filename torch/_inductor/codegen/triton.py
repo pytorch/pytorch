@@ -2710,12 +2710,6 @@ class TritonScheduling(BaseScheduling):
 
         self.scheduler.free_buffers()
 
-    def get_num_args(self):
-        """
-        TODO: Implement it.
-        """
-        return 0
-
     @staticmethod
     @functools.lru_cache(32)
     def candidate_tilings(node):
