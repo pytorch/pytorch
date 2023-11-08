@@ -369,3 +369,8 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         # call_function  add     <built-in function add>  (l_x_, l_x_)          {}
         # call_function  mul_1   <built-in function mul>  (mul, add)            {}
         # output         output  output                   ((mul_1, mul, add),)  {}
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
