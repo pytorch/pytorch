@@ -137,6 +137,17 @@ class TestCustomLowering(TorchTestCase):
             fn(inp, offsets, max_seq_len), fn_opt(inp, offsets, max_seq_len)
         )
 
+    def test_unfold_zero_dimension_tensor(self):
+        def forward(x):
+            return torch.unfold_copy(dimension=1, input=x,size=0,step=7)
+
+        x = torch.rand([1,0], dtype=torch.float32)
+
+        y = forward(x)
+        compiled_y = torch.compile(forward, mode='max-autotune',fullgraph=True)(x)
+
+        self.assertEqual(y, compiled_y)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
