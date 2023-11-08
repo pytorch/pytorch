@@ -381,6 +381,10 @@ class CppPrinter(ExprPrinter):
             il = "{" + ", ".join(args) + "}"
             return f"std::max({il})"
 
+    def _print_Abs(self, expr):
+        assert len(expr.args) == 1
+        return f"std::abs({self._print(expr.args[0])})"
+
 
 # A function to print, useful for printing sympy symbols.
 cexpr = CppPrinter().doprint
@@ -448,7 +452,7 @@ class CppVecOverrides(OpOverrides):
         return f"{a} * {b}"
 
     @staticmethod
-    def div(a, b):
+    def truediv(a, b):
         return f"{a} / {b}"
 
     @staticmethod
@@ -838,12 +842,12 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def to_dtype(x, dtype, src_dtype=None):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>({x})"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def to_dtype_bitcast(x, dtype):
         assert dtype in DTYPE_TO_CPP, f"{dtype} missing from {__name__}.DTYPE_TO_CPP"
-        return f"reinterpret_cast<{DTYPE_TO_CPP[dtype]}&>({x})"
+        return f"c10::bit_cast<{DTYPE_TO_CPP[dtype]}>({x})"
 
     @staticmethod
     def abs(x):
@@ -1195,7 +1199,6 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
-        self._load_mask = None
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -1218,9 +1221,12 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
-        return sympy_symbol(str(index_var))
+    def index_to_str(self, index: sympy.Expr) -> str:
+        """
+        Convert an index expr to a string that can be used in cpp code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
+        """
+        return cexpr(self.rename_indexing(index))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1313,7 +1319,7 @@ class CppKernel(Kernel):
         else:
             self.call_ranges = tuple(lengths) + tuple(reduction_lengths)
             self.ranges = [self.rename_indexing(x) for x in self.call_ranges]
-            self.itervars = [sympy_symbol(f"i{n}") for n in range(len(self.ranges))]
+            self.itervars = [sympy_symbol(f"x{n}") for n in range(len(self.ranges))]
             self.reduction_depth = len(lengths)
         return (
             self.itervars[: self.reduction_depth],
@@ -1321,7 +1327,9 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
-        return V.graph.sizevars.size_hint(sympy_product(self.call_ranges))
+        return V.graph.sizevars.size_hint(
+            sympy_product(self.call_ranges), fallback=8192
+        )
 
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
@@ -1414,12 +1422,16 @@ class CppKernel(Kernel):
         loop_nest = LoopNestWithSplit.build(self)
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
+    @property
+    def assert_function(self):
+        return "TORCH_CHECK"
+
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()
         par = 1
         depth = 0
         for expr in ranges:
-            hint = V.graph.sizevars.size_hint(expr)
+            hint = V.graph.sizevars.size_hint(expr, fallback=8192)
             if par >= 2 * threads or par == threads:
                 break
             if seq // threads < config.cpp.min_chunk_size:
@@ -1955,7 +1967,7 @@ class CppVecKernelChecker(CppVecKernel):
         if load_type is not torch.uint8:
             return False
         if len(users) == 1:
-            user = list(users)[0]
+            user = next(iter(users))
             if (user.target == "to_dtype") and (user.args[-1] == torch.float):
                 return True
             return False
@@ -2047,7 +2059,7 @@ class CppVecKernelChecker(CppVecKernel):
                 self.disable_vec(f"store mode: {mode}")
                 return self.simd_vec
 
-            if len(index.free_symbols) == 0:
+            if index.is_number:
                 self.disable_vec(f"constant store index: {index}")
             if self.simd_vec and not self.could_vec(name, index):
                 self.disable_vec(f"not a loop: {index}")
@@ -2649,6 +2661,7 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         V.graph.removed_buffers |= scalar_kernel.removed_buffers
+        V.graph.inplaced_to_remove |= scalar_kernel.inplaced_to_remove
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
@@ -2725,7 +2738,7 @@ class CppKernelProxy(CppKernel):
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
-        with torch._inductor.config.patch(inplace_buffers=False):  # type: ignore[attr-defined]
+        with torch._inductor.config.patch(inplace_buffers=False):
             tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:

@@ -29,7 +29,7 @@ using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 static PyObject* THPNNVariableFunctionsModule = NULL;
 
@@ -110,4 +110,4 @@ void initNNFunctions(PyObject* module) {
 
 ${py_methods}
 
-}} // namespace torch::autograd
+} // namespace torch::autograd

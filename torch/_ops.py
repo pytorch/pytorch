@@ -234,6 +234,15 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 _global_higher_order_ops = {}
 _higher_order_ops = {}
 
+_HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.ADInplaceOrView,
+    DispatchKey.BackendSelect,
+    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+]
+
 
 class HigherOrderOperator(OperatorBase):
     # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
@@ -264,6 +273,14 @@ class HigherOrderOperator(OperatorBase):
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.fallthrough(dispatch_key)
+
+    def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+        return super().py_impl(k)
 
     @property
     def namespace(self):
@@ -359,10 +376,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    flat_args, _ = torch.utils._pytree.tree_flatten(args)
-    flat_kwargs, _ = torch.utils._pytree.tree_flatten(kwargs)
-    flat_all = flat_args + flat_kwargs
-    return flat_all
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -472,6 +486,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+
+        # If the OpOverload was constructed from a Library.def in Python.
+        self._defined_in_python = self.__qualname__ in torch.library._defs
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
@@ -755,7 +772,7 @@ class OpOverloadPacket:
 # correct one at runtime and always calls into the boxed version of the method
 # Autograd codegen creates VariableType, TracerType,
 # inplace or view type and python bindings.
-# Aten codegen generates tensor methods for the the tensor class.
+# Aten codegen generates tensor methods for the tensor class.
 
 # _OpNamespace is a subclass of ModuleType because the torch script
 # allows attribute lookups on modules only. Since we want torch.ops.foo.bar()
@@ -806,6 +823,10 @@ class _OpNamespace(types.ModuleType):
         qualified_op_name = f"{namespace_name}::{op_name}"
         try:
             op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            if op is None:
+                raise AttributeError(
+                    f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
+                )
         except RuntimeError as e:
             # Turn this into AttributeError so getattr(obj, key, default)
             # works (this is called by TorchScript with __origin__)

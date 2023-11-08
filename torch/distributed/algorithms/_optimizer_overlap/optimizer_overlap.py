@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 import inspect
 from typing import Dict, Type
 
@@ -39,12 +39,14 @@ class OverlappedOptimizer(ABC):
         """
         self.optim_cls = optim_cls
 
+    @abstractmethod
     def register_ddp(self, ddp: DistributedDataParallel) -> None:
         """Registers the overlapped optimizer with DDP."""
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support overlapped DDP."
         )
 
+    @abstractmethod
     def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
         """Registers the overlapped optimizer with FSDP."""
         raise NotImplementedError(
@@ -70,7 +72,11 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
         )
 
     # TODO: register_fsdp once FSDP supports communication hook.
-
+    def register_fsdp(self, fsdp: FullyShardedDataParallel) -> None:
+        """Registers the overlapped optimizer with FSDP."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support overlapped FSDP."
+        )
 
 def _as_overlapped_optim(optim_cls: Type, params, *args, **kwargs):
     """

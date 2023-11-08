@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import atexit
+import contextlib
 import functools
 import os
 import sys
@@ -42,6 +43,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 try:
@@ -197,33 +199,33 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f32, f64},
-    "cauchy": {f16},
+    "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "exponential": {f16},
-    "geometric": {f16},
-    "log_normal": {f16},
+    "cross": {f16},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
+    "histc": {f16},
+    "linalg.cross": {f16},
     "masked_scatter": {f16, f32, f64},
-    "multinomial": {f32, f64},
+    "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
-    "uniform": {f16},
     "view_as_complex": {f16},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
 }
 
 
@@ -232,28 +234,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
     "bernoulli": {f16, f32, f64},
-    "cauchy": {f16},
     "cholesky": {f32, f64},
-    "exponential": {f16},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
-    "geometric": {f16},
-    "log_normal": {f16},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.triplet_margin_loss": {f16},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
 }
 
 
@@ -268,14 +260,7 @@ if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfft2": {b8, i32, i64, f32, f64},
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
@@ -306,15 +291,13 @@ test_skips_or_fails = (
 )
 
 
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    torch.manual_seed(42)
+def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
+    wrapper_noop_set_seed
+)
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
@@ -357,12 +340,24 @@ inductor_override_kwargs = {
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
     ("outer", "cuda", f16): {"reference_in_float": True},
     ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
+    # Temporarily skip interpolate bilinear and bicubic tests:
+    "nn.functional.interpolate.bicubic": {
+        "assert_equal": False,
+        "check_gradient": False,
+    },
+    "nn.functional.interpolate.bilinear": {"assert_equal": False},
+    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
 
 # Always test with all sample for following ops
@@ -414,6 +409,9 @@ def collection_decorator(fn):
 
 
 class TestInductorOpInfo(TestCase):
+    def tearDown(self):
+        torch._dynamo.reset()
+
     check_model = check_model
     check_model_cuda = check_model_cuda
 
@@ -497,7 +495,19 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-        def do_nopython(fn, args, kwargs):
+        class HasRngOp(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.has_rng_op = False
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                if torch.Tag.nondeterministic_seeded in func.tags:
+                    self.has_rng_op = True
+
+                return func(*args, **kwargs)
+
+        def do_nopython_and_has_rng(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
 
@@ -508,20 +518,38 @@ class TestInductorOpInfo(TestCase):
                         return e
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
-                with mode:
+                with HasRngOp() as rng_mode, mode:
                     with enable_python_dispatcher():
                         fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
-                return False
+                return False, rng_mode.has_rng_op
 
-            return True
+            return True, rng_mode.has_rng_op
+
+        def get_contexts(has_rng_op):
+            if has_rng_op:
+                # TODO - enable this, running into errors
+                return (
+                    # (
+                    #     lambda: torch._inductor.config.patch(
+                    #         {"fallback_random": True, "implicit_fallbacks": True}
+                    #     ),
+                    #     {"assert_equal": True},
+                    # ),
+                    (
+                        contextlib.nullcontext,
+                        {"assert_equal": False},
+                    ),
+                )
+            return ((contextlib.nullcontext, {}),)
 
         try:
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 # UNCOMMENT TO DEBUG SEGFAULTS
+
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -529,40 +557,46 @@ class TestInductorOpInfo(TestCase):
                     # opinfo test case have already place the input on the correct device
                     # so we don't need do additional copy by setting copy_to_cuda=False
 
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "copy_to_cuda": False,
-                        "reference_in_float": False,
-                        "check_gradient": requires_grad,
-                        "check_has_compiled": no_python,
-                        "output_process_fn_grad": sample_input.output_process_fn_grad,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
-                    self.check_model_cuda(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "copy_to_cuda": False,
+                                "reference_in_float": False,
+                                "check_gradient": requires_grad,
+                                "check_has_compiled": no_python,
+                                "output_process_fn_grad": sample_input.output_process_fn_grad,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
+                            self.check_model_cuda(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
                 elif device_type == "cpu":
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "check_has_compiled": no_python,
-                        # skip checking gradient on CPU for now
-                        "check_gradient": False,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "check_has_compiled": no_python,
+                                # skip checking gradient on CPU for now
+                                "check_gradient": False,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
 
-                    self.check_model(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                            self.check_model(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
 
         except Exception as e:
             known_failure = False

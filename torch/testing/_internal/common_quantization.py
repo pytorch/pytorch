@@ -2527,11 +2527,14 @@ class TestHelperModules:
             return x
 
     class ConvWithBNRelu(torch.nn.Module):
-        def __init__(self, relu, bn=True, bias=True):
+        def __init__(self, relu, dim=2, bn=True, bias=True):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 3, 3, bias=bias)
+            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
+            self.conv = convs[dim](3, 3, 3, bias=bias)
+
             if bn:
-                self.bn = torch.nn.BatchNorm2d(3)
+                self.bn = bns[dim](3)
             else:
                 self.bn = torch.nn.Identity()
             if relu:
@@ -2544,6 +2547,18 @@ class TestHelperModules:
             x = self.bn(x)
             return self.relu(x)
 
+    class Conv1dWithConv2d(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1d = torch.nn.Conv1d(3, 3, 3)
+            self.conv2d = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x):
+            x = self.conv2d(x)
+            x = x.squeeze(0)
+            x = self.conv1d(x)
+            return x
+
     class Conv2dWithCat(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -2555,6 +2570,20 @@ class TestHelperModules:
             y = self.conv2(y)
             z = torch.cat([x, y], dim=1)
             return z
+
+    class Conv2dWithTwoCat(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv1 = torch.nn.Conv2d(3, 3, 3)
+            self.conv2 = torch.nn.Conv2d(3, 3, 3)
+
+        def forward(self, x1, x2, x3, x4):
+            x1 = self.conv1(x1)
+            x2 = self.conv2(x2)
+            y = torch.cat([x1, x2], dim=1)
+            z = x3 + x4
+            w = torch.cat([z, y])
+            return w
 
     class EmbeddingModule(torch.nn.Module):
         def __init__(self):
@@ -2591,3 +2620,16 @@ class TestHelperModules:
             x = x * y
             x *= y
             return x
+
+    class ConvBnReLU2dAndLinearReLU(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv_bn_relu = TestHelperModules.ConvWithBNRelu(relu=True)
+            self.linear = torch.nn.Linear(3, 8, bias=False)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.conv_bn_relu(x)
+            permute_out = torch.permute(x, (0, 2, 3, 1))
+            linear_out = self.linear(permute_out)
+            return linear_out

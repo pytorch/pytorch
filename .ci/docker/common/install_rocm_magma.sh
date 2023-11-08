@@ -5,8 +5,10 @@ set -ex
 # "install" hipMAGMA into /opt/rocm/magma by copying after build
 git clone https://bitbucket.org/icl/magma.git
 pushd magma
-# Fixes memory leaks of magma found while executing linalg UTs
-git checkout 28592a7170e4b3707ed92644bf4a689ed600c27f
+
+# Version 2.7.2 + ROCm related updates
+git checkout 823531632140d0edcb7e77c3edc0e837421471c5
+
 cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
 echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
 echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc

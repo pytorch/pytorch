@@ -271,6 +271,11 @@ PowerPC
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
+AArch64 CPU
+~~~~~~~~~~~~
+
+-  Sunita Nadampalli (`snadampal <https://github.com/snadampal>`__)
+
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 
@@ -285,7 +290,7 @@ XLA
 -  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
 -  Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
 -  Zach Cain (`zcain117 <https://github.com/zcain117>`__)
--  Brian Hirsch (`bdhirsh <https://github.com/bdhirsh>`__)
+-  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
 -  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
 -  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
 -  (emeritus) Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)

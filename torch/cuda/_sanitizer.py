@@ -12,6 +12,7 @@ environment variable.
 
 import enum
 import functools
+import inspect
 import io
 import logging
 import sys
@@ -22,8 +23,8 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
+from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_map
 
 
 DEFAULT_STREAM_ID = 0
@@ -371,7 +372,7 @@ class EventHandler:
         self.seq_num += 1
         self.syncs.update_seq_num(stream, self.seq_num)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.
@@ -430,7 +431,7 @@ class EventHandler:
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
         stack_trace = traceback.StackSummary.extract(
-            traceback.walk_stack(None), lookup_lines=False
+            traceback.walk_stack(inspect.currentframe()), lookup_lines=False
         )
         # The stack trace generated in this way is in the inverse order, so it must be
         # reversed.
@@ -510,7 +511,7 @@ class ArgumentHandler:
     ) -> None:
         for argument, value in zip_arguments(schema, args, kwargs):
             is_write = argument.alias_info is not None and argument.alias_info.is_write
-            tree_map(
+            pytree.tree_map_(
                 functools.partial(
                     self._handle_argument, is_write=is_write, name=argument.name
                 ),
@@ -518,7 +519,7 @@ class ArgumentHandler:
             )
 
     def parse_outputs(self, outputs: Any) -> None:
-        tree_map(
+        pytree.tree_map_(
             functools.partial(self._handle_argument, is_write=True, is_output=True),
             outputs,
         )

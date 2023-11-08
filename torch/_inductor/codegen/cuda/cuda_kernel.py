@@ -1,7 +1,9 @@
-from typing import Dict, List, Optional
+import logging
+from typing import Callable, Dict, List, Optional
 
+from ... import ir
 from ...autotune_process import CUDABenchmarkRequest
-from ...ir import Callable, CUDATemplateBuffer, IRNode, Layout, TensorBox
+from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout, TensorBox
 from ...select_algorithm import ChoiceCaller
 from ...utils import sympy_product
 from ...virtualized import V
@@ -9,6 +11,7 @@ from ...virtualized import V
 from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp import CppPrinter, DTYPE_TO_CPP
 
+log = logging.getLogger(__name__)
 
 cexpr = CppPrinter().doprint
 
@@ -19,7 +22,7 @@ def _normalize_idx(index: int, total_length: int) -> int:
 
 class CUDAKernel(Kernel):
     """
-    Kernels defined by C++ CUDA.
+    Baseclass for CUDA / Cutlass based Kernels
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
@@ -27,15 +30,18 @@ class CUDAKernel(Kernel):
 
 class CUDATemplateKernel(CUDAKernel):
     """
-    Template kernels defined by C++ CUDA.
+    Template kernels defined by CUDA / Cutlass in C++.
     """
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
 
-    def __init__(
-        self,
-        kernel_name,
-    ):
+    def __init__(self, kernel_name):
+        """
+        Initializes a new instance of the CUDATemplateKernel class.
+
+        Args:
+            kernel_name (str): The name of the kernel.
+        """
         super().__init__()
         self.kernel_name = kernel_name
         # Mapping from arg name to IRNode.
@@ -45,7 +51,6 @@ class CUDATemplateKernel(CUDAKernel):
         """
         Returns arg name of a given input or output node.
         """
-
         if node is None:
             return None
         return {**self.args.input_buffers, **self.args.output_buffers}.get(
@@ -89,15 +94,17 @@ class CUDATemplateKernel(CUDAKernel):
         input_reorder: Optional[List[int]] = None,
     ) -> str:
         """
-        Hook called from template code to generate function def and
+        Hook called from template code to generate function definition and
         needed args.
 
-        inputs / outputs: List of input / output IRNodes. Note that IRNode can be None for optional arguments.
-        names_str: Comma separated list of input + output argument names.
-        input_reorder: The actual order of input nodes.
-                       e.g. The template might have input argument defined as [X, W, Bias],
-                       and the actual input passed into this template could be [Bias, X, W].
-                       In this case, the `input_reorder` would be [2, 0, 1].
+        Args:
+            inputs: List of input IRNodes
+            outputs: List of output IRNodes
+            names_str: Comma separated list of input + output argument names.
+            input_reorder: The actual order of input nodes.
+                           e.g. The template might have input argument defined as [X, W, Bias],
+                           and the actual input passed into this template could be [Bias, X, W].
+                           In this case, the `input_reorder` would be [2, 0, 1].
         """
 
         names = [x.strip() for x in names_str.strip().split(",")]
@@ -126,14 +133,17 @@ class CUDATemplateKernel(CUDAKernel):
         arg_defs, *_ = self.args.cpp_argdefs()
         return f"PT_EXPORT int {self.kernel_name}({', '.join(arg_defs)}, {self._EXTRA_CPP_ARGS})"
 
-    def call_kernel(self, name: str, node: CUDATemplateBuffer) -> None:
+    def call_kernel(
+        self, name: str, node: "CUDATemplateBuffer", epilogue_nodes: List[ir.Buffer]  # type: ignore[name-defined]
+    ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
+        used from within torch._inductor.wrapper.WrapperCodeGen
 
         name: Name of kernel function.
-        node: The IRNode which represents the kernel.
+        node: The CUDATemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
+        as well as all required inputs and outputs.
         """
-
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -266,19 +276,32 @@ class CUDATemplateKernel(CUDAKernel):
 
 
 class CUDATemplateCaller(ChoiceCaller):
+    """
+    CUDATemplateCaller
+
+    This class represents a caller for CUDA template kernels. It is a subclass of ChoiceCaller.
+    Attributes:
+        name (str): The name of the caller.
+        category (str): The category of the caller.
+        bmreq (CUDABenchmarkRequest): The benchmark request for the caller.
+        template_buffer (CUDATemplateBuffer): The template buffer for the caller.
+    """
+
     def __init__(
         self,
         name: str,
         category: str,
-        input_nodes: List[IRNode],
+        input_nodes: List[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[str], str],
+        make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
+        template: "CUDATemplate",  # type: ignore[name-defined]
     ):
         super().__init__(name, input_nodes, layout)
         self.category = category
         self.make_kernel_render = make_kernel_render
         self.bmreq = bmreq
+        self.template = template
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
@@ -305,5 +328,6 @@ class CUDATemplateCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 workspace_size=self.bmreq.workspace_size,
+                template=self.template,
             )
         )

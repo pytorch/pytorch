@@ -635,7 +635,9 @@ bool TensorImpl::is_non_overlapping_and_dense_custom() const {
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomSizes) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->sizes(this);
   }
   return sizes_default();
@@ -670,7 +672,9 @@ c10::Device TensorImpl::device_custom() const {
 }
 
 IntArrayRef TensorImpl::strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (C10_UNLIKELY(
+          matches_python_custom(SizesStridesPolicy::CustomStrides) ||
+          has_symbolic_sizes_strides_)) {
     return pyobj_slot_.load_pyobj_interpreter()->strides(this);
   }
   return strides_default();
@@ -685,8 +689,7 @@ int64_t TensorImpl::dim_custom() const {
 
 int64_t TensorImpl::numel_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
-    // TODO: fix this
-    return pyobj_slot_.load_pyobj_interpreter()->sym_numel(this).expect_int();
+    return pyobj_slot_.load_pyobj_interpreter()->numel(this);
   }
   return numel_default();
 }
@@ -815,9 +818,6 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-
-  impl->refresh_numel();
-  impl->refresh_contiguous();
   return impl;
 }
 
@@ -867,6 +867,7 @@ void TensorImpl::copy_generic_tensor_metadata(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
+  dest_impl->numel_ = src_impl->numel_;
   if (src_impl->extra_meta_ != nullptr) {
     dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
   }
