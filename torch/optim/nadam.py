@@ -83,7 +83,7 @@ class NAdam(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -211,8 +211,6 @@ def nadam(params: List[Tensor],
 
     See :class:`~torch.optim.NAdam` for details.
     """
-
-
     if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 

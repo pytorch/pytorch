@@ -64,8 +64,7 @@ def get_swa_avg_fn():
 
 
 class AveragedModel(Module):
-    r"""Implements averaged model for Stochastic Weight Averaging (SWA) and
-    Exponential Moving Average (EMA).
+    r"""Implements averaged model for Stochastic Weight Averaging (SWA) and Exponential Moving Average (EMA).
 
     Stochastic Weight Averaging was proposed in `Averaging Weights Leads to
     Wider Optima and Better Generalization`_ by Pavel Izmailov, Dmitrii
@@ -162,6 +161,7 @@ class AveragedModel(Module):
     .. _Polyak averaging:
         https://paperswithcode.com/method/polyak-averaging
     """
+
     def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False):
         super().__init__()
         assert avg_fn is None or multi_avg_fn is None, 'Only one of avg_fn and multi_avg_fn should be provided'
@@ -224,7 +224,7 @@ class AveragedModel(Module):
 
 @torch.no_grad()
 def update_bn(loader, model, device=None):
-    r"""Updates BatchNorm running_mean, running_var buffers in the model.
+    r"""Update BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
@@ -319,6 +319,7 @@ class SWALR(LRScheduler):
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
     """
+
     def __init__(self, optimizer, swa_lr, anneal_epochs=10, anneal_strategy='cos', last_epoch=-1):
         swa_lrs = self._format_param(optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):

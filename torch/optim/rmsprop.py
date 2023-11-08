@@ -97,7 +97,7 @@ class RMSprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -220,9 +220,9 @@ def rmsprop(
     centered: bool,
 ):
     r"""Functional API that performs rmsprop algorithm computation.
+
     See :class:`~torch.optim.RMSProp` for details.
     """
-
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 

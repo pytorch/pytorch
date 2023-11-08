@@ -48,6 +48,7 @@ _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
+
     def __repr__(self) -> str:
         return "<required parameter>"
 
@@ -174,8 +175,9 @@ _maximize_doc = r"""maximize (bool, optional): maximize the objective with respe
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
-    r"""Register a pre hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a pre hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -193,8 +195,9 @@ def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableH
 
 
 def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> RemovableHandle:
-    r"""Register a post hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a post hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None
 
@@ -395,8 +398,10 @@ class Optimizer:
         Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
         Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
     ]:
-        """Groups a list of lists of tensors by device and dtype.
-        Skips this step if we are compiling since this will occur during inductor lowering."""
+        """Group a list of lists of tensors by device and dtype.
+
+        Skips this step if we are compiling since this will occur during inductor lowering.
+        """
         if is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
@@ -410,8 +415,9 @@ class Optimizer:
             self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
     def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:
-        r"""Register an optimizer step pre hook which will be called before
-        optimizer step. It should have the following signature::
+        r"""Register an optimizer step pre hook which will be called before optimizer step.
+
+        It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -433,6 +439,7 @@ class Optimizer:
 
     def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
+
         It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None
@@ -455,9 +462,9 @@ class Optimizer:
     def register_state_dict_pre_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
     ) -> RemovableHandle:
-        r"""Register a state dict pre-hook which will be called before
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+        r"""Register a state dict pre-hook which will be called before :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer) -> None
 
@@ -490,9 +497,9 @@ class Optimizer:
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
-        r"""Register a state dict post-hook which will be called after
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+        r"""Register a state dict post-hook which will be called after :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer, state_dict) -> state_dict or None
 
@@ -522,7 +529,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def state_dict(self) -> StateDict:
-        r"""Returns the state of the optimizer as a :class:`dict`.
+        r"""Return the state of the optimizer as a :class:`dict`.
 
         It contains two entries:
 
@@ -568,9 +575,7 @@ class Optimizer:
                     }
                 ]
             }
-
         """
-
         for pre_hook in self._optimizer_state_dict_pre_hooks.values():
             pre_hook(self)
 
@@ -640,9 +645,11 @@ class Optimizer:
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
-        r"""Register a load_state_dict pre-hook which will be called before
-        :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
-        following signature::
+        r"""Register a load_state_dict pre-hook which will be called.
+
+        Pre-hook will be called before :meth:`~torch.optim.Optimizer.load_state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer, state_dict) -> state_dict or None
 
@@ -678,9 +685,11 @@ class Optimizer:
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
     ) -> RemovableHandle:
-        r"""Register a load_state_dict post-hook which will be called after
-        :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
-        following signature::
+        r"""Register a load_state_dict post-hook which will be called.
+
+        Pre-hook will be called after :meth:`~torch.optim.Optimizer.load_state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer) -> None
 
@@ -712,7 +721,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
-        r"""Loads the optimizer state.
+        r"""Load the optimizer state.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned
@@ -752,7 +761,8 @@ class Optimizer:
             elif isinstance(value, dict):
                 return {k: _cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
+                # type: ignore[call-arg]
+                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
             else:
                 return value
 
@@ -781,7 +791,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
+        r"""Reset the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -837,7 +847,9 @@ class Optimizer:
         ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        r"""Performs a single optimization step (parameter update).
+        r"""Perform a single optimization step.
+
+        Parameter update
 
         Args:
             closure (Callable): A closure that reevaluates the model and

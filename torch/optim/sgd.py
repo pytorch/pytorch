@@ -54,7 +54,7 @@ class SGD(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -200,7 +200,6 @@ def sgd(params: List[Tensor],
 
     See :class:`~torch.optim.SGD` for details.
     """
-
     if foreach is None:
         # why must we be explicit about an if statement for torch.jit.is_scripting here?
         # because JIT can't handle Optionals nor fancy conditionals when scripting

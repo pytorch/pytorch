@@ -82,7 +82,7 @@ class Rprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -194,7 +194,6 @@ def rprop(
 
     See :class:`~torch.optim.Rprop` for details.
     """
-
     if foreach is None:
         _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
