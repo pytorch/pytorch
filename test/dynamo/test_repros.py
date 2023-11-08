@@ -917,6 +917,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         f(torch.ones(2, device="cuda", dtype=torch.float64))
 
+    # https://github.com/pytorch/pytorch/issues/113010
+    def test_out_overload_non_contiguous(self):
+        def f(x, y):
+            return torch.abs(x, out=y.T)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_ref = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        x_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+        y_test = torch.arange(4, dtype=torch.float32).reshape(2, 2)
+
+        out_ref = f(x_ref, y_ref)
+        out_test = f_compiled(x_test, y_test)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(y_ref, y_test)
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
