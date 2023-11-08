@@ -101,6 +101,7 @@ class NumpyCompatNormalization:
                 signatures = torch.fx.operator_schemas.get_signature_for_torch_op(
                     node.target
                 )
+                signatures = () if signatures is None else signatures
                 replaceable_kwargs = set()
                 for sig in signatures:
                     for param_name in sig.parameters.keys():
