@@ -7,6 +7,8 @@
 # LICENSE file in the root directory of this source tree.
 
 """
+Superset of ``torch.distributed.launch``.
+
 ``torchrun`` provides a superset of the functionality as ``torch.distributed.launch``
 with the following additional functionalities:
 
@@ -390,8 +392,7 @@ log = get_logger(__name__)
 
 
 def get_args_parser() -> ArgumentParser:
-    """Helper function parsing the command line options."""
-
+    """Parse the command line options."""
     parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
 
     #
@@ -675,7 +676,8 @@ def get_rdzv_endpoint(args):
 
 def get_use_env(args) -> bool:
     """
-    Retrieves ``use_env`` from the args.
+    Retrieve ``use_env`` from the args.
+
     ``use_env`` is a legacy argument, if ``use_env`` is False, the
     ``--node-rank`` argument will be transferred to all worker processes.
     ``use_env`` is only used by the ``torch.distributed.launch`` and will
@@ -771,7 +773,8 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
 
 def run_script_path(training_script: str, *training_script_args: str):
     """
-    Runs the provided `training_script` from within this interpreter.
+    Run the provided `training_script` from within this interpreter.
+
     Usage: `script_as_function("/abs/path/to/script.py", "--arg1", "val1")`
     """
     import runpy
