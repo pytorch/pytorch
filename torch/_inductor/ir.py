@@ -3617,20 +3617,33 @@ class ExternKernel(InputsKernel):
             f"arg {arg_name} not found in self.kwargs or self.kwargs_default_value"
         )
 
+    def is_legacy_abi_kernel(self):
+        return False
+
     def codegen_kwargs(self):
         if not self.kwargs:
             return []
         if V.graph.cpp_wrapper:
             # FIXME: we should unconditionally fill self.kwargs with missing default values
             # instead of carrying an extra self.ordered_kwargs_for_cpp_kernel
-            if self.kwargs:
-                assert (
-                    self.ordered_kwargs_for_cpp_kernel
-                ), "ordered_kwargs_for_cpp_kernel is missing"
+            if self.kwargs and not self.ordered_kwargs_for_cpp_kernel:
+                raise AssertionError("ordered_kwargs_for_cpp_kernel is missing")
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
-                kwargs.append(V.graph.wrapper_code.val_to_arg_str(v))
+                if isinstance(v, sympy.Expr):
+                    kwargs.append(v)
+                else:
+                    # FIXME We should let ExternKernel have access to the cpp schema where possible.
+                    if hasattr(self, "kwargs_default_value"):
+                        type_ = self.kwargs_default_value.get(arg_name).get("type")
+                    else:
+                        type_ = None
+                    kwargs.append(
+                        V.graph.wrapper_code.val_to_cpp_arg_str(
+                            type_, v, self.is_legacy_abi_kernel()
+                        )
+                    )
         else:
             kwargs = [
                 f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
@@ -3796,7 +3809,7 @@ class ExternKernelAlloc(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def codegen(self, wrapper):
+    def get_kernel_and_configs(self):
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
@@ -3806,6 +3819,10 @@ class UserDefinedTritonKernel(ExternKernel):
         if isinstance(kernel, Autotuner):
             configs = kernel.configs
             kernel = kernel.fn
+        return kernel, configs
+
+    def codegen(self, wrapper):
+        kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
         new_name = wrapper.define_user_defined_triton_kernel(
@@ -3861,6 +3878,10 @@ class UserDefinedTritonKernel(ExternKernel):
         self.name = V.graph.register_buffer(self)
         self.kernel_idx = kernel_idx
         self.grid = grid
+
+        kernel, _ = self.get_kernel_and_configs()
+        self.ordered_kwargs_for_cpp_kernel = kernel.arg_names
+
         mark_node_as_mutating(
             self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
         )
@@ -4166,6 +4187,11 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+fbcode_use_proxy_executor = {
+    torch.ops.aten._scaled_dot_product_efficient_attention.default,
+}
+
+
 @dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
@@ -4199,41 +4225,43 @@ class FallbackKernel(ExternKernelAlloc):
             ),
         ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
 
-        if kernel.__module__ == "torch._ops.aten":
-            op_base_name = (
-                kernel.__name__.split(".")[0]
-                if isinstance(kernel, torch._ops.OpOverload)
-                else kernel.__name__
-            )
+        if kernel.namespace == "aten":
+            # Aten Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            op_base_name = kernel.__name__.split(".")[0]
+
             if V.graph.cpp_wrapper:
-                assert isinstance(kernel, torch._ops.OpOverload)
-                # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
-                # repeat_interleave(const at::Tensor & self, int64_t repeats,
-                #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-                self.kernel = (
-                    f"at::{op_base_name}"
-                    if kernel._overloadname == "default"
-                    else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
-                )
-                schema = kernel._schema
+                if config.is_fbcode() and kernel in fbcode_use_proxy_executor:
+                    self.use_cpp_op_schema = True
+                    self.set_cpp_kernel(kernel)
+                else:
+                    # Calling with the default kernel name can lead to ambiguous behavior like the following example.
+                    # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
+                    # repeat_interleave(const at::Tensor & self, int64_t repeats,
+                    #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    self.kernel = (
+                        f"at::{op_base_name}"
+                        if kernel._overloadname == "default"
+                        else f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
+                    )
+                    schema = kernel._schema
+
+                    self.args_default_value = [
+                        {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if not x.kwarg_only
+                    ]
+                    self.ordered_kwargs_for_cpp_kernel = [
+                        x.name for x in schema.arguments if x.kwarg_only
+                    ]
+                    self.kwargs_default_value = {
+                        x.name: {"type": x.real_type, "value": x.default_value}
+                        for x in schema.arguments
+                        if x.kwarg_only
+                    }
             else:
                 self.kernel = f"aten.{op_base_name}"
 
-            if schema is not None:
-                self.args_default_value = [
-                    {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if not x.kwarg_only
-                ]
-                self.ordered_kwargs_for_cpp_kernel = [
-                    x.name for x in schema.arguments if x.kwarg_only
-                ]
-                self.kwargs_default_value = {
-                    x.name: {"type": x.real_type, "value": x.default_value}
-                    for x in schema.arguments
-                    if x.kwarg_only
-                }
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
@@ -4242,6 +4270,7 @@ class FallbackKernel(ExternKernelAlloc):
                     "Unable to find HigherOrderOperator kernel name"
                 )
         else:
+            # For non-aten OpOverload, i.e. custom ops
             if V.graph.cpp_wrapper:
                 self.use_cpp_op_schema = True
                 self.set_cpp_kernel(kernel)
@@ -4284,6 +4313,9 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
+    def is_legacy_abi_kernel(self):
+        return "_scaled_dot_product_flash_attention" in str(self.kernel)
+
     def get_arg_default_value(self, pos):
         assert hasattr(
             self, "args_default_value"
@@ -4303,7 +4335,17 @@ class FallbackKernel(ExternKernelAlloc):
 
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
-        args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+
+        if V.graph.cpp_wrapper:
+            args = [
+                V.graph.wrapper_code.val_to_cpp_arg_str(
+                    param.real_type, x, self.is_legacy_abi_kernel()
+                )
+                for param, x in zip(self.op_overload._schema.arguments, args)
+            ]
+        else:
+            args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+
         # Previously, we want to maintain forward-compatibility by skipping
         # default args in the serialized artifacts in fbcode. However,
         # some of our shim interfaces require default values being set.
@@ -4399,7 +4441,7 @@ class FallbackKernel(ExternKernelAlloc):
                     ]
                 )
             else:
-                raise RuntimeError("Unsupported return type")
+                raise RuntimeError(f"Unsupported return type {type(return_type)}")
 
         target = self.op_overload
         returns = target._schema.returns
