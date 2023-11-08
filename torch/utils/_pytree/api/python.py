@@ -502,7 +502,7 @@ _private_register_pytree_node(
 
 
 def _get_node_type(tree: Any) -> Any:
-    node_type = type(tree)
+    node_type = tree.__class__  # Dynamo complains about using `type(tree)`
     if node_type not in SUPPORTED_NODES:
         if is_namedtuple_class(node_type):
             return namedtuple
