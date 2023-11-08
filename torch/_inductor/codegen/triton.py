@@ -2763,6 +2763,12 @@ class TritonScheduling(BaseScheduling):
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
+        
+    def get_args_num(self):
+        """
+        TODO: Implement it.
+        """
+        return 0
 
     @staticmethod
     @functools.lru_cache(32)

@@ -2007,9 +2007,6 @@ class Scheduler:
                 self.get_backend(device).codegen_foreach(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 self.get_backend(device).codegen_nodes(node.get_nodes())
-                args_num = self.get_backend(device).get_args_num()
-                if args_num > self.MAX_FUSED_KERNEL_ARGS_NUM :
-                    self.flush()
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2021,6 +2018,10 @@ class Scheduler:
                 self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
+
+            args_num = self.get_backend(device).get_args_num()
+            if args_num > self.MAX_FUSED_KERNEL_ARGS_NUM :
+                self.flush()
 
         self.flush()
 
@@ -2054,7 +2055,14 @@ class BaseScheduling:
         Process the iteration sizes in case a transformation needs to be applied.
         """
         raise NotImplementedError()
-
+    
+    def get_args_num(self):
+        """
+        Return codegen Scheduled args for stack size protection.
+        If can't provided it, please return 0.
+        """
+        raise NotImplementedError()
+    
     def codegen_template(
         self, template_node: BaseSchedulerNode, epilogue_nodes: List[BaseSchedulerNode]
     ):
