@@ -42,11 +42,13 @@ log = logging.getLogger(__name__)
 if has_triton_package():
     import triton
     from triton import Config
+    from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
 else:
     Config = object
     triton = None
     KernelInterface = object
+    OutOfResources = object
 
 if has_triton():
     from triton.runtime.jit import get_cuda_stream
@@ -184,11 +186,20 @@ class CachingAutotuner(KernelInterface):
             self.launchers = []
             compiled_binaries = []
             for c in self.configs:
-                compiled_binary, launcher = self._precompile_config(
-                    c, warm_cache_only_with_cc
-                )
+                try:
+                    compiled_binary, launcher = self._precompile_config(
+                        c, warm_cache_only_with_cc
+                    )
+                except OutOfResources:
+                    # Skip the config if we run out of resource
+                    continue
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
+
+            if len(self.launchers) == 0:
+                raise RuntimeError(
+                    "No valid triton configs. Report a fatal compilation error"
+                )
 
             seen_configs = set(self.configs)
 
@@ -905,7 +916,7 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
-    num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+    num_warps = next_power_of_2(min(max(num_warps, 2), 16))
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 

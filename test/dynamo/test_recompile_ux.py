@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import unittest
 import weakref
-from unittest.mock import patch
 
 import torch
 
@@ -136,7 +135,6 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
         )
 
-    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_verbose_tensor_check(self):
         def func(a):
             # Warning: choose a function here whose meta implementation lives
@@ -185,7 +183,6 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             "tensor 'L['a']' requires_grad mismatch. expected requires_grad=0",
         )
 
-    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_mismatched_type(self):
         a = torch.rand(3, 4, 5)
         b = torch.rand(3, 4, 5)
@@ -203,6 +200,34 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         self.assert_single_log_contains(
             logs,
             "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
+        )
+
+    @torch._dynamo.config.patch("cache_size_limit", 32)
+    def test_multiple_guard_fails(self):
+        failure_reasons = []
+
+        def guard_fail_fn(failure):
+            failure_reasons.append(failure[0])
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch._dynamo.optimize(
+            backend="eager", guard_fail_fn=guard_fail_fn, dynamic=False
+        )(f)
+
+        for i in range(5):
+            failure_reasons.clear()
+            opt_f(torch.randn(8 + i))
+
+        failure_str = "\n".join(failure_reasons)
+        self.assertExpectedInline(
+            failure_str,
+            """\
+tensor 'L['x']' size mismatch at index 0. expected 11, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 10, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 9, actual 12
+tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""",
         )
 
 
