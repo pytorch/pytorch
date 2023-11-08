@@ -1226,8 +1226,7 @@ class Scheduler:
         # ctypes limited 1024 args, and the worst case each time fused 2x args.
         # let's limited args number to 500
         self.MAX_FUSED_KERNEL_ARGS_NUM = 500
-        
-        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+
         get_metric_table("graph_stats").add_row(
             lambda: {
                 "graph_id": self.post_grad_graph_id,
@@ -2179,9 +2178,9 @@ class Scheduler:
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
-                self.get_backend(device).codegen_foreach(node) # triton
+                self.get_backend(device).codegen_foreach(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes()) # cpp
+                self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2195,7 +2194,7 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
             args_num = self.get_backend(device).get_num_args()
-            if args_num > self.MAX_FUSED_KERNEL_ARGS_NUM :
+            if args_num > self.MAX_FUSED_KERNEL_ARGS_NUM:
                 self.flush()
 
         self.flush()
