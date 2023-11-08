@@ -132,7 +132,7 @@ class UnpackedDualTensor(_UnpackedDualTensor):
     See :func:`unpack_dual` for more details.
 
     """
-    
+
     pass
 
 
