@@ -91,46 +91,37 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-CLOSURE_VARS = collections.OrderedDict(
-    [
-        ("___check_type_id", check_type_id),
-        ("___check_obj_id", check_obj_id),
-        (
-            "___current_backend",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend,
-        ),
-        (
-            "___lookup_backend",
-            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
-                backend_obj_id
-            ],
-        ),
-        (
-            "___skip_backend_check",
-            lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
-        ),
-        ("___odict_getitem", collections.OrderedDict.__getitem__),
-        ("___dict_param_key_ids", dict_param_key_ids),
-        ("___dict_const_keys", dict_const_keys),
-        ("___dict_version", dict_version),
-        ("___dict_contains", lambda a, b: a in b),
-        ("___tuple_iterator_len", tuple_iterator_len),
-        ("___tuple_iterator_getitem", tuple_iterator_getitem),
-        ("__math_isnan", math.isnan),
-        ("inf", float("inf")),
-        ("__load_module", lambda name: importlib.import_module(name)),
-        ("utils_device", torch.utils._device),
-        ("device", torch.device),
-        (
-            "___from_numpy",
-            # If not numpy array, piggy back on e.g. tensor guards to check type
-            lambda a: torch.as_tensor(a)
-            if isinstance(a, (np.generic, np.ndarray))
-            else a,
-        ),
-        ("torch", torch),
-    ]
-)
+CLOSURE_VARS = {
+    "___check_type_id": check_type_id,
+    "___check_obj_id": check_obj_id,
+    "___current_backend": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend
+    ),
+    "___lookup_backend": (
+        lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
+            backend_obj_id
+        ]
+    ),
+    "___skip_backend_check": (
+        lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode
+    ),
+    "___odict_getitem": collections.OrderedDict.__getitem__,
+    "___dict_param_key_ids": dict_param_key_ids,
+    "___dict_const_keys": dict_const_keys,
+    "___dict_version": dict_version,
+    "___dict_contains": lambda a, b: a in b,
+    "___tuple_iterator_len": tuple_iterator_len,
+    "___tuple_iterator_getitem": tuple_iterator_getitem,
+    "__math_isnan": math.isnan,
+    "inf": float("inf"),
+    "__load_module": lambda name: importlib.import_module(name),
+    "utils_device": torch.utils._device,
+    "device": torch.device,
+    "___from_numpy":
+    # If not numpy array, piggy back on e.g. tensor guards to check type
+    (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
+    "torch": torch,
+}
 
 if sys.version_info[:2] <= (3, 8):
     # [Note: Python Version <= 3.8]
@@ -1138,17 +1129,15 @@ class CheckFunctionManager:
         if global_state is None:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
-        closure_vars = collections.OrderedDict(
-            [
-                ("___guarded_code", self),
-                ("___check_tensors", check_tensors_fn),
-                ("___check_tensors_verbose", check_tensors_verbose_fn),
-                ("___check_global_state", global_state.check),
-                ("tensor_check_names", tensor_check_names),
-            ]
-            + list(SYMPY_INTERP.items())
-        )
-        closure_vars.update(CLOSURE_VARS)
+        closure_vars = {
+            "___guarded_code": self,
+            "___check_tensors": check_tensors_fn,
+            "___check_tensors_verbose": check_tensors_verbose_fn,
+            "___check_global_state": global_state.check,
+            "tensor_check_names": tensor_check_names,
+            **SYMPY_INTERP,
+            **CLOSURE_VARS,
+        }
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
