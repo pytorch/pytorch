@@ -203,6 +203,15 @@ AOTIRuntimeError AOTInductorModelDelete(
   })
 }
 
+AOTIRuntimeError AOTInductorModelGetNumOutputs(
+    AOTInductorModelHandle model_handle,
+    size_t* ret_num_outputs) {
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto model = reinterpret_cast<torch::aot_inductor::AOTInductorModel*>(model_handle);
+      *ret_num_outputs = model->num_outputs();
+  })
+}
+
 AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle) {
