@@ -195,6 +195,7 @@ include_patterns = [
     'torch/_dynamo/testing.py',
     'torch/_dynamo/types.py',
     'torch/_dynamo/test_minifier_common.py',
+    'torch/_dynamo/utils.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
     'torch/_dynamo/side_effects.py',
