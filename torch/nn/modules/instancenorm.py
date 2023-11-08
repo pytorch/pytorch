@@ -401,7 +401,6 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
     r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of the ``num_features`` argument.
 
     The ``num_features`` argument of the :class:`InstanceNorm3d` is inferred from the ``input.size(1)``.
-
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
