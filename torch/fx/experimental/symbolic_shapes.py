@@ -3155,22 +3155,28 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                r = try_solve(expr, free[0], floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    new_var = self._find(r[1])
-                    ok = False
-                    if self.is_unbacked_symint(free[0]):
-                        # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                        # s0 - i0 - i1.  Arguably this should be OK but the
-                        # runtime assert machinery is very delicate right now
-                        # so this causes things to fail e.g.,
-                        # test_split_unbacked_sizes
-                        ok = len(free_unbacked_symbols(new_var)) <= 1
-                    else:
-                        # Never substitute backed with unbacked
-                        ok = len(free_unbacked_symbols(new_var)) == 0
-                    if ok:
-                        self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
+                # short-circuit when no solving is needed
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                    self._set_replacement(lhs, self._find(rhs))
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                    self._set_replacement(rhs, self._find(lhs))
+                else:
+                    r = try_solve(expr, free[0], floordiv_inequality=False)
+                    if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
+                        new_var = self._find(r[1])
+                        ok = False
+                        if self.is_unbacked_symint(free[0]):
+                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
+                            # s0 - i0 - i1.  Arguably this should be OK but the
+                            # runtime assert machinery is very delicate right now
+                            # so this causes things to fail e.g.,
+                            # test_split_unbacked_sizes
+                            ok = len(free_unbacked_symbols(new_var)) <= 1
+                        else:
+                            # Never substitute backed with unbacked
+                            ok = len(free_unbacked_symbols(new_var)) == 0
+                        if ok:
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
         if expr.has(Mod):

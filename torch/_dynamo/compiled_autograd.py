@@ -194,18 +194,23 @@ def enable(compiler_fn):
     )
     global compiled_autograd_enabled
     compiled_autograd_enabled = True
-    with torch.autograd.set_multithreading_enabled(False):
-        yield
-    if not prior:
-        compiled_autograd_enabled = False
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+    try:
+        with torch.autograd.set_multithreading_enabled(False):
+            yield
+    finally:
+        if not prior:
+            compiled_autograd_enabled = False
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
 def disable():
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    global compiled_autograd_enabled
     compiled_autograd_enabled = False
-    yield
-    if prior:
-        compiled_autograd_enabled = True
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+    try:
+        yield
+    finally:
+        if prior:
+            compiled_autograd_enabled = True
+        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
