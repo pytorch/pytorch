@@ -57,15 +57,23 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             return x
 
         with torch.no_grad():
-            torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=3)  # coalesced noop
-            torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=3)  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn1, nargs=2, expected_ops=3
+            )  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn2, nargs=2, expected_ops=3
+            )  # coalesced noop
             torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=5)
         with torch.enable_grad():
             torch._dynamo.testing.standard_test(self, fn=fn1, nargs=2, expected_ops=5)
             torch._dynamo.testing.standard_test(self, fn=fn2, nargs=2, expected_ops=5)
-            torch._dynamo.testing.standard_test(self, fn=fn3, nargs=2, expected_ops=3)  # coalesced noop
-            torch._dynamo.testing.standard_test(self, fn=fn4, nargs=2, expected_ops=3)  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn3, nargs=2, expected_ops=3
+            )  # coalesced noop
+            torch._dynamo.testing.standard_test(
+                self, fn=fn4, nargs=2, expected_ops=3
+            )  # coalesced noop
 
     def test_grad_mode_guard(self):
         def fn(a, b):
