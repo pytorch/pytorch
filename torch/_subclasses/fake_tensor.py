@@ -376,6 +376,9 @@ class FakeTensorConverter:
             constraint_dims=constraint_dims,
             allocate_fresh_if_metadata_mutated=allocate_fresh_if_metadata_mutated,
         )
+        if out is NotImplemented:
+            raise UnsupportedFakeTensorException("meta converter nyi")
+
         # Bind original shape and stride to the FakeTensor
         # We must do this because as we trace, transforms like setting .data will
         # change the fake tensor. This means that if we do not keep track of the original meta,
@@ -386,8 +389,7 @@ class FakeTensorConverter:
         out._original_sym_shape = out.size()
         out._original_sym_stride = out.stride()
         out._original_sym_storage_offset = out.storage_offset()
-        if out is NotImplemented:
-            raise UnsupportedFakeTensorException("meta converter nyi")
+
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
