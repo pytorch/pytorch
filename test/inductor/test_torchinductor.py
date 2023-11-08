@@ -86,7 +86,7 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, skipCUDAIf
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -101,20 +101,6 @@ skip_if_x86_mac = functools.partial(
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libfoo = None
-
-def skipCUDAIf(cond, msg):
-    if cond:
-        def decorate_fn(fn):
-            def inner2(self, *args, **kwargs):
-                if self.device == "cuda":
-                    raise unittest.SkipTest(msg)
-                return fn(self, *args, **kwargs)
-            return fn
-    else:
-        def decorate_fn(fn):
-            return fn
-
-    return decorate_fn
 
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
@@ -3143,6 +3129,7 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
+    @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -7513,9 +7500,11 @@ class CommonTemplate:
         Inductor will try triton configs like x = 64 and y = 1024 which will
         result in out of shared memory if dtype is fp32.
 
-        Currnelty inductor will skip such bad configs and pick the best one
+        Currently inductor will skip such bad configs and pick the best one
         from the remaining configs.
         """
+        if not _has_sufficient_memory(self.device, 3 * 2**24 * 65 * 4):
+            raise unittest.SkipTest("insufficient memory")
 
         @torch.compile
         def fn(x, y):
@@ -7523,11 +7512,8 @@ class CommonTemplate:
 
         # Use shape (2**24, 65) rather than (2**24, 128) potentially avoid OOM in
         # CI while still keep the same up-rounded size-hints.
-        try:
-            a = torch.randn(2**24, 65, device=self.device)
-            b = torch.randn(65, 2**24, device=self.device)
-        except RuntimeError:
-            return  # skip testing if OOM
+        a = torch.randn(2**24, 65, device=self.device)
+        b = torch.randn(65, 2**24, device=self.device)
         fn(a, b)
 
 

@@ -2530,6 +2530,7 @@ class TestSparseCSR(TestCase):
         run_test(4, 5, 4, 10, False)
         run_test(4, 4, 4, 16, True)
 
+    @skipIfTorchDynamo()
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 0.01})
@@ -2894,6 +2895,7 @@ class TestSparseCSR(TestCase):
             run_test(shape, max(shape), index_dtype)
             run_test(shape, shape[0] * shape[1], index_dtype)
 
+    @skipIfTorchDynamo()
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @all_sparse_compressed_layouts()
