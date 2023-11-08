@@ -26,8 +26,13 @@ from torch.distributed.fsdp._common_utils import (
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.optim import _apply_optimizer_in_backward
-from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    PairwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp, DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
@@ -369,7 +374,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
             device_mesh=mesh_2d["dp"],
         )
         fsdp_state = _get_module_fsdp_state(model)
-        self.assertEqual(fsdp_state._enable_extension, True)
+        self.assertTrue(isinstance(fsdp_state._fsdp_extension, DTensorExtensions))
 
     def _test_2d_e2e_training(
         self,
@@ -447,6 +452,40 @@ class TestNew2dParallelTraining(DTensorTestBase):
 # TODO: update all state dict unit tests to use distributed.checkpoint.state_dict,
 # and consolidate all the state_dict test in test.distributed.checkpoint.
 class TestNew2dParallelStateDict(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_2d_extension(self):
+        """
+        Test whether _fsdp_extension from FSDPstate has been set correctly.
+        """
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+            "net3": ColwiseParallel(),
+        }
+        model_2d = parallelize_module(
+            SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan=parallelize_plan,
+        )
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=mesh_2d["dp"],
+            use_orig_params=True
+        )
+        model_2d_fsdp_state = _get_module_fsdp_state(model_2d)
+        self.assertTrue(isinstance(model_2d_fsdp_state._fsdp_extension, DTensorExtensions))
+
+        mesh_1d = init_device_mesh("cuda", (self.world_size,))
+        model_1d = FSDP(
+            SimpleModel().cuda(),
+            device_mesh=mesh_1d,
+            use_orig_params=True
+        )
+        model_1d_fsdp_state = _get_module_fsdp_state(model_1d)
+        self.assertEqual(model_1d_fsdp_state._fsdp_extension, None)
+
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("is_even_sharded_model", [True, False])
