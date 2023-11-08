@@ -28,6 +28,7 @@ updated, and all models on different processes should be exactly the same.
     import torch.multiprocessing as mp
     import torch.nn as nn
     import torch.optim as optim
+    import os
     from torch.nn.parallel import DistributedDataParallel as DDP
 
 

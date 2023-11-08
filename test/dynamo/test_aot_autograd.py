@@ -277,9 +277,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     # This test is a spiritual equivalent to test_invalid_requires_grad_fake in test_autodispatch.py
     # The point of this test is to invoke aot_autograd in a way that would normally trigger an assertion
     # (This is what test_invalid_requires_grad_fake) does. However, the point of this test is to prove
-    # that we do not hit this asseriton, as dynamo recompiles correctly and protects this condition.
+    # that we do not hit this assertion, as dynamo recompiles correctly and protects this condition.
     #
-    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tenosrs
+    # Subnote: The reason for us having test_invalid_requires_grad_fake utilizing fake tensors
     # is because dynamo sends fake tensors down to aot_autograd.
     @patch("torch._functorch.config.debug_assert", True)
     def test_requires_grad_fake_via_dynamo_recompiles(self):
@@ -798,10 +798,11 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                     continue
                 if min_seq_nr < 0:
                     min_seq_nr = seq_nr
-                mod_name = node.meta.get("source_fn", "")
+                source_fn_stack = node.meta.get("source_fn_stack", [])
                 orig_aten = node.meta.get("original_aten", "")
-                if isinstance(mod_name, tuple):
-                    mod_name = mod_name[0]
+                mod_name = ""
+                if len(source_fn_stack) > 0:
+                    mod_name = source_fn_stack[-1][0]
                 # Make all seq_nr relative so it starts at 0
                 seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
@@ -816,6 +817,7 @@ SeqNr|OrigAten|SrcFn
 0|aten.add.Tensor|l__self___bn1
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
 3|aten.add.Tensor|add
 4|aten.view.default|flatten
 5|aten.view.default|l__self___fc1
@@ -841,6 +843,7 @@ SeqNr|OrigAten|SrcFn
 6|aten.t.default|
 5|aten.view.default|
 4|aten.view.default|
+2|aten.detach.default|
 2|aten.threshold_backward.default|
 1|aten.native_batch_norm_backward.default|
 0|aten.convolution_backward.default|
@@ -848,6 +851,32 @@ SeqNr|OrigAten|SrcFn
 """
             ),
         )
+
+    # https://github.com/pytorch/pytorch/issues/110121
+    def test_aot_export_joint_simple_repro(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.linear = torch.nn.Linear(5, 7)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def mini_backend(gm, sample_inputs):
+            from torch._functorch.aot_autograd import aot_export_joint_simple
+
+            fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
+
+            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+                return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
+
+        sample_inputs = [torch.rand((3, 4, 5))]
+        model = Mod()
+        m_compiled = torch.compile(model, backend=mini_backend)
+
+        out_ref = model(*sample_inputs)
+        out_test = m_compiled(*sample_inputs)
+        self.assertEqual(out_ref, out_test)
 
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
@@ -910,6 +939,43 @@ SeqNr|OrigAten|SrcFn
                 if re.search(r"Backward[01]", event.name):
                     bwd_set.add(event.sequence_nr)
         self.assertTrue(len(bwd_set), 13)
+
+    def test_aot_grad_mode_mutation(self):
+        for compiler in ["aot_eager", "inductor"]:
+
+            def f(x):
+                y = x * x
+                torch.set_grad_enabled(False)
+                return y.clone(), y
+
+            f_compiled = torch.compile(f, backend=compiler, fullgraph=True)
+
+            torch.set_grad_enabled(True)
+            x = torch.ones(3, requires_grad=True) * 3
+            y_ref = f(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            y = f_compiled(x)
+            self.assertEqual(torch.is_grad_enabled(), False)
+            torch.set_grad_enabled(True)
+            self.assertEqual(y_ref, y)
+
+            self.assertIsNone(y_ref[0].grad_fn)
+            self.assertIsNone(y[0].grad_fn)
+
+            self.assertIsNotNone(y_ref[1].grad_fn)
+            self.assertIsNotNone(y[1].grad_fn)
+
+            # Check that the grad computed for the inputs, given the input, is the same
+            # The tangent to `y[0]`, which has grad_required=False, is irrelevant
+            self.assertEqual(
+                sum(y_ref[1].grad_fn(torch.tensor([-1.0, 2.0, 0.0]))),
+                sum(
+                    x
+                    for x in y[1].grad_fn.apply(None, torch.tensor([-1.0, 2.0, 0.0]))
+                    if x is not None
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -68,6 +68,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 obj.__func__, self, source=source, **options
             )
+        elif source and inspect.ismemberdescriptor(obj):
+            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
+                options
+            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -200,6 +204,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
+    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+
     def __init__(self, value, value_type=None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -322,6 +328,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .. import trace_rules
         from .builder import VariableBuilder
 
         if (
@@ -343,12 +350,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             obj = self.value.__self__
             if (
                 func is torch.utils._contextlib._DecoratorContextManager.clone
-                and is_allowed(obj.__class__)
+                and trace_rules.lookup(obj.__class__)
+                == variables.TorchCtxManagerClassVariable
                 and not (args or kwargs)
             ):
-                return variables.TorchVariable(obj.__class__).call_function(
-                    tx, args, kwargs
-                )
+                return variables.TorchCtxManagerClassVariable(
+                    obj.__class__
+                ).call_function(tx, args, kwargs)
+
+            if (
+                func is torch.autograd.grad_mode.inference_mode.clone
+                and obj.__class__ is torch.autograd.grad_mode.inference_mode
+            ):
+                # simulate the inference_mode.clone implementation
+                var = variables.ConstantVariable(obj.mode)
+                return variables.TorchCtxManagerClassVariable(
+                    obj.__class__
+                ).call_function(tx, [var], kwargs)
         elif (
             istype(self.value, functools.partial)
             and is_allowed(self.value.func)
@@ -426,10 +444,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
+        class NO_SUCH_SUBOBJ:
+            pass
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
-            subobj = None
+            subobj = NO_SUCH_SUBOBJ
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options

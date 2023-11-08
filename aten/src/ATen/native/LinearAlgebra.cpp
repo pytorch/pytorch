@@ -39,21 +39,27 @@
 #include <ATen/ops/addr.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
+#include <ATen/ops/argsort.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
 #include <ATen/ops/ceil.h>
 #include <ATen/ops/chain_matmul_native.h>
+#include <ATen/ops/cumsum.h>
 #include <ATen/ops/det_native.h>
 #include <ATen/ops/diag_embed.h>
+#include <ATen/ops/diff.h>
 #include <ATen/ops/dot.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/eye.h>
+#include <ATen/ops/floor.h>
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
+#include <ATen/ops/full_like.h>
 #include <ATen/ops/gelu.h>
 #include <ATen/ops/ger_native.h>
 #include <ATen/ops/index_select.h>
@@ -119,9 +125,11 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/slogdet_native.h>
+#include <ATen/ops/sort.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/tensordot.h>
+#include <ATen/ops/unique_consecutive.h>
 #include <ATen/ops/vdot_native.h>
 #include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
@@ -133,7 +141,9 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
+#endif
 
 namespace at {
 
@@ -1314,8 +1324,8 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)    \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(      \
-            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(      \
+            kBFloat16, kHalf, kFloat8_e5m2, kFloat8_e4m3fn, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ADDMM_TYPES(TYPE, NAME, ...)        \
@@ -1329,9 +1339,11 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8;
       }
+#endif
       return 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
@@ -1346,9 +1358,11 @@ static inline int64_t get_mkldnn_matmul_min_size() {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)  && !defined(__powerpc__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8 * 1024;
       }
+#endif
       return 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
@@ -1483,12 +1497,14 @@ static void addmm_impl_cpu_(
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
-  bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-  if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
-      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
-      // We have dispatched to ACL GEMM for single precision float
-      // so do not need to dispatch to BLAS GEMM below
-      dispatched = true;
+  if (transpose_c) {
+    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+        mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+        // We have dispatched to ACL GEMM for single precision float
+        // so do not need to dispatch to BLAS GEMM below
+        dispatched = true;
+    }
   }
 #endif
 
@@ -1729,28 +1745,30 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     const auto sizes = t.sizes();
     const auto strides = t.strides();
-    return (strides[2] == 1 && strides[1] >= sizes[2])
-            || (strides[1] == 1 && strides[2] >= sizes[1]);
+    // we do not care dimension's stride if its size equals to 1
+    return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
+        (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
 
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
-  if (apply_heur && use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)) {
+  if (apply_heur && use_mkldnn_lower_precision_matmul(batch1, batch2, self_or_result)) {
       mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
       return;
   }
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "bmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "bmm", [&] {
           baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
         });
     } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, batch1.scalar_type(), "baddbmm", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, batch1.scalar_type(), "baddbmm", [&] {
           baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
         });
     }
   } else if (at::hasMKL() && ((
             self_or_result.scalar_type() != kBFloat16 &&
+            self_or_result.scalar_type() != kHalf &&
             at::native::is_floating_point(self_or_result)) ||
             at::native::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
@@ -2503,32 +2521,74 @@ Tensor compute_T18(const Tensor& A) {
 }
 
 template <typename scalar_t>
-void compute_T18_scale_square(
-  Tensor& mexp_out,
+Tensor compute_T18_scale_square(
   const Tensor& a,
   const Tensor& norm,
   scalar_t theta
 ) {
   // Scale
-  const auto s = at::max(
-    at::zeros_like(norm),
-    at::ceil(at::log2(norm / theta))
-  ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
-  const auto pow2s = at::pow(2, s);
-  const auto a_scaled = a / pow2s;
+  // We eventually need to do the matrix multiplication to calculate the result.
+  // For example, if we have `norm` equal to [27, 6, 6, 0.05], we will end up to
+  // get `s` as [4, 1, 1, 0], so we can use it to get the result by calculating
+  // matrix[0]^(2^4), matrix[1]^(2^1) and matrix[2]^(2^1) one by one to get the
+  // result, such "one by one calculation" will be quite slow.
+  const auto s = (at::ceil(at::log2(norm / theta))).clamp(/*min=*/0);
+  const auto pow2s = at::pow(2, -s);
+  const auto a_scaled = a * pow2s.view({-1, 1, 1});
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+
+  // Sort:
+  // Consider inputs are square matrix, so if we first power `matrix 0,1,2`, then
+  // the remain thing will only be multiply `matrix 0` by (2^4 - 1) times, which
+  // gives us an opportunity to calculate the matrix multiplication in a batch.
+  // The first thing we need to do is sort tensor `s`, which will be helpful to
+  // do the matrix multiplication by range.
+  Tensor sorted_s, sorted_s_inds;
+  // With above example, `sorted_s` is [0, 1, 1, 4], we also will need the index
+  // info, so we can use it to compose the result back.
+  std::tie(sorted_s, sorted_s_inds) = at::sort(s, /*dim=*/0);
+  sorted_s = sorted_s.to(at::kLong);
+  // Then we call `unique_consecutive` and we will use it to split `sorted_s`,
+  // with above example, `split_counts` is [1, 2, 1].
+  auto split_counts = std::get<2>(at::unique_consecutive(sorted_s, true, /*return_counts=*/true));
+  // We also need to know the index of the last element of each split, so we can
+  // know how many times we need to do the multiplication for each split matrix.
+  // Notice that, we will not need to calculate the actual pows, because we will
+  // use the cumulative matrix multiplication.
+  // With about example, `mul_times` will be [0, 1, 3].
+  auto split_edges = at::cumsum(split_counts, /*dim=*/0) - 1;
+  auto unique_s = sorted_s.index_select(0, split_edges).clamp(/*min=*/0);
+  auto mul_times = at::diff(unique_s, 1, -1, /*prepend=*/unique_s.new_zeros({1}));
 
   // Square
-  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
-  auto s_cpu = (s.device().type() == at::kCPU)
-    ? s : s.to(at::kCPU);
-  for (const auto i : c10::irange(mexp_scaled.size(0))) {
-    auto s_val = s_cpu.select(0, i).template item<int64_t>();
-    auto mexp = mexp_scaled.select(0, i);
-    for (const auto p C10_UNUSED : c10::irange(s_val)) {
-      mexp = at::matmul(mexp, mexp);
+  auto section_values = at::cat({split_counts, mul_times}, 0).to(at::kCPU);
+
+  TORCH_INTERNAL_ASSERT(section_values.is_contiguous());
+  const auto section_numel = section_values.numel() / 2;
+  auto scs = section_values.data_ptr<int64_t>();
+  auto pts = &scs[section_numel];
+
+  // We now will do the matrix muplication in a batch, with above example:
+  // 1. Multiply all matrices by 0 (`mul_times[0]`) times, then do `slice`
+  // to get the remain matrices by acc[1:] (`split_counts[0]`),
+  // 2. Multiply remain matrices by 1 times and slice to acc[2:]
+  // 3. Multiply remain matrices by 3 times and slice to acc[1:]
+  // All processed matrices will be stored in `output_pieces`.
+  std::vector<Tensor> output_pieces;
+  auto acc = mexp_scaled.index_select(0, sorted_s_inds);
+  for (int64_t i = 0; i < section_numel; ++i) {
+    for (int64_t j = 0; j < pts[i]; j++) {
+      // To avoid AMP autocasting caused by at::matmul
+      auto acc_out = at::empty_like(acc);
+      acc = at::matmul_out(acc_out, acc, acc);
     }
-    mexp_out.select(0, i).copy_(mexp);
+    output_pieces.push_back(acc.slice(0, 0, scs[i]));
+    acc = acc.slice(0, scs[i]);
   }
+
+  // Compose the result back
+  auto output = at::cat(output_pieces, 0);
+  return output.index_select(0, at::argsort(sorted_s_inds));
 }
 
 template <typename scalar_t>
@@ -2537,17 +2597,26 @@ Tensor mexp_impl(
   std::array<scalar_t, total_n_degs> thetas,
   bool compute_highest_degree_approx = false
 ) {
-  auto res = at::empty_like(a);
   const auto norm = operator_1_norm(a);
-  // `norm_cpu` is used to decide which Tensors require which approximation
-  // based on their norm. This decision takes place on CPU.
-  // It requires moving data back and forth between devices when `a` is on CUDA,
-  // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
-  // and better performance overall (benchmarked).
-  const auto norm_cpu = (a.device().type() == at::kCUDA)
-    ? norm.to(at::kCPU) : norm;
+  const auto batch_size = a.size(0);
+  if (batch_size > 1) {
+    compute_highest_degree_approx = true;
+  }
 
   if (!compute_highest_degree_approx) {
+    // To prevent undefined behavior which outputs "normal" result from a matrix
+    // contains NaN values, we put NaN values in `res`, so if input has NaN values,
+    // its computation will be skipped to return the NaN contained `res` directly.
+    auto res = at::full_like(a, std::numeric_limits<double>::quiet_NaN(), {},
+                             at::MemoryFormat::Contiguous);
+    // `norm_cpu` is used to decide which Tensors require which approximation
+    // based on their norm. This decision takes place on CPU.
+    // It requires moving data back and forth between devices when `a` is on CUDA,
+    // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+    // and better performance overall (benchmarked).
+    const auto norm_cpu = (a.device().type() == at::kCUDA)
+      ? norm.to(at::kCPU) : norm;
+
     constexpr std::array<
       Tensor(*)(const Tensor&),
       total_n_degs - 1>
@@ -2583,26 +2652,20 @@ Tensor mexp_impl(
       );
       auto a_large_norm = at::index_select(a, 0, idx_to_device);
       auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
-      auto mexp_out = at::empty_like(a_large_norm);
-
-      compute_T18_scale_square(
-        mexp_out,
+      auto mexp_out = compute_T18_scale_square(
         a_large_norm,
         large_norm_subset,
         thetas[total_n_degs - 1]
       );
       res.index_put_({idx_large_norm}, mexp_out);
     }
-
     return res;
   }
 
-  compute_T18_scale_square(
-    res, a, norm,
+  return compute_T18_scale_square(
+    a, norm,
     thetas[total_n_degs - 1]
   );
-
-  return res;
 }
 
 // matrix exponential
@@ -2672,7 +2735,7 @@ Tensor backward_analytic_function_of_a_matrix(
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg.matrix_exp");
-  checkFloatingOrComplex(a, "matrix_exp");
+  checkFloatingOrComplex(a, "linalg.matrix_exp");
 
   NoTF32Guard disable_tf32;
 

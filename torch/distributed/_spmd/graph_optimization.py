@@ -33,6 +33,7 @@ from torch.distributed._spmd.graph_utils import (
 )
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
+from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 logger: logging.Logger = logging.getLogger("graph_optimization")
@@ -172,7 +173,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
     MAX_WAIT_DISTANCE = 5
     node_list = []
     wait_nodes = []
-    inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
+    inputs = pytree.arg_tree_leaves(*comm_node.args, **comm_node.kwargs)
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
     distance = 0
     wait_prefixes = ("wait_comm", "wait_tensor")
@@ -549,7 +550,7 @@ def schedule_comm_wait(gm: IterGraphModule) -> None:
 )
 def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
     """
-    Erase the the orphant copy_ that generated when tracing optimizer.
+    Erase the orphant copy_ that generated when tracing optimizer.
     Two reasons why we could not simply use the DCE of fx.Graph.
     1. fx.Graph treats copy_ as a side-effect node and does not erase it.
     2. Users may want to preserve some orphan `copy_` that is not from the
@@ -581,7 +582,7 @@ def remove_copy_from_optimizer(gm: IterGraphModule) -> None:
                 ("aten._foreach_", "aten._fused_")
             ):
                 should_remove = True
-            parents, _ = tree_flatten((visiting.args, visiting.kwargs))
+            parents = pytree.arg_tree_leaves(*visiting.args, **visiting.kwargs)
             for parent in parents:
                 if isinstance(parent, fx.Node):
                     nodes.append(parent)
@@ -764,7 +765,7 @@ def get_fused_optimizer_block(optim_node: fx.Node) -> FusedOptimizerBlock:
         else:
             nodes.extend(
                 a
-                for a in tree_flatten((node.args, node.kwargs))[0]
+                for a in pytree.arg_tree_leaves(*node.args, **node.kwargs)
                 if isinstance(a, fx.Node)
             )
     if step_node == optim_node:

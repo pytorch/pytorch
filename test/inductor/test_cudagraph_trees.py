@@ -172,7 +172,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x * x * x
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             ones = torch.ones([4, 4], device="cuda")
             zeros = torch.zeros([5, 5], device="cuda")
             self.run_twc(foo_opt, ones)
@@ -251,7 +251,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch._dynamo.graph_break()
                 return x * x * x
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             ones = torch.ones([4, 4], device="cuda")
             foo(ones)
             foo_opt(ones)
@@ -269,11 +269,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 z = x + y
                 return z
 
-            @torch._dynamo.optimize()
+            @torch.compile
             def foo2(x):
                 return x + 4
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             for _ in range(3):
                 out = foo_opt(torch.ones([4, 4], device="cuda"))
@@ -303,7 +303,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y - 10
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             inp = torch.zeros([4, 4], dtype=torch.float, device="cuda")
             self.assertEqual(foo_opt(inp), foo(inp))
             self.assertEqual(foo_opt(inp), foo(inp))
@@ -440,7 +440,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y * 10
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             # two separate compilations & recordings
             out1 = self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
@@ -473,7 +473,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
             self.assertEqual(self.num_checkpoints(), 0)
@@ -978,7 +978,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_cleanup(self):
             def test_closure():
-                @torch._dynamo.optimize()
+                @torch.compile
                 def foo(x):
                     return x + 1 + 2, x * 10
 
@@ -997,7 +997,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_forward_backward(self):
-            @torch._dynamo.optimize()
+            @torch.compile
             def foo(x):
                 y = x * 2
                 return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
@@ -1021,7 +1021,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo_unopt(x, y):
                 return (x + 1) @ y
 
-            foo = torch._dynamo.optimize()(foo_unopt)
+            foo = torch.compile(foo_unopt)
 
             foo_unopt(
                 torch.ones([20, 20], device="cuda"), torch.ones([20, 20], device="cuda")
@@ -1228,8 +1228,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo2(x):
                 return x * 12
 
-            foo_opt = torch._dynamo.optimize()(foo)
-            foo2_opt = torch._dynamo.optimize()(foo2)
+            foo_opt = torch.compile(foo)
+            foo2_opt = torch.compile(foo2)
             ones = torch.ones([4, 4], device="cuda", requires_grad=True)
 
             out = foo_opt(ones)
@@ -1279,6 +1279,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             torch._inductor.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
+
+        def test_storage_access_error(self):
+            x = torch.rand([4], device="cuda")
+            torch._C._set_storage_access_error_msg(x, "custom error msg")
+
+            with self.assertRaisesRegex(Exception, "custom error msg"):
+                device = x.untyped_storage()
 
 
 if __name__ == "__main__":
