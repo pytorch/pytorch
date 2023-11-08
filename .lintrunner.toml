@@ -179,6 +179,7 @@ init_command = [
 code = 'MYPYNOFOLLOW'
 include_patterns = [
     'torch/_dynamo/allowed_functions.py',
+    'torch/_dynamo/bytecode_analysis.py',
     'torch/_dynamo/bytecode_transformation.py',
     'torch/_dynamo/codegen.py',
     'torch/_dynamo/compiled_autograd.py',
