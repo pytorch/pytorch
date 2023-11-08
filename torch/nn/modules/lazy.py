@@ -8,7 +8,7 @@ from ..parameter import is_lazy
 __all__ = ['LazyModuleMixin']
 
 class _LazyProtocol(Protocol):
-    """This is to avoid errors with mypy checks for the attributes in a mixin.
+    """This class is used to avoid errors with mypy checks for the attributes in a mixin.
 
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
