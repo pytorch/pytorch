@@ -2655,7 +2655,7 @@ def get_torch_obj_rule_map():
         try:
             obj = load_object(k)
             d[obj] = v
-        except AttributeError:
+        except (AttributeError, ModuleNotFoundError):
             pass
     return d
 
