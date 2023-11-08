@@ -5220,7 +5220,7 @@ try:
 
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
-        ir._WaitKernel.create_wait(inp)
+        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
         return inp
 
 except ImportError:
