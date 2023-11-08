@@ -132,23 +132,6 @@ tensor_dunder_fns_remap = {
 }
 
 
-try:
-    # Wed need to monkeypatch transformers here, sadly.
-    # TODO(voz): Upstream to transformers lib
-    import transformers
-
-    def _dynamo_overriden_transformers_eq(self, other):
-        if not hasattr(other, "__dict__"):
-            return False
-        return self.__dict__ == other.__dict__
-
-    transformers.configuration_utils.PretrainedConfig.__eq__ = (
-        _dynamo_overriden_transformers_eq
-    )
-except ImportError:
-    pass
-
-
 def torch_reconstruct(codegen, value):
     name = torch_get_name(value, f"allowed_fn_{id(value)}")
     unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
