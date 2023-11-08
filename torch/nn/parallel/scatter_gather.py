@@ -33,7 +33,10 @@ def scatter(inputs: T, target_gpus: Sequence[Union[int, torch.device]], dim: int
     ...
 
 def scatter(inputs, target_gpus, dim=0):
-    r"""Slices tensors into approximately equal chunks and distributes them across given GPUs. Duplicates references to objects that are not tensors."""
+    r"""Slice tensors into approximately equal chunks and distributes them across given GPUs.
+
+    Duplicates references to objects that are not tensors.
+    """
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
@@ -76,7 +79,10 @@ def scatter_kwargs(
 
 
 def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
-    r"""Gather tensors from different GPUs on a specified device. Use 'cpu' for CPU to avoid a deprecation warning."""
+    r"""Gather tensors from different GPUs on a specified device.
+
+    Use 'cpu' for CPU to avoid a deprecation warning.
+    """
     def gather_map(outputs):
         out = outputs[0]
         if isinstance(out, torch.Tensor):

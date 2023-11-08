@@ -214,7 +214,10 @@ class Transformer(Module):
             device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
             dtype: torch.dtype = torch.get_default_dtype(),
     ) -> Tensor:
-        r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0)."""
+        r"""Generate a square causal mask for the sequence.
+
+        The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
+        """
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self):
@@ -225,7 +228,9 @@ class Transformer(Module):
 
 
 class TransformerEncoder(Module):
-    r"""TransformerEncoder is a stack of N encoder layers. Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
+    r"""TransformerEncoder is a stack of N encoder layers.
+
+    Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
