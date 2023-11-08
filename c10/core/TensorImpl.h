@@ -698,7 +698,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   c10::SymInt sym_numel_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().numel_;
+      return symbolic_shape_meta().numel();
     } else {
       return c10::SymInt(SymInt::UNCHECKED, numel_);
     }
@@ -813,13 +813,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_contiguous_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_contiguous().guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta().is_channels_last_3d_contiguous_.guard_bool(
-            __FILE__, __LINE__);
+        return symbolic_shape_meta()
+            .is_channels_last_3d_contiguous()
+            .guard_bool(__FILE__, __LINE__);
       }
-      return symbolic_shape_meta().is_contiguous_.guard_bool(
+      return symbolic_shape_meta().is_contiguous().guard_bool(
           __FILE__, __LINE__);
     }
 
@@ -834,10 +835,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_strides_like_default(at::MemoryFormat memory_format) const {
     if (has_symbolic_sizes_strides_) {
       if (memory_format == at::MemoryFormat::ChannelsLast) {
-        return symbolic_shape_meta().is_channels_last_.guard_bool(
+        return symbolic_shape_meta().is_channels_last().guard_bool(
             __FILE__, __LINE__);
       } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
-        return symbolic_shape_meta().is_channels_last_3d_.guard_bool(
+        return symbolic_shape_meta().is_channels_last_3d().guard_bool(
             __FILE__, __LINE__);
       } else {
         return false;
@@ -855,7 +856,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_non_overlapping_and_dense_default() const {
     if (has_symbolic_sizes_strides_) {
-      return symbolic_shape_meta().is_non_overlapping_and_dense_.guard_bool(
+      return symbolic_shape_meta().is_non_overlapping_and_dense().guard_bool(
           __FILE__, __LINE__);
     } else {
       return is_non_overlapping_and_dense_;
