@@ -1,4 +1,3 @@
-import functools
 import itertools
 import logging
 import operator
@@ -61,6 +60,46 @@ def _get_split_args_default(split_node):
     )
 
 
+# noqa: W605
+# ############The pattern to be optimized is#########
+#         unbind (dim=0)
+#       /   ...    \
+# getitem      getitem   -> user=1
+#    |            |
+#  split         split  -> dim=1, user=1, split_section_size=1
+#    |            |
+#  getitem       getitem  -> user=1
+#    \           /
+#        cat (dim=1)  -> user=1
+#          |
+
+# ################After transformation#############
+#          unbind (dim=0)
+#        /    ...   \
+#    getitem       getitem  -> user=1
+#       \          /
+#        cat (dim=1)  -> user=1
+#         |
+
+
+def remove_split_with_size_one(
+    graph: torch.fx.Graph,
+    node: torch.fx.Node,
+    input: torch.fx.Node,
+):
+    # find the grand children of the split_node
+    next_users = find_next_users(node)
+    user = next(iter(node.users.keys()))
+    # replace the users of grand child node with the input node
+    for next_user in next_users:
+        next_user.replace_input_with(user, input)
+    # erase the split node and its child
+    graph.erase_node(user)
+    graph.erase_node(node)
+
+    counters["inductor"]["remove_split_with_size_one"] += 1
+
+
 def normalize_split_base(
     match: Match,
     _get_split_args: Callable[
@@ -86,6 +125,10 @@ def normalize_split_base(
     if any(isinstance(section, torch.SymInt) for section in split_sections):
         # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
         return
+    # remove the dummy split whose split sections size is one
+    if len(split_sections) == 1:
+        remove_split_with_size_one(graph, split_node, split_input)
+        return
     if split_dim < 0:  # Normalize split dim
         split_dim += split_input.meta["example_value"].dim()
     with graph.inserting_after(split_node):
@@ -98,90 +141,6 @@ def normalize_split_base(
     new_split_node.meta.update(split_node.meta)
     graph.erase_node(split_node)
     counters["inductor"]["split_cat_norm"] += 1
-
-
-class CallFunctionTorchOp(PatternExpr):
-    op = "call_function"
-
-    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> Union[Match, FailedMatch]:
-        if not isinstance(node, torch.fx.Node):
-            return FailedMatch("Not an fx node")
-        if node.op != self.op:
-            return FailedMatch(f"Not a {self.op} node")
-        if isinstance(node.target, OpOverload) or isinstance(node.target, OpOverloadPacket):
-            return FailedMatch(f"Is an aten op, not a torch op")
-
-        return Match(self)
-
-
-class NumpyCompatKwargReplacer:
-    """
-    For compatibility with numpy, some kwargs to torch ops have alternative names.
-    For example, any torch op that takes a "dim" kwarg can also accept an "axis" kwarg
-    that has the same behavior/purpose.
-
-    See python_arg_parser.cpp for details.
-    """
-
-    numpy_compat = {
-        "dim": ("axis",),
-        "keepdim": ("keepdims",),
-        "input": ("x", "a", "x1"),
-        "other": ("x2",),
-    }
-
-    def __init__(self):
-        self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]
-        self.inverse_mapping = {}
-        for actual_kwarg, numpy_kwargs in self.numpy_compat.items():
-            for numpy_kwarg in numpy_kwargs:
-                assert numpy_kwarg not in self.inverse_mapping
-                self.inverse_mapping[numpy_kwarg] = actual_kwarg
-
-    def __call__(self, match: Match, *args, **kwargs):
-        node = match.nodes[0]
-        graph = match.graph
-
-        if node.target in self.cache:
-            replaceable_kwargs = self.cache[node.target]
-        else:
-            signatures = torch.fx.operator_schemas.get_signature_for_torch_op(node.target)
-            replaceable_kwargs = set()
-            for sig in signatures:
-                for param_name in sig.parameters.keys():
-                    if param_name in self.numpy_compat:
-                        replaceable_kwargs.add(param_name)
-
-            self.cache[node.target] = replaceable_kwargs
-
-        def rename_kwarg(kwarg_name):
-            if kwarg_name in self.replacable_kwargs:
-                return self.inverse_mapping[kwarg_name]
-            return kwarg_name
-
-        new_kwargs = {rename_kwarg(k): v for k, v in kwargs.items()}
-
-        with graph.inserting_after(node):
-            new_node = graph.call_function(
-                node.target,
-                args=args,
-                kwargs=new_kwargs,
-            )
-        node.replace_all_uses_with(new_node)
-        new_node.meta.update(node.meta)
-        graph.erase_node(node)
-        counters["inductor"]["numpy_compat_kwarg_replacer"] += 1
-
-
-
-get_numpy_compat_replacement = NumpyCompatKwargReplacer()
-
-register_graph_pattern(
-    CallFunctionTorchOp(),
-    pass_dict=normalization_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
-    prepend=True,  # other normalization passes depend on this
-)(get_numpy_compat_replacement)
 
 
 @register_graph_pattern(
@@ -1355,6 +1314,8 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             for arg in user.args[0]:
                 indices.append(arg.args[1])
                 split_sections_for_unbind.append(split_sections[arg.args[1]])
+            # indices may not be necessarily sorted, we sort them first
+            indices.sort()
             # update the arg of stack user, only keep the first getitem
             user.update_arg(0, user.args[0][0])
             # calculate the fused tensor sizes in the indices

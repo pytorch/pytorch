@@ -23,6 +23,7 @@ from ..pattern_matcher import (
 )
 from ..utils import is_cpu_device
 from .group_batch_fusion import group_batch_fusion_pre_grad_passes
+from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        numpy_compat_normalization(gm.graph)
         group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
