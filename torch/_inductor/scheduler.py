@@ -1171,6 +1171,8 @@ class Scheduler:
         # for debug attribution
         self.origin_to_index = {}
         
+        # ctypes limited 1024 args, and the worst case each time fused 2x args.
+        # let's limited args number to 500
         self.MAX_FUSED_KERNEL_ARGS_NUM = 500
 
         log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
