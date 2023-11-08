@@ -204,6 +204,7 @@ from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 # Set the __module__ attribute
 SDPBackend.__module__ = "torch.backends.cuda"
+SDPAParams.__module__ = "torch.backends.cuda"
 
 
 def flash_sdp_enabled():
@@ -268,7 +269,6 @@ def can_use_flash_attention(params: SDPAParams, debug: bool = False) -> bool:
         debug: Whether to print debug information as to why FlashAttention could not be run.
             Defaults to False.
     """
-    # TODO this is dumb but makes developing easier for now
     return torch._C._can_use_flash_attention(params, debug)
 
 
@@ -277,10 +277,9 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
 
     Args:
         params: The parameters to test.
-        debug (bool, optional): Whether to print debug information as to why FlashAttention could not be run.
+        debug: Whether to print debug information as to why FlashAttention could not be run.
             Defaults to False.
     """
-    # TODO this is dumb but makes developing easier for now
     return torch._C._can_use_mem_efficient_attention(params, debug)
 
 
