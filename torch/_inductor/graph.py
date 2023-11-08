@@ -172,6 +172,7 @@ class GraphLowering(torch.fx.Interpreter):
         layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
+        is_const_graph=False,
         original_constants=None,
         const_output_index=None,
         const_kernels=None,
@@ -184,6 +185,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.num_channels_last_conv = 0
         self.is_inference = is_inference
+        self.is_const_graph = is_const_graph
         self.const_code = const_code
 
         self.extra_traceback = False  # we do our own error wrapping

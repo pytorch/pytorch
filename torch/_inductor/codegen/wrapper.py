@@ -346,7 +346,7 @@ class WrapperCodeGen(CodeGen):
         self.user_defined_kernel_count = 0
         self.unbacked_symbol_decls = set()
 
-        if not V.const_graph_generation:
+        if not V.graph.is_const_graph:
             self.write_header()
             self.write_prefix()
 
@@ -1345,7 +1345,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.const_code:
                 self.prefix.splice(V.graph.const_code)
 
-            if V.const_graph_generation:
+            if V.graph.is_const_graph:
                 self.prefix.splice(
                     """
                     void AOTInductorModel::_const_run_impl(
@@ -1378,7 +1378,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if V.graph.aot_mode:
-                if not V.const_graph_generation:
+                if not V.graph.is_const_graph:
                     if config.aot_inductor.abi_compatible:
                         self.prefix.splice(
                             """
@@ -1452,7 +1452,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             if V.graph.aot_mode:
-                if not V.const_graph_generation:
+                if not V.graph.is_const_graph:
                     self.prefix.writeline("inputs.clear();")
                 self.prefix.writeline(
                     "auto& kernels = *dynamic_cast<AOTInductorModelKernels*>(this->kernels_.get());"
@@ -1627,7 +1627,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.writeline("}")
 
     def generate(self, is_inference):
-        if V.graph.aot_mode and not V.const_graph_generation:
+        if V.graph.aot_mode and not V.graph.is_const_graph:
             self.codegen_model_kernels()
             self.codegen_model_constructor()
             self.codegen_const_run_driver()
@@ -1684,7 +1684,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_end(self, result):
         if V.graph.aot_mode:
-            if V.const_graph_generation:
+            if V.graph.is_const_graph:
                 result.writeline("} // AOTInductorModel::const_run_impl")
             else:
                 result.writeline("} // AOTInductorModel::run_impl")

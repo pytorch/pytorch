@@ -675,8 +675,9 @@ def fx_codegen_and_compile(
                 user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
+                is_const_graph=True,
             )
-            with V.set_graph_handler(const_graph), V.set_const_graph_generation(True):
+            with V.set_graph_handler(const_graph):
                 const_graph.run()
                 const_code, _ = const_graph.codegen()
                 original_constants = const_graph.constants
@@ -697,7 +698,7 @@ def fx_codegen_and_compile(
             const_kernels=const_kernels,
             const_code=const_code,
         )
-        with V.set_graph_handler(graph), V.set_const_graph_generation(False):
+        with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[int, ...]]] = []
             if graph.graph_outputs is not None:
