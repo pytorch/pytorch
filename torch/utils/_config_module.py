@@ -187,10 +187,8 @@ class ConfigModule(ModuleType):
 
     def to_dict(self) -> Dict[str, Any]:
         warnings.warn(
-            (
-                "config.to_dict() has been deprecated. It may no longer change the underlying config. "
-                "use config.shallow_copy_dict() or config.get_config_copy() instead"
-            ),
+            "config.to_dict() has been deprecated. It may no longer change the underlying config."
+            " use config.shallow_copy_dict() or config.get_config_copy() instead",
             DeprecationWarning,
         )
         return self.shallow_copy_dict()
@@ -278,10 +276,10 @@ class ContextDecorator(contextlib.ContextDecorator):
     """
 
     def __enter__(self):
-        raise NotImplementedError()
+        raise NotImplementedError("NYI")
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        raise NotImplementedError()
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        raise NotImplementedError("NYI")
 
     def __call__(self, func):
         if isinstance(func, type) and issubclass(func, unittest.TestCase):
