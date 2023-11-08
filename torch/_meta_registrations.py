@@ -1923,7 +1923,7 @@ def calc_conv_nd_return_shape(
 ):
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
-        Formula to apply to calculate the length of some dimension of the output
+        Formula to apply to calculate the length of some dimension of the output.
 
         See: https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
 
