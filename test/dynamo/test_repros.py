@@ -1625,7 +1625,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         # https://github.com/pytorch/pytorch/issues/113271
 
-        # We cannot cover anything. We just do pointwise ops for now
+        # We cannot cover everything. We just do some pointwise ops for now.
         float_ops = [
             "manual_add_",
             torch.Tensor.add_,
