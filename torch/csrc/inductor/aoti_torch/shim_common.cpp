@@ -1,3 +1,4 @@
+#include <ATen/native/BinaryOps.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/ScalarType.h>
@@ -11,7 +12,6 @@
 #include <cstdio>
 #include <iostream>
 #include <memory>
-#include <ATen/native/BinaryOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
