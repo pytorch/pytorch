@@ -121,6 +121,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
@@ -162,6 +163,7 @@ jobs:
             -e GITHUB_RUN_ID \
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
+            -e JOB_ID \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
