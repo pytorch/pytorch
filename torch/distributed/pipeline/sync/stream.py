@@ -4,9 +4,7 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-"""Utilities for eliminating boilerplate code to handle abstract streams with
-CPU device.
-"""
+"""Utilities for eliminating boilerplate code to handle abstract streams with CPU device."""
 from contextlib import contextmanager
 from typing import Generator, List, Union, cast
 
@@ -29,7 +27,7 @@ AbstractStream = Union[torch.cuda.Stream, CPUStreamType]
 
 
 def new_stream(device: torch.device) -> AbstractStream:
-    """Creates a new stream for either CPU or CUDA device."""
+    """Create a new stream for either CPU or CUDA device."""
     if device.type != "cuda":
         return CPUStream
     return torch.cuda.Stream(device)
@@ -72,15 +70,16 @@ def use_stream(stream: AbstractStream) -> Generator[None, None, None]:
 
 
 def get_device(stream: AbstractStream) -> torch.device:
-    """Gets the device from CPU or CUDA stream."""
+    """Get the device from CPU or CUDA stream."""
     if is_cuda(stream):
         return as_cuda(stream).device
     return torch.device("cpu")
 
 
 def wait_stream(source: AbstractStream, target: AbstractStream) -> None:
-    """:meth:`torch.cuda.Stream.wait_stream` for either CPU or CUDA stream. It
-    makes the source stream wait until the target stream completes work queued.
+    """:meth:`torch.cuda.Stream.wait_stream` for either CPU or CUDA stream.
+
+    It makes the source stream wait until the target stream completes work queued.
     """
     if is_cuda(target):
         if is_cuda(source):
@@ -111,7 +110,7 @@ def record_stream(tensor: torch.Tensor, stream: AbstractStream) -> None:
 
 
 def is_cuda(stream: AbstractStream) -> bool:
-    """Returns ``True`` if the given stream is a valid CUDA stream."""
+    """Return ``True`` if the given stream is a valid CUDA stream."""
     return stream is not CPUStream
 
 

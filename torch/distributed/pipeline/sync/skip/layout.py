@@ -37,7 +37,8 @@ class SkipLayout:
             p.sort()
 
     def copy_policy(self, next_j: int) -> Iterable[Tuple[int, Namespace, str]]:
-        """Generates skip routes for the given destination partition number.
+        """Generate skip routes for the given destination partition number.
+
         The skip routes are sorted by source partition number in ascending
         order.
 
@@ -54,9 +55,7 @@ class SkipLayout:
             yield (prev_j, ns, name)
 
     def requires_copy(self, ns: Namespace, name: str) -> bool:
-        """Whether the given namespace and name requires partition-to-partition
-        copy or not.
-        """
+        """Whether the given namespace and name requires partition-to-partition copy or not."""
         prev_j, next_j = self.by_ns_name.get((ns, name), (-1, -1))
         return prev_j != next_j
 

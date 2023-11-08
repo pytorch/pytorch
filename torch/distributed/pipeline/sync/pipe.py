@@ -6,13 +6,24 @@
 # LICENSE file in the root directory of this source tree.
 """The Pipe interface."""
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Iterable, Iterator, List, Optional, Union, Sequence, Tuple, cast
+from typing import (
+    Any,
+    cast,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
-from torch import Tensor, nn
-from torch.distributed.rpc import RRef
 import torch.autograd
 import torch.cuda
+from torch import nn, Tensor
+from torch.distributed.rpc import RRef
 
 from . import microbatch
 from .batchnorm import DeferredBatchNorm
@@ -40,7 +51,7 @@ else:
 
 
 def _recommend_auto_balance(message: str) -> str:
-    """Expands a message with recommendation to :mod:`torchpipe.balance`."""
+    """Expand a message with recommendation to :mod:`torchpipe.balance`."""
     return f"""{message}
 
 If your model is still under development, its optimal balance would change
@@ -71,7 +82,9 @@ def _verify_splitting(
     module: nn.Sequential, partitions: List[nn.Sequential], devices: List[torch.device]
 ) -> None:
     num_parameters = len(list(module.parameters()))
-    num_child_parameters = sum(len(list(child.parameters())) for child in module.children())
+    num_child_parameters = sum(
+        len(list(child.parameters())) for child in module.children()
+    )
     if num_parameters == num_child_parameters:
         return
 
@@ -84,7 +97,9 @@ def _verify_splitting(
             for p in parti.parameters():
                 for q in partj.parameters():
                     if p is q:
-                        raise ValueError("module with duplicate parameters on distinct devices is not supported")
+                        raise ValueError(
+                            "module with duplicate parameters on distinct devices is not supported"
+                        )
 
 
 class BalanceError(ValueError):
@@ -92,8 +107,7 @@ class BalanceError(ValueError):
 
 
 def _retrieve_device(module: nn.Module) -> torch.device:
-    """Validates all parameters in the Module have the same device and returns
-    the appropriate device.
+    """Validate all parameters in the Module have the same device and returns the appropriate device.
 
     Args:
         An ``nn.Module`` to process.
@@ -105,23 +119,21 @@ def _retrieve_device(module: nn.Module) -> torch.device:
         ValueError:
             If devices for ``nn.Module`` parameters are not all same.
     """
-
     device = None
     for parameter in module.parameters():
         if device is None:
             device = parameter.device
         elif device != parameter.device:
             raise ValueError(
-                f'nn.Module: {module}, should have all parameters on a single device,'
-                ' please use .to() to place the module on a single device')
+                f"nn.Module: {module}, should have all parameters on a single device,"
+                " please use .to() to place the module on a single device"
+            )
 
     return device if device is not None else torch.device("cpu")
 
 
 class PipeSequential(nn.Sequential):
-    """
-    Pipe variant of ``nn.Sequential`` which supports multiple inputs.
-    """
+    """Pipe variant of ``nn.Sequential`` which supports multiple inputs."""
 
     def forward(self, *inputs):
         for module in self:
@@ -135,11 +147,10 @@ class PipeSequential(nn.Sequential):
 
 class WithDevice(nn.Module):
     """
-    Wraps an ``nn.Module`` which is part of ``nn.Sequential`` passed into :class:`Pipe`
-    that overrides the device for that module. In cases where :class:`Pipe`
-    can't implicitly determine the device for the module and places it on CPU,
-    this wrapper can be used to override the implicit behavior and explicitly
-    specify which device a module should run on.
+    Wraps an ``nn.Module`` which is part of ``nn.Sequential`` passed into :class:`Pipe`that overrides the device for that module.
+
+    In cases where :class:`Pipe`can't implicitly determine the device for the module and places it on CPU,this wrapper can be used
+    to override the implicit behavior and explicitly specify which device a module should run on.
 
     The provided module is also moved to the given device via ``.to(device)``
     by :class:`Pipe`
@@ -161,6 +172,7 @@ class WithDevice(nn.Module):
         >>> # xdoctest: +SKIP("Needs RPC framework init")
         >>> model = Pipe(model, chunks=8)
     """
+
     def __init__(self, module: nn.Module, device: torch.device):
         super().__init__()
         self._module = module
@@ -188,7 +200,9 @@ def _assemble_partition(modules: List[nn.Module]):
     return PipeSequential(*modules_list)
 
 
-def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[torch.device]]:
+def _split_module(
+    modules: nn.Sequential,
+) -> Tuple[List[nn.Sequential], List[torch.device]]:
     partitions = []
     devices = []
 
@@ -202,7 +216,9 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
             module.to(device)
         else:
             device = _retrieve_device(module)
-        if current_device is not None and (current_device != device or device.type == 'cpu'):
+        if current_device is not None and (
+            current_device != device or device.type == "cpu"
+        ):
             partitions.append(_assemble_partition(current_partition))
             devices.append(current_device)
             current_partition = []
@@ -218,14 +234,16 @@ def _split_module(modules: nn.Sequential) -> Tuple[List[nn.Sequential], List[tor
     return partitions, devices
 
 
-MOVING_DENIED = TypeError("denied to move parameters and buffers, because Pipe should manage device placement")
+MOVING_DENIED = TypeError(
+    "denied to move parameters and buffers, because Pipe should manage device placement"
+)
 
 
 class Pipe(Module):
-    """Wraps an arbitrary :class:`nn.Sequential <torch.nn.Sequential>` module
-    to train on using synchronous pipeline parallelism. If the module requires
-    lots of memory and doesn't fit on a single GPU, pipeline parallelism is a
-    useful technique to employ for training.
+    """Wraps an arbitrary :class:`nn.Sequential <torch.nn.Sequential>` module to train on using synchronous pipeline parallelism.
+
+    If the module requires lots of memory and doesn't fit on a single GPU, pipeline parallelism is a useful technique to employ
+    for training.
 
     The implementation is based on the torchgpipe_ paper.
 
@@ -317,8 +335,9 @@ class Pipe(Module):
         # Check if RPC framework is initialized.
         if not torch.distributed.rpc._is_current_rpc_agent_set():
             raise RuntimeError(
-                'Please initialize RPC framework for Pipe using '
-                'torch.distributed.rpc.init_rpc')
+                "Please initialize RPC framework for Pipe using "
+                "torch.distributed.rpc.init_rpc"
+            )
 
         chunks = int(chunks)
         checkpoint = str(checkpoint)
@@ -326,7 +345,9 @@ class Pipe(Module):
         if chunks <= 0:
             raise ValueError("number of chunks must be positive integer")
         if checkpoint not in ["always", "except_last", "never"]:
-            raise ValueError("checkpoint is not one of 'always', 'except_last', or 'never'")
+            raise ValueError(
+                "checkpoint is not one of 'always', 'except_last', or 'never'"
+            )
 
         _verify_module(module)
 
@@ -350,16 +371,26 @@ class Pipe(Module):
         copy_streams = self._ensure_copy_streams()
 
         # The micro-batch index where the checkpointing stops.
-        checkpoint_stop = {"always": self.chunks, "except_last": self.chunks - 1, "never": 0}[self.checkpoint]
+        checkpoint_stop = {
+            "always": self.chunks,
+            "except_last": self.chunks - 1,
+            "never": 0,
+        }[self.checkpoint]
 
-        self.pipeline = Pipeline(self.partitions, self.devices, copy_streams, self._skip_layout, checkpoint_stop)
+        self.pipeline = Pipeline(
+            self.partitions,
+            self.devices,
+            copy_streams,
+            self._skip_layout,
+            checkpoint_stop,
+        )
 
     def __len__(self) -> int:
-        """Counts the length of the underlying sequential module."""
+        """Count the length of the underlying sequential module."""
         return sum(len(p) for p in self.partitions)
 
     def __getitem__(self, index: int) -> nn.Module:
-        """Gets a layer in the underlying sequential module."""
+        """Get a layer in the underlying sequential module."""
         partitions = self.partitions
         if index < 0:
             partitions = partitions[::-1]
@@ -380,7 +411,7 @@ class Pipe(Module):
         raise IndexError
 
     def __iter__(self) -> Iterator[nn.Module]:
-        """Iterates over children of the underlying sequential module."""
+        """Iterate over children of the underlying sequential module."""
         for partition in self.partitions:
             yield from partition
 
@@ -414,7 +445,7 @@ class Pipe(Module):
         return super().to(*args, **kwargs)
 
     def _ensure_copy_streams(self) -> List[List[AbstractStream]]:
-        """Ensures that :class:`Pipe` caches CUDA streams for copy.
+        """Ensure that :class:`Pipe` caches CUDA streams for copy.
 
         It's worth to cache CUDA streams although PyTorch already manages a
         pool of pre-allocated CUDA streams, because it may reduce GPU memory
@@ -423,13 +454,16 @@ class Pipe(Module):
         """
         if not self._copy_streams:
             for device in self.devices:
-                self._copy_streams.append([new_stream(device) for _ in range(self.chunks)])
+                self._copy_streams.append(
+                    [new_stream(device) for _ in range(self.chunks)]
+                )
 
         return self._copy_streams
 
     def forward(self, *inputs) -> RRef:
         """
-        Processes a single input mini-batch through the pipe and returns an
+        Process a single input mini-batch through the pipe and returns an class.
+
         :class:`~torch.distributed.rpc.RRef` pointing to the output.
         :class:`Pipe` is a fairly transparent module wrapper. It doesn't
         modify the input and output signature of the underlying module. But
@@ -472,7 +506,9 @@ class Pipe(Module):
             TypeError: input doesn't contain at least one tensor
 
         """
-        first_partition_device = self.devices[0] if len(self.devices) != 0 else torch.device("cpu")
+        first_partition_device = (
+            self.devices[0] if len(self.devices) != 0 else torch.device("cpu")
+        )
         microbatch.check(first_partition_device, *inputs)
 
         if not self.devices:

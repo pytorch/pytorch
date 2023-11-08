@@ -4,8 +4,9 @@
 #
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
-"""Portal keeps a tensor in the pocket plane. The tensor becomes hidden to the
-autograd engine. The shared context of three functions (:class:`PortalBlue`,
+"""Portal keeps a tensor in the pocket plane. The tensor becomes hidden to the autograd engine.
+
+The shared context of three functions (:class:`PortalBlue`,
 :class:`PortalOrange`, and :class:`PortalCopy`) out of the computation graph is
 one of the most important feature of :mod:`torchpipe.skip`.
 
@@ -33,8 +34,7 @@ class Portal:
         self.grad: Optional[Tensor] = None
 
     def blue(self) -> Tensor:
-        """Creates a :class:`PortalBlue` which hides the underlying tensor from
-        the autograd engine.
+        """Create a :class:`PortalBlue` which hides the underlying tensor from the autograd engine.
 
         Join the returning phony to the main lane of the autograd graph to
         assure the correct backpropagation::
@@ -52,8 +52,7 @@ class Portal:
         return PortalBlue.apply(self, tensor)
 
     def orange(self, phony: Tensor) -> Optional[Tensor]:
-        """Creates a :class:`PortalOrange` which retrieves the hidden tensor
-        without losing ability of backpropagation.
+        """Create a :class:`PortalOrange` which retrieves the hidden tensor without losing ability of backpropagation.
 
         Give a phony forked from the main lane of an autograd graph::
 
@@ -70,7 +69,7 @@ class Portal:
         return PortalOrange.apply(self, phony)
 
     def copy(self, prev_stream: AbstractStream, next_stream: AbstractStream, phony: Tensor,) -> Tensor:
-        """Copies the hidden tensor by a :class:`PortalCopy`.
+        """Copy the hidden tensor by a :class:`PortalCopy`.
 
         Give a phony and use the returning phony to keep backpropagation::
 
@@ -89,7 +88,7 @@ class Portal:
             raise RuntimeError("tensor in portal has been removed")
 
     def put_tensor(self, tensor: Optional[Tensor], tensor_life: int) -> None:
-        """Stores a tensor into this portal."""
+        """Store a tensor into this portal."""
         # [Life of Tensor through Portal]
         #
         # The tensor can be retrieved by use_tensor() up to 'tensor_life'
@@ -122,8 +121,9 @@ class Portal:
             self.tensor = None
 
     def use_tensor(self) -> Optional[Tensor]:
-        """Retrieves the underlying tensor and decreases the tensor  life. When
-        the life becomes 0, it the tensor will be removed.
+        """Retrieve the underlying tensor and decreases the tensor  life.
+
+        When the life becomes 0, it the tensor will be removed.
         """
         self.check_tensor_life()
 
@@ -137,12 +137,13 @@ class Portal:
         return tensor
 
     def put_grad(self, grad: Tensor) -> None:
-        """Stores a gradient into this portal."""
+        """Store a gradient into this portal."""
         self.grad = grad
 
     def use_grad(self) -> Tensor:
-        """Retrieves and removes the underlying gradient. The gradient is
-        always ephemeral.
+        """Retrieve and removes the underlying gradient.
+
+        The gradient is always ephemeral.
         """
         if self.grad is None:
             raise RuntimeError("grad in portal has been removed or never set")
@@ -203,8 +204,9 @@ class PortalOrange(torch.autograd.Function):
 
 
 class PortalCopy(torch.autograd.Function):
-    """Copies the hidden tensor in a :class:`Portal`. It replaces the hidden
-    tensor with copied one.
+    """Copies the hidden tensor in a :class:`Portal`.
+
+    It replaces the hidden tensor with copied one.
     """
 
     @staticmethod

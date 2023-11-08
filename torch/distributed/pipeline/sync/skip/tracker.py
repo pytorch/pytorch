@@ -50,8 +50,9 @@ class SkipTracker:
 
 
 class SkipTrackerThroughPotals(SkipTracker):
-    """Tracks saved skip tensors through portals. The skip tensors will be
-    hidden in portals so that the autograd engine does not need to track them.
+    """Tracks saved skip tensors through portals.
+
+    The skip tensors will be hidden in portals so that the autograd engine does not need to track them.
 
     This tracker is only used when the training or evaluating module is wrapped
     with :class:`torchpipe.Pipe`.
@@ -64,8 +65,9 @@ class SkipTrackerThroughPotals(SkipTracker):
         self.portals: Dict[Tuple[Namespace, str], Portal] = {}
 
     def save(self, batch: Batch, ns: Namespace, name: str, tensor: Optional[Tensor]) -> None:
-        """Saves the stashed skip tensor in a portal. The portal is then
-        connected to the given micro-batch with :class:`Join`.
+        """Save the stashed skip tensor in a portal.
+
+        The portal is then connected to the given micro-batch with :class:`Join`.
         """
         if not self.skip_layout.requires_copy(ns, name):
             super().save(batch, ns, name, tensor)
@@ -111,8 +113,9 @@ class SkipTrackerThroughPotals(SkipTracker):
         batch[tensor_idx] = join(batch[tensor_idx], phony)
 
     def load(self, batch: Batch, ns: Namespace, name: str) -> Optional[Tensor]:
-        """Loads a skip tensor from the corresponding portal to pop. The given
-        micro-batch is connected to the portal with :class:`Fork`.
+        """Load a skip tensor from the corresponding portal to pop.
+        
+        The given micro-batch is connected to the portal with :class:`Fork`.
         """
         if not self.skip_layout.requires_copy(ns, name):
             tensor = super().load(batch, ns, name)
@@ -127,8 +130,9 @@ class SkipTrackerThroughPotals(SkipTracker):
     def copy(
         self, batch: Batch, prev_stream: AbstractStream, next_stream: AbstractStream, ns: Namespace, name: str,
     ) -> None:
-        """Copies the skip tensor in the corresponding portal. The given
-        micro-batch and the portal will be tied with :class:`Fork` and
+        """Copy the skip tensor in the corresponding portal.
+  
+        The given micro-batch and the portal will be tied with :class:`Fork` and
         :class:`Join`.
         """
         assert self.skip_layout.requires_copy(ns, name)
@@ -152,11 +156,10 @@ thread_local = ThreadLocal()
 
 @contextmanager
 def use_skip_tracker(skip_tracker: SkipTracker) -> Generator[None, None, None]:
-    """Registers the given skip tracker on the current thread within a
-    context::
+    """Register the given skip tracker on the current thread within a context.
 
-        with use_skip_tracker(my_skip_tracker):
-            ...
+    with use_skip_tracker(my_skip_tracker):
+        ...
 
     """
     orig = thread_local.skip_tracker
@@ -170,7 +173,7 @@ def use_skip_tracker(skip_tracker: SkipTracker) -> Generator[None, None, None]:
 
 
 def current_skip_tracker() -> SkipTracker:
-    """Gets the skip tracker on the current thread."""
+    """Get the skip tracker on the current thread."""
     skip_tracker = thread_local.skip_tracker
 
     if skip_tracker is None:

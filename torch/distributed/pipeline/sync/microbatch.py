@@ -6,11 +6,11 @@
 # LICENSE file in the root directory of this source tree.
 """Manipulation of micro-batches."""
 import typing
-from typing import Any, Callable, List, Union, cast, Sequence
+from typing import Any, Callable, cast, List, Sequence, Union
 
 import torch
-from torch import Tensor
 import torch.cuda.comm
+from torch import Tensor
 
 __all__: List[str] = ["NoChunk", "Batch", "check", "scatter", "gather"]
 
@@ -22,14 +22,15 @@ Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 
 class NoChunk:
     """
-    Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor
-    should not be chunked on the batch dimension and instead be replicated
-    as-is across all micro-batches. This is useful for tensors which might
-    not have any 'batch' semantics for the model.
+    Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor should not be chunked on the batch dimension.
+    
+    Instead it will be replicated as-is across all micro-batches.
+    This is useful for tensors which might not have any 'batch' semantics for the model.
     """
+
     def __init__(self, inp: Tensor):
         if not torch.is_tensor(inp):
-            raise TypeError(f'NoChunk only supported for tensors, found: {inp}')
+            raise TypeError(f"NoChunk only supported for tensors, found: {inp}")
         self._tensor = inp
 
     @property
@@ -38,9 +39,7 @@ class NoChunk:
 
 
 class Batch:
-    """
-    An abstraction representing a microbatch in the pipeline.
-    """
+    """An abstraction representing a microbatch in the pipeline."""
 
     def __init__(self, values: Union[List[Any], Tensor]) -> None:
         self._values = values
@@ -49,7 +48,7 @@ class Batch:
         # Verify at least on tensor
         if not self.atomic:
             if not any(torch.is_tensor(value) for value in self._values):
-                raise TypeError(f'No tensors found in batch: {self._values}')
+                raise TypeError(f"No tensors found in batch: {self._values}")
 
     @property
     def tensor(self) -> Tensor:
@@ -60,13 +59,11 @@ class Batch:
 
     @property
     def values(self):
-        """Retrieves the underlying values for the batch"""
+        """Retrieves the underlying values for the batch."""
         return self._values
 
     def find_tensor_idx(self):
-        """
-        Retrieves the index of first tensor found.
-        """
+        """Retrieve the index of first tensor found."""
         if self.atomic:
             return 0
         for i, value in enumerate(self._values):
@@ -76,9 +73,7 @@ class Batch:
         raise TypeError("No tensor found!")
 
     def get_device(self):
-        """
-        Retrieves the device for this microbatch.
-        """
+        """Retrieve the device for this microbatch."""
         if self.atomic:
             return self._values.device  # type: ignore[union-attr]
 
@@ -87,8 +82,10 @@ class Batch:
                 return value.device
 
     def call(self, function: Function) -> "Batch":
-        """Calls a function on the microbatch. It also wraps
-        the output with :class:`Batch`.
+        """
+        Call a function on the microbatch.
+
+        It also wraps the output with :class:`Batch`.
         """
         if self.atomic:
             return Batch(function(self._values))
@@ -158,22 +155,22 @@ class Batch:
 
 def check(first_device, *inputs) -> None:
     """
-    Checks whether the input contains at least one tensor and each tensor is
-    on the same device as the first partition.
+    Check whether the input contains at least one tensor and each tensor is on the same device as the first partition.
 
     Raises:
-        ValueError: input does not contain at least one tensor
+        ValueError: input does not contain at least one tensor.
 
     """
-
     if not any(torch.is_tensor(input) for input in inputs):
-        raise TypeError(f'inputs do not have any tensors: {inputs}')
+        raise TypeError(f"inputs do not have any tensors: {inputs}")
     if any(torch.is_tensor(input) and input.device != first_device for input in inputs):
-        raise ValueError('All inputs should be on the same device as the first partition')
+        raise ValueError(
+            "All inputs should be on the same device as the first partition"
+        )
 
 
 def scatter(*inputs, chunks: int) -> List[Batch]:
-    """Splits an input mini-batch into multiple micro-batches."""
+    """Split an input mini-batch into multiple micro-batches."""
     if len(inputs) == 1 and isinstance(inputs[0], Tensor):
         return [Batch(x) for x in inputs[0].chunk(chunks)]
 
@@ -187,7 +184,9 @@ def scatter(*inputs, chunks: int) -> List[Batch]:
 
             # Validate number of chunks equal across all inputs.
             if num_chunks != -1 and num_chunks != len(tensors):
-                raise RuntimeError(f'Found different number of chunks produced for inputs: {num_chunks} and {len(tensors)}')
+                raise RuntimeError(
+                    f"Found different number of chunks produced for inputs: {num_chunks} and {len(tensors)}"
+                )
             num_chunks = len(tensors)
 
             for i, tensor in enumerate(tensors):
@@ -221,7 +220,9 @@ def gather(outputs: List[Batch]):
             current_outputs = []
             for batch in outputs:
                 if output_type != type(batch[i]):
-                    raise TypeError(f'Types for microbatch outputs do not match, found: {output_type} and {type(batch[i])}')
+                    raise TypeError(
+                        f"Types for microbatch outputs do not match, found: {output_type} and {type(batch[i])}"
+                    )
                 current_outputs.append(batch[i])
 
             if torch.is_tensor(outputs[0][i]):
