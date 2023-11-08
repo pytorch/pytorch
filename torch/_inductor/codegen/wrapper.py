@@ -360,7 +360,7 @@ class WrapperCodeGen(CodeGen):
         self.last_seen_device_guard_index = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
-        self.user_defined_kernel_count = 0
+        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
         self.unbacked_symbol_decls = set()
         self.allow_stack_allocation = None
         self.stack_allocated_buffers = {}
@@ -855,13 +855,28 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def get_unique_kernel_name(self, name: str) -> str:
-        new_name = f"{name}_{self.user_defined_kernel_count}"
-        self.user_defined_kernel_count += 1
-        return new_name
+    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+        from ..ir import Buffer
 
-    def define_user_defined_triton_kernel(self, name, kernel, configs, kwargs):
         original_name = kernel.__name__
+
+        # Distinguish between different functions using function id
+        cache_key = [id(kernel.fn)]
+        for arg in kwargs.values():
+            if isinstance(arg, Buffer):
+                cache_key.append(arg.get_dtype())
+            elif len(configs) > 0:
+                # We need to key on non tensor arg only in autotune mode
+                cache_key.append(arg)
+        cache_key = tuple(cache_key)
+
+        if cache_key in self.user_defined_kernel_cache:
+            return self.user_defined_kernel_cache[cache_key]
+
+        name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
+        # Add to the cache for the next use
+        self.user_defined_kernel_cache[cache_key] = name
+
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
@@ -876,7 +891,6 @@ class WrapperCodeGen(CodeGen):
         )
         compile_wrapper.newline()
 
-        from ..ir import Buffer
         from .common import SizeArg, TensorArg
 
         signature: List[Union[TensorArg, SizeArg]] = []
@@ -956,6 +970,7 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.getvalue(),
             metadata,
         )
+        return name
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
