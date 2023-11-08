@@ -359,7 +359,7 @@ def split_module(
             for i, output_name in enumerate(partition.outputs):
                 base_mod_env[output_name] = output_val_proxy[i].node  # type: ignore[index]
         elif num_outputs == 1:
-            base_mod_env[list(partition.outputs)[0]] = output_val
+            base_mod_env[next(iter(partition.outputs))] = output_val
 
     for node in m.graph.nodes:
         if node.op == "output":
