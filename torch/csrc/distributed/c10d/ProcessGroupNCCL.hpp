@@ -8,7 +8,6 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
@@ -47,6 +46,9 @@ constexpr const char* NCCL_ENABLE_TIMING = "NCCL_ENABLE_TIMING";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
+constexpr auto kProcessGroupNCCLDefaultTimeout =
+    std::chrono::milliseconds(10 * 60 * 1000);
+
 // NoHandling: do not handle asynchronous NCCL errors
 // TearDown: tear down process upon error, see `WorkNCCL::handleException`
 // CleanUpOnly: just clean up collectives and abort communicators without
@@ -73,6 +75,12 @@ enum ErrorHandlingMode {
 // See stashed_for_allocator_safety_ below.
 constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS =
     "TORCH_NCCL_AVOID_RECORD_STREAMS";
+
+// If set, ProcessGroupNCCL registers postAlloc and preFree hooks to cuda cache
+// allocator so that whenever a tensor is allocated or freed, ProcessGroupNCCL
+// can register/deregister the tensor on all available NCCL communicators.
+constexpr const char* NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
+    "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -166,6 +174,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     float getDuration() const override;
+
+    uint64_t getSequencenumber() const override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -268,6 +278,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    bool timingEnabled_;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    c10::optional<uint64_t> trace_id_;
     friend class ProcessGroupNCCL;
   };
 
@@ -345,11 +359,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   ~ProcessGroupNCCL() override;
-
-  // Check that all work is done (no enqueued work).
-  // We use this to avoid uwittingly having watchdogs query work during
-  // CUDA graph captures.
-  static void waitForAllPendingWorks();
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
@@ -488,12 +497,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::function<void(std::shared_ptr<WorkInfo>)>&& hook) override;
   void waitForPendingWorks() override;
 
+  void enableCollectivesTiming() override;
+
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   void abort(c10::optional<std::string> abortReason = c10::nullopt);
+
+  void shutdown();
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
@@ -521,7 +534,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
+      const std::vector<at::Tensor>& inputs = {},
+      const std::vector<at::Tensor>& outputs = {});
 
   virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
   initCoalescedWork(
@@ -542,7 +556,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& output,
       Fn fn,
       OpType opType,
-      const char* profilingTitle = nullptr);
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false);
+
   template <typename Fn, typename PreProcess, typename PostProcess>
   c10::intrusive_ptr<Work> collective(
       std::vector<at::Tensor>& input,
@@ -551,7 +567,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       PreProcess pre,
       PostProcess post,
       OpType opType,
-      const char* profilingTitle = nullptr);
+      const char* profilingTitle = nullptr,
+      bool avoidRecordStreams = false);
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
@@ -695,9 +712,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Mutex to Guard workMetaList_
   std::mutex workMetaListMutex_;
 
-  // Mutex to Guard all_nccl_process_groups
-  static std::mutex allProcessGroupsMutex_;
-
   // Condition Variable for watchdog thread sleep
   std::condition_variable workMetaListCV_;
 
@@ -711,9 +725,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::condition_variable completedWorkListCV_;
 
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList_;
-
-  // All process groups for checking Watchdog status
-  static std::unordered_set<c10d::ProcessGroupNCCL*> all_nccl_process_groups;
 
   // Add Work Pointer to workVector
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
@@ -761,6 +772,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
+  // Whether or not to hook the cache allocator to register all allocated
+  // tensors
+  bool useTensorRegisterAllocatorHook_ = false;
+
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
@@ -771,7 +786,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
-  bool enableTiming_;
+  std::atomic<bool> enableTiming_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
@@ -797,7 +812,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
   c10::intrusive_ptr<Backend> uccPG_;
 #endif
+  size_t uid_;
 };
+
+TORCH_API std::string dump_nccl_trace();
 
 } // namespace c10d
 

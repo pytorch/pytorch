@@ -1,9 +1,13 @@
 import logging
+import typing
 from collections import Counter
-from typing import Set
+from typing import Dict, Set
 
 import torch
 import torch._guards
+from torch._inductor.constant_folding import ConstantFolder
+from torch.multiprocessing.reductions import StorageWeakRef
+
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -23,10 +27,12 @@ patterns = PatternMatcherPass()
 @init_once_fakemode
 def lazy_init():
     from .fuse_attention import _sfdp_init
+    from .misc_patterns import _misc_patterns_init
     from .pad_mm import _pad_mm_init
 
     _pad_mm_init()
     _sfdp_init()
+    _misc_patterns_init()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -109,18 +115,95 @@ def remove_no_ops(
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_fold_uniform_value(gm):
+def remove_redundant_views(gm: torch.fx.GraphModule):
+    """
+    Removes redundant views by reusing existing ones.
+    """
+
+    # A dictionary mapping a tensor to all aliased views.
+    views: Dict[torch.fx.Node, Dict[torch.dtype, torch.fx.Node]] = {}
+    graph = gm.graph
+
+    for node in graph.nodes:
+        if node.op != "call_function":
+            continue
+
+        if node.target != torch.ops.aten.view.dtype:
+            continue
+
+        src = node.args[0]
+        to_type = node.args[1]
+        existing_views = views.get(src)
+        is_needed = True
+
+        if existing_views:
+            # Replace the view with the an existing view if available.
+            alias = existing_views.get(to_type)
+            if alias:
+                is_needed = False
+                node.replace_all_uses_with(alias)
+                alias.meta.update(node.meta)
+                graph.erase_node(node)
+        else:
+            from_type = src.meta["val"].dtype
+            existing_views = {from_type: src}
+            views[src] = existing_views
+
+        if is_needed:
+            # Save the new alias but do not replace existing one.
+            existing_views.setdefault(to_type, node)
+            views[node] = existing_views
+
+    # Clean up unused views.
+    while True:
+        unused_views = []
+        for alias in views:
+            if not alias.users:
+                unused_views.append(alias)
+        if len(unused_views) == 0:
+            break
+        for unused in unused_views:
+            views.pop(unused)
+            graph.erase_node(unused)
+
+
+class UniformValueConstantFolder(ConstantFolder):
+    """
+    Runs constant folding and replaces tensors that have a unifrom value
+    with a tensor constructor call: aten.full([shape], value, ...)
+    """
+
+    def __init__(self, gm, skip_constructors=False):
+        super().__init__(gm, skip_constructors)
+        self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
+        self.constant_data_ptrs: Dict[torch.fx.Node, StorageWeakRef] = {}
+
+    def insertable_tensor_check(self, t: torch.Tensor) -> bool:
+        # TODO - we could also Tensors which get replaced with arange here
+        return (
+            t.numel() != 0
+            and (t == t.flatten()[0]).all()
+            and torch._C._has_storage(t)
+            and t.layout == torch.strided
+        )
+
+    def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
+        self.node_replacements[node] = tensor.flatten()[0].item()
+        self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
+
+
+@torch.utils._python_dispatch._disable_current_modes()
+def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
     aten = torch.ops.aten
-    from torch._inductor.constant_folding import ConstantFolder
 
-    def is_uniform_valued_tensor(t):
-        return t.numel() != 0 and (t == t.flatten()[0]).all()
-
-    cf = ConstantFolder(gm, insertable_tensor_check=is_uniform_valued_tensor)
+    # Constant folding can leak memory, especially with repeated compilation, so we are only going to
+    # remove constants which can be replaced with a constructor.
+    cf = UniformValueConstantFolder(gm)
     cf.run()
 
     node_replacements = cf.node_replacements
+
     graph = gm.graph
 
     zeros = set()
@@ -128,39 +211,20 @@ def constant_fold_uniform_value(gm):
 
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
-    constant_data_ptrs = Counter()
+    constant_data_ptr_count: typing.Counter[StorageWeakRef] = Counter()
 
-    for constant in node_replacements.values():
-        if (
-            constant.numel() != 0
-            and torch._C._has_storage(constant)
-            and constant.layout == torch.strided
-        ):
-            constant_data_ptrs[constant.untyped_storage().data_ptr()] += 1
+    for node in cf.node_replacements:
+        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
-    for node, constant in node_replacements.items():
-        # Constant folding can leak memory, especially with repeated compilation, so we are only going to
-        # remove constants which can be replaced with a constructor.
-
-        # TODO - we could also Tensors which get replaced with arange here
-        if not is_uniform_valued_tensor(constant):
-            continue
-
+    for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
-        if (
-            not constant.is_contiguous(memory_format=torch.contiguous_format)
-            or not constant.layout == torch.strided
-        ):
+        fake_tensor = node.meta["val"]
+        if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
 
-        if (
-            torch._C._has_storage(constant)
-            and constant_data_ptrs[constant.untyped_storage().data_ptr()] != 1
-        ):
+        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
             continue
-
-        value = constant.flatten()[0].item()
 
         with graph.inserting_after(node):
             # the conversion from tensor and back to value can be lossy, just use the original full ctor value
@@ -174,11 +238,11 @@ def constant_fold_uniform_value(gm):
             # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(list(constant.shape), value),
+                args=(list(fake_tensor.shape), value),
                 kwargs={
-                    "dtype": constant.dtype,
+                    "dtype": fake_tensor.dtype,
                     "layout": torch.strided,
-                    "device": constant.device,
+                    "device": fake_tensor.device,
                     "pin_memory": False,
                 },
             )
@@ -193,6 +257,7 @@ def constant_fold_uniform_value(gm):
                 ones.add(new_node)
 
     remove_no_ops(gm, zeros, ones)
+    remove_redundant_views(gm)
 
 
 def joint_graph_passes(graph: torch.fx.GraphModule):
@@ -230,7 +295,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     ),
     pass_dict=patterns,
 )
-def pointless_convert(match: Match, arg, dtype1, dtype2):
+def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()

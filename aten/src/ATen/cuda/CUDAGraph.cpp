@@ -4,11 +4,14 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+
+#include <chrono>
+#include <thread>
 
 namespace at::cuda {
 
 static bool _cuda_graphs_debug = false;
+constexpr int kSynchronizeBusyWaitMillis = 10;
 
 MempoolId_t graph_pool_handle() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
@@ -55,6 +58,25 @@ CaptureId_t capture_sequence_id() {
  * Note [Interaction with CUDA graph capture] in CUDACachingAllocator.cpp
  * describes memory management for captures.
  */
+
+std::atomic<int> CUDAGraph::pending_event_queries = 0;
+
+// Track any outstanding event queries that could happen e.g., in a NCCL watchdog so that they
+// can be resolved before the capture begins. Note that event queries are not allowed during a
+// graph capture in the default capture mode.
+void CUDAGraph::inc_pending_event_queries() {
+  pending_event_queries++;
+}
+
+void CUDAGraph::dec_pending_event_queries() {
+  TORCH_INTERNAL_ASSERT(pending_event_queries > 0,
+    "Attempted to decrement the number of outstanding events to be queried, but it was <= 0.");
+  pending_event_queries--;
+}
+
+int CUDAGraph::num_pending_event_queries() {
+  return pending_event_queries;
+}
 
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
@@ -116,11 +138,14 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // due to the capture status being updated _after_ a capture had already started.
   c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
 
-#ifdef USE_C10D_NCCL
-  // If the watchdog has remaining work enqueued, an event query on the remaining work will crash
-  // the graph capture, so we wait for all pending work to be completed.
-  c10d::ProcessGroupNCCL::waitForAllPendingWorks();
-#endif
+  // At this point, any NCCL watchdogs should be aware that we are in capture mode
+  // and therefore should not enqueue any additional work that could be event-queried.
+  // We still must wait on any existing work that has not been cleaned up.
+  while (num_pending_event_queries()) {
+    TORCH_WARN_ONCE("Waiting for pending NCCL work to finish before starting graph capture.");
+    std::this_thread::sleep_for(
+      std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
+  }
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
@@ -302,9 +327,11 @@ void CUDAGraph::reset() {
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
+    has_graph_ = false;
   }
   if (has_graph_exec_) {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
+    has_graph_exec_ = false;
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")

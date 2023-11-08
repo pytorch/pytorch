@@ -989,6 +989,25 @@ class ModulePatch2(torch.nn.Module):
         return x - 1
 
 
+class UnspecNonInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        if x.sum() > 0:
+            return x + 1
+        else:
+            return x - 1
+
+
+class UnspecNonInlinableToplevelModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m = UnspecNonInlinableModule()
+
+    def forward(self, x):
+        return self.m(x)
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1027,11 +1046,11 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_cfgmod = make_test(CfgModule())
     test_stringmember = make_test(StringMember())
     test_modulelist = make_test(ModuleList())
-    test_modulelist = make_test(CustomGetItemModuleList())
+    test_modulelist_custom = make_test(CustomGetItemModuleList())
     test_moduledict = make_test(ModuleDict())
-    test_moduledict = make_test(CustomGetItemModuleDict())
+    test_moduledict_custom = make_test(CustomGetItemModuleDict())
     test_parameterdict = make_test(ParameterDict())
-    test_parameterdict = make_test(CustomGetItemParameterDict())
+    test_parameterdict_custom = make_test(CustomGetItemParameterDict())
     test_super1 = make_test(SuperModule())
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
@@ -1508,7 +1527,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
-        # Check parameteres and buffers
+        # Check parameters and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
         for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
@@ -1749,7 +1768,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         """
         Summary:
-          - removing a hook doesn't fail a guard, becuase we weren't compiling the hook
+          - removing a hook doesn't fail a guard, because we weren't compiling the hook
             (at least into the same graph) as forward in the first place! We do correctly
             omit calling the removed hook, but since this hook is a post forward hook,
             the 'RETURN' from forward is breaking the graph.
@@ -1875,7 +1894,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        activations = dict()
+        compiled_activations = dict()
+        eager_activations = dict()
+        activations = None
 
         def save_activations(name, mod, inp, out):
             activations[name] = inp
@@ -1885,19 +1906,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 partial(save_activations, name)
             )
 
-        model = torch.compile(model, backend="aot_eager")
+        compiled_model = torch.compile(model, backend="aot_eager")
 
+        activations = compiled_activations
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
-            activations.clear()
+            compiled_activations.clear()
+            x = torch.randn((20, 10))
+            pred = compiled_model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        activations = eager_activations
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            eager_activations.clear()
             x = torch.randn((20, 10))
             pred = model(x)
             loss = pred.sum()
             loss.backward()
 
-        print(f"Recorded Layers: {activations.keys()}\n\n")
-        print(f"Expected Layers: {forward_handles.keys()}")
+        print(f"Recorded Layers: {compiled_activations.keys()}\n\n")
+        print(f"Expected Layers: {eager_activations.keys()}")
+
+        self.assertTrue(compiled_activations.keys() == eager_activations.keys())
         self.assertTrue(activations.keys() == forward_handles.keys())
 
     def test_hooks_allowed_modules(self):
@@ -1947,7 +1981,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
-        self.assertEqual(len(activations), 5)
+        self.assertEqual(len(activations), 6)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
@@ -2199,6 +2233,43 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
+
+    def test_unspec_non_inlinable_module(self):
+        mod = UnspecNonInlinableModule()
+        opt_fn = torch._dynamo.optimize("eager")(mod)
+        x = torch.randn(100)
+        actual = opt_fn(x)
+        expected = mod(x)
+        self.assertEqual(actual, expected)
+
+    def test_no_guard_on_torch_nn_modules(self):
+        # https://github.com/pytorch/pytorch/issues/110048
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        mod = MockModule()
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def generate(x, c):
+            return mod(x) + c
+
+        for _ in range(0, 10):
+            generate(torch.randn(10, 10), 0)
+            generate(torch.randn(10, 10), 1)
+        self.assertEqual(cnt.frame_count, 2)
+
+        # Ensure that modification in user module causes recompile
+        mod.eval()
+        generate(torch.randn(10, 10), 0)
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":

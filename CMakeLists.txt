@@ -43,7 +43,12 @@ set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are reques
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# --- [ Check that minimal gcc version is 9.4+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.4)
+  message(FATAL "GCC-9.4 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
+endif()
+
+if(LINUX)
   include(cmake/CheckAbi.cmake)
   string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   string(APPEND CMAKE_CUDA_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
@@ -58,6 +63,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_LINK_WHAT_YOU_USE TRUE)
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -196,9 +202,6 @@ option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
-cmake_dependent_option(
-    BUILD_NVFUSER "Build NVFUSER" ON
-    "USE_CUDA OR USE_ROCM" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -210,12 +213,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_CUSPARSELT "Use cuSPARSELt" ON
     "USE_CUDA" OFF)
-cmake_dependent_option(
-    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
-    "USE_CUDA" OFF)
-cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
-    "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
@@ -484,6 +481,17 @@ if(LINUX)
 endif()
 
 if(MSVC)
+  # MSVC by default does not apply the correct __cplusplus version as specified by the C++ standard
+  # because MSVC is not a completely compliant implementation. This option forces MSVC to use the
+  # appropriate value given the requested --std option. This fixes a compilation issue mismatch
+  # between GCC/Clang and MSVC.
+  #
+  # See:
+  # * https://learn.microsoft.com/en-us/cpp/build/reference/zc-cplusplus?view=msvc-170
+  # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler  /Zc:__cplusplus")
+
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
@@ -719,6 +727,11 @@ endif()
 
 set(BUILD_ONEDNN_GRAPH OFF)
 
+if(MSVC)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
@@ -811,12 +824,14 @@ endif()
 include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
+if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
   list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
 endif()
 
 # ---[ Build flags
+# Re-include to override append_cxx_flag_if_supported from third_party/FBGEMM
+include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   # Eigen fails to build with some versions, so convert this to a warning
@@ -838,26 +853,18 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Winconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
-  endif()
-  if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
-  endif()
-  if(NOT CMAKE_COMPILER_IS_GNUCXX OR GCC_VERSION VERSION_GREATER_EQUAL 9.2)
-    # Prior to GCC 9.2, this warning misfires when a method is
-    # labeled "final".
-    # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=78010
-    append_cxx_flag_if_supported("-Wsuggest-override" CMAKE_CXX_FLAGS)
   endif()
 
   # Use ld.gold if available, fall back to ld.bfd (the default ld) if not
@@ -890,10 +897,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-error=inconsistent-missing-destructor-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
@@ -924,7 +929,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
 else()
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
@@ -933,8 +937,6 @@ else()
   add_compile_definitions(_UCRT_LEGACY_INFINITY)
   # disable min/max macros
   add_compile_definitions(NOMINMAX)
-  # The source code is in utf-8 encoding
-  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
   # Turn off these warnings on Windows.
   # destructor was implicitly defined as delete
   append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
@@ -1047,7 +1049,7 @@ include_directories(BEFORE ${PROJECT_SOURCE_DIR})
 include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
-include_directories(BEFORE ${PROJECT_BINARY_DIR}/aten/src/)
+include_directories(BEFORE ${CMAKE_BINARY_DIR}/aten/src/)
 
 if(USE_MIMALLOC)
   set(MI_OVERRIDE OFF)
@@ -1202,22 +1204,29 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
-if(NOT USE_CUDA AND NOT USE_ROCM)
-  set(BUILD_NVFUSER OFF CACHE BOOL "BUILD nvfuser" FORCE)
-endif()
-
-if(BUILD_NVFUSER)
-  if(DEFINED ENV{NVFUSER_SOURCE_DIR})
-    add_subdirectory($ENV{NVFUSER_SOURCE_DIR} nvfuser)
-  else()
-    add_subdirectory(third_party/nvfuser nvfuser)
-  endif()
-  add_compile_definitions(BUILD_NVFUSER)
-endif()
-
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
+endif()
+
+# Parse custom debug info
+if(DEFINED USE_CUSTOM_DEBINFO)
+    string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
+    message(STATUS "Source files with custom debug infos: ${SOURCE_FILES}")
+
+    string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
+
+    # Set the COMPILE_FLAGS property for each source file
+    foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
+        # We have to specify the scope here. We do this by specifying the
+        # targets we care about and caffe2/ for all test targets defined there
+        set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
+        set_source_files_properties(${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS} PROPERTIES COMPILE_FLAGS "-g")
+    endforeach()
+
+    # Link everything with debug info when any file is in debug mode
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
 endif()

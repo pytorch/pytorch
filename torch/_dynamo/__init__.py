@@ -1,6 +1,7 @@
 import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
+from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
     allow_in_graph,
@@ -16,6 +17,7 @@ from .decorators import (
     run,
 )
 from .eval_frame import (
+    _reset_guarded_backend_cache,
     explain,
     export,
     is_dynamo_supported,
@@ -51,6 +53,15 @@ __all__ = [
     "list_backends",
 ]
 
+if torch.manual_seed is torch.random.manual_seed:
+    import torch.jit._builtins
+
+    # Wrap manual_seed with the disable decorator.
+    # Can't do it at its implementation due to dependency issues.
+    torch.manual_seed = disable(torch.manual_seed)
+    # Add the new manual_seed to the builtin registry.
+    torch.jit._builtins._register_builtin(torch.manual_seed, "aten::manual_seed")
+
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""
@@ -64,8 +75,7 @@ def reset() -> None:
     guard_failures.clear()
     graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
-    if hasattr(eval_frame.most_recent_backend, "reset"):
-        eval_frame.most_recent_backend.reset()
-    eval_frame.most_recent_backend = None
+    _reset_guarded_backend_cache()
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()
+    code_context.clear()

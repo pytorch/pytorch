@@ -74,6 +74,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -120,7 +121,8 @@ enum class ParameterType {
   QSCHEME,
   FLOAT_LIST,
   SCALAR_LIST,
-  SYM_INT_LIST
+  SYM_INT_LIST,
+  DISPATCH_KEY_SET
 };
 
 struct FunctionParameter;
@@ -298,6 +300,7 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+  inline c10::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
   at::Tensor tensor_slow(int i);
@@ -626,6 +629,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   if (size1 > 0 && THPUtils_checkLong(arg)) {
     return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
   }
+  if (size1 > 0 && torch::is_symint(py::handle(arg))) {
+    return std::vector<int64_t>(
+        size1,
+        py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
+  }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -655,6 +663,9 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx, e);
         }
+      } else if (torch::is_symint(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymInt>(py::handle(obj))
+                       .guard_int(__FILE__, __LINE__);
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
@@ -725,6 +736,14 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
     return {};
   }
   return this->getDoublelist(i);
+}
+
+inline c10::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
+    int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return py::cast<c10::DispatchKeySet>(py::handle(args[i]));
 }
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(
@@ -1029,6 +1048,10 @@ inline double PythonArgs::toDouble(int i) {
     return py::cast<c10::SymFloat>(py::handle(args[i]))
         .guard_float(__FILE__, __LINE__);
   }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
+                                   .guard_int(__FILE__, __LINE__));
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
@@ -1095,8 +1118,8 @@ inline at::Storage PythonArgs::storage(
     is_typed_storage = false;
     storage_scalar_type = at::ScalarType::Undefined;
   } else {
-    storage =
-        createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
+    std::tie(storage, storage_scalar_type, is_typed_storage) =
+        createStorageGetType(args[i]);
   }
   return storage;
 }

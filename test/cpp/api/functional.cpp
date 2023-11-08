@@ -303,6 +303,23 @@ TEST_F(FunctionalTest, SmoothL1LossBeta) {
   ASSERT_TRUE(input.sizes() == input.grad().sizes());
 }
 
+TEST_F(FunctionalTest, SmoothL1LossBetaOptions) {
+  auto input = torch::tensor(
+      {0.1, 1.5, 10.0}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      F::smooth_l1_loss(
+          input,
+          target,
+          F::SmoothL1LossFuncOptions().reduction(torch::kMean).beta(0.5));
+  auto expected = torch::tensor(1.67, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor(
       {0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2235,6 +2252,13 @@ TEST_F(FunctionalTest, Interpolate) {
         ASSERT_TRUE(output.allclose(expected));
       }
     }
+  }
+  {
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            torch::randn({1}),
+            F::InterpolateFuncOptions().size(std::vector<int64_t>({1}))),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 1D) ");
   }
   {
     auto input = torch::randn({3, 2, 2});

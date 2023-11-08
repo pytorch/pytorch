@@ -1,4 +1,5 @@
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
@@ -6,6 +7,10 @@
 #include <fcntl.h>
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <fstream>
+#include <random>
+#include <streambuf>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -29,6 +34,53 @@
 
 namespace c10d {
 namespace detail {
+
+class timing_guard {
+  Counter& counter_;
+  typedef std::chrono::time_point<std::chrono::high_resolution_clock>
+      time_point;
+  time_point start_;
+
+ public:
+  timing_guard(Counter& counter)
+      : counter_(counter), start_(std::chrono::high_resolution_clock::now()) {}
+
+  ~timing_guard() {
+    stop();
+  }
+
+  void stop() {
+    if (start_ != time_point()) {
+      auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::high_resolution_clock::now() - start_)
+                      .count();
+      counter_.update(diff);
+      start_ = time_point();
+    }
+  }
+};
+
+void Counter::update(double val) {
+  count_ += 1;
+
+  auto delta = val - mean_;
+  mean_ += delta / count_;
+
+  auto delta2 = val - mean_;
+  m2_ += delta2 * delta2;
+}
+
+std::unordered_map<std::string, double> Counter::observe() const {
+  std::unordered_map<std::string, double> res;
+  res["count"] = (double)count_;
+  res["mean"] = mean_;
+  if (count_ >= 2) {
+    res["sample_variance"] = m2_ / (count_ - 1);
+  } else {
+    res["sample_variance"] = std::nan("1");
+  }
+  return res;
+}
 
 // Manages the lifecycle of a server daemon.
 class TCPServer {
@@ -237,7 +289,8 @@ TCPStore::TCPStore(
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
-      numWorkers_{opts.numWorkers} {
+      numWorkers_{opts.numWorkers},
+      usingLibUv_{opts.useLibUV} {
   if (opts.useLibUV) {
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
@@ -251,14 +304,45 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     // server successfully started
     C10D_DEBUG("The server has started on port = {}.", server_->port());
 
+    std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
+    if (maxconnFile.good() && numWorkers_.has_value()) {
+      try {
+        std::string str(
+            (std::istreambuf_iterator<char>(maxconnFile)),
+            std::istreambuf_iterator<char>());
+        std::size_t somaxconn = std::stoll(str);
+        if (somaxconn < *numWorkers_) {
+          C10D_WARNING(
+              "Starting store with {} workers but somaxconn is {}."
+              "This might cause instability during bootstrap, consider increasing it.",
+              *numWorkers_,
+              somaxconn);
+        }
+      } catch (std::logic_error& e) {
+        C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
+      }
+    }
+
     addr_.port = server_->port();
   } else {
     addr_.port = opts.port;
   }
 
+  if (numWorkers_.has_value()) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> distrib(1, *numWorkers_);
+    // stagger connecting to the store when there are too many ranks to
+    // avoid causing a DDoS
+    std::this_thread::sleep_for(std::chrono::milliseconds(distrib(gen)));
+  }
+
   client_ = detail::TCPClient::connect(addr_, opts);
   // TCP connection established
   C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
+
+  // client's first query for validation
+  validate();
 
   if (opts.waitWorkers) {
     waitForWorkers();
@@ -268,6 +352,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
+  detail::timing_guard tguard(clientCounters_["waitForWorkers"]);
   if (numWorkers_ == c10::nullopt) {
     return;
   }
@@ -290,7 +375,13 @@ void TCPStore::waitForWorkers() {
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
-        break;
+        C10_THROW_ERROR(
+            DistStoreError,
+            fmt::format(
+                "Timed out after {} seconds waiting for clients. {}/{} clients joined.",
+                elapsed.count(),
+                numWorkersCompleted,
+                *numWorkers_));
       }
       /* sleep override */
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -298,7 +389,15 @@ void TCPStore::waitForWorkers() {
   }
 }
 
+void TCPStore::validate(void) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
+  buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
+  buffer.flush();
+}
+
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
+  detail::timing_guard tguard(clientCounters_["set"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::SET);
   buffer.appendString(keyPrefix_ + key);
@@ -310,6 +409,7 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
+  detail::timing_guard tguard(clientCounters_["compareSet"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::COMPARE_SET);
   buffer.appendString(keyPrefix_ + key);
@@ -321,6 +421,7 @@ std::vector<uint8_t> TCPStore::compareSet(
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
+  detail::timing_guard tguard(clientCounters_["get"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   return doGet(keyPrefix_ + key);
 }
@@ -335,11 +436,13 @@ std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
 }
 
 int64_t TCPStore::add(const std::string& key, int64_t value) {
+  detail::timing_guard tguard(clientCounters_["add"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   return incrementValueBy(keyPrefix_ + key, value);
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
+  detail::timing_guard tguard(clientCounters_["deleteKey"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::DELETE_KEY);
   buffer.appendString(keyPrefix_ + key);
@@ -367,6 +470,7 @@ int64_t TCPStore::getNumKeys() {
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
+  detail::timing_guard tguard(clientCounters_["check"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
   buffer.appendValue(keys.size());
@@ -393,6 +497,7 @@ void TCPStore::wait(const std::vector<std::string>& keys) {
 void TCPStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
+  detail::timing_guard tguard(clientCounters_["wait"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
@@ -448,6 +553,7 @@ void TCPStore::doWait(
 void TCPStore::append(
     const std::string& key,
     const std::vector<uint8_t>& data) {
+  detail::timing_guard tguard(clientCounters_["append"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::APPEND);
   buffer.appendString(keyPrefix_ + key);
@@ -457,6 +563,7 @@ void TCPStore::append(
 
 std::vector<std::vector<uint8_t>> TCPStore::multiGet(
     const std::vector<std::string>& keys) {
+  detail::timing_guard tguard(clientCounters_["multiGet"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys;
   prefixedKeys.reserve(keys.size());
@@ -483,6 +590,7 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
 void TCPStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
+  detail::timing_guard tguard(clientCounters_["multiSet"]);
   TORCH_CHECK(
       keys.size() == values.size(),
       "multiSet keys and values vectors must be of same size");
@@ -499,6 +607,15 @@ void TCPStore::multiSet(
 
 bool TCPStore::hasExtendedApi() const {
   return true;
+}
+
+std::unordered_map<std::string, std::unordered_map<std::string, double>>
+TCPStore::collectClientCounters() const noexcept {
+  std::unordered_map<std::string, std::unordered_map<std::string, double>> res;
+  for (auto kv : clientCounters_) {
+    res[kv.first] = kv.second.observe();
+  }
+  return res;
 }
 
 } // namespace c10d

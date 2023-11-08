@@ -154,12 +154,7 @@ def get_symmetric_quantization_config(
         ),
     )
 
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = None
     if is_dynamic:
         quantization_config = QuantizationConfig(
             act_quantization_spec,
@@ -201,7 +196,8 @@ def _get_module_name_filter(module_name: str):
         #    'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #    'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
-        nn_module_stack = n.meta["nn_module_stack"]
+        # get_attr nodes doesn't have nn_module_stack?
+        nn_module_stack = n.meta.get("nn_module_stack", {})
         names = [
             n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
         ]
@@ -228,20 +224,58 @@ def _get_module_type_filter(tp: Callable):
         #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
         #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
         # }
-        nn_module_stack = n.meta["nn_module_stack"]
+        nn_module_stack = n.meta.get("nn_module_stack", {})
         types = [t for _, t in nn_module_stack.values()]
         return tp in types
 
     return module_type_filter
 
 
+def _get_not_module_type_or_name_filter(
+    tp_list: List[Callable], module_name_list: List[str]
+) -> Callable[[Node], bool]:
+    module_type_filters = [_get_module_type_filter(tp) for tp in tp_list]
+    module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
+
+    def not_module_type_or_name_filter(n: Node) -> bool:
+        return not any(f(n) for f in module_type_filters + module_name_list_filters)
+
+    return not_module_type_or_name_filter
+
+
 class XNNPACKQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
+    STATIC_QAT_ONLY_OPS = [
+        "conv2d_bn_relu",
+        "conv2d_bn",
+    ]
+
+    # static quantization ops (both PTQ and QAT)
+    STATIC_OPS = [
+        "linear",
+        "conv_relu",
+        "conv",
+        "adaptive_avg_pool2d",
+        # TODO: move this to BoltNNQuantizer?
+        "gru_io_only",
+        "max_pool2d",
+        "add_relu",
+        "add",
+        "mul_relu",
+        "mul",
+        "cat",
+    ]
+
+    DYNAMIC_OPS = [
+        "linear",
+    ]
 
     def __init__(self):
         super().__init__()
         self.global_config: Optional[QuantizationConfig] = None
-        self.operator_type_config: Dict[str, Optional[QuantizationConfig]] = {}
+        self.operator_type_config: Dict[
+            torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
+        ] = {}
         self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
         self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
@@ -277,7 +311,9 @@ class XNNPACKQuantizer(Quantizer):
         return self
 
     def set_operator_type(
-        self, operator_type: str, quantization_config: QuantizationConfig
+        self,
+        operator_type: torch._ops.OpOverloadPacket,
+        quantization_config: QuantizationConfig,
     ) -> XNNPACKQuantizer:
         self.operator_type_config[operator_type] = quantization_config
         return self
@@ -315,168 +351,80 @@ class XNNPACKQuantizer(Quantizer):
         propagate_annotation(model)
         return model
 
-    def _annotate_all_patterns(
+    def _annotate_all_static_patterns(
         self,
         model: torch.fx.GraphModule,
-        config: Optional[QuantizationConfig],
+        quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> torch.fx.GraphModule:
         # TODO: implement the support for None to be canceling out previous annotations
-        if config is None:
+        if quantization_config is None:
             return model
 
-        # assert config is not None
+        if quantization_config.is_qat:
+            for op in self.STATIC_QAT_ONLY_OPS:
+                OP_TO_ANNOTATOR[op](model, quantization_config, filter_fn)
+        for op in self.STATIC_OPS:
+            OP_TO_ANNOTATOR[op](model, quantization_config, filter_fn)
+        return model
 
-        self._annotate_linear(model, config, filter_fn)
-        self._annotate_conv2d_patterns(model, config, filter_fn)
-        self._annotate_max_pool2d(model, config, filter_fn)
-        self._annotate_add_patterns(model, config, filter_fn)
-        OP_TO_ANNOTATOR["mul_relu"](model, config, filter_fn)
-        OP_TO_ANNOTATOR["mul"](model, config, filter_fn)
-        self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
-        self._annotate_gru_io_only(model, config, filter_fn)
+    def _annotate_all_dynamic_patterns(
+        self,
+        model: torch.fx.GraphModule,
+        quantization_config: Optional[QuantizationConfig],
+        filter_fn: Optional[Callable[[Node], bool]] = None,
+    ) -> torch.fx.GraphModule:
+        # TODO: implement the support for None to be canceling out previous annotations
+        if quantization_config is None:
+            return model
+
+        for op in self.DYNAMIC_OPS:
+            OP_TO_ANNOTATOR[op](model, quantization_config, filter_fn)
         return model
 
     def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        module_name_list = list(self.module_name_config.keys())
         for module_name, config in self.module_name_config.items():
-            self._annotate_all_patterns(
+            self._annotate_all_static_patterns(
                 model, config, _get_module_name_filter(module_name)
             )
 
+        tp_list = list(self.module_type_config.keys())
         for module_type, config in self.module_type_config.items():
-            self._annotate_all_patterns(
+            self._annotate_all_static_patterns(
                 model, config, _get_module_type_filter(module_type)
             )
 
-        self._annotate_all_patterns(model, self.global_config)
+        self._annotate_all_static_patterns(
+            model,
+            self.global_config,
+            _get_not_module_type_or_name_filter(tp_list, module_name_list),
+        )
         return model
 
     def _annotate_for_dynamic_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
+        module_name_list = list(self.module_name_config.keys())
         for module_name, config in self.module_name_config.items():
-            self._annotate_linear(model, config, _get_module_name_filter(module_name))
+            self._annotate_all_dynamic_patterns(
+                model, config, _get_module_name_filter(module_name)
+            )
 
+        tp_list = list(self.module_type_config.keys())
         for module_type, config in self.module_type_config.items():
-            self._annotate_linear(model, config, _get_module_type_filter(module_type))
+            self._annotate_all_dynamic_patterns(
+                model, config, _get_module_type_filter(module_type)
+            )
 
-        self._annotate_linear(model, self.global_config)
-        return model
-
-    def _annotate_conv2d_patterns(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        if quantization_config is None:
-            return
-
-        if quantization_config.is_qat:
-            self._annotate_conv2d_bn_relu(gm, quantization_config, filter_fn)
-            self._annotate_conv2d_bn(gm, quantization_config, filter_fn)
-        self._annotate_conv2d_relu(gm, quantization_config, filter_fn)
-        self._annotate_conv2d(gm, quantization_config, filter_fn)
-
-    def _annotate_conv2d_bn(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        """
-        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
-        """
-        return OP_TO_ANNOTATOR["conv2d_bn"](gm, quantization_config, filter_fn)
-
-    def _annotate_conv2d_bn_relu(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        """
-        Note: This is only used for QAT. In PTQ, batchnorm should already be fused into the conv.
-        """
-        return OP_TO_ANNOTATOR["conv2d_bn_relu"](gm, quantization_config, filter_fn)
-
-    def _annotate_conv2d_relu(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["conv2d_relu"](gm, quantization_config, filter_fn)
-
-    def _annotate_conv2d(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["conv2d"](gm, quantization_config, filter_fn)
-
-    def _annotate_linear(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["linear"](gm, quantization_config, filter_fn)
-
-    def _annotate_adaptive_avg_pool2d(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["adaptive_avg_pool2d"](
-            gm, quantization_config, filter_fn
+        self._annotate_all_dynamic_patterns(
+            model,
+            self.global_config,
+            _get_not_module_type_or_name_filter(tp_list, module_name_list),
         )
-
-    # TODO: move this to BoltNNQuantizer?
-    def _annotate_gru_io_only(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["gru_io_only"](gm, quantization_config, filter_fn)
-
-    def _annotate_max_pool2d(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["max_pool2d"](gm, quantization_config, filter_fn)
-
-    def _annotate_add_patterns(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        self._annotate_add_relu(gm, quantization_config, filter_fn)
-        self._annotate_add(gm, quantization_config, filter_fn)
-
-    def _annotate_add_relu(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["add_relu"](gm, quantization_config, filter_fn)
-
-    def _annotate_add(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["add"](gm, quantization_config, filter_fn)
+        return model
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

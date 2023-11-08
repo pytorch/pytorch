@@ -1,25 +1,26 @@
 import dataclasses
 import sys
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Protocol,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Protocol, Union
+
+from typing_extensions import TypeAlias
 
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
 
-    DynamoFrameType = eval_frame._PyInterpreterFrame
+    DynamoFrameType: TypeAlias = eval_frame._PyInterpreterFrame
 else:
-    DynamoFrameType = types.FrameType
+    DynamoFrameType: TypeAlias = types.FrameType
+
+import torch
+
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
+
+# We use a dict to store additional data per frame.
+FrameState = Dict[Any, Any]
 
 
 class GuardFail(NamedTuple):
@@ -30,7 +31,7 @@ class GuardFail(NamedTuple):
 
 
 class GuardFn(Protocol):
-    closure_vars: OrderedDict[str, object]
+    closure_vars: Dict[str, object]
     args: List[str]
     code_parts: List[str]
     verbose_code_parts: List[str]
@@ -38,7 +39,7 @@ class GuardFn(Protocol):
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
 
     # maps locals of user function to bool
-    def __call__(self, *maybe_dotzero: object, **f_locals: object) -> bool:
+    def __call__(self, f_locals: Dict[str, object]) -> bool:
         ...
 
 
@@ -52,7 +53,8 @@ class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_size: int,
+        cache_entry: Optional[CacheEntry],  # type: ignore[valid-type]
+        frame_state: FrameState,
     ) -> Optional[GuardedCode]:
         ...
 
@@ -83,4 +85,11 @@ class ProfilerStartHook(Protocol):
 
 class ProfilerEndHook(Protocol):
     def __call__(self, record: Any) -> None:
+        ...
+
+
+class BytecodeHook(Protocol):
+    def __call__(
+        self, code: types.CodeType, new_code: types.CodeType
+    ) -> Optional[types.CodeType]:
         ...

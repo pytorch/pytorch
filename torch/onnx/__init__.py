@@ -1,5 +1,3 @@
-"""ONNX exporter."""
-
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import (
@@ -46,14 +44,15 @@ from .utils import (
 )
 
 from ._internal.exporter import (  # usort:skip. needs to be last to avoid circular import
-    ExportOptions,
-    ExportOutput,
-    ExportOutputSerializer,
-    dynamo_export,
-    OnnxExporterError,
-    enable_fake_mode,
-    OnnxRegistry,
     DiagnosticOptions,
+    ExportOptions,
+    ONNXProgram,
+    ONNXProgramSerializer,
+    InvalidExportOptionsError,
+    OnnxExporterError,
+    OnnxRegistry,
+    dynamo_export,
+    enable_fake_mode,
 )
 
 from ._internal.onnxruntime import (
@@ -100,14 +99,15 @@ __all__ = [
     # Errors
     "CheckerError",  # Backwards compatibility
     # Dynamo Exporter
-    "ExportOptions",
-    "ExportOutput",
-    "ExportOutputSerializer",
-    "dynamo_export",
-    "OnnxExporterError",
-    "enable_fake_mode",
-    "OnnxRegistry",
     "DiagnosticOptions",
+    "ExportOptions",
+    "ONNXProgram",
+    "ONNXProgramSerializer",
+    "InvalidExportOptionsError",
+    "OnnxExporterError",
+    "OnnxRegistry",
+    "dynamo_export",
+    "enable_fake_mode",
     # DORT / torch.compile
     "is_onnxrt_backend_supported",
 ]
@@ -116,9 +116,10 @@ __all__ = [
 ExportTypes.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 ExportOptions.__module__ = "torch.onnx"
-ExportOutput.__module__ = "torch.onnx"
-ExportOutputSerializer.__module__ = "torch.onnx"
+ONNXProgram.__module__ = "torch.onnx"
+ONNXProgramSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
+InvalidExportOptionsError.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 enable_fake_mode.__module__ = "torch.onnx"
 OnnxRegistry.__module__ = "torch.onnx"

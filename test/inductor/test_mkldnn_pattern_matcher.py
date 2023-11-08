@@ -11,7 +11,11 @@ from torch._dynamo.utils import counters
 from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantize_pt2e import (
+    convert_pt2e,
+    prepare_pt2e,
+    prepare_qat_pt2e,
+)
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
@@ -19,7 +23,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
+
 
 # The dict value is match_nodes(computation_op+unary_op)
 
@@ -78,41 +83,64 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
+    def _generate_qdq_quantized_model(self, mod, inputs, is_qat=False):
+        maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
+        with maybe_no_grad:
+            export_model = capture_pre_autograd_graph(
+                mod,
+                inputs,
+            )
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(
+                xiq.get_default_x86_inductor_quantization_config(is_qat=is_qat)
+            )
+            prepare_model = (
+                prepare_qat_pt2e(export_model, quantizer)
+                if is_qat
+                else prepare_pt2e(export_model, quantizer)
+            )
+            prepare_model(*inputs)
+            convert_model = convert_pt2e(prepare_model, fold_quantize=True)
+            torch.ao.quantization.move_exported_model_to_eval(convert_model)
+            return convert_model
+
     def _test_common(
         self,
         mod,
         inputs,
-        matcher_count,
-        matcher_nodes,
+        matcher_count=None,
+        matcher_nodes=None,
         atol=1e-5,
         rtol=1.3e-6,
         check_autocast=False,
         check_quantization=False,
+        is_qat=False,
+        matcher_check_fn=None,
     ):
         counters.clear()
+        torch._dynamo.reset()
         maybe_autocast = contextlib.nullcontext()
+        assert matcher_check_fn is not None or (
+            matcher_count is not None and matcher_nodes is not None
+        )
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
+            convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
             with torch.no_grad():
-                export_model = capture_pre_autograd_graph(
-                    mod,
-                    inputs,
-                )
-                quantizer = X86InductorQuantizer()
-                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-                prepare_model = prepare_pt2e(export_model, quantizer)
-                prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model).eval()
                 _ = torch.compile(convert_model)(*inputs)
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_count"], matcher_count
-                )
-                self.assertEqual(
-                    counters["inductor"]["pattern_matcher_nodes"],
-                    matcher_nodes,
-                )
+                if matcher_count is not None:
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_count"], matcher_count
+                    )
+                if matcher_nodes is not None:
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_nodes"],
+                        matcher_nodes,
+                    )
+                if matcher_check_fn is not None:
+                    matcher_check_fn()
         else:
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
@@ -128,19 +156,34 @@ class TestPatternMatcherBase(TestCase):
                 )
 
     def _test_code_common(
-        self, mod, inputs, include_ops, exclude_ops, atol=1e-5, rtol=1.3e-6
+        self,
+        mod,
+        inputs,
+        include_ops,
+        exclude_ops,
+        atol=1e-5,
+        rtol=1.3e-6,
+        check_quantization=False,
+        check_dynamic=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
+            if check_quantization:
+                mod = self._generate_qdq_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
-                torch.compile(mod, fullgraph=True), *clone_inputs
+                torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
+                *clone_inputs,
             )
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
+            if check_dynamic is not None:
+                _check_has_dynamic_shape(self, source_code)
+            if not check_quantization:
+                # Skip due to reduce range setting for Quantization on preCI system.
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
@@ -393,7 +436,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d(self):
+    def test_qconv2d_cpu(self):
         r"""
         This testcase will quantize a single Conv2d module.
         """
@@ -412,29 +455,27 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
-        # Totally pattern_matcher_count 4,
-        # pattern_matcher_nodes 17
-        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        # 2. dequant-conv pattern matched in quantization weight prepack
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-        # 4. Quantization fusion in post-grad fusion pass
-        #    [qconv2d_pointwise_default, div_1, round_2, add_1,
-        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
+            )
+
         self._test_common(
             mod,
             (v,),
-            4,
-            17,
             check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
         )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_relu(self):
+    def test_qconv2d_relu_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
         """
@@ -454,29 +495,31 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
-        # Totally pattern_matcher_count 4,
-        # pattern_matcher_nodes 18
-        # 1. pair of to_int8 and to_fp32 at conv input matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        # 2. dequant-conv pattern matched in quantization weight prepack
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 3. pair of to_int8 and to_fp32 at conv output matched in pointless_convert pass
-        #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-        # 4. Quantization fusion in post-grad fusion pass
-        #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1,
-        #     clamp_min_1, clamp_max_1, convert_element_type_2]
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 1
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
+            )
+            # 2. QConv2D Unary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, relu]
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 2)
+
         self._test_common(
             mod,
             (v,),
-            4,
-            18,
             check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
         )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_add(self):
+    def test_qconv2d_add_cpu(self):
         r"""
         This testcase will quantize a Conv2d->Add pattern as:
                  X
@@ -509,38 +552,36 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 8 pattern_matcher_count, 39 pattern_matcher_nodes
-            # 1. Pair of to_int8 and to_fp32 at conv input * 1, extra input of add * 1, and graph output * 1
-            #    matched in pointless_convert pass at
-            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
-            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
-            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-            #        However when dq has multiple users we will have
-            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-            #                                          \-> to_float -> sub -> mul]
-            #        So for now we will discount one pattern here
-            # 2. Dequant pattern matcher for dequant promotion * 1
-            #    [convert_element_type_3, sub_1, mul_3]
-            # 3. Dequant-conv pattern matched in quantization weight prepack * 2
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-            # 4. Quantization fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            # 5. Qconv2d_add * 1
-            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3,
-            #     mul_6, round_4, add_4, clamp_min_3, clamp_max_3, convert_element_type_6]
+
+            def matcher_check_fn():
+                # 1. Dequant-Conv2D pattern matched in quantization weight prepack * 2
+                #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
+                )
+                # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
+                #    [qconv2d_pointwise_default_1, add_4]
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 1
+                )
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 2
+                )
+
             self._test_common(
                 mod,
                 (v,),
-                7,
-                37,
                 check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
             )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_add_relu(self):
+    def test_qconv2d_add_relu_cpu(self):
         r"""
         This testcase will quantize a Conv2d->Add->ReLU pattern as:
                  X
@@ -576,38 +617,244 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(
                 1
             )
-            # Totally 8 pattern_matcher_count, 40 pattern_matcher_nodes
-            # 1. Pair of to_int8 and to_fp32 at conv input * 1, extra input of add * 1, and graph output * 1
-            #    matched in pointless_convert pass at
-            #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
-            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
-            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-            #        However when dq has multiple users we will have
-            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-            #                                          \-> to_float -> sub -> mul]
-            #        So for now we will discount one pattern here
-            # 2. Dequant pattern matcher for dequant promotion * 1
-            #    [convert_element_type_3, sub_1, mul_3]
-            # 3. Dequant-conv pattern matched in quantization weight prepack * 2
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-            # 4. Quantization fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-            # 5. Qconv2d_add * 1
-            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu,
-            #     mul_6, round_4, add_4, clamp_min_3, clamp_max_3, convert_element_type_6]
+
+            def matcher_check_fn():
+                # 1. Dequant-conv pattern matched in quantization weight prepack * 2
+                #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+                )
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
+                )
+                # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
+                #    [qconv2d_pointwise_default_1, add_3, relu]
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_count"], 1
+                )
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_binary_matcher_nodes"], 3
+                )
+
             self._test_common(
                 mod,
                 (v,),
-                7,
-                38,
                 check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
             )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qconv2d_dequant_promotion(self):
+    def test_qat_qconv2d(self):
+        r"""
+        This testcase will quantize a single Conv2d module with qat flow.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.bn = torch.nn.BatchNorm2d(128)
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        mod = M().train()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        def matcher_check_fn():
+            # 1. Dequant-conv pattern matched in quantization weight prepack * 1
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
+            )
+            # 2. QConv2D Unary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 7)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            is_qat=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_relu(self):
+        r"""
+        This testcase will quantize Conv2d->ReLU pattern with qat flow.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.unary_fn = torch.nn.ReLU()
+                self.bn = torch.nn.BatchNorm2d(128)
+
+            def forward(self, x):
+                return self.unary_fn(self.bn(self.conv(x)))
+
+        mod = M()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        def matcher_check_fn():
+            # 1. Dequant-conv pattern matched in quantization weight prepack * 1
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 1
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 6
+            )
+            # 2. QConv2D Unary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default, relu, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_nodes"], 8)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            is_qat=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_add(self):
+        r"""
+        This testcase will quantize a Conv2d->Add pattern as:
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                 Y
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.bn1 = torch.nn.BatchNorm2d(6)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.bn2 = torch.nn.BatchNorm2d(6)
+
+            def forward(self, x):
+                x1 = self.bn1(self.conv1(x))
+                x2 = self.bn2(self.conv2(x))
+                return x1 + x2
+
+        mod = M().train()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        def matcher_check_fn():
+            # 1. Dequant-conv pattern matched in quantization weight prepack * 2
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
+            )
+            # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
+            #     clamp_min_3, clamp_max_3, convert_element_type_6]
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 11)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            is_qat=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qat_qconv2d_add_relu(self):
+        r"""
+        This testcase will quantize a Conv2d->Add->ReLU pattern as:
+                 X
+               /   \
+        Conv1(X)   Conv2(X)
+               \   /
+                Add
+                 |
+                ReLU
+                 |
+                 Y
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.bn1 = torch.nn.BatchNorm2d(6)
+                self.conv2 = torch.nn.Conv2d(3, 6, kernel_size=3, stride=1)
+                self.bn2 = torch.nn.BatchNorm2d(6)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x1 = self.bn1(self.conv1(x))
+                x2 = self.bn2(self.conv2(x))
+                return self.relu(x1 + x2)
+
+        mod = M().train()
+        v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=True).add(1)
+
+        def matcher_check_fn():
+            # 1. Dequant-conv pattern matched in quantization weight prepack * 2
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
+            )
+            # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu, mul_6, round_4, add_4,
+            #     clamp_min_3, clamp_max_3, convert_element_type_6]
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 12)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            is_qat=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    def test_qconv2d_dequant_promotion_cpu(self):
         r"""
         This testcase tests if dequant node before conv2d is promoted correctly:
                  X
@@ -639,38 +886,35 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
 
-        # Totally 11 pattern_matcher_count, 54 pattern_matcher_nodes for conv
-        # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
-        #    matched in pointless_convert pass at
-        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
-        #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
-        #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #        However when dq has multiple users we will have
-        #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #                                          \-> to_float -> sub -> mul]
-        #        So for now we will discount one pattern here
-        # 2. Dequant pattern matcher for dequant promotion * 1
-        #    [convert_element_type_3, sub_1, mul_3]
-        # 3. Dequant-conv pattern matched in quantization weight prepack * 3
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
-        # 4. Quantization fusion in post-grad fusion pass * 2
-        #    [qconv2d_pointwise_default, div_1, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
-        # 5. Qconv2d_add * 1
-        #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
-        #     clamp_min_3, clamp_max_3, convert_element_type_6]
+        def matcher_check_fn():
+            # 1. Dequant pattern matcher for dequant promotion * 1
+            #    [convert_element_type_3, sub_1, mul_3]
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_nodes"], 3)
+            # 2. Dequant-conv pattern matched in quantization weight prepack * 3
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 3
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 18
+            )
+            # 3. Qconv2d Binary fusion in post-grad fusion pass * 1
+            #    [qconv2d_pointwise_default_1, add_3]
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 2)
+
         self._test_common(
             mod,
             (v,),
-            10,
-            52,
             check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
         )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear(self):
+    def test_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
         """
@@ -688,28 +932,27 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(bias).eval()
             v = torch.randn((2, 4))
 
-            # Totally pattern_matcher_count 4, pattern_matcher_nodes 17
-            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. dequant-linear pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-            # 3. pair of to_int8 and to_fp32 at output matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-            # 4. Quantization fusion in post-grad fusion pass
-            #    [qlinear_pointwise_default, div_1, round_2, add_1,
-            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            def matcher_check_fn():
+                # 1. dequant-linear pattern matched in quantization weight prepack
+                #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 6
+                )
+
             self._test_common(
                 mod,
                 (v,),
-                4,
-                17,
                 check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
             )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_relu(self):
+    def test_qlinear_relu_cpu(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
         """
@@ -728,28 +971,31 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(bias).eval()
             v = torch.randn((2, 4))
 
-            # Totally pattern_matcher_count 4, pattern_matcher_nodes 18
-            # 1. pair of to_int8 and to_fp32 at input matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-            # 2. dequant-linear pattern matched in quantization weight prepack
-            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
-            # 3. pair of to_int8 and to_fp32 at output matched in pointless_convert pass
-            #    at torch/_inductor/fx_passes/joint_graph.py: [convert_element_type_2, convert_element_type_3]
-            # 4. Quantization fusion in post-grad fusion pass
-            #    [qlinear_pointwise_default, relu, div_1, round_2, add_1,
-            #     clamp_min_1, clamp_max_1, convert_element_type_2]
+            def matcher_check_fn():
+                # 1. dequant-linear pattern matched in quantization weight prepack
+                #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 6
+                )
+                # 2. QLinear Unary fusion in post-grad fusion pass * 1
+                #    [qlinear_pointwise_default, relu]
+                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
+                self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 2)
+
             self._test_common(
                 mod,
                 (v,),
-                4,
-                18,
                 check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
             )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
-    def test_qlinear_dequant_promotion(self):
+    def test_qlinear_dequant_promotion_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
                   X
@@ -781,29 +1027,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
         mod = M().eval()
         v = torch.rand((2, 4))
 
-        # Totally 11 pattern_matcher_count, 50 pattern_matcher_nodes for linear
-        # 1. Pair of to_int8 and to_fp32 at linear input * 2, extra input of add * 1, and graph output * 1
-        #    matched in pointless_convert pass at
-        #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
-        #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
-        #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
-        #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #        However when dq has multiple users we will have
-        #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
-        #                                          \-> to_float -> sub -> mul]
-        #        So for now we will discount one pattern here
-        # 2. Dequant pattern matcher for dequant promotion * 1
-        #    [convert_element_type_3, sub_1, mul_3]
-        # 3. Dequant-linear pattern matched in quantization weight prepack * 3
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, permute, addmm]
-        # 4. Quantization fusion in post-grad fusion pass * 3
-        #    [qlinear_pointwise_default, mul_6, round_4, add_3, clamp_min_3, clamp_max_3, convert_element_type_6]
+        def matcher_check_fn():
+            # 1. Dequant pattern matcher for dequant promotion * 1
+            #    [convert_element_type_3, sub_1, mul_3]
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_nodes"], 3)
+            # 2. dequant-linear pattern matched in quantization weight prepack * 3
+            #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, t, addmm/mm]
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
+            )
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"], 18
+            )
+            # 3. QLinear Unary fusion in post-grad fusion pass * 1
+            #    [qlinear_pointwise_default, mul_6, round_4, add_3, clamp_min_3, clamp_max_3, convert_element_type_6]
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["qlinear_unary_matcher_nodes"], 7)
+
         self._test_common(
             mod,
             (v,),
-            10,
-            48,
             check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
         )
 
     @skipIfNoDynamoSupport
@@ -1168,6 +1414,51 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             match_count = 8
             match_nodes = 12
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+
+    def test_qconv2d_maxpool2d_linear_dynamic_cpu(self, include_ops=None):
+        r"""
+        This testcase will quantize a single Conv2d->Maxpool2d->Linear module
+        with dynamic batch size input.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 16, (2, 2), stride=(1, 1), padding=(1, 1)
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                temp = self.relu(self.conv(x))
+                temp = self.maxpool2d(temp)
+                temp = self.avgpool(temp)
+                temp = torch.flatten(temp, 1)
+                return self.linear(temp)
+
+        mod = M().eval()
+        v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        if include_ops is None:
+            include_ops = [
+                "torch.ops.onednn.qconv2d_pointwise",
+                "torch.ops.quantized.max_pool2d",
+                "torch.ops.onednn.qlinear_pointwise",
+            ]
+        exclude_ops = []
+        self._test_code_common(
+            mod,
+            (v,),
+            include_ops,
+            exclude_ops,
+            check_quantization=True,
+            check_dynamic=True,
+        )
 
 
 if __name__ == "__main__":

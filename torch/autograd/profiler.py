@@ -79,40 +79,12 @@ def _set_is_profiler_enabled(enable: bool):
     _is_profiler_enabled = enable
 
 
-def _enable_dynamo_cache_lookup_profiler(enable: bool):
-    from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
-        clear_profiler_hooks,
-        set_profiler_hooks,
-    )
-
-    """
-    Registers a hook within dynamo eval_frame.c called before and after
-    the lookup process, which runs guards associated with each cached frame.
-
-    Clear deregisters the hooks, saving overhead.
-    """
-
-    if enable:
-
-        def _profiler_start(name):
-            return torch.ops.profiler._record_function_enter_new(name, None)
-
-        def _profiler_end(record):
-            torch.ops.profiler._record_function_exit._RecordFunction(record)
-
-        set_profiler_hooks(_profiler_start, _profiler_end)
-    else:
-        clear_profiler_hooks()
-
-
 def _run_on_profiler_start():
     _set_is_profiler_enabled(True)
-    _enable_dynamo_cache_lookup_profiler(True)
 
 
 def _run_on_profiler_stop():
     _set_is_profiler_enabled(False)
-    _enable_dynamo_cache_lookup_profiler(False)
 
 
 class profile:

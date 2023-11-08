@@ -50,6 +50,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
+    {"DispatchKeySet", ParameterType::DISPATCH_KEY_SET},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -790,7 +791,7 @@ static bool is_int_list(
     // Make sure none of the later arguments are SymInt
     // NB: do NOT check that the later arguments are ints, as this is
     // BC-breaking for FX
-    for (int i = 1; i < len; i++) {
+    for (Py_ssize_t i = 1; i < len; i++) {
       if (torch::is_symint(
               py::reinterpret_steal<py::object>(PySequence_GetItem(obj, i)))) {
         if (failed_idx != nullptr) {
@@ -921,7 +922,8 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
-      if (torch::is_symfloat(py::handle(obj))) {
+      if (torch::is_symfloat(py::handle(obj)) ||
+          torch::is_symint(py::handle(obj))) {
         // This will induce a guard
         return true;
       }
@@ -956,8 +958,6 @@ auto FunctionParameter::check(
       return is_tensor_list_and_append_overloaded(
           obj, &overloaded_args, argnum, true /* throw_error */);
     }
-    case ParameterType::INT_LIST:
-      return is_int_list(obj, size, failed_idx);
     case ParameterType::FLOAT_LIST:
       return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR:
@@ -987,8 +987,12 @@ auto FunctionParameter::check(
       return is_scalar_list(obj);
     case ParameterType::SYM_INT:
       return is_int_or_symint(obj);
+    // Allow SymInt where int is expected; we'll guard in this case
+    case ParameterType::INT_LIST:
     case ParameterType::SYM_INT_LIST:
       return is_int_or_symint_list(obj, size, failed_idx);
+    case ParameterType::DISPATCH_KEY_SET:
+      return py::isinstance<c10::DispatchKeySet>(py::handle(obj));
     default:
       throw std::runtime_error("unknown parameter type");
   }
@@ -1044,6 +1048,8 @@ std::string FunctionParameter::type_name() const {
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
       return "tuple of ints";
+    case ParameterType::DISPATCH_KEY_SET:
+      return "DispatchKeySet";
     default:
       throw std::runtime_error("unknown parameter type");
   }
@@ -1165,7 +1171,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
     allow_none = true;
   }
-  if (type_ == ParameterType::TENSOR) {
+  if (type_ == ParameterType::TENSOR ||
+      type_ == ParameterType::DISPATCH_KEY_SET) {
     if (str != "None") {
       throw std::runtime_error(
           "default value for Tensor must be none, got: " + str);
@@ -1456,14 +1463,10 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
-  int int_list_overload = false;
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
-    if (params[0].type_ == ParameterType::INT_LIST) {
-      int_list_overload = true;
-    }
   }
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
@@ -1518,9 +1521,7 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         varargs_eligible &&
-        ((int_list_overload
-              ? is_int_list(args, param.size, &failed_idx)
-              : is_int_or_symint_list(args, param.size, &failed_idx)))) {
+        (is_int_or_symint_list(args, param.size, &failed_idx))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

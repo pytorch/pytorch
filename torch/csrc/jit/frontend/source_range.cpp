@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <iostream>
 
 namespace torch::jit {
 
@@ -51,6 +52,20 @@ size_t StringCordView::find(const std::string& tok, size_t start) const {
     }
   }
   return std::string::npos;
+}
+
+size_t StringCordView::find_regex(const std::string& tok, size_t start) const {
+  if (tok.empty()) {
+    return 0;
+  }
+
+  const std::string& target = this->substr(start, this->size()).str();
+  std::smatch sm;
+  const std::regex re(tok);
+
+  auto regex_found = std::regex_search(target, sm, re);
+
+  return regex_found ? sm.position(0) : std::string::npos;
 }
 
 StringCordView StringCordView::substr(size_t start, size_t size) const {

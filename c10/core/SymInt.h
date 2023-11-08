@@ -126,7 +126,8 @@ class C10_API SymInt {
     if (auto r = maybe_as_int()) {
       return *r;
     }
-    TORCH_CHECK(false, "expected int but got ", *this);
+    TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(
+        false, "when unpacking SymInt, expected int but got ", *this);
   }
 
   // Test if we have a hint for this int (e.g., guard_int would work).
@@ -144,6 +145,14 @@ class C10_API SymInt {
   // It should be called as guard_int(__FILE__, __LINE__).  The file and line
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
+
+  // Insert a guard that this SymInt must be size-like, returning true if
+  // the integer actually is >= 0.  Unlike manually performing a >= 0 test,
+  // if the SymInt in question is an unbacked SymInt (or, potentially in the
+  // future, if it contains unbacked SymInts), we will also treat the
+  // unbacked SymInt as statically testing >= 2 (which will prevent us from
+  // choking on, e.g., contiguity checks.)
+  bool expect_size(const char* file, int64_t line) const;
 
   // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {
@@ -201,6 +210,11 @@ class C10_API SymInt {
 
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;
+
+  // If both are symbolic, this checks if
+  // they share the same node.
+  // If both are not symbolic this just checks normal equality.
+  bool is_same(const SymInt& other) const;
 
   operator SymFloat() const;
 

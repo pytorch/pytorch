@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-using activation_t = c10::variant<
+using activation_t = std::variant<
     enumtype::kReLU,
     enumtype::kGELU,
     std::function<Tensor(const Tensor&)>>;

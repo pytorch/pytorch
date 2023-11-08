@@ -171,6 +171,15 @@ def typecast_tensors(tensors, target_dtype, casting):
     return tuple(typecast_tensor(t, target_dtype, casting) for t in tensors)
 
 
+def _try_convert_to_tensor(obj):
+    try:
+        tensor = torch.as_tensor(obj)
+    except Exception as e:
+        mesg = f"failed to convert {obj} to ndarray. \nInternal error is: {str(e)}."
+        raise NotImplementedError(mesg)  # noqa: TRY200
+    return tensor
+
+
 def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     """The core logic of the array(...) function.
 
@@ -201,17 +210,16 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     if isinstance(obj, torch.Tensor):
         tensor = obj
     else:
-        tensor = torch.as_tensor(obj)
-
         # tensor.dtype is the pytorch default, typically float32. If obj's elements
         # are not exactly representable in float32, we've lost precision:
         # >>> torch.as_tensor(1e12).item() - 1e12
         # -4096.0
-
-        # Therefore, we treat `tensor.dtype` as a hint, and convert the
-        # original object *again*, this time with an explicit dtype.
-        torch_dtype = _dtypes_impl.get_default_dtype_for(tensor.dtype)
-        tensor = torch.as_tensor(obj, dtype=torch_dtype)
+        default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(_dtypes_impl.get_default_dtype_for(torch.float32))
+        try:
+            tensor = _try_convert_to_tensor(obj)
+        finally:
+            torch.set_default_dtype(default_dtype)
 
     # type cast if requested
     tensor = cast_if_needed(tensor, dtype)

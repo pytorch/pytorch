@@ -1,17 +1,20 @@
 # Owner(s): ["oncall: distributed"]
 
+import datetime
 import os
 import socket
 import sys
 import tempfile
 import time
+import threading
 from datetime import timedelta
 from sys import platform
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.distributed.rpc as rpc
-from torch.distributed import DistNetworkError, DistError
+from torch.distributed import DistNetworkError, DistError, DistStoreError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
@@ -402,6 +405,14 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(b"po", v0)
         self.assertEqual(b"tato", v1)
 
+    def test_store_timeout_on_missing_clients(self):
+        with self.assertRaisesRegex(DistStoreError, r"Timed out after \d+ seconds waiting for clients. \d+/\d+ clients joined."):
+            # world_size is 2 so it should timeout
+            dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2))
+
+        # when wait_for_workers is not set, then there should be no exception raised
+        dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2), wait_for_workers=False)
+
 class LibUvTCPStoreTest(TCPStoreTest):
 
     def _create_store(self):
@@ -616,6 +627,11 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
+    def test_tcp_store_url_with_libuv(self):
+        url = self.create_tcp_url()
+        gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
+        store0, rank0, size0 = next(gen0)
+        self.assertTrue(store0.libuvBackend)
 
 class DummyStore(dist.Store):
     def __init__(self):
@@ -739,6 +755,85 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
 
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
+
+@skip_if_win32()
+class TimeoutTest(TestCase):
+    def tearDown(self):
+        import signal
+        super().tearDown()
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+
+    def test_interrupt_doesnt_break_wait(self):
+        import signal
+        rank_res = [None, None]
+
+        def run(rank, my_store):
+            nonlocal rank_res
+            try:
+                if rank == 0:
+                    time.sleep(4)
+                    my_store.set("foo", "bar")
+                else:
+                    my_store.wait(["foo"], datetime.timedelta(seconds=10))
+                rank_res[rank] = True
+            except Error as e:
+                rank_res[rank] = e
+            time.sleep(1)
+
+        rank0_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=0, world_size=2, is_master=True, wait_for_workers=False)
+        rank1_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=rank0_store.port, world_size=2, is_master=False, wait_for_workers=False)
+
+        ths = []
+        for i in range(2):
+            t = threading.Thread(target=run, args=(i, [rank0_store, rank1_store][i],))
+            t.start()
+            ths.append(t)
+
+        def handler(a, b):
+            pass
+
+        signal.signal(signal.SIGUSR1, handler)
+        time.sleep(1)
+        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+
+        for t in ths:
+            t.join()
+        self.assertTrue(rank_res[0], "rank0")
+        self.assertTrue(rank_res[1], "rank1")
+
+
+class InitPgWithUvStore(TestCase):
+    def tearDown(self):
+        super().tearDown()
+        os.environ.pop("USE_LIBUV", None)
+        os.environ.pop("MASTER_ADDR", None)
+        os.environ.pop("MASTER_PORT", None)
+
+    def test_with_url_param(self):
+        port = common.find_free_port()
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=1")
+        self._run_test()
+
+    def test_with_env_var(self):
+        port = common.find_free_port()
+        os.environ["USE_LIBUV"] = "1"
+        os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
+        os.environ["MASTER_PORT"] = str(port)
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method="env://")
+        self._run_test()
+
+    def _run_test(self):
+        pg = dist.group.WORLD
+        store = c10d._get_process_group_store(pg)
+        self.assertTrue(isinstance(store, dist.PrefixStore))
+        # c10d does multiple levels of wrapping
+        while isinstance(store, dist.PrefixStore):
+            store = store.underlying_store
+        self.assertTrue(isinstance(store, dist.TCPStore))
+        self.assertTrue(store.libuvBackend)
+        dist.destroy_process_group()
 
 if __name__ == "__main__":
     assert (

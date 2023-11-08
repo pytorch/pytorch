@@ -16,6 +16,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/examples/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -74,6 +75,7 @@ exclude_patterns = [
     '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    'aten/src/ATen/dlpack.h',
 ]
 init_command = [
     'python3',
@@ -160,7 +162,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.24.3',
     'expecttest==0.1.6',
-    'mypy==1.4.1',
+    'mypy==1.6.0',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
@@ -170,15 +172,27 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
+    'optree==0.9.1',
 ]
 
 [[linter]]
 code = 'MYPYNOFOLLOW'
 include_patterns = [
+    'torch/_dynamo/allowed_functions.py',
+    'torch/_dynamo/bytecode_transformation.py',
+    'torch/_dynamo/codegen.py',
+    'torch/_dynamo/compiled_autograd.py',
     'torch/_dynamo/eval_frame.py',
+    'torch/_dynamo/exc.py',
+    'torch/_dynamo/funcname_cache.py',
+    'torch/_dynamo/hooks.py',
     'torch/_dynamo/convert_frame.py',
+    'torch/_dynamo/replay_record.py',
+    'torch/_dynamo/resume_execution.py',
     'torch/_dynamo/symbolic_convert.py',
+    'torch/_dynamo/testing.py',
     'torch/_dynamo/types.py',
+    'torch/_dynamo/test_minifier_common.py',
     'torch/_dynamo/output_graph.py',
     'torch/_dynamo/guards.py',
     'torch/_dynamo/side_effects.py',
@@ -193,47 +207,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
-    'torch/_inductor/index_propagation.py',
-    'torch/_inductor/coordinate_descent_tuner.py',
-    'torch/_inductor/debug.py',
-    'torch/_inductor/hooks.py',
-    'torch/_inductor/decomposition.py',
-    'torch/_inductor/bounds.py',
-    'torch/_inductor/config.py',
-    'torch/_inductor/ir.py',
-    'torch/_inductor/codecache.py',
-    'torch/_inductor/test_operators.py',
-    'torch/_inductor/inductor_prims.py',
-    'torch/_inductor/scheduler.py',
-    'torch/_inductor/__init__.py',
-    'torch/_inductor/exc.py',
-    'torch/_inductor/sizevars.py',
-    'torch/_inductor/triton_helpers.py',
-    'torch/_inductor/freezing.py',
-    'torch/_inductor/pattern_matcher.py',
-    'torch/_inductor/fx_utils.py',
-    'torch/_inductor/virtualized.py',
-    'torch/_inductor/cuda_properties.py',
-    'torch/_inductor/kernel/mm.py',
-    'torch/_inductor/kernel/mm_plus_mm_new.py',
-    'torch/_inductor/kernel/bmm.py',
-    'torch/_inductor/kernel/__init__.py',
-    'torch/_inductor/kernel/mm_plus_mm.py',
-    'torch/_inductor/codegen/triton_foreach.py',
-    'torch/_inductor/codegen/__init__.py',
-    'torch/_inductor/codegen/cpp.py',
-    'torch/_inductor/codegen/triton_utils.py',
-    'torch/_inductor/codegen/triton.py',
-    'torch/_inductor/fx_passes/split_cat.py',
-    'torch/_inductor/fx_passes/binary_folding.py',
-    'torch/_inductor/fx_passes/replace_random.py',
-    'torch/_inductor/fx_passes/joint_graph.py',
-    'torch/_inductor/fx_passes/pad_mm.py',
-    'torch/_inductor/fx_passes/__init__.py',
-    'torch/_inductor/fx_passes/group_batch_fusion.py',
-    'torch/_inductor/fx_passes/pre_grad.py',
-    'torch/_inductor/fx_passes/fuse_attention.py',
-    'torch/_inductor/fx_passes/freezing_patterns.py',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
 ]
 command = [
     'python3',
@@ -258,6 +232,7 @@ include_patterns = [
     'tools/**/*.py',
     'torchgen/**/*.py',
     'torch/utils/_pytree.py',
+    'torch/utils/_cxx_pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
@@ -284,34 +259,35 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
+    'aten/src/ATen/core/*.cpp',
     'c10/**/*.cpp',
-    'torch/csrc/fx/**/*.cpp',
-    'torch/csrc/generic/**/*.cpp',
-    'torch/csrc/onnx/**/*.cpp',
-    'torch/csrc/tensor/**/*.cpp',
-    'torch/csrc/utils/**/*.cpp',
+    'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-    # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
-    # in a follow up PR.
-    # that are not easily converted to accepted c++
-    'c10/cuda/**/*.cpp',
-    'c10/test/**/*.cpp',
+    # CUDA files are also excluded.
     '**/fb/**',
-    'torch/csrc/jit/passes/onnx/helper.cpp',
-    'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
-    'torch/csrc/jit/serialization/onnx.cpp',
-    'torch/csrc/jit/serialization/export.cpp',
-    'torch/csrc/jit/serialization/import.cpp',
+    '**/*pb.h',
+    '**/*CUDA*',
+    '**/cuda/*pp',
+    'aten/src/ATen/core/TensorImpl_test.cpp',
+    'third_party/**/*',
+    'torch/csrc/api/**',
+    'torch/csrc/autograd/generated/**',
+    'torch/csrc/autograd/profiler_legacy.cpp',
+    'torch/csrc/cuda/**',
+    'torch/csrc/dynamo/*',
+    'torch/csrc/distributed/**/*',
+    'torch/csrc/inductor/**/*',
+    'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/import_legacy.cpp',
+    'torch/csrc/jit/serialization/export.cpp',
+    'torch/csrc/lazy/**/*',
     'torch/csrc/onnx/init.cpp',
-    'torch/csrc/cuda/nccl.*',
-    'torch/csrc/cuda/python_nccl.cpp',
-    'torch/csrc/autograd/FunctionsManual.cpp',
-    'torch/csrc/jit/codegen/cuda/runtime/*',
-    'torch/csrc/utils/disable_torch_function.cpp',
+    'torch/csrc/profiler/**/*',
+    'torch/csrc/quantized/**/*',
+    'torch/csrc/mps/**/*',
 ]
 init_command = [
     'python3',
@@ -419,6 +395,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '**/*.png',
+    '**/*.gz',
 ]
 command = [
     'python3',
@@ -1004,6 +981,7 @@ exclude_patterns = [
     '**/fb/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     # These files are all grandfathered in, feel free to remove from this list
     # as necessary
     'test/_nvfuser/__init__.py',
@@ -1208,6 +1186,7 @@ exclude_patterns = [
     'test/export/test_serialize.py',
     'test/export/test_upgrade.py',
     'test/export/test_verifier.py',
+    'test/export/test_unflatten.py',
     'test/forward_backward_compatibility/check_forward_backward_compatibility.py',
     'test/forward_backward_compatibility/dump_all_function_schemas.py',
     'test/functorch/attn_ft.py',
@@ -1289,7 +1268,6 @@ exclude_patterns = [
     'test/jit/test_ignorable_args.py',
     'test/jit/test_ignore_context_manager.py',
     'test/jit/test_isinstance.py',
-    'test/jit/test_ivalue.py',
     'test/jit/test_jit_utils.py',
     'test/jit/test_list_dict.py',
     'test/jit/test_logging.py',
@@ -1482,7 +1460,6 @@ exclude_patterns = [
     'test/quantization/jit/test_quantize_jit.py',
     'test/quantization/pt2e/test_graph_utils.py',
     'test/quantization/pt2e/test_quantize_pt2e.py',
-    'test/quantization/pt2e/test_quantize_pt2e_fx.py',
     'test/quantization/pt2e/test_x86inductor_quantizer.py',
     'test/scripts/cuda_memcheck_common.py',
     'test/scripts/run_cuda_memcheck.py',
@@ -1595,7 +1572,6 @@ exclude_patterns = [
     'test/test_pruning_op.py',
     'test/test_public_bindings.py',
     'test/test_python_dispatch.py',
-    'test/test_pytree.py',
     'test/test_quantization.py',
     'test/test_reductions.py',
     'test/test_scatter_gather_ops.py',
@@ -1625,7 +1601,6 @@ exclude_patterns = [
     'test/test_type_hints.py',
     'test/test_type_info.py',
     'test/test_type_promotion.py',
-    'test/test_typing.py',
     'test/test_unary_ufuncs.py',
     'test/test_utils.py',
     'test/test_view_ops.py',
@@ -1720,7 +1695,6 @@ exclude_patterns = [
     'torch/_functorch/partitioners.py',
     'torch/_functorch/pyfunctorch.py',
     'torch/_functorch/python_key.py',
-    'torch/_functorch/pytree_hacks.py',
     'torch/_functorch/top_operators_github_usage.py',
     'torch/_functorch/utils.py',
     'torch/_functorch/vmap.py',
@@ -2477,7 +2451,6 @@ exclude_patterns = [
     'torch/utils/_freeze.py',
     'torch/utils/_mode_utils.py',
     'torch/utils/_python_dispatch.py',
-    'torch/utils/_pytree.py',
     'torch/utils/_stats.py',
     'torch/utils/_sympy/__init__.py',
     'torch/utils/_sympy/functions.py',
@@ -2676,6 +2649,7 @@ exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -2693,6 +2667,20 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.0.286',
+    'ruff==0.1.4',
+]
+is_formatter = true
+
+# This linter prevents merge conlicts in csv files in pytorch by enforcing
+# three lines of whitespace between entries such that unless people are modifying
+# the same line, merge conflicts should not arise in git or hg
+[[linter]]
+code = 'MERGE_CONFLICTLESS_CSV'
+include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
+command = [
+    'python3',
+    'tools/linter/adapters/no_merge_conflict_csv_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
 ]
 is_formatter = true

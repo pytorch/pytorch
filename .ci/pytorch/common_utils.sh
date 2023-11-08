@@ -171,13 +171,6 @@ function install_torchrec_and_fbgemm() {
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
 }
 
-function install_numpy_pytorch_interop() {
-  local commit
-  commit=$(get_pinned_commit numpy_pytorch_interop)
-  # TODO: --no-use-pep517 will result in failure.
-  pip_install --user "git+https://github.com/Quansight-Labs/numpy_pytorch_interop.git@${commit}"
-}
-
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
     git clone --recursive --quiet https://github.com/pytorch/xla.git
@@ -210,15 +203,6 @@ function test_torch_deploy(){
  ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
-}
-
-function install_timm() {
-  local commit
-  commit=$(get_pinned_commit timm)
-  pip_install pandas
-  pip_install scipy
-  pip_install z3-solver
-  pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 
 function checkout_install_torchbench() {

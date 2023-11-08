@@ -2524,6 +2524,22 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
     return samples
 
 
+def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    samples = [
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="hidden_size must be greater than zero"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 10, 0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="num_layers must be greater than zero"
+        ),
+    ]
+    return samples
 
 def module_error_inputs_torch_nn_Pad1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2791,23 +2807,14 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule',
                                 dtypes=complex_types_and(torch.chalf, torch.float64, torch.complex128)),
                    # Not implmented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule',
-                                'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
-                                dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
-                                dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_multiple_device_transfer',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=2, lazy=False, transposed=True),
@@ -2832,23 +2839,14 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='mps', dtypes=[torch.float32]),
                    # Not implemented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule',
-                                'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
-                                dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
-                                dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_multiple_device_transfer',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ConvTranspose3d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=3, lazy=False, transposed=True),
@@ -2869,17 +2867,7 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.complex32, torch.complex64], active_if=TEST_WITH_ROCM),
                    # Not implmented for chalf on CPU
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format',
-                                dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule',
-                                'test_if_train_and_eval_modes_differ', dtypes=(torch.chalf,), device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_non_contiguous_tensors',
-                                dtypes=(torch.chalf,), device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
-                                dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_multiple_device_transfer',
                                 dtypes=(torch.chalf,), device_type='cuda'),
                    # Ref: https://github.com/pytorch/pytorch/issues/73502
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
@@ -2887,6 +2875,7 @@ module_db: List[ModuleInfo] = [
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
                )),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU,
@@ -3441,6 +3430,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.RNN,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
@@ -3448,12 +3438,14 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_LSTM,
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),),

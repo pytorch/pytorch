@@ -202,6 +202,7 @@ class TimmRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
         if self.args.enable_activation_checkpointing:
             raise NotImplementedError(

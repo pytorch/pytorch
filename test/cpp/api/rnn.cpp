@@ -773,3 +773,27 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
   }
 }
+
+TEST_F(RNNTest, CheckErrorInfos) {
+  {
+    auto options = torch::nn::RNNOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(RNN(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::RNNOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(RNN(options), "num_layers must be greater than zero");
+  }
+  {
+    auto options = torch::nn::LSTMOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(LSTM(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::LSTMOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(LSTM(options), "num_layers must be greater than zero");
+  }
+  {
+    auto options = torch::nn::GRUOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(GRU(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::GRUOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(GRU(options), "num_layers must be greater than zero");
+  }
+}

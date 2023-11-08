@@ -12,8 +12,6 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/native/cudnn/Macros.h>
-
 #endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
@@ -22,6 +20,7 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
 #include <c10/core/StorageImpl.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
@@ -310,8 +309,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
   }
   auto size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  void* mem =
-      c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  void* mem = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  }
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
 }
@@ -420,7 +422,10 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
-  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -442,8 +447,10 @@ PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::device_synchronize();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::device_synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -459,7 +466,11 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  at::cuda::sleep(THPUtils_unpackLong(cycles));
+  int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::sleep(unpacked_cycles);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -877,10 +888,22 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      // HIP-only property; reuse name attribute for CUDA builds
+      .def_readonly(
+          "gcnArchName",
+#if USE_ROCM
+          &cudaDeviceProp::gcnArchName
+#else
+          &cudaDeviceProp::name
+#endif // USE_ROCM
+          )
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
+#if USE_ROCM
+               << ", gcnArchName='" << prop.gcnArchName << "'"
+#endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ")";
@@ -947,8 +970,6 @@ void addStorageDeleterFns(
     if (storage_pair != storages.end()) {
       auto ctx = storage_pair->second->data_ptr().get_context();
       TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
-
-      auto curr_deleter = storage_pair->second->data_ptr().get_deleter();
       storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
     } else {
       data_ptr.release_context();
@@ -1077,7 +1098,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     auto data_ptr = storage_impl->data_ptr().get();
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
-    TORCH_CHECK("Expected standard deleter");
+    TORCH_CHECK(succeeded, "Expected standard deleter");
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
@@ -1089,7 +1110,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
-    auto data_ptr = storage_impl->data_ptr().get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
@@ -1184,7 +1204,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
             device, pps);
         auto& freed_pointers = delta.ptrs_freed;
-        auto& allocd_pointers = delta.dataptrs_allocd;
 
         std::unordered_set<void*> allocd_set;
         for (auto& data_ptr : delta.dataptrs_allocd) {
@@ -1335,12 +1354,7 @@ PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
       "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
 #endif
 #if AT_CUDNN_ENABLED()
-#if HAS_CUDNN_V8()
   at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
-#else
-  TORCH_WARN_ONCE(
-      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
-#endif
 #endif
   Py_RETURN_NONE;
 }
@@ -1470,6 +1484,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
+    {"_nccl_version_suffix",
+     THCPModule_nccl_version_suffix,
+     METH_NOARGS,
+     nullptr},
     {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
     {"_nccl_init_rank", THCPModule_nccl_init_rank, METH_VARARGS, nullptr},
     {"_nccl_reduce", THCPModule_nccl_reduce, METH_VARARGS, nullptr},

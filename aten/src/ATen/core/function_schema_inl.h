@@ -1,5 +1,6 @@
 #pragma once
-#include <iostream>
+#include <ostream>
+#include <sstream>
 
 // note: windows build doesn't find symbols in operator files unless
 // this is a header file

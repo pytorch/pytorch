@@ -30,7 +30,7 @@ namespace at {
 namespace native {
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
-  return self.sizes().equals(other.sizes());
+  return self.sym_sizes().equals(other.sym_sizes());
 }
 
 bool nested_is_same_size(const Tensor& self, const Tensor& other) {

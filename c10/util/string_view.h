@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <stdexcept>
@@ -316,7 +317,6 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     if (v.size() == 0) {
       return pos <= size() ? pos : npos;
     }
@@ -467,7 +467,6 @@ class basic_string_view final {
 
  private:
   static constexpr size_type strlen_(const_pointer str) noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     const_pointer current = str;
     while (*current != '\0') {
       ++current;
@@ -487,7 +486,6 @@ class basic_string_view final {
   template <class Condition>
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
         if (condition(at_(cur))) {
@@ -520,8 +518,6 @@ class basic_string_view final {
     return size() == rhs.size() &&
         0 == __builtin_memcmp(data(), rhs.data(), size());
 #else
-    // if we are in C++14, write it iteratively. This is faster than the
-    // recursive C++11 implementation below.
     if (size() != rhs.size()) {
       return false;
     }
@@ -572,10 +568,6 @@ class basic_string_view final {
 };
 
 template <class CharT>
-const typename basic_string_view<CharT>::size_type
-    basic_string_view<CharT>::npos;
-
-template <class CharT>
 inline std::basic_ostream<CharT>& operator<<(
     std::basic_ostream<CharT>& stream,
     basic_string_view<CharT> sv) {
@@ -600,7 +592,7 @@ namespace std {
 template <class CharT>
 struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
-    // The standard says that std""string_view hashing must do the same as
+    // The standard says that std::string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
     // up to the implementer. So, to be conformant, we need to re-use and
     // existing STL type's hash function. The std::string fallback is probably

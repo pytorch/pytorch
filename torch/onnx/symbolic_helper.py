@@ -23,7 +23,7 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _deprecation, _type_utils, errors
+from torch.onnx import _constants, _type_utils, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number
@@ -476,8 +476,8 @@ def _if_scalar_type_as(self, tensor):
 
 
 @_beartype.beartype
-def _is_none(x: _C.Value) -> bool:
-    return x.node().mustBeNone()
+def _is_none(x: Any) -> bool:
+    return x is None or (x.node().mustBeNone() if isinstance(x, _C.Value) else False)
 
 
 @_beartype.beartype
@@ -1710,36 +1710,6 @@ def args_have_same_dtype(args):
         _type_utils.JitScalarType.from_value(elem) == base_dtype for elem in args
     )
     return has_same_dtype
-
-
-# TODO(justinchuby): Delete these setters, users should set the vars directly.
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_opset_version(opset_version: int):
-    GLOBALS.export_onnx_opset_version = opset_version
-
-
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_operator_export_type(operator_export_type):
-    GLOBALS.operator_export_type = operator_export_type
-
-
-# This function is for debug use only.
-# onnx_shape_inference = True by default.
-@_deprecation.deprecated(
-    "1.13",
-    "2.0",
-    "remove its usage and avoid setting internal variables directly",
-)
-def _set_onnx_shape_inference(onnx_shape_inference: bool):
-    GLOBALS.onnx_shape_inference = onnx_shape_inference
 
 
 # Deprecated. Internally use _type_utils.ScalarType

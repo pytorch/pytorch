@@ -16,11 +16,18 @@ class TwoTensor(torch.Tensor):
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = a.shape
         kwargs = {}
+        kwargs["strides"] = a.stride()
+        kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
         kwargs["requires_grad"] = a.requires_grad
         kwargs["dtype"] = a.dtype
-        return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+        assert a.shape == b.shape
+        assert a.stride() == b.stride()
+        assert a.storage_offset() == b.storage_offset()
+        return out
 
     def __init__(self, a, b):
         self.a = a
@@ -46,11 +53,15 @@ class TwoTensor(torch.Tensor):
             kwargs = {}
         args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
         args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
-        out_a = func(*args_a, **kwargs)
-        out_b = func(*args_b, **kwargs)
+
+        kwargs_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, kwargs)
+        kwargs_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, kwargs)
+
+        out_a = func(*args_a, **kwargs_a)
+        out_b = func(*args_b, **kwargs_b)
         assert type(out_a) == type(out_b)
         out_a_flat, spec = pytree.tree_flatten(out_a)
-        out_b_flat, _ = pytree.tree_flatten(out_b)
+        out_b_flat = pytree.tree_leaves(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
         out_flat = [
@@ -59,3 +70,11 @@ class TwoTensor(torch.Tensor):
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
+
+
+class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        out = func(*args, **kwargs)
+        if torch._subclasses.fake_tensor._is_tensor_constructor(func):
+            out = TwoTensor(out, out.clone())
+        return out

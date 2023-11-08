@@ -10,7 +10,7 @@ namespace rpc {
 // All RPC peers should call into this function at the same time. Each peer
 // provides its own id and name, and this function uses the given Store to
 // gather global name-to-id mapping on all peers.
-std::unordered_map<std::string, worker_id_t> collectNames(
+TORCH_API std::unordered_map<std::string, worker_id_t> collectNames(
     ::c10d::PrefixStore store,
     const worker_id_t selfId,
     const std::string& selfName,
@@ -21,7 +21,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
 // put its own worker info in the store and discover all the ranks that came
 // before it. NOTE: This needs to be called with the Dynamic RPC group
 // membership management token held.
-std::unordered_map<std::string, worker_id_t> collectCurrentNames(
+TORCH_API std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     ::c10d::PrefixStore store,
     const worker_id_t selfId,
     const std::string& selfName);
@@ -29,14 +29,14 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
 // Remove name frmo Store, used in dynamic RPC groups.
 // NOTE: This needs to be called with the Dynamic RPC group
 // membership management token held.
-void removeCurrentName(
+TORCH_API void removeCurrentName(
     ::c10d::PrefixStore store,
     const worker_id_t selfId,
     const std::string& selfName);
 
 // This performs a synchronization of all call counts by using store.
 // All RPC peers wait for others to join to exit at the same time.
-int syncCallCount(
+TORCH_API int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls = 0);

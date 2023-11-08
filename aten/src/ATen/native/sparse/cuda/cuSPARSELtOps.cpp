@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Functions.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
@@ -98,6 +99,7 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
+    const c10::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result
 )
 {
@@ -110,34 +112,56 @@ at::Tensor _cslt_sparse_mm(
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
 
+  bool mixed_dtype_mode = false;
   float alpha = 1.0;
   float beta = 0.0;
-  cudaDataType type;
+  cudaDataType input_type;
+  cudaDataType output_type;
   cusparseComputeType compute_type;
   auto compression_factor = 9;
+
 
   switch(compressed_A.scalar_type())
   {
     case at::ScalarType::Char:
-        type = CUDA_R_8I;
+        input_type = CUDA_R_8I;
+        output_type = CUDA_R_8I;
         compute_type = CUSPARSE_COMPUTE_32I;
         compression_factor = 10;
+
         break;
     case at::ScalarType::Half:
-        type = CUDA_R_16F;
+        input_type = CUDA_R_16F;
+        output_type = CUDA_R_16F;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::BFloat16:
-        type = CUDA_R_16BF;
+        input_type = CUDA_R_16BF;
+        output_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_16F;
         break;
     case at::ScalarType::Float:
-        type = CUDA_R_32F;
+        input_type = CUDA_R_32F;
+        output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
     default:
         TORCH_CHECK(false, "Unsupported dtype for cuSPARSE compressed matrix multiplication.");
         break;
+  }
+
+  // special check for int8 int8 -> fp16 support
+  if (out_dtype_opt.has_value()) {
+    ScalarType out_dtype = out_dtype_opt.value();
+    if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Half)
+    {
+        output_type = CUDA_R_16F;
+        mixed_dtype_mode = true;
+    }
+    else
+    {
+        TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");
+    }
   }
 
   int64_t k = dense_B.size(0);
@@ -153,7 +177,7 @@ at::Tensor _cslt_sparse_mm(
       k,
       k,
       16,
-      type,
+      input_type,
       CUSPARSE_ORDER_ROW,
       CUSPARSELT_SPARSITY_50_PERCENT));
 
@@ -166,12 +190,21 @@ at::Tensor _cslt_sparse_mm(
       (dense_B.is_contiguous()) ? n : k,
       (dense_B.is_contiguous()) ? n : k,
       16,
-      type,
+      input_type,
       CUSPARSE_ORDER_ROW));
 
   // create result tensor
-  auto res = (transpose_result) ? dense_B.new_empty({n, m})
-                                : dense_B.new_empty({m, n});
+  at::Tensor res;
+  if (mixed_dtype_mode)
+  {
+      res = (transpose_result) ? at::empty({n, m}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()))
+                               : at::empty({m, n}, c10::TensorOptions().dtype(c10::kHalf).device(dense_B.device()));
+  }
+  else
+  {
+      res = (transpose_result) ? dense_B.new_empty({n, m})
+                               : dense_B.new_empty({m, n});
+  }
 
 
   cusparseLtMatDescriptor_t res_descriptor;
@@ -182,7 +215,7 @@ at::Tensor _cslt_sparse_mm(
       n,
       (transpose_result) ? m: n,
       16,
-      type,
+      output_type,
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW));
 
   // intialize matmul
@@ -260,6 +293,7 @@ at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
     const c10::optional<Tensor>& bias_opt,
+    const c10::optional<c10::ScalarType> out_dtype,
     bool transpose_result)
 {
     TORCH_CHECK(false, "cuSPARSELT not supported on your machine.");

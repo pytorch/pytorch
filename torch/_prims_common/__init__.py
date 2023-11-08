@@ -17,10 +17,17 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -76,21 +83,45 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+CustomOutParamAnnotation = "__custom_out_param__"
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
+
+def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
+        if allow_rhs_unbacked:
+            # TODO: We should check that the symbols are consistent
+            # with each other
+            if isinstance(y, torch.SymInt):
+                continue
         if x != y:
             return False
 
     return True
 
 
+def _maybe_get_pytype(t):
+    if t is torch.SymFloat:
+        return float
+    elif t is torch.SymInt:
+        return int
+    elif t is torch.SymBool:
+        return bool
+    else:
+        return t
+
+
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -101,7 +132,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
+    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
@@ -489,7 +520,11 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
-    assert length >= 0
+    if isinstance(length, (int, torch.SymInt)):
+        torch._check_is_size(length)
+    else:
+        # sometimes called with sympy expression by inductor
+        assert length >= 0
 
 
 def validate_shape(shape: ShapeType):
@@ -769,6 +804,31 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
+def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
+    ndim = max(len(a), len(b))
+    expandedSizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dimA = len(a) - 1 - offset
+        dimB = len(b) - 1 - offset
+        sizeA = a[dimA] if dimA >= 0 else 1
+        sizeB = b[dimB] if dimB >= 0 else 1
+
+        torch._check(
+            (sizeA == sizeB) or (sizeA == 1) or (sizeB == 1),
+            lambda: (
+                f"The size of tensor a ({sizeA}) must match the size of "
+                f"tensor b ({sizeB}) at non-singleton dimension {i}"
+            ),
+        )
+
+        # 1s map to the other size (even 0)
+        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+
+    return tuple(expandedSizes)
+
+
 def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     """
     Infers the size of a dim with size -1, if it exists.
@@ -805,7 +865,6 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
@@ -826,7 +885,7 @@ def is_low_precision_dtype(dtype: torch.dtype) -> bool:
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
-    return dtype in _float_dtypes
+    return dtype.is_floating_point
 
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
@@ -838,7 +897,7 @@ def is_grad_dtype(dtype: torch.dtype) -> bool:
     """
     Checks if the dtype can require a gradient.
     """
-    return is_float_dtype(dtype) or is_complex_dtype(dtype)
+    return dtype.is_floating_point or is_complex_dtype(dtype)
 
 
 _complex_to_real_dtype_map = {
@@ -874,7 +933,7 @@ def dtype_to_type(dtype: torch.dtype) -> type:
         return bool
     if dtype in _integer_dtypes:
         return int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return float
     if dtype in _complex_dtypes:
         return complex
@@ -893,7 +952,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
         return sym_int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -962,9 +1021,10 @@ def get_higher_type(a: type, b: type) -> type:
 
     The types are ordered bool -> int -> float -> complex.
     """
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
     # Type checking
-    assert a in _ordered_types
-    assert b in _ordered_types
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     if a is b:
         return a
@@ -1063,17 +1123,13 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
 
     The comparison is determined by the following type ordering: bool, int, float, complex.
     """
-    ordered_types = (
-        bool,
-        int,
-        float,
-        complex,
-    )
 
-    assert a in ordered_types
-    assert b in ordered_types
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
 
-    for typ in ordered_types:
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
+
+    for typ in _ordered_types:
         if a == typ:
             return True
         if b == typ:
@@ -1297,7 +1353,7 @@ def elementwise_dtypes(
     computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
     which perform no mathematical operations on their tensors (see below for examples).
 
-    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    The INT_TO_FLOAT type promotion kind maps boolean and integer result dtypes to the default floating point dtype,
     and computation dtypes to the appropriate op math dtype.
 
     The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
@@ -1326,6 +1382,11 @@ def elementwise_dtypes(
     args = tuple(x for x in _args if x is not None)
 
     highest_type: type = bool
+
+    # Import sympy locally, as importing it eagerly at a module level is too slow
+    # See https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589
+    import sympy
+
     for x in args:
         if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
@@ -1453,11 +1514,27 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    # TODO: Move this somewhere central?
+    def _is_singleton(s):
+        # check for SingletonSymNode
+        if not isinstance(s, torch.SymInt):
+            return False
+        if s.node.singleton_int() is not None:
+            return True
+
+        # check for SymInt wrapping a SingletonSymNode (fake-ifying causes this)
+        return (
+            s.node.is_symbolic()
+            and s.node.hint is not None
+            and isinstance(s.node.hint, torch.SymInt)
+            and s.node.hint.node.singleton_int() is not None
+        )
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        multiplier *= l if _is_singleton(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 

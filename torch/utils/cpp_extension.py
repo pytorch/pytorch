@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
 from setuptools.command.build_ext import build_ext
-from pkg_resources import packaging  # type: ignore[attr-defined]
+import packaging.version
 
 IS_WINDOWS = sys.platform == 'win32'
 IS_MACOS = sys.platform.startswith('darwin')
@@ -208,7 +208,7 @@ ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
 
-CUDA_HOME = _find_cuda_home()
+CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
@@ -234,7 +234,7 @@ COMMON_NVCC_FLAGS = [
 
 COMMON_HIP_FLAGS = [
     '-fPIC',
-    '-D__HIP_PLATFORM_HCC__=1',
+    '-D__HIP_PLATFORM_AMD__=1',
     '-DUSE_ROCM=1',
 ]
 
@@ -404,6 +404,9 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
 
     cuda_str_version = cuda_version.group(1)
     cuda_ver = packaging.version.parse(cuda_str_version)
+    if torch.version.cuda is None:
+        return
+
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
     if cuda_ver != torch_cuda_version:
         # major/minor attributes are only available in setuptools>=49.4.0
@@ -1014,8 +1017,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     You can override the default behavior using `TORCH_CUDA_ARCH_LIST` to explicitly specify which
     CCs you want the extension to support:
 
-    TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py
-    TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py
+    ``TORCH_CUDA_ARCH_LIST="6.1 8.6" python build_my_extension.py``
+    ``TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" python build_my_extension.py``
 
     The +PTX option causes extension kernel binaries to include PTX instructions for the specified
     CC. PTX is an intermediate representation that allows kernels to runtime-compile for any CC >=
@@ -1434,7 +1437,7 @@ def _check_and_build_extension_h_precompiler_headers(
                 Path(path_dir).mkdir(parents=True, exist_ok=True)
             except OSError as exc:  # Guard against race condition
                 if exc.errno != errno.EEXIST:
-                    raise RuntimeError(f"Fail to create path {path_dir}")
+                    raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
     def write_pch_signature_to_file(file_path, pch_sign):
         _create_if_not_exist(os.path.dirname(file_path))
@@ -1446,10 +1449,10 @@ def _check_and_build_extension_h_precompiler_headers(
         try:
             subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}")
+            raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 
     extra_cflags_str = listToString(extra_cflags)
-    extra_include_paths_str = listToString(extra_include_paths)
+    extra_include_paths_str = " ".join([f'-I{include}' for include in extra_include_paths])
 
     lib_include = os.path.join(_TORCH_PATH, 'include')
     torch_include_dirs = [
@@ -1928,6 +1931,8 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     # (from `extra_compile_args`)
     if cflags is not None:
         for flag in cflags:
+            if 'TORCH_EXTENSION_NAME' in flag:
+                continue
             if 'arch' in flag:
                 return []
 
@@ -1949,7 +1954,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
     ])
 
     supported_arches = ['3.5', '3.7', '5.0', '5.2', '5.3', '6.0', '6.1', '6.2',
-                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0']
+                        '7.0', '7.2', '7.5', '8.0', '8.6', '8.7', '8.9', '9.0', '9.0a']
     valid_arch_strings = supported_arches + [s + "+PTX" for s in supported_arches]
 
     # The default is sm_30 for CUDA 9.x and 10.x
@@ -1992,7 +1997,7 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         if arch not in valid_arch_strings:
             raise ValueError(f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
-            num = arch[0] + arch[2]
+            num = arch[0] + arch[2:].split("+")[0]
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
@@ -2343,15 +2348,13 @@ def _write_ninja_file(path,
         # Compilation will work on earlier CUDA versions but header file
         # dependencies are not correctly computed.
         required_cuda_version = packaging.version.parse('11.0')
-        has_cuda_version = torch.version.cuda is not None
-        if has_cuda_version and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
+        if torch.version.cuda is not None and packaging.version.parse(torch.version.cuda) >= required_cuda_version:
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
             # on Linux so use --generate-dependencies-with-compile
             # to make this work on Windows too.
-            if IS_WINDOWS:
-                nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
+            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
         cuda_compile_rule.append(
             f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 

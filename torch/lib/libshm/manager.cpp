@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <memory>
-#include <optional>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -55,9 +54,19 @@ void unregister_fd(int fd) {
   client_sessions.erase(fd);
 }
 
-void print_init_message(const char* message) {
-  write(1, message, strlen(message));
-  write(1, "\n", 1);
+void print_init_message(std::string_view message) {
+  ssize_t written_bytes = -1;
+  while (!message.empty()) {
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+    SYSCHECK_ERR_RETURN_NEG1(
+        written_bytes = write(1, message.data(), message.size()));
+    message.remove_prefix(written_bytes);
+  }
+  written_bytes = 0;
+  while (written_bytes != 1) {
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+    SYSCHECK_ERR_RETURN_NEG1(written_bytes = write(1, "\n", 1));
+  }
 }
 
 bool object_exists(const char* name) {
@@ -92,7 +101,7 @@ int main(int argc, char* argv[]) {
           "could not generate a random directory for manager socket");
     }
 
-    std::string tempfile = (tempdir->name / "manager.sock").string();
+    std::string tempfile = tempdir->name + "/manager.sock";
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
@@ -112,10 +121,10 @@ int main(int argc, char* argv[]) {
   std::vector<int> to_add;
   std::vector<int> to_remove;
   for (;;) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int nevents;
+    int nevents = -1;
     if (client_sessions.empty())
       timeout = SHUTDOWN_TIMEOUT;
+    // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
     SYSCHECK_ERR_RETURN_NEG1(
         nevents = poll(pollfds.data(), pollfds.size(), timeout));
     timeout = -1;

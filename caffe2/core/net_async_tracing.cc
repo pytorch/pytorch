@@ -402,7 +402,7 @@ int extractShardId(const std::string& name) {
     while (right_pos < name.length() && isdigit(name[right_pos])) {
       right_pos++;
     }
-    return c10::stoi(name.substr(left_pos, right_pos - left_pos));
+    return std::stoi(name.substr(left_pos, right_pos - left_pos));
   } else {
     return -1;
   }

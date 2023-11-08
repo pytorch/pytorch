@@ -9,17 +9,19 @@ import warnings
 import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
+import tempfile
 from typing import Any, Dict, List, Tuple
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
+    set_default_dtype, set_default_tensor_type,
     TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, dtypesIfCPU, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex, all_types_and_complex_and, all_types_and, floating_and_complex_types, complex_types,
     floating_types, floating_and_complex_types_and, integral_types, integral_types_and, get_all_dtypes,
@@ -1965,37 +1967,36 @@ class TestTensorCreation(TestCase):
     # TODO: this test should be updated
     @onlyCPU
     def test_constructor_dtypes(self, device):
-        default_type = torch.tensor([]).type()
         self.assertIs(torch.tensor([]).dtype, torch.get_default_dtype())
 
         self.assertIs(torch.uint8, torch.ByteTensor.dtype)
         self.assertIs(torch.float32, torch.FloatTensor.dtype)
         self.assertIs(torch.float64, torch.DoubleTensor.dtype)
 
-        torch.set_default_tensor_type('torch.FloatTensor')
-        self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.FloatStorage, torch.Storage)
+        with set_default_tensor_type('torch.FloatTensor'):
+            self.assertIs(torch.float32, torch.get_default_dtype())
+            self.assertIs(torch.FloatStorage, torch.Storage)
 
         # only floating-point types are supported as the default type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
 
-        torch.set_default_dtype(torch.float64)
-        self.assertIs(torch.float64, torch.get_default_dtype())
-        self.assertIs(torch.DoubleStorage, torch.Storage)
+        with set_default_dtype(torch.float64):
+            self.assertIs(torch.float64, torch.get_default_dtype())
+            self.assertIs(torch.DoubleStorage, torch.Storage)
 
-        torch.set_default_tensor_type(torch.FloatTensor)
-        self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.FloatStorage, torch.Storage)
+        with set_default_tensor_type(torch.FloatTensor):
+            self.assertIs(torch.float32, torch.get_default_dtype())
+            self.assertIs(torch.FloatStorage, torch.Storage)
 
         if torch.cuda.is_available():
-            torch.set_default_tensor_type(torch.cuda.FloatTensor)
-            self.assertIs(torch.float32, torch.get_default_dtype())
-            self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
-            self.assertIs(torch.cuda.FloatStorage, torch.Storage)
+            with set_default_tensor_type(torch.cuda.FloatTensor):
+                self.assertIs(torch.float32, torch.get_default_dtype())
+                self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
+                self.assertIs(torch.cuda.FloatStorage, torch.Storage)
 
-            torch.set_default_dtype(torch.float64)
-            self.assertIs(torch.float64, torch.get_default_dtype())
-            self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
+                with set_default_dtype(torch.float64):
+                    self.assertIs(torch.float64, torch.get_default_dtype())
+                    self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
 
         # don't allow passing dtype to set_default_tensor_type
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
@@ -2008,11 +2009,10 @@ class TestTensorCreation(TestCase):
                     torch.float,
                     torch.double,
                     torch.bfloat16):
-                torch.set_default_dtype(t)
+                with set_default_dtype(t):
+                    pass
             else:
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
-
-        torch.set_default_tensor_type(default_type)
 
     # TODO: this test should be updated
     @onlyCPU
@@ -2049,14 +2049,10 @@ class TestTensorCreation(TestCase):
             self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))
             self.assertRaises(RuntimeError, lambda: i.new(i, device='cpu'))
 
-            default_type = torch.Tensor().type()
-            torch.set_default_tensor_type(torch.cuda.FloatTensor)
-            self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cpu'))
-            self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cpu'))
-            torch.set_default_tensor_type(torch.cuda.FloatTensor)
-            torch.set_default_tensor_type(default_type)
-
+            with set_default_tensor_type(torch.cuda.FloatTensor):
+                self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cpu'))
+                self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cpu'))
+                self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cpu'))
             x = torch.randn((3,), device='cuda')
             self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
@@ -2158,8 +2154,6 @@ class TestTensorCreation(TestCase):
     @onlyCPU
     def test_tensor_factory_type_inference(self, device):
         def test_inference(default_dtype):
-            saved_dtype = torch.get_default_dtype()
-            torch.set_default_dtype(default_dtype)
             default_complex_dtype = torch.complex64 if default_dtype == torch.float32 else torch.complex128
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
@@ -2181,10 +2175,10 @@ class TestTensorCreation(TestCase):
             self.assertIs(default_dtype, torch.tensor(((7, np.array(5)), (np.array(9), 5.))).dtype)
             self.assertIs(torch.float64, torch.tensor(((7, 5), (9, np.array(5.)))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, np.array(3)), (np.array(3), 5))).dtype)
-            torch.set_default_dtype(saved_dtype)
 
-        test_inference(torch.float64)
-        test_inference(torch.float32)
+        for dtype in [torch.float64, torch.float32]:
+            with set_default_dtype(dtype):
+                test_inference(dtype)
 
     # TODO: this test should be updated
     @suppress_warnings
@@ -2300,30 +2294,32 @@ class TestTensorCreation(TestCase):
     # TODO: this test should be updated
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @suppress_warnings
-    def test_range(self, device):
-        res1 = torch.range(0, 1, device=device)
-        res2 = torch.tensor((), device=device)
-        torch.range(0, 1, device=device, out=res2)
+    @dtypesIfCPU(torch.float, torch.bfloat16, torch.float16)
+    @dtypes(torch.float)
+    def test_range(self, device, dtype):
+        res1 = torch.range(0, 1, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(0, 1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Check range for non-contiguous tensors.
-        x = torch.zeros(2, 3, device=device)
-        torch.range(0, 3, device=device, out=x.narrow(1, 1, 2))
-        res2 = torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=torch.float32)
+        x = torch.zeros(2, 3, device=device, dtype=dtype)
+        torch.range(0, 3, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
+        res2 = torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype)
         self.assertEqual(x, res2, atol=1e-16, rtol=0)
 
         # Check negative
-        res1 = torch.tensor((1, 0), device=device, dtype=torch.float32)
-        res2 = torch.tensor((), device=device)
-        torch.range(1, 0, -1, device=device, out=res2)
+        res1 = torch.tensor((1, 0), device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(1, 0, -1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Equal bounds
-        res1 = torch.ones(1, device=device)
-        res2 = torch.tensor((), device=device)
-        torch.range(1, 1, -1, device=device, out=res2)
+        res1 = torch.ones(1, device=device, dtype=dtype)
+        res2 = torch.tensor((), device=device, dtype=dtype)
+        torch.range(1, 1, -1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
-        torch.range(1, 1, 1, device=device, out=res2)
+        torch.range(1, 1, 1, device=device, dtype=dtype, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
     # TODO: this test should be updated
@@ -2471,8 +2467,6 @@ class TestTensorCreation(TestCase):
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     @onlyCPU
     def test_arange_inference(self, device):
-        saved_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float32)
         # end only
         self.assertIs(torch.float32, torch.arange(1.).dtype)
         self.assertIs(torch.float32, torch.arange(torch.tensor(1.)).dtype)
@@ -2501,7 +2495,6 @@ class TestTensorCreation(TestCase):
                       torch.arange(torch.tensor(1),
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
-        torch.set_default_dtype(saved_dtype)
 
     # cannot call storage() on meta tensor
     @skipMeta
@@ -2818,28 +2811,24 @@ class TestTensorCreation(TestCase):
 
     @onlyCUDA
     def test_tensor_factory_gpu_type_inference(self, device):
-        saved_type = torch.tensor([]).type()
-        torch.set_default_tensor_type(torch.cuda.DoubleTensor)
-        torch.set_default_dtype(torch.float32)
-        self.assertIs(torch.float32, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device(device), torch.tensor(0.).device)
-        torch.set_default_dtype(torch.float64)
-        self.assertIs(torch.float64, torch.tensor(0.).dtype)
-        self.assertEqual(torch.device(device), torch.tensor(0.).device)
-        torch.set_default_tensor_type(saved_type)
+        with set_default_tensor_type(torch.cuda.DoubleTensor):
+            with set_default_dtype(torch.float32):
+                self.assertIs(torch.float32, torch.tensor(0.).dtype)
+                self.assertEqual(torch.device(device), torch.tensor(0.).device)
+            with set_default_dtype(torch.float64):
+                self.assertIs(torch.float64, torch.tensor(0.).dtype)
+                self.assertEqual(torch.device(device), torch.tensor(0.).device)
 
     @onlyCUDA
     def test_tensor_factory_gpu_type(self, device):
-        saved_type = torch.tensor([]).type()
-        torch.set_default_tensor_type(torch.cuda.FloatTensor)
-        x = torch.zeros((5, 5))
-        self.assertIs(torch.float32, x.dtype)
-        self.assertTrue(x.is_cuda)
-        torch.set_default_tensor_type(torch.cuda.DoubleTensor)
-        x = torch.zeros((5, 5))
-        self.assertIs(torch.float64, x.dtype)
-        self.assertTrue(x.is_cuda)
-        torch.set_default_tensor_type(saved_type)
+        with set_default_tensor_type(torch.cuda.FloatTensor):
+            x = torch.zeros((5, 5))
+            self.assertIs(torch.float32, x.dtype)
+            self.assertTrue(x.is_cuda)
+        with set_default_tensor_type(torch.cuda.DoubleTensor):
+            x = torch.zeros((5, 5))
+            self.assertIs(torch.float64, x.dtype)
+            self.assertTrue(x.is_cuda)
 
     @skipCPUIf(True, 'compares device with cpu')
     @dtypes(torch.int, torch.long, torch.float, torch.double)
@@ -2848,15 +2837,16 @@ class TestTensorCreation(TestCase):
         device_tensor = torch.arange(0, 10, dtype=dtype, device=device)
         self.assertEqual(cpu_tensor, device_tensor)
 
-    def test_arange_bfloat16(self, device):
-        ref_tensor = torch.tensor([0, 1, 2, 3], dtype=torch.bfloat16, device=device)
-        bfloat16_tensor = torch.arange(0, 4, dtype=torch.bfloat16, device=device)
-        self.assertEqual(ref_tensor, bfloat16_tensor)
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_arange_lowp(self, device, dtype):
+        ref_tensor = torch.tensor([0, 1, 2, 3], dtype=dtype, device=device)
+        f16_tensor = torch.arange(0, 4, dtype=dtype, device=device)
+        self.assertEqual(ref_tensor, f16_tensor)
 
         # step=2
-        ref_tensor = torch.tensor([0, 2, 4], dtype=torch.bfloat16, device=device)
-        bfloat16_tensor = torch.arange(0, 6, step=2, dtype=torch.bfloat16, device=device)
-        self.assertEqual(ref_tensor, bfloat16_tensor)
+        ref_tensor = torch.tensor([0, 2, 4], dtype=dtype, device=device)
+        f16_tensor = torch.arange(0, 6, step=2, dtype=dtype, device=device)
+        self.assertEqual(ref_tensor, f16_tensor)
 
     @dtypes(*all_types_and_complex_and(torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.bfloat16))
@@ -3081,27 +3071,23 @@ class TestTensorCreation(TestCase):
     def test_full_inference(self, device, dtype):
         size = (2, 2)
 
-        prev_default = torch.get_default_dtype()
-        torch.set_default_dtype(dtype)
+        with set_default_dtype(dtype):
+            # Tests bool fill value inference
+            t = torch.full(size, True)
+            self.assertEqual(t.dtype, torch.bool)
 
-        # Tests bool fill value inference
-        t = torch.full(size, True)
-        self.assertEqual(t.dtype, torch.bool)
+            # Tests integer fill value inference
+            t = torch.full(size, 1)
+            self.assertEqual(t.dtype, torch.long)
 
-        # Tests integer fill value inference
-        t = torch.full(size, 1)
-        self.assertEqual(t.dtype, torch.long)
+            # Tests float fill value inference
+            t = torch.full(size, 1.)
+            self.assertEqual(t.dtype, dtype)
 
-        # Tests float fill value inference
-        t = torch.full(size, 1.)
-        self.assertEqual(t.dtype, dtype)
-
-        # Tests complex inference
-        t = torch.full(size, (1 + 1j))
-        ctype = torch.complex128 if dtype is torch.double else torch.complex64
-        self.assertEqual(t.dtype, ctype)
-
-        torch.set_default_dtype(prev_default)
+            # Tests complex inference
+            t = torch.full(size, (1 + 1j))
+            ctype = torch.complex128 if dtype is torch.double else torch.complex64
+            self.assertEqual(t.dtype, ctype)
 
     def test_full_out(self, device):
         size = (5,)
@@ -3124,6 +3110,26 @@ class TestTensorCreation(TestCase):
             a.flags.writeable = False
             t = torch.tensor(a)
             self.assertEqual(len(w), 0)
+
+    @onlyCPU
+    @parametrize('shared', [True, False])
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_from_file(self, device, shared):
+        dtype = torch.float64
+        t = torch.randn(2, 5, dtype=dtype, device=device)
+        with tempfile.NamedTemporaryFile() as f:
+            t.numpy().tofile(f)
+            t_mapped = torch.from_file(f.name, shared=shared, size=t.numel(), dtype=dtype)
+            self.assertTrue(t_mapped.storage().filename == f.name)
+            self.assertEqual(torch.flatten(t), t_mapped)
+
+            s = torch.UntypedStorage.from_file(f.name, shared, t.numel() * dtype.itemsize)
+            self.assertTrue(s.filename == f.name)
+
+    @onlyCPU
+    def test_storage_filename(self, device):
+        t = torch.randn(2, 5, device=device)
+        self.assertIsNone(t.storage().filename)
 
 
 # Class for testing random tensor creation ops, like torch.randint
@@ -4050,6 +4056,18 @@ class TestAsArray(TestCase):
                 else:
                     self.assertEqual(data, tensor)
 
+    @onlyCUDA
+    def test_device_without_index(self, device):
+        original = torch.arange(5, device="cuda")
+
+        tensor = torch.asarray(original, device="cuda")
+        # The storage pointers should be equal
+        self.assertEqual(original.data_ptr(), tensor.data_ptr())
+
+        tensor = torch.asarray(original, copy=True, device="cuda")
+        # The storage pointers should not be equal
+        self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
+
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())
@@ -4058,4 +4076,5 @@ instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
