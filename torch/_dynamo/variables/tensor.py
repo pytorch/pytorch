@@ -780,8 +780,6 @@ class TensorVariable(VariableTracker):
             if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
 
-            is_inplace_op = not name.startswith("_") and name.endswith("_")
-
             ret = wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -791,7 +789,15 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-            if is_inplace_op:
+            if (
+                not name.startswith("_")
+                and name.endswith("_")
+                and isinstance(ret, TensorVariable)
+                and (
+                    ret.as_proxy().node.meta["example_value"]
+                    is args[0].as_proxy().node.meta["example_value"]
+                )
+            ):
                 assert (
                     ret.as_proxy().node.meta["example_value"]
                     is self.as_proxy().node.meta["example_value"]

@@ -751,12 +751,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
             name = fn_.__name__
-            is_inplace_op = not name.startswith("_") and name.endswith("_")
-            if is_inplace_op:
-                assert (
+            if (
+                not name.startswith("_")
+                and name.endswith("_")
+                and (
                     tensor_variable.as_proxy().node.meta["example_value"]
                     is args[0].as_proxy().node.meta["example_value"]
                 )
+            ):
                 return args[0]
             return tensor_variable
 
