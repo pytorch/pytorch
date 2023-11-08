@@ -39,7 +39,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    OrderedDict,
     Set,
     Tuple,
     Type,
@@ -102,10 +101,10 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time by function
-compilation_time_metrics: OrderedDict[str, List[float]] = collections.OrderedDict()
+compilation_time_metrics: Dict[str, List[float]] = {}
 
 # profiling compilation time by frame phase
-frame_phase_timing: OrderedDict[str, Dict[str, float]] = collections.OrderedDict()
+frame_phase_timing: Dict[str, Dict[str, float]] = {}
 
 timer_counter = itertools.count()
 
