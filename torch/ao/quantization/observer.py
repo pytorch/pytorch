@@ -133,11 +133,14 @@ class ObserverBase(ABC, nn.Module):
     Args:
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec.
+        is_dynamic: indicator for whether the observer is a placeholder for dynamic quantization
+        or static quantization
     """
 
-    def __init__(self, dtype):
+    def __init__(self, dtype, is_dynamic=False):
         super().__init__()
         self.dtype = dtype
+        self.is_dynamic = False
 
     @abstractmethod
     def forward(self, x):
@@ -584,8 +587,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     ) -> None:
         if not is_per_tensor(qscheme):
             raise NotImplementedError(
-                "MovingAverageMinMaxObserver's qscheme only support \
-                    torch.per_tensor_symmetric and torch.per_tensor_affine."
+                f"MovingAverageMinMaxObserver's qscheme only support \
+                torch.per_tensor_symmetric and torch.per_tensor_affine. \
+                but got: {qscheme}"
             )
         self.averaging_constant = averaging_constant
         super().__init__(

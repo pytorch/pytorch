@@ -9,6 +9,7 @@ import torch
 import torch._dynamo as torchdynamo
 import torch.nn.functional as F
 from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
+from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.observer import (
     HistogramObserver,
     MinMaxObserver,
@@ -103,12 +104,15 @@ def get_symmetric_quantization_config(
     is_qat: bool = False,
     is_dynamic: bool = False,
 ):
+
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
         if is_dynamic:
-            raise NotImplementedError(
-                "dynamic quantization for qat is not yet implemented."
-            )
-        act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
+            act_observer_or_fake_quant_ctr = FakeQuantize
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(averaging_constant=1)
+            extra_args["observer"] = dynamic_quant_observer
+        else:
+            act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
     else:
         if is_dynamic:
             act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
@@ -122,10 +126,10 @@ def get_symmetric_quantization_config(
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
-            eps=2**-12
+            **extra_args,
         ),
     )
-    qscheme = (
+    weight_qscheme = (
         torch.per_channel_symmetric if is_per_channel else torch.per_tensor_symmetric
     )
     weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
@@ -138,7 +142,7 @@ def get_symmetric_quantization_config(
 
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
-        if qscheme == torch.per_tensor_symmetric:
+        if weight_qscheme == torch.per_tensor_symmetric:
             extra_args["observer"] = MovingAverageMinMaxObserver
         else:
             extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
@@ -146,7 +150,7 @@ def get_symmetric_quantization_config(
         dtype=torch.int8,
         quant_min=-127,
         quant_max=127,
-        qscheme=qscheme,
+        qscheme=weight_qscheme,
         ch_axis=0,
         is_dynamic=False,
         observer_or_fake_quant_ctr=weight_observer_or_fake_quant_ctr.with_args(

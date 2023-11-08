@@ -119,6 +119,9 @@ class FakeQuantize(FakeQuantizeBase):
           clamp(round(x/scale + zero_point), quant_min, quant_max) - zero_point
         ) * scale
 
+    * :attr:`is_dynamic` indicates whether the fake quantie is a placeholder for dynamic quantization
+      operators (choose_qparams -> q -> dq) or static quantization operators (q -> dq)
+
     * :attr:`scale` defines the scale factor used for quantization.
 
     * :attr:`zero_point` specifies the quantized value to which 0 in floating point maps to
@@ -147,7 +150,7 @@ class FakeQuantize(FakeQuantizeBase):
     scale: torch.Tensor
     zero_point: torch.Tensor
 
-    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, **observer_kwargs):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=None, quant_max=None, is_dynamic=False, **observer_kwargs):
         super().__init__()
         # Populate quant_min/quant_max to observer_kwargs if valid
         if quant_min is not None and quant_max is not None:
@@ -168,6 +171,9 @@ class FakeQuantize(FakeQuantizeBase):
         # Users should use self.activation_post_process.quant_min
         self.quant_min = self.activation_post_process.quant_min
         self.quant_max = self.activation_post_process.quant_max
+        # TODO: cleanup
+        is_dynamic = is_dynamic or observer_kwargs.get("is_dynamic", False)
+        self.is_dynamic = is_dynamic
         if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
@@ -369,7 +375,7 @@ Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
 """
 
-default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, is_dynamic=True,
                                                     dtype=torch.quint8, averaging_constant=1)
 """
 Default dynamic fake_quant for activations.

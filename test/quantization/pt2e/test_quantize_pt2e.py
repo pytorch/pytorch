@@ -90,6 +90,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         check_against_fx_quant=False,
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
+        is_qat=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -103,7 +104,11 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
         )
 
-        m = prepare_pt2e(m, quantizer)
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+            print("prepared:", m)
+        else:
+            m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m, fold_quantize=True)

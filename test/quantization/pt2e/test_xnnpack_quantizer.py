@@ -7,7 +7,7 @@ import torch._dynamo as torchdynamo
 from torch._export import capture_pre_autograd_graph
 from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization import (
-    default_dynamic_qconfig,
+    default_dynamic_fake_quant,
     observer,
     QConfig,
     QConfigMapping,
@@ -435,6 +435,44 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 [],
                 True,
                 qconfig_mapping,
+            )
+
+    def test_qat_dynamic_linear(self):
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(
+            is_per_channel=True, is_dynamic=True, is_qat=True,
+        )
+        quantizer.set_global(quantization_config)
+        m_eager = TestHelperModules.TwoLinearModule().eval()
+
+        node_occurrence = {
+            torch.ops.quantized_decomposed.choose_qparams.tensor: 2,
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
+        }
+        act_affine_quant_obs = default_dynamic_fake_quant
+        qconfig = QConfig(
+            activation=act_affine_quant_obs,
+            weight=per_channel_weight_observer_range_neg_127_to_127,
+        )
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        # Test with 2d inputs
+        example_inputs_2d = (torch.randn(9, 8),)
+        example_inputs_4d = (torch.randn(9, 10, 11, 8),)
+        for example_inputs in [example_inputs_2d, example_inputs_4d]:
+            self._test_quantizer(
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],
+                True,
+                qconfig_mapping,
+                is_qat=True,
             )
 
     def test_dynamic_linear_with_conv(self):
